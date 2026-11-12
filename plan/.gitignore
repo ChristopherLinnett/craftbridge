@@ -1,0 +1,4 @@
+node_modules/
+review/
+.DS_Store
+# Deployed-code snapshots can embed credentials: review before committing anything under analysis/.

@@ -1,0 +1,40 @@
+{
+  "name": "cinefly-dark",
+  "about": "The ONE theme file. Diagrams (drawio-kit), the plan HTML (build-plan), review renders (review) and the deck (deck/build-deck) all read these tokens. Change the look here and rebuild; never hard-code a colour anywhere else.",
+  "brand": "Cinefly",
+  "color": {
+    "page": "#0f0f0f",
+    "card": "#141414",
+    "surface": "#1e1e1e",
+    "border": "#2a2a2a",
+    "borderStrong": "#3a3a3a",
+    "primary": "#fe8c6e",
+    "magenta": "#b53761",
+    "lilac": "#a67fc8",
+    "info": "#60a5fa",
+    "success": "#14a03f",
+    "warn": "#ff6b6b",
+    "amber": "#f5b942",
+    "textHi": "#f2f2f2",
+    "textMid": "#cccccc",
+    "textLow": "#9ca3af",
+    "edge": "#8a8a8a",
+    "codeText": "#ffb39f",
+    "figure": "#121212",
+    "mockupWell": "#0b0b0b",
+    "white": "#ffffff"
+  },
+  "font": {
+    "sans": "Poppins",
+    "mono": "JetBrains Mono"
+  },
+  "deck": {
+    "tailwindColors": {
+      "primary": "#fe8c6e", "secondary": "#27232d", "highlight": "#fe8c6e", "background": "#0f0f0f",
+      "card": "#141414", "accent": "#b53761", "offWhite": "#cccccc",
+      "metricsSurface": "#1e1e1e", "metricsBorder": "#2a2a2a", "promptingMenu": "#3c3c3c",
+      "lilac": "#a67fc8", "info": "#60a5fa", "success": "#14a03f", "errorSoft": "#ff6b6b",
+      "rowColour": "#707070", "placeholder": "#9ca3af", "textSecondary": "#cccccc", "ratingStar": "#fbbf24"
+    }
+  }
+}

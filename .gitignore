@@ -1,0 +1,17 @@
+.DS_Store
+
+# Build outputs
+/rust/target/
+/ios/sdk/.build/
+/ios/sdk/.swiftpm/
+/ios/sdk/Frameworks/
+/android/sdk/.gradle/
+/android/sdk/.kotlin/
+/android/sdk/local.properties
+/android/sdk/**/build/
+/android/sdk/*/src/main/jniLibs/
+
+# The plan (plan/.gitignore covers its dependencies and renders): the bundle and the raw device logs stay
+# on the machine that made them.
+/plan/analysis/
+/plan/*-plan.zip

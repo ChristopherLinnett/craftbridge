@@ -1,0 +1,10 @@
+{
+  "name": "effectcraft-plugin-port-plan",
+  "private": true,
+  "description": "EffectCraft Plugin Port — plan of record (scoping-plan). Build: node build/build-diagrams.mjs && node build/build-plan.mjs",
+  "dependencies": {
+    "@mermaid-js/mermaid-cli": "^11.17.0",
+    "marked": "^18.0.0",
+    "puppeteer": "^25.0.0"
+  }
+}

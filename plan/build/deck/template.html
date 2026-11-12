@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>{{TITLE}}</title>
+
+<!-- Fonts: vendored for offline (vendor/fonts.css, from the scoping-plan kit) -->
+<link rel="stylesheet" href="vendor/fonts.css">
+
+<!-- Tailwind v3.4.17 runtime — vendored from cdn.tailwindcss.com for offline (vendor/tailwind.js) -->
+<script src="vendor/tailwind.js"></script>
+<script>
+  tailwind.config = { theme: { extend: {
+    fontFamily: { sans: ['{{FONT_SANS}}','sans-serif'] },
+    colors: {{TAILWIND_COLORS}},
+    borderRadius: { metrics:'0.75rem' },
+    boxShadow: { customPrimary:'0px 3px 8px rgba(0,0,0,0.24)' }
+  } } }
+</script>
+
+<!-- Deck framework: tokens (:root) + component classes. MUST load after Tailwind. -->
+<link rel="stylesheet" href="framework.css" />
+</head>
+<body>
+
+<!-- Fixed 1280×720 design stage, scaled to fit (deck.js fit()) -->
+<div class="deck-viewport" id="deck-viewport">
+  <div class="deck-stage" id="deck-stage">
+{{SLIDES}}
+  </div>
+</div>
+
+<!-- Persistent chrome (outside slides) -->
+<div class="deck-chrome">
+  <div class="deck-counter" id="deck-counter" aria-live="polite">1 / {{COUNT}}</div>
+  <div class="dot-rail" id="dot-rail" aria-label="Slide navigation"></div>
+</div>
+
+<!-- Esc overview grid (live-scaled clones, built by deck.js) -->
+<div class="overview" id="overview" aria-hidden="true">
+  <div class="overview-grid"></div>
+</div>
+
+<script src="deck.js"></script>
+
+<!-- Autopilot: generated data (per-slide clips + timing) then the controller.
+     Empty data array = no button rendered, deck unchanged. -->
+<script src="autopilot-data.js"></script>
+<script src="autopilot.js"></script>
+</body>
+</html>

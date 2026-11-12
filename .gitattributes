@@ -1,0 +1,8 @@
+* text=auto eol=lf
+*.bat text eol=crlf
+*.jar binary
+*.png binary
+
+# Generated code: written only by `cargo xtask generate`, never edited by hand.
+**/generated/** linguist-generated=true
+**/Generated/** linguist-generated=true

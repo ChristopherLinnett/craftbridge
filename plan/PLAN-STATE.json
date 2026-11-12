@@ -1,0 +1,2179 @@
+{
+  "skill": "scoping-plan",
+  "stateVersion": 1,
+  "name": "EffectCraft Plugin Port",
+  "slug": "EFFECTCRAFT-PLUGIN-PORT",
+  "master": "EFFECTCRAFT-PLUGIN-PORT-SCOPING.md",
+  "html": "EFFECTCRAFT-PLUGIN-PORT-PLAN.html",
+  "created": "2026-11-12T07:07:09.853Z",
+  "updated": "2026-11-12T10:37:38.267Z",
+  "deck": false,
+  "pieces": [
+    {
+      "status": "done",
+      "notes": [],
+      "id": "setup/doctor",
+      "phase": "setup",
+      "kind": "check",
+      "title": "Environment ready",
+      "accept": "`plan.mjs doctor` passes: node ≥ 20, npm dependencies installed in the plan folder, draw.io CLI found."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "intake/brief",
+      "phase": "intake",
+      "kind": "evidence",
+      "file": "evidence/00-brief.md",
+      "title": "Brief recorded verbatim",
+      "accept": "The request is quoted verbatim, split into numbered requirements RQ1…RQn, with stated constraints and the audiences. Nothing inferred; every ambiguity is a question (`plan.mjs q add`)."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "intake/systems",
+      "phase": "intake",
+      "kind": "evidence",
+      "file": "evidence/01-system-inventory.md",
+      "title": "System inventory",
+      "accept": "Every surface / repo / environment the feature touches, with base branch + SHA and how to read it (read-only). Unknowns raised as questions."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "research/in-flight",
+      "phase": "research",
+      "kind": "evidence",
+      "file": "evidence/02-in-flight-work.md",
+      "title": "Work in flight on the surfaces",
+      "accept": "Every repo pinned in plan.config.mjs → repos (fetched first); `node build/inflight.mjs --gh` run; every branch, PR, issue and deployment that touches the surfaces read and recorded with what it changes. The plan governs: it states what the build keeps, replaces (naming each piece) or leaves alone, and the merge order."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "research/plan",
+      "phase": "research",
+      "kind": "plan",
+      "title": "Plan the investigations",
+      "accept": "One research piece per surface or open technical topic from the inventory (`plan.mjs add research evidence/NN-<topic> \"<title>\"`), each producing one evidence file."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "research/03-device-feasibility",
+      "phase": "research",
+      "title": "Does the unmodified engine run on iOS and Android, and what breaks?",
+      "kind": "evidence",
+      "accept": "evidence/03-device-feasibility.md answers: Does the unmodified engine run on iOS and Android, and what breaks?. Findings are facts with anchors (file:line@SHA, ARN + date); unknowns and business choices are raised as questions, not assumed.",
+      "file": "evidence/03-device-feasibility.md"
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "research/04-craft-suite-shared-core",
+      "phase": "research",
+      "title": "Can a universal Craft core be shared by per-app plugins?",
+      "kind": "evidence",
+      "accept": "evidence/04-craft-suite-shared-core.md answers: Can a universal Craft core be shared by per-app plugins?. Findings are facts with anchors (file:line@SHA, ARN + date); unknowns and business choices are raised as questions, not assumed.",
+      "file": "evidence/04-craft-suite-shared-core.md"
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "research/05-mobile-platforms",
+      "phase": "research",
+      "title": "Mobile platform facts: GPU, bindings, packaging, policy, codecs",
+      "kind": "evidence",
+      "accept": "evidence/05-mobile-platforms.md answers: Mobile platform facts: GPU, bindings, packaging, policy, codecs. Findings are facts with anchors (file:line@SHA, ARN + date); unknowns and business choices are raised as questions, not assumed.",
+      "file": "evidence/05-mobile-platforms.md"
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "research/06-feasibility-verdict",
+      "phase": "research",
+      "title": "Feasibility verdict: is the plugin port feasible, on what conditions, at what cost?",
+      "kind": "evidence",
+      "accept": "evidence/06-feasibility-verdict.md answers: Feasibility verdict: is the plugin port feasible, on what conditions, at what cost?. Findings are facts with anchors (file:line@SHA, ARN + date); unknowns and business choices are raised as questions, not assumed.",
+      "file": "evidence/06-feasibility-verdict.md"
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "research/07-repository-conventions",
+      "phase": "research",
+      "title": "Repository conventions: Swift, Android and Kotlin, Rust, UniFFI SDKs, house rules",
+      "kind": "evidence",
+      "accept": "evidence/07-repository-conventions.md answers: Repository conventions: Swift, Android and Kotlin, Rust, UniFFI SDKs, house rules. Findings are facts with anchors (file:line@SHA, ARN + date); unknowns and business choices are raised as questions, not assumed.",
+      "file": "evidence/07-repository-conventions.md",
+      "review": "Read each finding against its URL or command; corrected the three EffectCraft anchors (AGENTS.md 1-90 and 153-154, xtask layers 136-166) after opening them at 10376058; unverified points are marked as such."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "questions/complete",
+      "phase": "questions",
+      "kind": "gate",
+      "title": "Every business question answered by the user",
+      "accept": "No open questions; each answer recorded (`q answer … --pd PDn`); the user has confirmed there is nothing else to decide before design."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "design/outline",
+      "phase": "design",
+      "kind": "outline",
+      "title": "Outline the master",
+      "accept": "`plan.mjs outline --surfaces \"<A,B,…>\" [--ui \"<A,B>\"]` has written the numbered skeleton and seeded one piece per section, diagram and mockup."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/header",
+      "phase": "design",
+      "kind": "header",
+      "title": "Write the header table",
+      "accept": "Status line, surfaces with base branch + SHA (or snapshot date), and the hard constraints exactly as the user stated them — if the brief states none, ask (q add) instead of inventing one.",
+      "review": "Surfaces row names the repository's visibility (PD3), the per-platform layout (PD19) and craftbridge-swift (D-24); status counts 19 product decisions."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/summary",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 1. Executive summary",
+      "title": "Write §1. Executive summary",
+      "accept": "What it is, who it is for and why it matters, in plain language; how it works in 2–4 numbered ideas; the commercial position (access, pricing, launch); the footprint in one sentence. Ends with the journey diagram (d01).",
+      "diagrams": [
+        "d01-journey"
+      ],
+      "review": "Commercial position states private until hosted CI starts; footprint names craftbridge-swift; nothing else in §1 depends on the layout."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "design/problem",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 2. The problem and the opportunity",
+      "title": "Write §2. The problem and the opportunity",
+      "accept": "The user problem today, what users do instead, why now (which existing capabilities make it cheap), and sizing from real aggregate data (dated, sourced)."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "design/narrative",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 3. Customer narrative (PR/FAQ)",
+      "title": "Write §3. Customer narrative (PR/FAQ)",
+      "accept": "A short press-release paragraph in the customer's voice, then an FAQ table answering the questions customers and support will ask, each answer consistent with the decisions."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "design/capabilities",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 4. What we're building — capabilities",
+      "title": "Write §4. What we're building — capabilities",
+      "accept": "Numbered capability table C1…Cn: capability · who benefits · where it lives."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/experience",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 5. The experience, step by step",
+      "title": "Write §5. The experience, step by step",
+      "accept": "One running example used everywhere in the plan (named, concrete numbers). Walk the experience surface by surface with mockup screenshots inline, one per step or state.",
+      "review": "Step 1 adds the craftbridge-swift package and its CraftBridgeEffects product, matching §22 and D-24; Android coordinate unchanged."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/decisions",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 6. Product decisions",
+      "title": "Write §6. Product decisions",
+      "accept": "The PD register: | PD | Area | Decision | Where it lands |, one row per answered business question, numbered PD1…PDn with no gaps.",
+      "review": "PD3 rewritten for visibility from hosted CI, PD10 path wording moved inside the platform folders, PD19 added with where it lands; the register reads PD1-PD19 without gaps."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/scope",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 7. Scope",
+      "title": "Write §7. Scope",
+      "accept": "In scope (v1) as one paragraph; out of scope as a table: not in v1 · why (cite the PD) · revisit.",
+      "review": "In-scope names the per-platform repository; the not-in-release row now covers publishing the packages, the repository going public with CI (PD3)."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/rollout-business",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 8. Access, pricing and rollout",
+      "title": "Write §8. Access, pricing and rollout",
+      "accept": "Who gets it, what it costs, how it launches, the safety order in one line, and the kill switches.",
+      "review": "Who-gets-it and launch bullets say private until hosted CI, then public; packages from the checkout or craftbridge-swift and GitHub Packages."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "design/metrics",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 9. Success metrics and analytics",
+      "title": "Write §9. Success metrics and analytics",
+      "accept": "Definition of value; metrics table with launch targets; the analytics events (surface, properties) that measure them."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "design/risks-business",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 10. Risks (business-level)",
+      "title": "Write §10. Risks (business-level)",
+      "accept": "Risk · likelihood/impact · mitigation, in business terms; points to the technical register."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/roadmap",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 11. Roadmap and effort",
+      "title": "Write §11. Roadmap and effort",
+      "accept": "Waves (W0 prerequisites …) · when · team · scope · effort, calendar estimate and the critical path.",
+      "review": "W0 is 2.5 engineer-days (OPS-3 grew to the three platform builds); total 66 engineer-days, equal to the sum of the §31 estimates."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/architecture",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 12. Architecture overview",
+      "title": "Write §12. Architecture overview",
+      "accept": "Every component the feature touches, marked new / modified / verify-only / untouched (diagram d02 with legend), plus a table per surface: new · modified · untouched.",
+      "diagrams": [
+        "d02-architecture"
+      ],
+      "review": "Opening sentence states one repository with rust/, ios/sdk and android/sdk (PD19); surface table names craftbridge-effects-codegen and craftbridge-swift."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "design/lifecycle",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 13. Lifecycle and editability",
+      "title": "Write §13. Lifecycle and editability",
+      "accept": "Where in the product lifecycle each piece of data can change, who can change it, what a change triggers; normative rules table L1…Ln with 'enforced by'. Diagram d03 (and states if two lifecycles exist).",
+      "diagrams": [
+        "d03-lifecycle"
+      ]
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "design/data",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 14. Data model and contracts",
+      "title": "Write §14. Data model and contracts",
+      "accept": "Every new/changed data shape: JSON/DDL/model code blocks, field tables (type · required · rule), invariants, error codes, shared test vectors. Diagram d04. Code blocks that become files carry an @code tag.",
+      "diagrams": [
+        "d04-data-model"
+      ]
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/surface:repository-and-pins",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 15. Repository and pins design",
+      "title": "Write §15. Repository and pins design",
+      "accept": "For Repository and pins: files changed (NEW/MOD/CHK/NONE table with file:line anchors at the recorded base SHA), behaviour, states, edge cases, tests.",
+      "review": "Layout table rewritten to the per-platform tree, dependency-direction table added (layers.rs), pins point at rust/Cargo.toml, tests paragraph replaced by the gate stage table matching tools/ci.sh."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout"
+      ],
+      "id": "design/surface:core-runtime",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 16. Core runtime design",
+      "title": "Write §16. Core runtime design",
+      "accept": "For Core runtime: files changed (NEW/MOD/CHK/NONE table with file:line anchors at the recorded base SHA), behaviour, states, edge cases, tests.",
+      "review": "Lints sentence states the inherited workspace table with unsafe_code denied and never allowed without a platform module."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "design/surface:gpu-and-frames",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 17. GPU and frames design",
+      "title": "Write §17. GPU and frames design",
+      "accept": "For GPU and frames: files changed (NEW/MOD/CHK/NONE table with file:line anchors at the recorded base SHA), behaviour, states, edge cases, tests."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout"
+      ],
+      "id": "design/surface:native-media",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 18. Native media design",
+      "title": "Write §18. Native media design",
+      "accept": "For Native media: files changed (NEW/MOD/CHK/NONE table with file:line anchors at the recorded base SHA), behaviour, states, edge cases, tests.",
+      "review": "VideoToolbox and MediaCodec files move under src/platform/ behind one allow(unsafe_code) mod platform; lints row states the inherited table."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "design/surface:effectcraft-app-crate",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 19. EffectCraft app crate design",
+      "title": "Write §19. EffectCraft app crate design",
+      "accept": "For EffectCraft app crate: files changed (NEW/MOD/CHK/NONE table with file:line anchors at the recorded base SHA), behaviour, states, edge cases, tests.",
+      "diagrams": [
+        "d05-main-flow"
+      ]
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/surface:ffi-and-bindings",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 20. FFI and bindings design",
+      "title": "Write §20. FFI and bindings design",
+      "accept": "For FFI and bindings: files changed (NEW/MOD/CHK/NONE table with file:line anchors at the recorded base SHA), behaviour, states, edge cases, tests.",
+      "review": "Paths under rust/core and rust/effects; unsafe policy says inherited deny plus crate-wide allow for scaffolding, checked by cargo xtask rules; bindgen from rust/uniffi-bindgen; generated Swift and Kotlin locations named."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/surface:api-generator",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 21. API generator design",
+      "title": "Write §21. API generator design",
+      "accept": "For API generator: files changed (NEW/MOD/CHK/NONE table with file:line anchors at the recorded base SHA), behaviour, states, edge cases, tests.",
+      "review": "Crate renamed craftbridge-effects-codegen, run by cargo xtask generate; every generated output path is inside a generated or Generated directory."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/surface:swift-packages",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 22. Swift packages design",
+      "title": "Write §22. Swift packages design",
+      "accept": "For Swift packages: files changed (NEW/MOD/CHK/NONE table with file:line anchors at the recorded base SHA), behaviour, states, edge cases, tests.",
+      "review": "Package at ios/sdk with Package.swift at its top; binary target local and never committed, URL and checksum only in craftbridge-swift; Swift Testing; gate builds every target for the simulator."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/surface:kotlin-libraries",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 23. Kotlin libraries design",
+      "title": "Write §23. Kotlin libraries design",
+      "accept": "For Kotlin libraries: files changed (NEW/MOD/CHK/NONE table with file:line anchors at the recorded base SHA), behaviour, states, edge cases, tests.",
+      "review": "Modules in android/sdk; jniLibs output path; bindgen into src/generated/kotlin; build-setup paragraph for the catalog and build-logic conventions; publishing uses the one version."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/surface:upstream-update-loop",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 24. Upstream update loop design",
+      "title": "Write §24. Upstream update loop design",
+      "accept": "For Upstream update loop: files changed (NEW/MOD/CHK/NONE table with file:line anchors at the recorded base SHA), behaviour, states, edge cases, tests.",
+      "review": "Pins written into rust/Cargo.toml; regeneration through cargo xtask generate and the renamed codegen diff; the update record moves to docs/upstream-updates.md, as the root holds no extra files."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/surface:samples-and-guides",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 25. Samples and guides design",
+      "title": "Write §25. Samples and guides design",
+      "accept": "For Samples and guides: files changed (NEW/MOD/CHK/NONE table with file:line anchors at the recorded base SHA), behaviour, states, edge cases, tests.",
+      "review": "Template recipe in conformance/effects (shared by samples and corpus); samples under ios/samples and android/samples consuming the library as an app would; generated command reference under docs/generated."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/compat",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 26. Backwards compatibility and rollout",
+      "title": "Write §26. Backwards compatibility and rollout",
+      "accept": "Compatibility matrix B1…Bn (scenario · expected · why), the hard deploy order (diagram d06), flags and kill switches.",
+      "diagrams": [
+        "d06-rollout"
+      ],
+      "review": "G3 now decides package publishing; the repository is already public once hosted CI runs (PD3)."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout"
+      ],
+      "id": "design/edges",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 27. Integration edges and validation",
+      "title": "Write §27. Integration edges and validation",
+      "accept": "Edge table E1…En (from → to · contract · how it is validated on staging) and the end-to-end validation spine.",
+      "review": "E1 validated by the Swift Testing corpus, matching §22 and §28."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/testing",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 28. Testing strategy",
+      "title": "Write §28. Testing strategy",
+      "accept": "Layer · what · where (unit, shared vectors, golden files, device, staging E2E, manual QA).",
+      "review": "Desktop conformance runner and corpus paths moved to craftbridge-effects-conformance and conformance/effects; QA-2 Swift side uses Swift Testing."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "design/nfr",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 29. Non-functional requirements",
+      "title": "Write §29. Non-functional requirements",
+      "accept": "Privacy, security, performance, reliability, accessibility, observability — each concrete and checkable."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "design/risks-tech",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 30. Risk register (technical)",
+      "title": "Write §30. Risk register (technical)",
+      "accept": "R1…Rn · risk · severity · mitigation."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/tasks",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 31. Team task lists",
+      "title": "Write §31. Team task lists",
+      "accept": "One ordered checklist per team (IDs like BE-1, M-1), every task naming its acceptance (edge, matrix row or test layer). Wrap each team's list in its own @view block for tasks/<team>.md.",
+      "review": "OPS-1 adds AGENTS.md, CLAUDE.md, CHANGELOG and decision issues; OPS-2 lists what doctor checks; OPS-3 is 1.5 d with acceptance that each rule check fails on a planted violation; QA-1, QA-2, FFI-1, GEN-1, IOS-1, AND-1 and OPS-5 use the new paths, D-24 and D-27."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/prereqs",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 32. Prerequisites, verifications and follow-ups",
+      "title": "Write §32. Prerequisites, verifications and follow-ups",
+      "accept": "Prerequisites P1…Pn (owner · blocks), verifications V1…Vn to close during build, related issues outside scope for their owners.",
+      "review": "P3 lists every toolchain doctor checks, x86_64-linux-android included, uniffi-bindgen as the workspace crate; F2 ties hosted CI to the repository going public."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/signoff",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## 33. Sign-off checklist",
+      "title": "Write §33. Sign-off checklist",
+      "accept": "Checklist: requirements mapped, decisions recorded, prerequisites closed, tasks done, staging green, production deployed.",
+      "review": "Verification record path is plan/evidence/99-verification.md; PD1-PD19."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/modules",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## Appendix A — Module inventory",
+      "title": "Write §Appendix A — Module inventory",
+      "accept": "Every module/file touched: id · surface · path · change type · section.",
+      "review": "M1-M11 paths follow the per-platform tree; M6 adds rust/uniffi-bindgen."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/eng-decisions",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## Appendix B — Engineering decisions",
+      "title": "Write §Appendix B — Engineering decisions",
+      "accept": "D-1…D-n · decision · why · where; the engineering choices that implement the PDs.",
+      "review": "D-1 rewritten for the per-platform layout; D-24 craftbridge-swift, D-25 rules checked by code behind tools/ci.sh, D-26 generated-code placement, D-27 one version, each with its reason and evidence."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "design/sources",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## Appendix C — Sources and evidence",
+      "title": "Write §Appendix C — Sources and evidence",
+      "accept": "Where every fact comes from: evidence files, repo SHAs, deployed snapshots (with dates)."
+    },
+    {
+      "status": "done",
+      "notes": [
+        "reopened: PD19 layout and PD3 visibility"
+      ],
+      "id": "design/glossary",
+      "phase": "design",
+      "kind": "section",
+      "heading": "## Appendix D — Glossary",
+      "title": "Write §Appendix D — Glossary",
+      "accept": "Every domain term and identifier a reader meets, defined once.",
+      "review": "Platform folder and Gate added; universal core and app plugin entries still match §15."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "diagrams/d01-journey",
+      "phase": "diagrams",
+      "kind": "diagram",
+      "diagram": "d01-journey",
+      "recipe": "flow",
+      "title": "The end-to-end journey (business view) (d01-journey, in §1. Executive summary)",
+      "accept": "diagrams/src/d01-journey.mjs built with the kit (recipe \"flow\"), lint clean, reviewed PNG judged against the rubric, mermaid twin tagged \"%% @drawio d01-journey | <caption>\" placed in §1. Executive summary. Drop it (plan.mjs drop) only if the plan genuinely has no such view.",
+      "review": "Opened the PNG. Glance: reads as desktop template → phone export in two phases; trace: five left-to-right edges and the cancel self-loop all followable. Fixed: groups had ~80 px dead space below the stages (shrunk to 252 px) and the mermaid twin had 7 nodes against 6 stages (rewritten to the same 6 steps). Legend names both colour kinds; numbers match §5 (1080×1080, 30 fps, 6 s, 180 frames)."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "diagrams/d02-architecture",
+      "phase": "diagrams",
+      "kind": "diagram",
+      "diagram": "d02-architecture",
+      "recipe": "architecture",
+      "title": "What changes, where (change-type legend) (d02-architecture, in §12. Architecture overview)",
+      "accept": "diagrams/src/d02-architecture.mjs built with the kit (recipe \"architecture\"), lint clean, reviewed PNG judged against the rubric, mermaid twin tagged \"%% @drawio d02-architecture | <caption>\" placed in §12. Architecture overview. Drop it (plan.mjs drop) only if the plan genuinely has no such view.",
+      "review": "Opened both PNGs. Glance: new / seam / unchanged / platform layers read at once; trace: all 14 edges followable, turning only in gutters. Fixed: three edges ran through group-title text (titles shortened, left-column entries moved to 0.8 of the node), a legend pill overflowed the page (labels shortened), two edge labels sat on a group border (dropped; node subs carry them), and the mermaid twin's auto-layout tangled the effects fan-out (rewritten as ranked nodes without subgraphs, same 14 nodes and edges)."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "diagrams/d03-lifecycle",
+      "phase": "diagrams",
+      "kind": "diagram",
+      "diagram": "d03-lifecycle",
+      "recipe": "flow",
+      "title": "Where things can change in the lifecycle (d03-lifecycle, in §13. Lifecycle and editability)",
+      "accept": "diagrams/src/d03-lifecycle.mjs built with the kit (recipe \"flow\"), lint clean, reviewed PNG judged against the rubric, mermaid twin tagged \"%% @drawio d03-lifecycle | <caption>\" placed in §13. Lifecycle and editability. Drop it (plan.mjs drop) only if the plan genuinely has no such view.",
+      "review": "Opened both PNGs. Glance: six engine states with the Ready hub; trace: all eight transitions followable, paired edges at matched fractions, one diagonal through an empty cell. Fixed: the footnote claimed identical output in every state (GPU frames match the CPU only within tolerance, so reworded), and closing during an export was missing (added Exporting → Closed in both twins)."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "diagrams/d04-data-model",
+      "phase": "diagrams",
+      "kind": "diagram",
+      "diagram": "d04-data-model",
+      "recipe": "data-model",
+      "title": "The data model and contracts (d04-data-model, in §14. Data model and contracts)",
+      "accept": "diagrams/src/d04-data-model.mjs built with the kit (recipe \"data-model\"), lint clean, reviewed PNG judged against the rubric, mermaid twin tagged \"%% @drawio d04-data-model | <caption>\" placed in §14. Data model and contracts. Drop it (plan.mjs drop) only if the plan genuinely has no such view.",
+      "review": "Opened both PNGs. Glance: typed layer → one Engine object → method table, with what each carries; trace: four edges, all straight between level centres. Fixed: a legend label wrapped (shortened), the row gap squeezed two edge labels (row 2 moved down 24 px), and the diagram exposed a contract inconsistency: CraftError listed Busy for calls during an export while L3 says they wait; Busy removed from §14, §16 and §19 (8 error kinds)."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "diagrams/d05-main-flow",
+      "phase": "diagrams",
+      "kind": "diagram",
+      "diagram": "d05-main-flow",
+      "recipe": "sequence",
+      "title": "The main runtime flow across components (d05-main-flow, in §19. EffectCraft app crate design)",
+      "accept": "diagrams/src/d05-main-flow.mjs built with the kit (recipe \"sequence\"), lint clean, reviewed PNG judged against the rubric, mermaid twin tagged \"%% @drawio d05-main-flow | <caption>\" placed in §19. EffectCraft app crate design. Drop it (plan.mjs drop) only if the plan genuinely has no such view.",
+      "review": "Opened both PNGs. Glance: one export request, progress and cancel through the engine actor; trace: 17 numbered messages, each between real lanes. Fixed: the first version sent progress and cancel straight between the automation lane and the app/Swift lanes, skipping the engine actor, which contradicted §16 and its own note; rerouted every message through the actor (17 messages, under the 18 limit) and matched the mermaid sequence twin message for message."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "diagrams/d06-rollout",
+      "phase": "diagrams",
+      "kind": "diagram",
+      "diagram": "d06-rollout",
+      "recipe": "flow",
+      "title": "Deploy order: every step safe on its own (d06-rollout, in §26. Backwards compatibility and rollout)",
+      "accept": "diagrams/src/d06-rollout.mjs built with the kit (recipe \"flow\"), lint clean, reviewed PNG judged against the rubric, mermaid twin tagged \"%% @drawio d06-rollout | <caption>\" placed in §26. Backwards compatibility and rollout. Drop it (plan.mjs drop) only if the plan genuinely has no such view.",
+      "review": "Opened both PNGs. Glance: nine steps in three phases, gates in their own colour; trace: eight neighbour-to-neighbour edges. Fixed: 'T1–T24' broke across a line (reworded as the whole corpus) and stages had ~30 px dead space (height 150 → 124, groups shrunk). Effort figures match §11 and §31 (2 + 10 + 14 + 16 + 14 + 9.5 = 65.5 d)."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "render/build",
+      "phase": "render",
+      "kind": "build",
+      "title": "Build diagrams, views and HTML",
+      "accept": "`plan.mjs build` completes with no errors and no warnings left unexplained."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "render/review-a",
+      "phase": "render",
+      "kind": "visual",
+      "title": "Visual review — Part A in the HTML",
+      "accept": "`plan.mjs review html`; every Part A tile read and judged against the rubric; defects fixed and re-reviewed.",
+      "review": "Read tiles 01–13 and a full-page screenshot: EffectCraft theme (dark tokens, Inter, unicorn icon in the sidebar) renders; d01 sits beside §1. Fixed: 'three ideas' introduced four; the FAQ and §9 claimed identical output where only rendered frames are identical (GPU within tolerance, encodes equivalent); §5 step 8 credited Leo with the upstream update (the SDK maintainer runs it); §10 'commands change weekly' was unsourced (replaced with the in-flight evidence); D-8 tripped the artefact check on 'NaN' (reworded)."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "render/review-b",
+      "phase": "render",
+      "kind": "visual",
+      "title": "Visual review — Part B in the HTML",
+      "accept": "As for Part A, for Part B.",
+      "review": "Read Part B tiles (12, 14 ×3, 15 ×2, 16, 17, 18, 19 ×2, 21, 26 and the remaining sections): diagrams d02–d06 legible at embedded size with captions; code blocks and wide tables wrap without sideways scrolling. Fixed: §14 named an Android handle function and crate that §20 designs differently (aligned to the JNI acquire + attach_window design); an error example's nested backticks rendered as stray characters; seam S4's row omitted render::run, which §19 and d05 rely on; the iOS plug-in policy could be bypassed by a command loading from the container (iOS loader now checks the source against the bundle, tied to PluginLoader's fn-pointer signature at crates/engine/src/lib.rs:294); B6 overclaimed identical output."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "render/review-c",
+      "phase": "render",
+      "kind": "visual",
+      "title": "Visual review — Part C + appendices in the HTML",
+      "accept": "As for Part A, for Part C and the appendices.",
+      "review": "Read Part C and appendix tiles (31 ×2, 32, 33, A–D): checklists, registers and tables render without overflow; task estimates sum to the §11 waves. Fixed: P2 omitted the write:packages scope that GitHub Packages publishing needs (the ChristopherLinnett token lacks it on 2026-11-12; the fix command is now in the row)."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "verify/anchors",
+      "phase": "verify",
+      "kind": "evidence",
+      "file": "evidence/99-verification.md",
+      "title": "Re-verify every anchor",
+      "accept": "Fetch every repo; `node build/inflight.mjs --gh` and `node build/review.mjs anchors` clean (no ✘); every excerpt in review/anchors/REPORT.md read against its sentence and the master corrected where it drifted; pins moved where work landed; results in evidence/99-verification.md."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "verify/facts",
+      "phase": "verify",
+      "kind": "review",
+      "title": "Claims ledger: every design step traced through the code it calls",
+      "accept": "evidence/99-verification.md has a \"## Claims\" table — one row per engineering decision (D-n) and per behaviour the design relies on in existing code: claim · how it was checked (anchor, command, query) · date · result. Every number, name and decision in the master traced to evidence or a PD; the running example identical everywhere; Part A agrees with Part B."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "verify/final-check",
+      "phase": "verify",
+      "kind": "check",
+      "title": "`check --final` clean",
+      "accept": "`plan.mjs check --final` exits 0."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "verify/signoff",
+      "phase": "verify",
+      "kind": "gate",
+      "title": "User sign-off",
+      "accept": "The user has reviewed the rendered HTML and confirmed it; changes they asked for are made and re-reviewed."
+    },
+    {
+      "status": "done",
+      "notes": [],
+      "id": "verify/bundle",
+      "phase": "verify",
+      "kind": "bundle",
+      "title": "Shareable bundle",
+      "accept": "`plan.mjs bundle` writes <slug>-plan.zip (plan HTML + everything it references, resolving relatively) with no unresolved references. Publishing it (e.g. with a deploy-plan skill) is the user's call."
+    }
+  ],
+  "questions": [
+    {
+      "id": "Q1",
+      "area": "Ownership and naming",
+      "text": "Who is named as the owner of this plan (shown in its header)?",
+      "why": "The plan of record names an accountable owner; the header and sign-off use it.",
+      "options": [
+        "You, by the name you give",
+        "A team name you give"
+      ],
+      "recommend": "You, by the name you give|You commissioned it and sign it off",
+      "source": "evidence/00-brief.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:14:20.602Z",
+      "answer": "Owner: ChristopherLinnett (the user).",
+      "answeredAt": "2026-11-12T07:47:36.282Z",
+      "pd": "PD1"
+    },
+    {
+      "id": "Q2",
+      "area": "Ownership and naming",
+      "text": "Is this an official ArtCraft Team project, or an independent SDK built on EffectCraft? The ArtCraft brand licence forbids the ArtCraft name or marks in the name, listing or marketing of anything other than EffectCraft itself without the ArtCraft Team's written permission.",
+      "why": "Decides the published package names (Swift module, Maven coordinates, repo name) and what the README may say; an unlicensed 'ArtCraft …' name would have to be renamed after release.",
+      "options": [
+        "Independent: neutral product name, README says 'based on EffectCraft by the ArtCraft team'",
+        "Official: ArtCraft Team gives written permission and the SDK may carry the ArtCraft name"
+      ],
+      "recommend": "Independent: neutral product name, README says 'based on EffectCraft by the ArtCraft team'|Needs no permission to start; can be renamed into an official package later if the team adopts it",
+      "source": "evidence/00-brief.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:14:20.651Z",
+      "answer": "Independent SDK: a neutral product name, and the README says in plain text that it is based on EffectCraft by the ArtCraft team; no ArtCraft name or marks in names, listings or marketing.",
+      "answeredAt": "2026-11-12T07:47:36.311Z",
+      "pd": "PD2"
+    },
+    {
+      "id": "Q3",
+      "area": "Ownership and naming",
+      "text": "Where does the plugin code live, under which licence, and where are the built packages published?",
+      "why": "Fixes the repository the build steps create, the licence headers, and the release targets the packaging steps publish to (SwiftPM binary URL, Maven repository).",
+      "options": [
+        "A new repo under your personal GitHub account, MIT OR Apache-2.0 like EffectCraft, releases on GitHub Releases (XCFramework zip for SwiftPM) and GitHub Packages (Maven AAR)",
+        "The same, but private until a first release",
+        "Local only for now: build and consume packages from disk, publishing decided later"
+      ],
+      "recommend": "The same, but private until a first release|Lets the build run end to end, including release automation, without publishing anything before you decide",
+      "source": "evidence/00-brief.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:14:20.702Z",
+      "answer": "A new repository under the ChristopherLinnett GitHub account, licensed MIT OR Apache-2.0, private until a first release; releases on GitHub Releases (XCFramework zip for SwiftPM) and GitHub Packages (Maven AAR).",
+      "answeredAt": "2026-11-12T07:47:36.338Z",
+      "pd": "PD3"
+    },
+    {
+      "id": "Q4",
+      "area": "Upstream linkage",
+      "text": "How do the plugins stay linked to EffectCraft (RQ4)?",
+      "why": "Decides the repository layout, the update procedure and how deterministic an upstream update is; it shapes Part B and every build step.",
+      "options": [
+        "Depend on the unmodified upstream crates at a pinned git revision; generate the Swift and Kotlin API from the engine's own command registry and tool catalogue; one update script bumps the pin, regenerates, diffs the API surface and runs the conformance suite",
+        "Fork storytold/effectcraft and add the mobile crates inside the fork, merging upstream periodically",
+        "Propose the mobile crates into storytold/effectcraft itself"
+      ],
+      "recommend": "Depend on the unmodified upstream crates at a pinned git revision; generate the Swift and Kotlin API from the engine's own command registry and tool catalogue; one update script bumps the pin, regenerates, diffs the API surface and runs the conformance suite|No fork to keep merging, and an update is a pin bump plus regeneration. Upstream forbids unsafe code workspace-wide, and an FFI layer needs it, so the mobile crates cannot live inside the upstream workspace without a rule exception",
+      "source": "evidence/00-brief.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:14:20.757Z",
+      "answer": "The plugins depend on the unmodified upstream crates at a pinned git revision; the Swift and Kotlin API is generated from the engine's command registry and tool catalogue; one update script bumps the pin, regenerates, diffs the API surface and runs the conformance suite.",
+      "answeredAt": "2026-11-12T07:47:36.365Z",
+      "pd": "PD4"
+    },
+    {
+      "id": "Q5",
+      "area": "Upstream linkage",
+      "text": "May the build contribute small seams to storytold/effectcraft as pull requests (through your fork), where the plugins would otherwise copy upstream code or work around it?",
+      "why": "Without them the plugin must set process environment variables at start-up (config, cache and font folders), cannot find system fonts on iOS or Android, and cannot use hardware video encoders without re-implementing the export pipeline; each workaround is code that drifts from upstream.",
+      "options": [
+        "Yes: plan them as upstream PRs, with a plugin-side fallback until each merges",
+        "No: the plugin works around them and never depends on upstream changes"
+      ],
+      "recommend": "Yes: plan them as upstream PRs, with a plugin-side fallback until each merges|Keeps one source of truth upstream; the fallbacks mean the plugin never waits on a merge",
+      "source": "evidence/00-brief.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:14:41.018Z",
+      "answer": "Yes: small seams are proposed to storytold/effectcraft as pull requests through the ChristopherLinnett fork, each with a plugin-side fallback until it merges.",
+      "answeredAt": "2026-11-12T07:47:36.393Z",
+      "pd": "PD5"
+    },
+    {
+      "id": "Q6",
+      "area": "API scope",
+      "text": "Which EffectCraft CLI capabilities must the first release expose as device APIs (RQ2)?",
+      "why": "Sets the API surface, the conformance suite and the size of the build. The CLI's bridge mode drives a desktop app over a local TCP port, and its operations and Roto Brush benchmarks depend on the desktop UI and on installed models.",
+      "options": [
+        "Everything except --bridge and the UI/Roto benchmarks: info, commands, exec, run, props, get, set, render-frame, render (every format, --queue, templates), script, replay, an in-process MCP endpoint, and render timings",
+        "Literally everything, including bridge mode to a desktop app on the network and every benchmark",
+        "Core only: exec, run, props, get, set, render-frame, render"
+      ],
+      "recommend": "Everything except --bridge and the UI/Roto benchmarks: info, commands, exec, run, props, get, set, render-frame, render (every format, --queue, templates), script, replay, an in-process MCP endpoint, and render timings|Covers every document operation the CLI can perform; bridge mode and the UI benchmarks exist to drive or measure the desktop app, which a phone does not run",
+      "source": "evidence/00-brief.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:14:41.067Z",
+      "answer": "Everything except --bridge and the UI/Roto benchmarks: info, commands, exec, run, props, get, set, render-frame, render (every format, --queue, templates), script, replay, an in-process MCP endpoint, and render timings.",
+      "answeredAt": "2026-11-12T07:47:36.421Z",
+      "pd": "PD6"
+    },
+    {
+      "id": "Q7",
+      "area": "API scope",
+      "text": "What shape should the Swift and Kotlin APIs take?",
+      "why": "Decides what the code generator emits, what the docs show developers, and how much hand-written API has to be maintained when upstream changes.",
+      "options": [
+        "Two layers: a generated typed facade (one method per engine command with named parameters, regenerated on every update) plus a generic exec(id, params) / run(steps); hand-written typed calls only for the fixed-shape operations (render, props, get, set, templates)",
+        "Generic only: exec(id, JSON) and run(steps), developers read the command list",
+        "Hand-written typed API for every command"
+      ],
+      "recommend": "Two layers: a generated typed facade (one method per engine command with named parameters, regenerated on every update) plus a generic exec(id, params) / run(steps); hand-written typed calls only for the fixed-shape operations (render, props, get, set, templates)|The engine registers 763 commands; their parameter docs give names and optionality in a machine-readable form, and types only as prose hints (bool, enum lists, [x,y], seconds); generating them keeps updates mechanical, and the hand-written part stays small",
+      "source": "evidence/00-brief.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:14:41.118Z",
+      "answer": "Two layers: a generated typed facade (one method per engine command with named parameters, regenerated on every update) plus a generic exec(id, params) / run(steps); hand-written typed calls only for the fixed-shape operations (render, props, get, set, templates).",
+      "answeredAt": "2026-11-12T07:47:36.450Z",
+      "pd": "PD7"
+    },
+    {
+      "id": "Q8",
+      "area": "API scope",
+      "text": "How should rendered frames reach the developer's interface?",
+      "why": "Decides whether the SDK owns on-screen drawing paths (CAMetalLayer on iOS, Surface on Android) and whether frames ever leave the GPU; affects performance, battery and the API.",
+      "options": [
+        "Three outputs: render into a layer or surface the developer passes in (frames stay on the GPU), a platform image (CVPixelBuffer / Android Bitmap or HardwareBuffer), and encoded PNG bytes; no UI widgets",
+        "Images and PNG bytes only",
+        "The three outputs plus ready-made SwiftUI and Jetpack Compose preview views"
+      ],
+      "recommend": "Three outputs: render into a layer or surface the developer passes in (frames stay on the GPU), a platform image (CVPixelBuffer / Android Bitmap or HardwareBuffer), and encoded PNG bytes; no UI widgets|You said developers connect their own interface; drawing into their layer is the native, zero-copy way to show a live preview",
+      "source": "evidence/00-brief.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:14:41.170Z",
+      "answer": "Three outputs: render into a layer or surface the developer passes in (frames stay on the GPU), a platform image (CVPixelBuffer / Android Bitmap or HardwareBuffer), and encoded PNG bytes; no UI widgets.",
+      "answeredAt": "2026-11-12T07:47:36.478Z",
+      "pd": "PD8"
+    },
+    {
+      "id": "Q9",
+      "area": "Universal core",
+      "text": "Should the first build split the work into a universal Craft core plugin plus an EffectCraft plugin, or build an EffectCraft-only plugin and extract the core when a second app arrives (RQ8)?",
+      "why": "Decides the package and crate layout every build step creates, and whether a second Craft app later imports the core or forces a refactor of the EffectCraft plugin.",
+      "options": [
+        "Two layers from the start: a universal core (Rust crate + Swift package + Kotlin library: request channel, progress and cancellation, errors, GPU device, folders, fonts, native video decoding) that knows nothing of EffectCraft, plus the EffectCraft plugin that imports it; the core holds only what EffectCraft needs today",
+        "EffectCraft-only first; extract the core when FilmCraft or FigCraft gets a plugin"
+      ],
+      "recommend": "Two layers from the start: a universal core (Rust crate + Swift package + Kotlin library: request channel, progress and cancellation, errors, GPU device, folders, fonts, native video decoding) that knows nothing of EffectCraft, plus the EffectCraft plugin that imports it; the core holds only what EffectCraft needs today|EffectCraft, FilmCraft and FigCraft share the registry, session and control-protocol shape, and craft-web-api already shares the web equivalent the same way; splitting now costs a crate boundary, splitting later means moving code out of a shipped package",
+      "source": "evidence/04-craft-suite-shared-core.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:27:48.814Z",
+      "answer": "Two layers from the start: a universal core that knows nothing of EffectCraft (request channel, progress and cancellation, errors, GPU device, folders, fonts, native video decoding) plus the EffectCraft plugin that imports it; the core holds only what EffectCraft needs today.",
+      "answeredAt": "2026-11-12T07:47:36.507Z",
+      "pd": "PD9"
+    },
+    {
+      "id": "Q10",
+      "area": "Universal core",
+      "text": "Where should the universal core live?",
+      "why": "Decides which repository the core's crates and packages are created in, who can change them, and whether other Craft app plugins can depend on it without depending on the EffectCraft plugin.",
+      "options": [
+        "In the plugin-port repository as its own crate and packages (artcraft-plugin-port/core), next to effectcraft/; propose it to storytold/craft-libs later if the maintainers want it",
+        "Propose it to storytold/craft-libs now, as a new shared crate",
+        "A separate repository of its own"
+      ],
+      "recommend": "In the plugin-port repository as its own crate and packages (artcraft-plugin-port/core), next to effectcraft/; propose it to storytold/craft-libs later if the maintainers want it|No dependency on maintainers' review to start; the folder layout you described (artcraft-plugin-port/<app>) gains one sibling, and moving a self-contained crate to craft-libs later is a path change",
+      "source": "evidence/04-craft-suite-shared-core.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:27:48.840Z",
+      "answer": "The universal core lives in the plugin-port repository as its own crate and packages (artcraft-plugin-port/core, next to effectcraft/); it may be proposed to storytold/craft-libs later.",
+      "answeredAt": "2026-11-12T07:47:36.535Z",
+      "pd": "PD10"
+    },
+    {
+      "id": "Q11",
+      "area": "Platforms",
+      "text": "Which minimum OS versions and CPU architectures should the plugins support?",
+      "why": "Sets the Xcode deployment target, Android minSdk, the ABIs built and tested, and which GPU paths can be assumed. Devices without Metal or Vulkan compute still work on the CPU path.",
+      "options": [
+        "iOS 17+ (arm64 device, arm64 simulator); Android 10+ (API 29), arm64-v8a plus x86_64 for emulators, no 32-bit",
+        "iOS 16+; Android 8.0+ (API 26), arm64-v8a, x86_64 and armeabi-v7a",
+        "iOS 18+ (as storytold/effectcraft#1401 chose); Android 13+ (API 33), arm64-v8a only"
+      ],
+      "recommend": "iOS 17+ (arm64 device, arm64 simulator); Android 10+ (API 29), arm64-v8a plus x86_64 for emulators, no 32-bit|A product judgement, not measured market share: Android 10 is where apps lose the right to run their own binaries and launch devices must offer Vulkan 1.1; 32-bit Android was not built or tested in the feasibility runs",
+      "source": "evidence/05-mobile-platforms.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:30:52.181Z",
+      "answer": "iOS 17+ (arm64 device, arm64 simulator); Android 10+ (API 29), arm64-v8a plus x86_64 for emulators, no 32-bit.",
+      "answeredAt": "2026-11-12T07:47:36.563Z",
+      "pd": "PD11"
+    },
+    {
+      "id": "Q12",
+      "area": "Platforms",
+      "text": "How should the plugins decode and encode video: through the platform's hardware codecs or EffectCraft's own pure-Rust codecs (RQ3)?",
+      "why": "Decides battery and speed for footage-heavy projects, whether exports match the desktop's output, and which upstream changes the build depends on. EffectCraft's maintainers keep OS codec code out of their own binary (storytold/effectcraft#819); a plugin is a separate product and may include it.",
+      "options": [
+        "Hybrid: decode H.264 and HEVC (and AV1 where the device has it) with VideoToolbox on iOS and MediaCodec on Android, registered in front of the pure-Rust decoders, which remain the fallback; encode with the pure-Rust encoders until an encoder seam exists upstream, then add hardware H.264/HEVC encoding as an export option",
+        "Pure-Rust only: identical behaviour to the desktop, no platform codec code",
+        "Hardware both ways from the first release, which first requires the upstream encoder seam"
+      ],
+      "recommend": "Hybrid: decode H.264 and HEVC (and AV1 where the device has it) with VideoToolbox on iOS and MediaCodec on Android, registered in front of the pure-Rust decoders, which remain the fallback; encode with the pure-Rust encoders until an encoder seam exists upstream, then add hardware H.264/HEVC encoding as an export option|Hardware decoding plugs into FilmCraft's decoder registry with no EffectCraft change and was measured bit-exact on desktop; hardware encoding needs an upstream seam the plugin cannot add alone",
+      "source": "evidence/05-mobile-platforms.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:30:52.207Z",
+      "answer": "Hybrid: H.264 and HEVC (and AV1 where the device has it) decode through VideoToolbox on iOS and MediaCodec on Android, registered in front of the pure-Rust decoders, which remain the fallback; exports use the pure-Rust encoders until an encoder seam exists upstream, then hardware H.264/HEVC encoding becomes an export option.",
+      "answeredAt": "2026-11-12T07:47:36.592Z",
+      "pd": "PD12"
+    },
+    {
+      "id": "Q13",
+      "area": "Platforms",
+      "text": "Should the plugins run JavaScript (scripts and expressions) and load WebAssembly effect plug-ins on device?",
+      "why": "Scripts and expressions are part of what the CLI does (script, expressions in projects). Apple allows a bundled interpreter running user-written scripts; whether downloaded WebAssembly plug-ins count as interpreted code is not addressed by Apple's rules. External helper effects are separate processes, which neither iOS nor Android allows, so they are unavailable either way.",
+      "options": [
+        "Scripts and expressions on both platforms; WebAssembly plug-ins on Android always, on iOS only from files the host app bundles, with a switch the host app can turn off",
+        "Scripts, expressions and WebAssembly plug-ins on both platforms; the host app decides what to allow",
+        "Scripts and expressions only; no WebAssembly plug-ins on either platform"
+      ],
+      "recommend": "Scripts and expressions on both platforms; WebAssembly plug-ins on Android always, on iOS only from files the host app bundles, with a switch the host app can turn off|Keeps full document parity (projects with expressions render the same) while leaving the App Review judgement on downloaded plug-ins with the host app",
+      "source": "evidence/05-mobile-platforms.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:30:52.231Z",
+      "answer": "Scripts and expressions run on both platforms; WebAssembly plug-ins load on Android always and on iOS only from files the host app bundles, behind a switch the host app can turn off.",
+      "answeredAt": "2026-11-12T07:47:36.620Z",
+      "pd": "PD13"
+    },
+    {
+      "id": "Q14",
+      "area": "Platforms",
+      "text": "Who schedules long exports when the user leaves the app?",
+      "why": "iOS stops GPU work in the background unless the app runs a BGContinuedProcessingTask with a GPU entitlement; Android needs a mediaProcessing foreground service. Whoever owns this needs the entitlement, the permission and the system progress UI.",
+      "options": [
+        "The host app: the SDK exposes progress, cancellation and a background-safe export call, documents the iOS and Android recipes, and ships a sample of each",
+        "The SDK starts and manages the background task and foreground service itself",
+        "Out of scope: exports run only while the app is in the foreground"
+      ],
+      "recommend": "The host app: the SDK exposes progress, cancellation and a background-safe export call, documents the iOS and Android recipes, and ships a sample of each|Entitlements, permissions and the system progress UI belong to the app's identity and review; an SDK that starts them would impose them on every host app",
+      "source": "evidence/05-mobile-platforms.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:31:03.847Z",
+      "answer": "The host app schedules background exports; the SDK exposes progress, cancellation and a background-safe export call, documents the iOS and Android recipes and ships a sample of each.",
+      "answeredAt": "2026-11-12T07:47:36.648Z",
+      "pd": "PD14"
+    },
+    {
+      "id": "Q15",
+      "area": "Platforms",
+      "text": "Is an engine library of about 60 MB per architecture acceptable for the first release?",
+      "why": "The release Android build of the engine is 62.4 MB stripped (26.7 MB compressed). Everything the CLI does includes PSD, AEP, PDF, SVG, Lottie, 3D models, SAM 2 and every codec, which the engine links unconditionally; making them optional needs upstream feature flags.",
+      "options": [
+        "Yes for the first release; measure the plugin library itself and report its size with each release",
+        "No: the first release ships optional modules, which requires upstream feature flags before the build can finish",
+        "Set a budget now (you name it) and the plan finds what to cut"
+      ],
+      "recommend": "Yes for the first release; measure the plugin library itself and report its size with each release|Full CLI parity is the requirement, and every module the engine links is part of it; trimming needs upstream changes the first release should not wait for",
+      "source": "evidence/03-device-feasibility.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:31:03.874Z",
+      "answer": "An engine library of about 60 MB per architecture is acceptable for the first release; the plugin library's own size is measured and reported with each release.",
+      "answeredAt": "2026-11-12T07:47:36.675Z",
+      "pd": "PD15"
+    },
+    {
+      "id": "Q16",
+      "area": "Ownership and naming",
+      "text": "What are the SDK's product and package names? (PD2 rules out the ArtCraft name; the brand licence names only the ArtCraft name and marks, not 'EffectCraft', but forbids presenting a derived work as an ArtCraft product.)",
+      "why": "Fixes the GitHub repository name, the Rust crate names, the Swift package and module names and the Maven coordinates that every build step creates; renaming after a release breaks every integrating app.",
+      "options": [
+        "CraftBridge: repo ChristopherLinnett/craftbridge; core CraftBridge (Swift) / io.github.christopherlinnett.craftbridge:core (Maven); EffectCraft plugin CraftBridgeEffects / io.github.christopherlinnett.craftbridge:effects",
+        "EffectCraftKit: core CraftKit, EffectCraft plugin EffectCraftKit, which names the engine plainly but may read as an official EffectCraft product",
+        "A name you choose"
+      ],
+      "recommend": "CraftBridge: repo ChristopherLinnett/craftbridge; core CraftBridge (Swift) / io.github.christopherlinnett.craftbridge:core (Maven); EffectCraft plugin CraftBridgeEffects / io.github.christopherlinnett.craftbridge:effects|Says what it is (a bridge from Swift and Kotlin to the Craft engines) without the ArtCraft name, and leaves room for CraftBridgeFilm and the rest; the local folder artcraft-plugin-port stays as it is",
+      "source": "evidence/00-brief.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:49:48.231Z",
+      "answer": "CraftBridge: repository ChristopherLinnett/craftbridge; the universal core is CraftBridge (Swift) and io.github.christopherlinnett.craftbridge:core (Maven); the EffectCraft plugin is CraftBridgeEffects and io.github.christopherlinnett.craftbridge:effects; the local folder artcraft-plugin-port stays as it is.",
+      "answeredAt": "2026-11-12T07:53:48.184Z",
+      "pd": "PD16"
+    },
+    {
+      "id": "Q17",
+      "area": "Upstream linkage",
+      "text": "Native video decoders: extend FilmCraft's filmcraft-platform (which already has the macOS VideoToolbox decoder) through a new ChristopherLinnett/filmcraft fork and pull requests to storytold/filmcraft, or write CraftBridge's own decoders?",
+      "why": "PD12 needs VideoToolbox (iOS) and MediaCodec (Android) decoders. FilmCraft's decoder compiles for iOS with three gate changes (tested); a second implementation in CraftBridge would duplicate it. Extending FilmCraft means creating a fork of storytold/filmcraft under ChristopherLinnett.",
+      "options": [
+        "Extend filmcraft-platform: fork storytold/filmcraft, propose the iOS gates and a MediaCodec decoder as pull requests, and pin CraftBridge to the fork commit on EffectCraft's FilmCraft revision through a Cargo patch until FilmCraft merges them and EffectCraft's pin includes them",
+        "Write VideoToolbox and MediaCodec decoders in CraftBridge's core, registered through FilmCraft's public decoder registry; no fork"
+      ],
+      "recommend": "Extend filmcraft-platform: fork storytold/filmcraft, propose the iOS gates and a MediaCodec decoder as pull requests, and pin CraftBridge to the fork commit on EffectCraft's FilmCraft revision through a Cargo patch until FilmCraft merges them and EffectCraft's pin includes them|One VideoToolbox decoder for the whole suite, extended rather than copied",
+      "source": "evidence/03-device-feasibility.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:58:59.709Z",
+      "answer": "CraftBridge's own decoders: the universal core carries the VideoToolbox (iOS) and MediaCodec (Android) hardware decoders, registered through FilmCraft's public decoder registry that EffectCraft already decodes through; every app plugin (CraftBridgeEffects now, CraftBridgeFilm later) imports them from the core; no FilmCraft fork and no FilmCraft pull requests.",
+      "answeredAt": "2026-11-12T08:03:47.565Z",
+      "pd": "PD18",
+      "supersedes": [
+        "ChristopherLinnett/filmcraft",
+        "filmcraft fork"
+      ]
+    },
+    {
+      "id": "Q18",
+      "area": "Upstream linkage",
+      "text": "PD5's plugin-side fallback for seams whose code lives only in the EffectCraft CLI binary (template rendering, render timings): until each seam pull request merges, should CraftBridge build against your fork's pull-request branch (the upstream pin plus that PR's commits), instead of carrying a copy of the CLI code?",
+      "why": "Template rendering (190 lines) and render timings exist only in the CLI binary, so the plugin can reuse them only from a library. A copy would drift from upstream; the pull-request branch keeps one source and is replaced by the upstream pin once merged.",
+      "options": [
+        "Yes: pin the fork's PR branch until merged; the update script rebases it onto each new upstream pin",
+        "No: those capabilities ship only after their PRs merge upstream"
+      ],
+      "recommend": "Yes: pin the fork's PR branch until merged; the update script rebases it onto each new upstream pin|Every PD6 capability ships in the first release without a copied line of upstream code",
+      "source": "evidence/01-system-inventory.md",
+      "status": "answered",
+      "asked": "2026-11-12T07:58:59.735Z",
+      "answer": "Until a seam pull request merges upstream, CraftBridge builds against the ChristopherLinnett/effectcraft pull-request branch (the upstream pin plus that PR's commits) rather than a copy of CLI code; the update script rebases the branch onto each new upstream pin, and the pin returns to storytold/effectcraft once the PR merges.",
+      "answeredAt": "2026-11-12T08:01:24.276Z",
+      "pd": "PD17"
+    },
+    {
+      "id": "Q19",
+      "area": "repository",
+      "text": "How is the CraftBridge repository laid out?",
+      "why": "Every path in §15, §20–§25, §31 and Appendix A follows from it",
+      "options": [
+        "one folder per platform, each a complete build",
+        "product folders, then language (core/, effectcraft/)"
+      ],
+      "recommend": "one folder per platform|each toolchain's files stay in its own folder; nothing of a platform sits at the root",
+      "status": "answered",
+      "asked": "2026-11-12T10:29:20.146Z",
+      "answer": "One folder per platform, each a complete build: rust/, ios/ and android/, with clean separation of the libraries; Package.swift sits at the top of the iOS section (ios/sdk) rather than the repository root, nesting a level deeper where that keeps the libraries separate, and releases reach SwiftPM by whatever best achieves that separation.",
+      "answeredAt": "2026-11-12T10:29:30.020Z",
+      "pd": "PD19",
+      "supersedes": [
+        "next to `effectcraft/`",
+        "core/rust/",
+        "effectcraft/rust/",
+        "effectcraft/swift/",
+        "effectcraft/kotlin",
+        "core/swift/",
+        "core/kotlin",
+        "effectcraft/codegen",
+        "effectcraft/conformance",
+        "effectcraft/samples",
+        "effectcraft/plan",
+        "effectcraft/api-surface.json"
+      ]
+    },
+    {
+      "id": "Q20",
+      "area": "distribution",
+      "text": "When does the CraftBridge repository become public?",
+      "why": "Decides when hosted CI runs (free on public repositories) and what G3 still gates",
+      "options": [
+        "when hosted CI starts",
+        "at the first release"
+      ],
+      "recommend": "when hosted CI starts|hosted runners, macOS included, are free on public repositories",
+      "status": "answered",
+      "asked": "2026-11-12T10:29:20.176Z",
+      "answer": "Private initially; the repository becomes public when hosted CI starts, so CI can run and validate there.",
+      "answeredAt": "2026-11-12T10:29:30.052Z",
+      "pd": "PD3",
+      "supersedes": [
+        "private until a first release",
+        "private until its first release",
+        "stays private until the owner releases it"
+      ]
+    }
+  ],
+  "log": [
+    {
+      "at": "2026-11-12T07:07:09.854Z",
+      "msg": "plan started: EffectCraft Plugin Port"
+    },
+    {
+      "at": "2026-11-12T07:08:10.086Z",
+      "msg": "started setup/doctor"
+    },
+    {
+      "at": "2026-11-12T07:08:10.244Z",
+      "msg": "done setup/doctor"
+    },
+    {
+      "at": "2026-11-12T07:09:55.220Z",
+      "msg": "started intake/brief (created evidence/00-brief.md)"
+    },
+    {
+      "at": "2026-11-12T07:14:20.603Z",
+      "msg": "question Q1 [Ownership and naming]: Who is named as the owner of this plan (shown in its header)?"
+    },
+    {
+      "at": "2026-11-12T07:14:20.652Z",
+      "msg": "question Q2 [Ownership and naming]: Is this an official ArtCraft Team project, or an independent SDK built on EffectCraft? The ArtCraft brand licence forbids the ArtCraft name or marks in the name, listing or marketing of anything other than EffectCraft itself without the ArtCraft Team's written permission."
+    },
+    {
+      "at": "2026-11-12T07:14:20.703Z",
+      "msg": "question Q3 [Ownership and naming]: Where does the plugin code live, under which licence, and where are the built packages published?"
+    },
+    {
+      "at": "2026-11-12T07:14:20.758Z",
+      "msg": "question Q4 [Upstream linkage]: How do the plugins stay linked to EffectCraft (RQ4)?"
+    },
+    {
+      "at": "2026-11-12T07:14:41.020Z",
+      "msg": "question Q5 [Upstream linkage]: May the build contribute small seams to storytold/effectcraft as pull requests (through your fork), where the plugins would otherwise copy upstream code or work around it?"
+    },
+    {
+      "at": "2026-11-12T07:14:41.068Z",
+      "msg": "question Q6 [API scope]: Which EffectCraft CLI capabilities must the first release expose as device APIs (RQ2)?"
+    },
+    {
+      "at": "2026-11-12T07:14:41.119Z",
+      "msg": "question Q7 [API scope]: What shape should the Swift and Kotlin APIs take?"
+    },
+    {
+      "at": "2026-11-12T07:14:41.171Z",
+      "msg": "question Q8 [API scope]: How should rendered frames reach the developer's interface?"
+    },
+    {
+      "at": "2026-11-12T07:14:55.932Z",
+      "msg": "done intake/brief"
+    },
+    {
+      "at": "2026-11-12T07:15:01.405Z",
+      "msg": "started intake/systems (created evidence/01-system-inventory.md)"
+    },
+    {
+      "at": "2026-11-12T07:17:54.649Z",
+      "msg": "done intake/systems"
+    },
+    {
+      "at": "2026-11-12T07:17:58.182Z",
+      "msg": "started research/in-flight (created evidence/02-in-flight-work.md)"
+    },
+    {
+      "at": "2026-11-12T07:24:03.359Z",
+      "msg": "done research/in-flight"
+    },
+    {
+      "at": "2026-11-12T07:24:08.424Z",
+      "msg": "started research/plan"
+    },
+    {
+      "at": "2026-11-12T07:24:08.501Z",
+      "msg": "added research/03-device-feasibility"
+    },
+    {
+      "at": "2026-11-12T07:24:08.580Z",
+      "msg": "added research/04-craft-suite-shared-core"
+    },
+    {
+      "at": "2026-11-12T07:24:08.628Z",
+      "msg": "added research/05-mobile-platforms"
+    },
+    {
+      "at": "2026-11-12T07:24:08.677Z",
+      "msg": "done research/plan"
+    },
+    {
+      "at": "2026-11-12T07:25:31.875Z",
+      "msg": "started research/03-device-feasibility (created evidence/03-device-feasibility.md)"
+    },
+    {
+      "at": "2026-11-12T07:26:18.741Z",
+      "msg": "done research/03-device-feasibility"
+    },
+    {
+      "at": "2026-11-12T07:26:18.770Z",
+      "msg": "started research/04-craft-suite-shared-core (created evidence/04-craft-suite-shared-core.md)"
+    },
+    {
+      "at": "2026-11-12T07:27:48.814Z",
+      "msg": "question Q9 [Universal core]: Should the first build split the work into a universal Craft core plugin plus an EffectCraft plugin, or build an EffectCraft-only plugin and extract the core when a second app arrives (RQ8)?"
+    },
+    {
+      "at": "2026-11-12T07:27:48.841Z",
+      "msg": "question Q10 [Universal core]: Where should the universal core live?"
+    },
+    {
+      "at": "2026-11-12T07:27:48.867Z",
+      "msg": "done research/04-craft-suite-shared-core"
+    },
+    {
+      "at": "2026-11-12T07:28:16.207Z",
+      "msg": "started research/05-mobile-platforms (created evidence/05-mobile-platforms.md)"
+    },
+    {
+      "at": "2026-11-12T07:28:16.235Z",
+      "msg": "added research/06-feasibility-verdict"
+    },
+    {
+      "at": "2026-11-12T07:30:52.182Z",
+      "msg": "question Q11 [Platforms]: Which minimum OS versions and CPU architectures should the plugins support?"
+    },
+    {
+      "at": "2026-11-12T07:30:52.208Z",
+      "msg": "question Q12 [Platforms]: How should the plugins decode and encode video: through the platform's hardware codecs or EffectCraft's own pure-Rust codecs (RQ3)?"
+    },
+    {
+      "at": "2026-11-12T07:30:52.232Z",
+      "msg": "question Q13 [Platforms]: Should the plugins run JavaScript (scripts and expressions) and load WebAssembly effect plug-ins on device?"
+    },
+    {
+      "at": "2026-11-12T07:31:03.848Z",
+      "msg": "question Q14 [Platforms]: Who schedules long exports when the user leaves the app?"
+    },
+    {
+      "at": "2026-11-12T07:31:03.874Z",
+      "msg": "question Q15 [Platforms]: Is an engine library of about 60 MB per architecture acceptable for the first release?"
+    },
+    {
+      "at": "2026-11-12T07:31:24.997Z",
+      "msg": "done research/05-mobile-platforms"
+    },
+    {
+      "at": "2026-11-12T07:31:25.031Z",
+      "msg": "started research/06-feasibility-verdict"
+    },
+    {
+      "at": "2026-11-12T07:31:25.060Z",
+      "msg": "done research/06-feasibility-verdict"
+    },
+    {
+      "at": "2026-11-12T07:31:49.894Z",
+      "msg": "Feasibility research complete (evidence 00-06): engine runs CLI capabilities on iOS Simulator (Metal) and Android emulator (Vulkan); round 1 of 15 questions asked."
+    },
+    {
+      "at": "2026-11-12T07:47:36.283Z",
+      "msg": "answered Q1 → PD1"
+    },
+    {
+      "at": "2026-11-12T07:47:36.311Z",
+      "msg": "answered Q2 → PD2"
+    },
+    {
+      "at": "2026-11-12T07:47:36.338Z",
+      "msg": "answered Q3 → PD3"
+    },
+    {
+      "at": "2026-11-12T07:47:36.366Z",
+      "msg": "answered Q4 → PD4"
+    },
+    {
+      "at": "2026-11-12T07:47:36.394Z",
+      "msg": "answered Q5 → PD5"
+    },
+    {
+      "at": "2026-11-12T07:47:36.422Z",
+      "msg": "answered Q6 → PD6"
+    },
+    {
+      "at": "2026-11-12T07:47:36.451Z",
+      "msg": "answered Q7 → PD7"
+    },
+    {
+      "at": "2026-11-12T07:47:36.479Z",
+      "msg": "answered Q8 → PD8"
+    },
+    {
+      "at": "2026-11-12T07:47:36.507Z",
+      "msg": "answered Q9 → PD9"
+    },
+    {
+      "at": "2026-11-12T07:47:36.536Z",
+      "msg": "answered Q10 → PD10"
+    },
+    {
+      "at": "2026-11-12T07:47:36.564Z",
+      "msg": "answered Q11 → PD11"
+    },
+    {
+      "at": "2026-11-12T07:47:36.593Z",
+      "msg": "answered Q12 → PD12"
+    },
+    {
+      "at": "2026-11-12T07:47:36.620Z",
+      "msg": "answered Q13 → PD13"
+    },
+    {
+      "at": "2026-11-12T07:47:36.648Z",
+      "msg": "answered Q14 → PD14"
+    },
+    {
+      "at": "2026-11-12T07:47:36.676Z",
+      "msg": "answered Q15 → PD15"
+    },
+    {
+      "at": "2026-11-12T07:49:48.232Z",
+      "msg": "question Q16 [Ownership and naming]: What are the SDK's product and package names? (PD2 rules out the ArtCraft name; the brand licence names only the ArtCraft name and marks, not 'EffectCraft', but forbids presenting a derived work as an ArtCraft product.)"
+    },
+    {
+      "at": "2026-11-12T07:53:48.185Z",
+      "msg": "answered Q16 → PD16"
+    },
+    {
+      "at": "2026-11-12T07:53:54.385Z",
+      "msg": "started questions/complete"
+    },
+    {
+      "at": "2026-11-12T07:53:54.419Z",
+      "msg": "done questions/complete"
+    },
+    {
+      "at": "2026-11-12T07:58:59.710Z",
+      "msg": "question Q17 [Upstream linkage]: Native video decoders: extend FilmCraft's filmcraft-platform (which already has the macOS VideoToolbox decoder) through a new ChristopherLinnett/filmcraft fork and pull requests to storytold/filmcraft, or write CraftBridge's own decoders?"
+    },
+    {
+      "at": "2026-11-12T07:58:59.736Z",
+      "msg": "question Q18 [Upstream linkage]: PD5's plugin-side fallback for seams whose code lives only in the EffectCraft CLI binary (template rendering, render timings): until each seam pull request merges, should CraftBridge build against your fork's pull-request branch (the upstream pin plus that PR's commits), instead of carrying a copy of the CLI code?"
+    },
+    {
+      "at": "2026-11-12T08:01:24.277Z",
+      "msg": "answered Q18 → PD17"
+    },
+    {
+      "at": "2026-11-12T08:03:47.566Z",
+      "msg": "answered Q17 → PD18"
+    },
+    {
+      "at": "2026-11-12T08:03:59.996Z",
+      "msg": "started design/outline"
+    },
+    {
+      "at": "2026-11-12T08:04:00.026Z",
+      "msg": "outlined: 33 numbered sections, 11 surface(s), 0 UI gallery(ies)"
+    },
+    {
+      "at": "2026-11-12T08:04:18.777Z",
+      "msg": "done design/outline"
+    },
+    {
+      "at": "2026-11-12T08:08:25.572Z",
+      "msg": "started design/header"
+    },
+    {
+      "at": "2026-11-12T08:08:25.604Z",
+      "msg": "started design/summary"
+    },
+    {
+      "at": "2026-11-12T08:08:25.634Z",
+      "msg": "started design/problem"
+    },
+    {
+      "at": "2026-11-12T08:08:25.663Z",
+      "msg": "started design/narrative"
+    },
+    {
+      "at": "2026-11-12T08:08:25.691Z",
+      "msg": "started design/capabilities"
+    },
+    {
+      "at": "2026-11-12T08:08:25.721Z",
+      "msg": "started design/experience"
+    },
+    {
+      "at": "2026-11-12T08:08:25.747Z",
+      "msg": "started design/decisions"
+    },
+    {
+      "at": "2026-11-12T08:08:25.773Z",
+      "msg": "started design/scope"
+    },
+    {
+      "at": "2026-11-12T08:08:25.799Z",
+      "msg": "started design/rollout-business"
+    },
+    {
+      "at": "2026-11-12T08:08:25.825Z",
+      "msg": "started design/metrics"
+    },
+    {
+      "at": "2026-11-12T08:08:25.851Z",
+      "msg": "started design/risks-business"
+    },
+    {
+      "at": "2026-11-12T08:08:25.877Z",
+      "msg": "started design/roadmap"
+    },
+    {
+      "at": "2026-11-12T08:08:42.228Z",
+      "msg": "done design/header"
+    },
+    {
+      "at": "2026-11-12T08:10:28.120Z",
+      "msg": "done design/summary"
+    },
+    {
+      "at": "2026-11-12T08:10:28.152Z",
+      "msg": "done design/problem"
+    },
+    {
+      "at": "2026-11-12T08:10:28.181Z",
+      "msg": "done design/narrative"
+    },
+    {
+      "at": "2026-11-12T08:10:28.209Z",
+      "msg": "done design/capabilities"
+    },
+    {
+      "at": "2026-11-12T08:10:28.237Z",
+      "msg": "done design/experience"
+    },
+    {
+      "at": "2026-11-12T08:10:28.265Z",
+      "msg": "done design/decisions"
+    },
+    {
+      "at": "2026-11-12T08:10:28.293Z",
+      "msg": "done design/scope"
+    },
+    {
+      "at": "2026-11-12T08:10:28.321Z",
+      "msg": "done design/rollout-business"
+    },
+    {
+      "at": "2026-11-12T08:10:28.349Z",
+      "msg": "done design/metrics"
+    },
+    {
+      "at": "2026-11-12T08:10:28.377Z",
+      "msg": "done design/risks-business"
+    },
+    {
+      "at": "2026-11-12T08:10:28.405Z",
+      "msg": "done design/roadmap"
+    },
+    {
+      "at": "2026-11-12T08:18:46.863Z",
+      "msg": "started design/architecture"
+    },
+    {
+      "at": "2026-11-12T08:18:46.894Z",
+      "msg": "done design/architecture"
+    },
+    {
+      "at": "2026-11-12T08:18:46.923Z",
+      "msg": "started design/lifecycle"
+    },
+    {
+      "at": "2026-11-12T08:18:46.950Z",
+      "msg": "done design/lifecycle"
+    },
+    {
+      "at": "2026-11-12T08:18:46.977Z",
+      "msg": "started design/data"
+    },
+    {
+      "at": "2026-11-12T08:18:47.004Z",
+      "msg": "done design/data"
+    },
+    {
+      "at": "2026-11-12T08:18:47.030Z",
+      "msg": "started design/surface:repository-and-pins"
+    },
+    {
+      "at": "2026-11-12T08:18:47.081Z",
+      "msg": "started design/surface:core-runtime"
+    },
+    {
+      "at": "2026-11-12T08:18:47.107Z",
+      "msg": "done design/surface:core-runtime"
+    },
+    {
+      "at": "2026-11-12T08:18:47.134Z",
+      "msg": "started design/surface:gpu-and-frames"
+    },
+    {
+      "at": "2026-11-12T08:18:47.159Z",
+      "msg": "done design/surface:gpu-and-frames"
+    },
+    {
+      "at": "2026-11-12T08:18:47.186Z",
+      "msg": "started design/surface:native-media"
+    },
+    {
+      "at": "2026-11-12T08:18:47.212Z",
+      "msg": "done design/surface:native-media"
+    },
+    {
+      "at": "2026-11-12T08:18:47.239Z",
+      "msg": "started design/surface:effectcraft-app-crate"
+    },
+    {
+      "at": "2026-11-12T08:18:47.265Z",
+      "msg": "done design/surface:effectcraft-app-crate"
+    },
+    {
+      "at": "2026-11-12T08:18:47.292Z",
+      "msg": "started design/surface:ffi-and-bindings"
+    },
+    {
+      "at": "2026-11-12T08:18:47.318Z",
+      "msg": "done design/surface:ffi-and-bindings"
+    },
+    {
+      "at": "2026-11-12T08:18:47.344Z",
+      "msg": "started design/surface:api-generator"
+    },
+    {
+      "at": "2026-11-12T08:18:47.375Z",
+      "msg": "done design/surface:api-generator"
+    },
+    {
+      "at": "2026-11-12T08:18:47.402Z",
+      "msg": "started design/surface:swift-packages"
+    },
+    {
+      "at": "2026-11-12T08:18:47.427Z",
+      "msg": "done design/surface:swift-packages"
+    },
+    {
+      "at": "2026-11-12T08:18:47.454Z",
+      "msg": "started design/surface:kotlin-libraries"
+    },
+    {
+      "at": "2026-11-12T08:18:47.480Z",
+      "msg": "done design/surface:kotlin-libraries"
+    },
+    {
+      "at": "2026-11-12T08:18:47.507Z",
+      "msg": "started design/surface:upstream-update-loop"
+    },
+    {
+      "at": "2026-11-12T08:18:47.532Z",
+      "msg": "done design/surface:upstream-update-loop"
+    },
+    {
+      "at": "2026-11-12T08:18:47.558Z",
+      "msg": "started design/surface:samples-and-guides"
+    },
+    {
+      "at": "2026-11-12T08:18:47.584Z",
+      "msg": "done design/surface:samples-and-guides"
+    },
+    {
+      "at": "2026-11-12T08:18:47.610Z",
+      "msg": "started design/compat"
+    },
+    {
+      "at": "2026-11-12T08:18:47.636Z",
+      "msg": "done design/compat"
+    },
+    {
+      "at": "2026-11-12T08:18:47.662Z",
+      "msg": "started design/edges"
+    },
+    {
+      "at": "2026-11-12T08:18:47.688Z",
+      "msg": "done design/edges"
+    },
+    {
+      "at": "2026-11-12T08:18:47.714Z",
+      "msg": "started design/testing"
+    },
+    {
+      "at": "2026-11-12T08:18:47.739Z",
+      "msg": "done design/testing"
+    },
+    {
+      "at": "2026-11-12T08:18:47.765Z",
+      "msg": "started design/nfr"
+    },
+    {
+      "at": "2026-11-12T08:18:47.790Z",
+      "msg": "done design/nfr"
+    },
+    {
+      "at": "2026-11-12T08:18:47.817Z",
+      "msg": "started design/risks-tech"
+    },
+    {
+      "at": "2026-11-12T08:18:47.843Z",
+      "msg": "done design/risks-tech"
+    },
+    {
+      "at": "2026-11-12T08:19:03.052Z",
+      "msg": "d05-main-flow moved to §19 (the export sequence lives with the EffectCraft app crate)"
+    },
+    {
+      "at": "2026-11-12T08:19:03.081Z",
+      "msg": "done design/surface:repository-and-pins"
+    },
+    {
+      "at": "2026-11-12T08:21:01.334Z",
+      "msg": "started design/tasks"
+    },
+    {
+      "at": "2026-11-12T08:21:01.359Z",
+      "msg": "done design/tasks"
+    },
+    {
+      "at": "2026-11-12T08:21:01.386Z",
+      "msg": "started design/prereqs"
+    },
+    {
+      "at": "2026-11-12T08:21:01.412Z",
+      "msg": "done design/prereqs"
+    },
+    {
+      "at": "2026-11-12T08:21:01.438Z",
+      "msg": "started design/signoff"
+    },
+    {
+      "at": "2026-11-12T08:21:01.464Z",
+      "msg": "done design/signoff"
+    },
+    {
+      "at": "2026-11-12T08:21:01.490Z",
+      "msg": "started design/modules"
+    },
+    {
+      "at": "2026-11-12T08:21:01.516Z",
+      "msg": "done design/modules"
+    },
+    {
+      "at": "2026-11-12T08:21:01.543Z",
+      "msg": "started design/eng-decisions"
+    },
+    {
+      "at": "2026-11-12T08:21:01.568Z",
+      "msg": "done design/eng-decisions"
+    },
+    {
+      "at": "2026-11-12T08:21:01.595Z",
+      "msg": "started design/sources"
+    },
+    {
+      "at": "2026-11-12T08:21:01.621Z",
+      "msg": "done design/sources"
+    },
+    {
+      "at": "2026-11-12T08:21:01.647Z",
+      "msg": "started design/glossary"
+    },
+    {
+      "at": "2026-11-12T08:21:01.673Z",
+      "msg": "done design/glossary"
+    },
+    {
+      "at": "2026-11-12T08:21:06.829Z",
+      "msg": "started diagrams/d01-journey (created diagrams/src/d01-journey.mjs)"
+    },
+    {
+      "at": "2026-11-12T08:22:08.112Z",
+      "msg": "done diagrams/d01-journey"
+    },
+    {
+      "at": "2026-11-12T08:22:08.141Z",
+      "msg": "started diagrams/d02-architecture (created diagrams/src/d02-architecture.mjs)"
+    },
+    {
+      "at": "2026-11-12T08:25:19.316Z",
+      "msg": "done diagrams/d02-architecture"
+    },
+    {
+      "at": "2026-11-12T08:25:19.343Z",
+      "msg": "started diagrams/d03-lifecycle (created diagrams/src/d03-lifecycle.mjs)"
+    },
+    {
+      "at": "2026-11-12T08:25:47.173Z",
+      "msg": "done diagrams/d03-lifecycle"
+    },
+    {
+      "at": "2026-11-12T08:25:47.201Z",
+      "msg": "started diagrams/d04-data-model (created diagrams/src/d04-data-model.mjs)"
+    },
+    {
+      "at": "2026-11-12T08:26:56.268Z",
+      "msg": "done diagrams/d04-data-model"
+    },
+    {
+      "at": "2026-11-12T08:26:56.298Z",
+      "msg": "started diagrams/d05-main-flow (created diagrams/src/d05-main-flow.mjs)"
+    },
+    {
+      "at": "2026-11-12T08:28:02.814Z",
+      "msg": "done diagrams/d05-main-flow"
+    },
+    {
+      "at": "2026-11-12T08:28:02.842Z",
+      "msg": "started diagrams/d06-rollout (created diagrams/src/d06-rollout.mjs)"
+    },
+    {
+      "at": "2026-11-12T08:28:25.801Z",
+      "msg": "done diagrams/d06-rollout"
+    },
+    {
+      "at": "2026-11-12T08:28:30.915Z",
+      "msg": "started render/build"
+    },
+    {
+      "at": "2026-11-12T08:28:37.617Z",
+      "msg": "done render/build"
+    },
+    {
+      "at": "2026-11-12T08:29:31.573Z",
+      "msg": "started render/review-a"
+    },
+    {
+      "at": "2026-11-12T08:29:59.758Z",
+      "msg": "done render/review-a"
+    },
+    {
+      "at": "2026-11-12T08:29:59.786Z",
+      "msg": "started render/review-b"
+    },
+    {
+      "at": "2026-11-12T08:31:16.611Z",
+      "msg": "done render/review-b"
+    },
+    {
+      "at": "2026-11-12T08:31:16.639Z",
+      "msg": "started render/review-c"
+    },
+    {
+      "at": "2026-11-12T08:31:35.196Z",
+      "msg": "done render/review-c"
+    },
+    {
+      "at": "2026-11-12T08:31:40.996Z",
+      "msg": "started verify/anchors (created evidence/99-verification.md)"
+    },
+    {
+      "at": "2026-11-12T08:36:43.644Z",
+      "msg": "done verify/anchors"
+    },
+    {
+      "at": "2026-11-12T08:36:43.671Z",
+      "msg": "started verify/facts"
+    },
+    {
+      "at": "2026-11-12T08:36:43.697Z",
+      "msg": "done verify/facts"
+    },
+    {
+      "at": "2026-11-12T08:36:47.875Z",
+      "msg": "started verify/final-check"
+    },
+    {
+      "at": "2026-11-12T08:37:19.734Z",
+      "msg": "done verify/final-check"
+    },
+    {
+      "at": "2026-11-12T08:37:49.623Z",
+      "msg": "Plan built, rendered and verified (check --final clean); sent to the owner for sign-off."
+    },
+    {
+      "at": "2026-11-12T09:14:28.401Z",
+      "msg": "started verify/signoff"
+    },
+    {
+      "at": "2026-11-12T09:14:28.429Z",
+      "msg": "done verify/signoff"
+    },
+    {
+      "at": "2026-11-12T09:14:33.463Z",
+      "msg": "started verify/bundle"
+    },
+    {
+      "at": "2026-11-12T09:14:39.102Z",
+      "msg": "done verify/bundle"
+    },
+    {
+      "at": "2026-11-12T09:14:48.318Z",
+      "msg": "Signed off by the owner; bundle effectcraft-plugin-port-plan.zip built and checked (19 files, 1.3 MB, all assets resolve)."
+    },
+    {
+      "at": "2026-11-12T10:29:20.147Z",
+      "msg": "question Q19 [repository]: How is the CraftBridge repository laid out?"
+    },
+    {
+      "at": "2026-11-12T10:29:20.176Z",
+      "msg": "question Q20 [distribution]: When does the CraftBridge repository become public?"
+    },
+    {
+      "at": "2026-11-12T10:29:30.020Z",
+      "msg": "answered Q19 → PD19"
+    },
+    {
+      "at": "2026-11-12T10:29:30.052Z",
+      "msg": "answered Q20 → PD3"
+    },
+    {
+      "at": "2026-11-12T10:30:49.727Z",
+      "msg": "added research/07-repository-conventions"
+    },
+    {
+      "at": "2026-11-12T10:30:49.759Z",
+      "msg": "started research/07-repository-conventions (created evidence/07-repository-conventions.md)"
+    },
+    {
+      "at": "2026-11-12T10:32:18.482Z",
+      "msg": "done research/07-repository-conventions"
+    },
+    {
+      "at": "2026-11-12T10:32:18.518Z",
+      "msg": "reopened design/header: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.546Z",
+      "msg": "reopened design/summary: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.574Z",
+      "msg": "reopened design/experience: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.604Z",
+      "msg": "reopened design/decisions: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.633Z",
+      "msg": "reopened design/scope: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.661Z",
+      "msg": "reopened design/rollout-business: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.689Z",
+      "msg": "reopened design/roadmap: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.716Z",
+      "msg": "reopened design/architecture: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.742Z",
+      "msg": "reopened design/surface:repository-and-pins: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.770Z",
+      "msg": "reopened design/surface:ffi-and-bindings: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.797Z",
+      "msg": "reopened design/surface:api-generator: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.824Z",
+      "msg": "reopened design/surface:swift-packages: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.851Z",
+      "msg": "reopened design/surface:kotlin-libraries: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.877Z",
+      "msg": "reopened design/surface:upstream-update-loop: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.905Z",
+      "msg": "reopened design/surface:samples-and-guides: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.933Z",
+      "msg": "reopened design/compat: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.960Z",
+      "msg": "reopened design/testing: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:18.987Z",
+      "msg": "reopened design/tasks: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:19.014Z",
+      "msg": "reopened design/prereqs: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:19.041Z",
+      "msg": "reopened design/signoff: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:19.069Z",
+      "msg": "reopened design/modules: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:19.097Z",
+      "msg": "reopened design/eng-decisions: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:32:19.126Z",
+      "msg": "reopened design/glossary: PD19 layout and PD3 visibility"
+    },
+    {
+      "at": "2026-11-12T10:34:07.052Z",
+      "msg": "reopened design/surface:core-runtime: PD19 layout"
+    },
+    {
+      "at": "2026-11-12T10:34:07.081Z",
+      "msg": "reopened design/surface:native-media: PD19 layout"
+    },
+    {
+      "at": "2026-11-12T10:34:07.110Z",
+      "msg": "reopened design/edges: PD19 layout"
+    },
+    {
+      "at": "2026-11-12T10:36:52.187Z",
+      "msg": "started design/header"
+    },
+    {
+      "at": "2026-11-12T10:36:52.217Z",
+      "msg": "done design/header"
+    },
+    {
+      "at": "2026-11-12T10:36:52.245Z",
+      "msg": "started design/summary"
+    },
+    {
+      "at": "2026-11-12T10:36:52.273Z",
+      "msg": "done design/summary"
+    },
+    {
+      "at": "2026-11-12T10:36:52.301Z",
+      "msg": "started design/experience"
+    },
+    {
+      "at": "2026-11-12T10:36:52.330Z",
+      "msg": "done design/experience"
+    },
+    {
+      "at": "2026-11-12T10:36:52.359Z",
+      "msg": "started design/decisions"
+    },
+    {
+      "at": "2026-11-12T10:36:52.388Z",
+      "msg": "done design/decisions"
+    },
+    {
+      "at": "2026-11-12T10:36:52.417Z",
+      "msg": "started design/scope"
+    },
+    {
+      "at": "2026-11-12T10:36:52.446Z",
+      "msg": "done design/scope"
+    },
+    {
+      "at": "2026-11-12T10:36:52.475Z",
+      "msg": "started design/rollout-business"
+    },
+    {
+      "at": "2026-11-12T10:36:52.503Z",
+      "msg": "done design/rollout-business"
+    },
+    {
+      "at": "2026-11-12T10:36:52.532Z",
+      "msg": "started design/roadmap"
+    },
+    {
+      "at": "2026-11-12T10:36:52.560Z",
+      "msg": "done design/roadmap"
+    },
+    {
+      "at": "2026-11-12T10:36:52.588Z",
+      "msg": "started design/architecture"
+    },
+    {
+      "at": "2026-11-12T10:36:52.617Z",
+      "msg": "done design/architecture"
+    },
+    {
+      "at": "2026-11-12T10:36:52.650Z",
+      "msg": "started design/surface:repository-and-pins"
+    },
+    {
+      "at": "2026-11-12T10:36:52.680Z",
+      "msg": "done design/surface:repository-and-pins"
+    },
+    {
+      "at": "2026-11-12T10:36:52.710Z",
+      "msg": "started design/surface:core-runtime"
+    },
+    {
+      "at": "2026-11-12T10:36:52.739Z",
+      "msg": "done design/surface:core-runtime"
+    },
+    {
+      "at": "2026-11-12T10:36:52.768Z",
+      "msg": "started design/surface:native-media"
+    },
+    {
+      "at": "2026-11-12T10:36:52.796Z",
+      "msg": "done design/surface:native-media"
+    },
+    {
+      "at": "2026-11-12T10:36:52.825Z",
+      "msg": "started design/surface:ffi-and-bindings"
+    },
+    {
+      "at": "2026-11-12T10:36:52.854Z",
+      "msg": "done design/surface:ffi-and-bindings"
+    },
+    {
+      "at": "2026-11-12T10:36:52.883Z",
+      "msg": "started design/surface:api-generator"
+    },
+    {
+      "at": "2026-11-12T10:36:52.910Z",
+      "msg": "done design/surface:api-generator"
+    },
+    {
+      "at": "2026-11-12T10:36:52.938Z",
+      "msg": "started design/surface:swift-packages"
+    },
+    {
+      "at": "2026-11-12T10:36:52.966Z",
+      "msg": "done design/surface:swift-packages"
+    },
+    {
+      "at": "2026-11-12T10:36:52.994Z",
+      "msg": "started design/surface:kotlin-libraries"
+    },
+    {
+      "at": "2026-11-12T10:36:53.023Z",
+      "msg": "done design/surface:kotlin-libraries"
+    },
+    {
+      "at": "2026-11-12T10:36:53.051Z",
+      "msg": "started design/surface:upstream-update-loop"
+    },
+    {
+      "at": "2026-11-12T10:36:53.080Z",
+      "msg": "done design/surface:upstream-update-loop"
+    },
+    {
+      "at": "2026-11-12T10:36:53.108Z",
+      "msg": "started design/surface:samples-and-guides"
+    },
+    {
+      "at": "2026-11-12T10:36:53.136Z",
+      "msg": "done design/surface:samples-and-guides"
+    },
+    {
+      "at": "2026-11-12T10:36:53.165Z",
+      "msg": "started design/compat"
+    },
+    {
+      "at": "2026-11-12T10:36:53.194Z",
+      "msg": "done design/compat"
+    },
+    {
+      "at": "2026-11-12T10:36:53.223Z",
+      "msg": "started design/edges"
+    },
+    {
+      "at": "2026-11-12T10:36:53.251Z",
+      "msg": "done design/edges"
+    },
+    {
+      "at": "2026-11-12T10:36:53.278Z",
+      "msg": "started design/testing"
+    },
+    {
+      "at": "2026-11-12T10:36:53.306Z",
+      "msg": "done design/testing"
+    },
+    {
+      "at": "2026-11-12T10:36:53.334Z",
+      "msg": "started design/tasks"
+    },
+    {
+      "at": "2026-11-12T10:36:53.362Z",
+      "msg": "done design/tasks"
+    },
+    {
+      "at": "2026-11-12T10:36:53.391Z",
+      "msg": "started design/prereqs"
+    },
+    {
+      "at": "2026-11-12T10:36:53.418Z",
+      "msg": "done design/prereqs"
+    },
+    {
+      "at": "2026-11-12T10:36:53.447Z",
+      "msg": "started design/signoff"
+    },
+    {
+      "at": "2026-11-12T10:36:53.475Z",
+      "msg": "done design/signoff"
+    },
+    {
+      "at": "2026-11-12T10:36:53.503Z",
+      "msg": "started design/modules"
+    },
+    {
+      "at": "2026-11-12T10:36:53.531Z",
+      "msg": "done design/modules"
+    },
+    {
+      "at": "2026-11-12T10:36:53.559Z",
+      "msg": "started design/eng-decisions"
+    },
+    {
+      "at": "2026-11-12T10:36:53.586Z",
+      "msg": "done design/eng-decisions"
+    },
+    {
+      "at": "2026-11-12T10:36:53.614Z",
+      "msg": "started design/glossary"
+    },
+    {
+      "at": "2026-11-12T10:36:53.642Z",
+      "msg": "done design/glossary"
+    },
+    {
+      "at": "2026-11-12T10:37:38.267Z",
+      "msg": "Amended for PD19 (one folder per platform, Package.swift at ios/sdk, craftbridge-swift written by each release) and PD3 (public when hosted CI starts): §1, §5–§8, §11, §12, §15–§16, §18, §20–§28, §31–§33, Appendices A, B, D; D-1 rewritten, D-24–D-27 added; research/07 conventions; check --final clean; anchors re-resolved (62, the same nine accepted warnings)."
+    }
+  ]
+}

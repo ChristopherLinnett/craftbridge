@@ -1,0 +1,30 @@
+{
+  "name": "effectcraft-dark",
+  "about": "EffectCraft's own look for this plan: the dark interface tokens of crates/ui-egui/src/theme.rs and the app colour of its icon, at storytold/effectcraft 10376058. Overrides the kit theme key by key; sources in brand/SOURCES.md.",
+  "brand": "EffectCraft",
+  "color": {
+    "page": "#121212",
+    "card": "#1f1f1f",
+    "surface": "#232323",
+    "border": "#343434",
+    "borderStrong": "#3a3a3a",
+    "primary": "#e0368f",
+    "magenta": "#e87c5c",
+    "lilac": "#4aa0f5",
+    "info": "#2d8ceb",
+    "success": "#3ca64c",
+    "warn": "#e04a3c",
+    "amber": "#e89a2c",
+    "textHi": "#e3e3e3",
+    "textMid": "#c8c8c8",
+    "textLow": "#9a9a9a",
+    "edge": "#707070",
+    "codeText": "#e87c5c",
+    "figure": "#1b1b1b",
+    "mockupWell": "#1a1a1a",
+    "white": "#ffffff"
+  },
+  "font": { "sans": "Inter", "mono": "JetBrains Mono" },
+  "fontsCss": "brand/fonts.css",
+  "logo": { "src": "brand/effectcraft-icon-256.png", "alt": "EffectCraft", "height": 40 }
+}

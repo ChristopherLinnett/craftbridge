@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CraftBridge API surface",
+  "type": "object",
+  "required": ["app", "engineVersion", "pin", "commands", "tools"],
+  "properties": {
+    "app": { "const": "effectcraft" },
+    "engineVersion": { "type": "string" },
+    "pin": { "type": "string", "pattern": "^[0-9a-f]{8,40}$" },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "params", "keys", "journal"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "params": { "type": "string" },
+          "journal": { "type": "boolean" },
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "required", "type"],
+              "properties": {
+                "name": { "type": "string" },
+                "required": { "type": "boolean" },
+                "type": { "enum": ["bool", "number", "string", "enum", "vec2", "vec3", "color", "ref", "json"] },
+                "values": { "type": "array", "items": { "type": "string" } },
+                "doc": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "tools": { "type": "array", "items": { "type": "object", "required": ["name", "inputSchema"] } }
+  }
+}

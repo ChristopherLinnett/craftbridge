@@ -1,0 +1,15 @@
+CraftBridge
+Copyright (c) 2026 the CraftBridge contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option
+(LICENSE-MIT, LICENSE-APACHE).
+
+CraftBridge is based on EffectCraft by the ArtCraft team
+(https://github.com/storytold/effectcraft), licensed under the MIT License or the Apache
+License, Version 2.0. CraftBridge builds EffectCraft's crates from a pinned revision and
+contains no ArtCraft name, wordmark or logo; the ArtCraft marks are trademarks of the
+ArtCraft Team and are not covered by this licence.
+
+Changes CraftBridge carries to EffectCraft
+
+None yet. A seam proposed to EffectCraft and declined is listed here for as long as
+CraftBridge carries it.
