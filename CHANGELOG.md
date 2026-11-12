@@ -7,3 +7,4 @@ Every artifact (the Rust crates, the Swift package and both Maven artifacts) sha
 ### Added
 
 - The repository: its rules in `AGENTS.md`, the licences, and the plan of record in `plan/`.
+- `tools/doctor.sh`: checks every prerequisite of the build and prints the fix for each gap; `--gate` checks only what the gate needs.
