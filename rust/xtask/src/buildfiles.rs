@@ -275,9 +275,11 @@ const BUILD_FILE: &str = "build.gradle.kts";
 
 /// Run the check over `android/sdk` when the tree has it: every module's and the root's build file by
 /// shape, the root file and every included module's file present, and no Groovy build file at all.
-/// File names are matched as a case-insensitive disk matches them: there Gradle opening
-/// `build.gradle.kts` reads a `Build.gradle.kts`, so every spelling is read by shape, and one that is not
-/// the exact name is refused besides, since a case-sensitive disk would not read it at all.
+/// Files are matched as Gradle finds them, not by the name on the directory entry: Gradle opens
+/// `build.gradle.kts` by name, and a case-insensitive disk answers with any spelling it folds to that
+/// name — ASCII case, the Kelvin sign for `k`, a long s for `s`, and beyond (see `scan::reads_as`).
+/// Every such file is therefore read by shape, and one not spelled the exact name is refused besides,
+/// since a case-sensitive disk would not read it at all.
 pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     let sdk = root.join("android").join("sdk");
     if !sdk.join("settings.gradle.kts").is_file() {
@@ -287,7 +289,8 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     let files = scan::walk(&sdk, "")?;
     for found in &files {
         let Some(name) = found.path.file_name().and_then(|name| name.to_str()) else { continue };
-        if !name.eq_ignore_ascii_case(BUILD_FILE) || found.components.first().map(String::as_str) == Some("build-logic") {
+        let opened_as_build_file = name == BUILD_FILE || scan::reads_as(found.path.parent().unwrap_or(Path::new(".")), &found.path, BUILD_FILE);
+        if !opened_as_build_file || found.components.first().map(String::as_str) == Some("build-logic") {
             continue;
         }
         let shown = crate::report::shown(root, &found.path);
@@ -313,8 +316,18 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
         }
     }
     for groovy in &files {
-        let name = groovy.path.file_name().map(|name| name.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-        if !name.ends_with(".gradle") || groovy.components.first().map(String::as_str) == Some("build-logic") {
+        if groovy.components.first().map(String::as_str) == Some("build-logic") {
+            continue;
+        }
+        let Some(name) = groovy.path.file_name().and_then(|name| name.to_str()) else { continue };
+        // The plain `.gradle` ending catches every case spelling of it; the file system is asked besides,
+        // because the letters of the ending have Unicode case pairs of their own (a script g folds to a
+        // plain one), and Gradle reads such a `build.gradle` in place of the module's `.kts` file.
+        let dir = groovy.path.parent().unwrap_or(Path::new("."));
+        let is_groovy = name.to_ascii_lowercase().ends_with(".gradle")
+            || scan::reads_as(dir, &groovy.path, "build.gradle")
+            || scan::reads_as(dir, &groovy.path, "settings.gradle");
+        if !is_groovy {
             continue;
         }
         errors.push(format!(
@@ -535,6 +548,40 @@ plugins {
         assert!(errors.iter().any(|e| e.starts_with("android/sdk/effects/Build.gradle.kts: spell it build.gradle.kts")), "{errors:?}");
         assert!(errors.iter().any(|e| e.starts_with("android/sdk/effects/Build.gradle.kts:15:")), "{errors:?}");
         assert!(errors.iter().any(|e| e.starts_with("android/sdk/core/BUILD.GRADLE: Gradle reads this Groovy file")), "{errors:?}");
+    }
+
+    /// A case-insensitive volume folds more than ASCII case: on this machine's APFS, running Gradle
+    /// itself proved that a module's `build.gradle.Ꝁts` (Kelvin sign) and `build.gradle.ktſ` (long s)
+    /// are opened where Gradle opens `build.gradle.kts`. Such a spelling is therefore the module's
+    /// build file, read by shape and refused like any unread one. Where the volume folds neither name,
+    /// Gradle opens neither and the check must see only a missing build file; the probe asks the file
+    /// system which machine this is rather than assume either.
+    #[test]
+    fn a_build_file_spelled_in_a_name_the_disk_folds_under_the_exact_name_is_read_and_refused() {
+        for folded_name in ["build.gradle.\u{212A}ts", "build.gradle.kt\u{017F}"] {
+            let scratch = setup();
+            std::fs::remove_file(scratch.0.join("android/sdk/effects/build.gradle.kts")).unwrap();
+            scratch.write(&format!("android/sdk/effects/{folded_name}"), format!("{LEGAL_MODULE}tasks.named(\"lintDebug\") {{ onlyIf {{ false }} }}\n"));
+            let folded = std::fs::canonicalize(scratch.0.join("android/sdk/effects/build.gradle.kts")).ok()
+                == std::fs::canonicalize(scratch.0.join("android/sdk/effects").join(folded_name)).ok();
+            let errors = check(&scratch.0).unwrap();
+            if folded {
+                assert!(
+                    errors.iter().any(|e| e.starts_with(&format!("android/sdk/effects/{folded_name}: spell it build.gradle.kts"))),
+                    "{folded_name}: {errors:?}"
+                );
+                assert!(errors.iter().any(|e| e.starts_with(&format!("android/sdk/effects/{folded_name}:15:"))), "{folded_name}: {errors:?}");
+            } else {
+                assert!(
+                    errors.iter().any(|e| e.contains("effects/build.gradle.kts: the settings include") && e.contains("no build file")),
+                    "{folded_name}: {errors:?}"
+                );
+                assert!(
+                    !errors.iter().any(|e| e.starts_with(&format!("android/sdk/effects/{folded_name}"))),
+                    "{folded_name} is no build file here: {errors:?}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -27,6 +27,25 @@ const BUILD_OUTPUTS: &[(&str, &[&str])] = &[
 /// Directories that never hold this repository's source, wherever they sit.
 const NEVER_SOURCE: &[&str] = &[".git", "node_modules"];
 
+/// Does reading `dir/expected` read the file `found`?
+///
+/// A case-insensitive file system answers a lookup for a name with any spelling of it it holds, and
+/// it folds more than ASCII case: probed on this APFS volume, a name carrying the Kelvin sign (U+212A)
+/// is found under a plain `k`, one carrying a long s (U+017F) under a plain `s`, and an `fi` ligature
+/// under `fi`. A tool that looks its file up by name — Gradle a project's `build.gradle.kts`, a
+/// formatter its `rustfmt.toml` — therefore reads such a file where it asked for the plain name, just
+/// as it reads a case variant, so a check that matched stored names string by string would leave that
+/// file unread while every tool still ran it. Answering through the file system — resolve the name the
+/// way an open of it resolves, and compare the file resolved — covers every fold this machine makes,
+/// known to the check or not, and says no everywhere on a case-sensitive volume, so the check needs no
+/// list of folds and no platform branches.
+pub(crate) fn reads_as(dir: &Path, found: &Path, expected: &str) -> bool {
+    match (fs::canonicalize(dir.join(expected)), fs::canonicalize(found)) {
+        (Ok(opened), Ok(walked)) => opened == walked,
+        _ => false,
+    }
+}
+
 /// One source file found by [`walk`].
 pub(crate) struct FoundFile {
     /// Absolute path on disk.
