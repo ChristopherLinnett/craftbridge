@@ -9,10 +9,11 @@
 //! that has been quietly widened without a decision issue behind it.
 //!
 //! What is read is what ships: each library of the version catalog, each package a `Package.swift`
-//! declares, each pin a `Package.resolved` records, and — asked of Gradle itself rather than read off the
-//! build files — every external module resolved onto each library module's release runtime classpath.
-//! That last part is the point: transitive modules arrive inside the AAR without any build file naming
-//! them. Build plugins never ship, so they stay checked by name, from the catalog.
+//! declares (as `swift package dump-package` reads it), each pin a `Package.resolved` records, and — asked
+//! of Gradle itself rather than read off the build files — every external module resolved onto each
+//! library module's release runtime classpath. That last part is the point: transitive modules arrive
+//! inside the AAR without any build file naming them. Build plugins never ship, so they stay checked by
+//! name, from the catalog's `[plugins]`.
 
 use crate::scan;
 use std::path::{Path, PathBuf};
@@ -180,41 +181,27 @@ pub(crate) fn gradle_libraries(catalog_source: &str, name: &str) -> Result<Vec<S
     Ok(keys)
 }
 
-/// The packages a `Package.swift` depends on: the URL of each `.package(url: "…")` and the registry
-/// identity of each `.package(id: "…")`, tolerating whitespace and line breaks anywhere in the
-/// declaration. A `.package(path:)` is a package of this repository and carries no licence of its own.
-pub(crate) fn swiftpm_packages(package_source: &str) -> Vec<String> {
-    let mut packages = Vec::new();
-    // The declaration is found in a copy with the comments stripped (so a commented-out one is not a
-    // dependency) and the whitespace removed (so one spread over lines still matches). The stripper keeps
-    // strings and every byte's offset, so the quoted value is then read from the stripped text itself,
-    // starting where the declaration ended.
-    let stripped = scan::strip_comments(package_source);
-    let (offsets, compact): (Vec<usize>, Vec<u8>) = stripped.bytes().enumerate().filter(|(_, byte)| !byte.is_ascii_whitespace()).unzip();
-    for needle in [".package(url:", ".package(id:"] {
-        let mut from = 0usize;
-        while let Some(offset) = scan::find(&compact, from, needle.as_bytes()) {
-            let end = offsets.get(offset + needle.len() - 1).copied().unwrap_or(stripped.len());
-            if let Some(value) = quoted_after(&stripped, end + 1) {
-                packages.push(value);
-            }
-            from = offset + needle.len();
+/// The `[plugins]` entries of a Gradle version catalog, as the Maven module Gradle resolves for each
+/// plugin id: its marker, `<id>:<id>.gradle.plugin`. A plugin never ships, but it runs in the build and
+/// arrives from a repository like any library, so its licence is declared like one; a plugin added to
+/// the catalog alone reaches the build through a root `alias(…) apply false` line.
+pub(crate) fn gradle_plugins(catalog_source: &str, name: &str) -> Result<Vec<String>, String> {
+    let document = toml::from_str::<toml::Value>(catalog_source).map_err(|error| format!("{name}: is not valid TOML: {error}"))?;
+    let Some(plugins) = document.get("plugins").and_then(toml::Value::as_table) else { return Ok(Vec::new()) };
+    let mut keys = Vec::new();
+    for (alias, entry) in plugins {
+        let id = match entry {
+            toml::Value::String(notation) => notation.split(':').next().unwrap_or_default().to_string(),
+            toml::Value::Table(table) => table.get("id").and_then(toml::Value::as_str).unwrap_or_default().to_string(),
+            _ => String::new(),
+        };
+        if id.is_empty() {
+            return Err(format!("{name}: plugin `{alias}` gives no plugin id"));
         }
+        keys.push(format!("{id}:{id}.gradle.plugin"));
     }
-    packages.sort();
-    packages.dedup();
-    packages
-}
-
-/// The text between the first pair of double quotes at or after `from`, reading through line breaks.
-/// A package's URL or identity can only sit inside a string literal, so the two quotes around it are
-/// unambiguous delimiters.
-fn quoted_after(text: &str, from: usize) -> Option<String> {
-    let rest = text.get(from..)?;
-    let start = rest.find('"')?;
-    let after = rest.get(start + 1..)?;
-    let end = after.find('"')?;
-    after.get(..end).map(str::to_string)
+    keys.sort();
+    Ok(keys)
 }
 
 /// Every `Package.swift` under `ios/`: generated code is not a dependency declaration, and `.build` holds
@@ -279,13 +266,19 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
         for key in gradle_libraries(&catalog, CATALOG)? {
             used.push(Used { key, source: CATALOG.to_string(), kind: "library" });
         }
+        for key in gradle_plugins(&catalog, CATALOG)? {
+            used.push(Used { key, source: CATALOG.to_string(), kind: "build plugin" });
+        }
     }
     for module in gradle_release_modules(root)? {
         used.push(Used { key: module, source: "Gradle release runtime classpath".to_string(), kind: "module" });
     }
+    // SwiftPM's own reading of each manifest, so every spelling it accepts — the deprecated
+    // `.package(name:url:…)` included — names its package here as it does to the build.
     for manifest in package_manifests(&root.join("ios"))? {
         let shown = crate::report::shown(root, &manifest);
-        for key in swiftpm_packages(&scan::read_text(&manifest)?) {
+        let Some(folder) = manifest.parent() else { continue };
+        for key in crate::direction::dump_package(folder, &shown)?.iter().flat_map(crate::direction::published_packages) {
             used.push(Used { key, source: shown.clone(), kind: "package" });
         }
     }
@@ -388,6 +381,10 @@ mod tests {
         ALLOW.iter().map(|identifier| identifier.to_string()).collect()
     }
 
+    /// A manifest SwiftPM reads, taking one published package in the deprecated `name:url:` spelling the
+    /// licence check once missed.
+    const UNIFFI_MANIFEST: &str = "// swift-tools-version: 6.0\nimport PackageDescription\nlet package = Package(\n    name: \"Probe\",\n    dependencies: [.package(name: \"uniffi\", url: \"https://github.com/mozilla/uniffi.git\", from: \"0.32.0\")],\n    targets: []\n)\n";
+
     /// A scratch repository with the files `check` reads — `rust/deny.toml`, `tools/licences.toml`, the
     /// version catalog and one `ios/sdk/Package.swift` — so the check runs against a tree on disk without
     /// depending on what the real repository happens to hold.
@@ -436,7 +433,7 @@ mod tests {
             "clean",
             "[maven]\n\"junit:junit\" = \"MIT\"\n[swiftpm]\n\"https://github.com/mozilla/uniffi.git\" = \"MPL-2.0\"\n",
             "[libraries]\njunit = \"junit:junit:4.13.2\"\n",
-            "// swift-tools-version: 6.0\nlet package = Package(dependencies: [.package(url: \"https://github.com/mozilla/uniffi.git\", from: \"0.32.0\")])\n",
+            UNIFFI_MANIFEST,
         );
         assert!(repo.errors().is_empty(), "{:?}", repo.errors());
     }
@@ -452,9 +449,7 @@ mod tests {
 
     #[test]
     fn a_resolved_pin_needs_a_declaration_like_any_package() {
-        let manifest =
-            "// swift-tools-version: 6.0\nlet package = Package(dependencies: [.package(url: \"https://github.com/mozilla/uniffi.git\", from: \"0.32.0\")])\n";
-        let repo = ScratchRepo::new("pins", "[swiftpm]\n\"https://github.com/mozilla/uniffi.git\" = \"MPL-2.0\"\n", "", manifest);
+        let repo = ScratchRepo::new("pins", "[swiftpm]\n\"https://github.com/mozilla/uniffi.git\" = \"MPL-2.0\"\n", "", UNIFFI_MANIFEST);
         assert!(repo.errors().is_empty(), "{:?}", repo.errors()); // no Package.resolved written yet
         repo.0.write(
             "ios/sdk/Package.resolved",
@@ -547,25 +542,17 @@ split = { group = "androidx.annotation", name = "annotation", version = "1.8.0" 
     }
 
     #[test]
-    fn swiftpm_packages_survive_whitespace_and_extra_arguments() {
-        let manifest = r#"
-// swift-tools-version: 6.0
-let package = Package(
-    name: "CraftBridge",
-    dependencies: [
-        .package(url: "https://github.com/mozilla/uniffi.git",  from: "0.32.0"),
-        .package(
-            url: "https://github.com/tylermh/swift-format.git",
-            branch: "main"
-        ),
-    ]
-)
-"#;
-        assert_eq!(swiftpm_packages(manifest), vec!["https://github.com/mozilla/uniffi.git", "https://github.com/tylermh/swift-format.git"]);
-        assert!(swiftpm_packages("// .package(url: \"https://commented/out.git\", from: \"1\")\n").is_empty(), "a commented declaration is not a dependency");
-        let registry =
-            "// é\nlet package = Package(name: \"é\", dependencies: [.package(id: \"mona.LinkedList\", from: \"1.0.0\"), .package(path: \"../Local\")])\n";
-        assert_eq!(swiftpm_packages(registry), vec!["mona.LinkedList"], "a registry identity is a dependency, a local path is not");
+    fn every_catalog_plugin_is_read_as_its_marker_module() {
+        let catalog =
+            "[plugins]\nandroid-library = { id = \"com.android.library\", version.ref = \"agp\" }\ncompose = \"org.jetbrains.kotlin.plugin.compose:2.4.21\"\n";
+        assert_eq!(
+            gradle_plugins(catalog, "libs.versions.toml").unwrap(),
+            ["com.android.library:com.android.library.gradle.plugin", "org.jetbrains.kotlin.plugin.compose:org.jetbrains.kotlin.plugin.compose.gradle.plugin"]
+        );
+        assert!(gradle_plugins("[plugins]\nbroken = { version = \"1\" }\n", "c").is_err());
+        let repo = ScratchRepo::new("plugins", "[maven]\n", catalog, "");
+        let errors = repo.errors();
+        assert!(errors.len() == 2 && errors.iter().all(|e| e.contains("build plugin") && e.contains("has no licence")), "{errors:?}");
     }
 
     #[test]

@@ -650,7 +650,7 @@ try await card.set(&quot;Photo&quot;, media: photoURL)        // sam.jpg
 <td>weeks 2–5</td>
 <td>CORE, FX, QA</td>
 <td>core runtime, GPU device, EffectCraft crate with its adaptations, desktop conformance</td>
-<td>20 engineer-days</td>
+<td>21 engineer-days</td>
 </tr>
 <tr>
 <td>W3</td>
@@ -681,7 +681,7 @@ try await card.set(&quot;Photo&quot;, media: photoURL)        // sam.jpg
 <td>6.5 engineer-days</td>
 </tr>
 </tbody></table>
-</div><p><strong>Total for the first release: 64.5 engineer-days</strong> (W0–W5, the sum of the task estimates in §31); W6 follows the first release. Calendar weeks assume one engineer full time. <strong>Critical path:</strong> W0 → the pin (W1) → EffectCraft crate (W2) → bindings (W3) → device acceptance (W4) → staged release (W5).</p>
+</div><p><strong>Total for the first release: 65.5 engineer-days</strong> (W0–W5, the sum of the task estimates in §31); W6 follows the first release. Calendar weeks assume one engineer full time. <strong>Critical path:</strong> W0 → the pin (W1) → EffectCraft crate (W2) → bindings (W3) → device acceptance (W4) → staged release (W5).</p>
 <hr>
 <h1 id="part-b-the-technical-design" class="part">Part B — The technical design<a class="anchor" href="#part-b-the-technical-design" aria-label="link">#</a></h1>
 <h2 id="12-architecture-overview">12. Architecture overview<a class="anchor" href="#12-architecture-overview" aria-label="link">#</a></h2>
@@ -1208,7 +1208,7 @@ impl Engine {
 <tr>
 <td><code>rust/<wbr>xtask/<wbr></code></td>
 <td>NEW</td>
-<td><code>cargo xtask rules</code> (the rule checks of the gate) and <code>cargo xtask generate</code> (every generated file)</td>
+<td><code>cargo xtask rules</code> (the rule checks of the gate), <code>cargo xtask generate</code> (every file a generator in this repository writes) and <code>cargo xtask skipped-tasks</code> (the Android stage&#39;s judgement of Gradle&#39;s task outcomes)</td>
 </tr>
 <tr>
 <td><code>ios/<wbr>sdk/<wbr></code></td>
@@ -1253,7 +1253,7 @@ impl Engine {
 <tr>
 <td><code>ATTRIBUTION.md</code></td>
 <td>NEW</td>
-<td>the asset index: each folder that holds assets and the file listing their authors, sources and licences</td>
+<td>the asset index: each folder that holds assets and the file listing their authors, sources and licences, among them the Noto Sans SC and Noto Sans TC Regular fonts FX-3 bundles (noto-cjk&#39;s region-subset OTFs, SIL OFL 1.1, shipped with their <code>LICENSE</code>)</td>
 </tr>
 <tr>
 <td><code>README.md</code>, <code>NOTICE</code>, <code>LICENSE-MIT</code>, <code>LICENSE-APACHE</code>, <code>CHANGELOG.md</code></td>
@@ -1278,22 +1278,22 @@ impl Engine {
 <tr>
 <td>core 1</td>
 <td><code>craftbridge-core</code></td>
-<td>core 0</td>
+<td>a lower core rank</td>
 </tr>
 <tr>
 <td>core 2</td>
 <td><code>craftbridge-core-ffi</code></td>
-<td>core 1; <code>uniffi</code></td>
+<td>the lower core ranks; <code>uniffi</code></td>
 </tr>
 <tr>
 <td>app 0</td>
 <td><code>craftbridge-effects</code></td>
-<td>the core; <code>effectcraft-*</code></td>
+<td>any core crate; <code>effectcraft-*</code></td>
 </tr>
 <tr>
 <td>app 1</td>
 <td><code>craftbridge-effects-ffi</code></td>
-<td>app 0, core 2; <code>uniffi</code></td>
+<td>a lower rank of its app, and any core crate; <code>uniffi</code></td>
 </tr>
 <tr>
 <td>tool</td>
@@ -1302,10 +1302,11 @@ impl Engine {
 </tr>
 </tbody></table>
 </div><ul>
-<li>A core crate never depends on an <code>effectcraft-*</code> crate or on an app crate (PD9). An app crate never depends on another app&#39;s crates: code two plugins need moves into the core (PD18).</li>
-<li><code>uniffi</code> appears only in <code>-ffi</code> crates, and only an app&#39;s <code>-ffi</code> crate builds a <code>staticlib</code> or <code>cdylib</code> (D-4).</li>
+<li>A core crate never depends on an <code>effectcraft-*</code> crate or on an app crate, not even in its tests (PD9). An app crate never depends on another app&#39;s crates, not even in its tests: code two plugins need moves into the core (PD18). The rank, <code>uniffi</code> and tool rules are about what ships, so dev-dependencies, which only a crate&#39;s own tests compile, are outside them.</li>
+<li><code>uniffi</code> appears only in <code>-ffi</code> crates, and only an app&#39;s <code>-ffi</code> crate builds a <code>staticlib</code> or <code>cdylib</code>, and it builds both; no crate is a Rust <code>dylib</code> (D-4).</li>
+<li>Every crate is a workspace member in the folder its row gives it (<code>core/<wbr>&lt;name&gt;</code>, <code>&lt;app&gt;/<wbr>&lt;name&gt;</code>, or <code>&lt;name&gt;</code> for a tool that is no app&#39;s), its library named after it; a dependency by a path outside the workspace, or on a workspace crate&#39;s name from anywhere else, is refused.</li>
 <li>Swift: <code>CraftBridgeFFI</code> ← <code>CraftBridge</code> ← <code>CraftBridgeEffects</code>. Kotlin: <code>:effects</code> exposes <code>:core</code>. Swift and Kotlin take the same rule as Rust: a plugin target or plugin module depends only on the core (in Swift, the core&#39;s targets <code>CraftBridge</code>, the generated <code>CraftBridgeFFI</code> and its binary target), <code>CraftBridge</code> and <code>:core</code> depend on no plugin, and no plugin depends on another; the package manifest, read by <code>swift package dump-package</code>, and Gradle&#39;s own project graph, declared and resolved, enforce this. A platform folder never refers to another platform&#39;s code; every platform reads <code>conformance/<wbr></code>.</li>
-<li>Code and data a generator in this repository writes live only in <code>generated</code> or <code>Generated</code> directories, carry an <code>@generated</code> header where the format has comments, and are written only by <code>cargo xtask generate</code> (D-26, L10). Two kinds of written-for-you file are outside that rule: what a build tool writes for itself (<code>Cargo.lock</code>, <code>Package.resolved</code>, the Gradle wrapper), which change only through that tool, and the plan&#39;s views in <code>plan/<wbr></code>, which the plan kit builds from this file and <code>plan/<wbr>diagrams/<wbr>src/<wbr></code> and <code>plan/<wbr>plan check --final</code> checks.</li>
+<li>Code and data a generator in this repository writes live only in <code>generated</code> or <code>Generated</code> directories, carry an <code>@generated</code> header where the format has comments (Markdown&#39;s being ``), are committed, and are written only by <code>cargo xtask generate</code> (D-26, L10). Three kinds of written-for-you file are outside that rule: what a build tool writes for itself (<code>Cargo.lock</code>, <code>Package.resolved</code>, the Gradle wrapper), which change only through that tool; the <code>[patch.crates-io]</code> and <code>[profile.release]</code> tables of <code>rust/<wbr>Cargo.toml</code> and the starting <code>Cargo.lock</code>, which only <code>tools/<wbr>update-upstream.sh</code> writes from the pinned EffectCraft (Pins, below); and the plan&#39;s views in <code>plan/<wbr></code>, which the plan kit builds from this file and <code>plan/<wbr>diagrams/<wbr>src/<wbr></code> and <code>plan/<wbr>plan check --final</code> checks.</li>
 </ul>
 <p><strong>Pins.</strong> <code>[workspace.dependencies]</code> names each EffectCraft crate CraftBridge uses (<code>effectcraft-engine</code>, <code>-host</code>, <code>-automation</code>, <code>-gpu</code>, <code>-render</code>, <code>-time</code>, <code>-text</code>, <code>-media</code>, <code>-expr</code>, <code>-script</code>, <code>-plugin</code>) with <code>git = &quot;https:/<wbr>/<wbr>github.com/<wbr>storytold/<wbr>effectcraft&quot;</code> and one <code>rev</code>, an official revision (<code>10376058</code> at the start, PD4, PD17), and <code>filmcraft-codecs</code> and <code>filmcraft-isobmff</code> with EffectCraft&#39;s own FilmCraft revision <code>d5ead4ba</code> (<code>effectcraft: Cargo.toml:89-90</code>), so CraftBridge&#39;s decoders register into the same registry EffectCraft decodes through (D-13).</p>
 <ul>
@@ -1332,9 +1333,9 @@ impl Engine {
 </tr>
 <tr>
 <td>AD2</td>
-<td>At engine start, <code>effectcraft_text::add_source(&amp;DirectorySource { dirs })</code> with the phone&#39;s system font folder (iOS <code>/<wbr>System/<wbr>Library/<wbr>Fonts</code> once V1 confirms an app can read it; Android <code>/<wbr>system/<wbr>fonts</code>) and <code>Folders.fonts</code></td>
+<td>At engine start, <code>effectcraft_text::fonts::add_source(&amp;DirectorySource { dirs })</code> with the phone&#39;s font folders and <code>Folders.fonts</code>: on iOS the parent folders of the font files CoreText reports (<code>CTFontCollectionCreateFromAvailableFonts</code>, <code>kCTFontURLAttribute</code>), never a hard-coded <code>/<wbr>System/<wbr>Library/<wbr>Fonts</code>, which in the simulator is the Mac&#39;s and on a phone misses PingFang&#39;s <code>CorePrivate</code> (V1); on Android <code>/<wbr>system/<wbr>fonts</code>. Every face stays registered for drawing and fallback; <code>craftbridge-effects</code> filters the font list on every app-facing call (the <code>list_fonts</code> method, <code>exec</code> of <code>text.fonts</code>, the MCP tools that reach it) to the faces CoreText offers, matched by (file, PostScript name), plus the bundled ones, passing it through where no face list is supplied; code inside EffectCraft&#39;s own dispatch (scripts, <code>engine.batch</code>) sees the full registry</td>
 <td><code>DirectorySource::system()</code>, which knows the macOS, Windows and Unix desktop folders (<code>effectcraft: crates/<wbr>text/<wbr>src/<wbr>fonts.rs:79-101</code>; <code>evidence/<wbr>03-device-feasibility.md</code> Finding 10)</td>
-<td><code>FontSource</code>, <code>DirectorySource</code> (<code>effectcraft: crates/<wbr>text/<wbr>src/<wbr>fonts.rs:67-76</code>), <code>add_source</code> (<code>:396-412</code>), <code>add_font_data</code> (<code>:414-422</code>)</td>
+<td><code>FontSource</code>, <code>DirectorySource</code> (<code>effectcraft: crates/<wbr>text/<wbr>src/<wbr>fonts.rs:67-76</code>), <code>add_source</code> (<code>:396-412</code>), <code>add_font_data</code> (<code>:414-422</code>), <code>text.fonts</code> (<code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>cmd/<wbr>text_edit.rs:880-903</code>), <code>effectcraft_text::families</code></td>
 <td class="rid">FX-3</td>
 </tr>
 <tr>
@@ -1384,7 +1385,7 @@ impl Engine {
 <li>An update removes a public item an adaptation uses: the build fails at the gate, and the adaptation is rewritten on what upstream offers instead, in the same update.</li>
 <li>Upstream adds a public interface that does what an adaptation does (a session with explicit folders, an encoder interface): the adaptation moves onto it and leaves <code>tools/<wbr>adaptations.toml</code> (upstream wins).</li>
 </ul>
-<p><strong>The gate.</strong> <code>tools/<wbr>ci.sh</code> is the one entry point for people, agents and CI (D-25). It runs <code>tools/<wbr>doctor.sh --gate</code>, then every stage, and one run reports every failure.</p>
+<p><strong>The gate.</strong> <code>tools/<wbr>ci.sh</code> is the one entry point for people, agents and CI (D-25). It runs <code>tools/<wbr>doctor.sh --gate</code>, then every stage, and one run reports every failure; <code>tools/<wbr>ci.sh &lt;stage or group&gt;…</code> runs only those named, every name checked before the first runs.</p>
 <div class="table-wrap"><table>
 <thead>
 <tr>
@@ -1394,31 +1395,31 @@ impl Engine {
 </thead>
 <tbody><tr>
 <td>Rust</td>
-<td><code>cargo fmt --check</code>; <code>cargo clippy --workspace --all-targets -D warnings</code>; <code>cargo test --workspace</code>; <code>cargo check</code> of the libraries for the four mobile targets; <code>cargo deny check licenses bans sources</code></td>
+<td><code>cargo fmt --check</code>; <code>cargo clippy --workspace --all-targets --all-features -D warnings</code>; <code>cargo test --workspace</code>; <code>cargo clippy -D warnings</code> of the libraries for each of the four mobile targets, so the platform modules, which only the phones compile, meet the never-crash lints and carry their <code>/<wbr>/<wbr> SAFETY:</code> comments; <code>cargo deny check licenses bans sources</code> over every feature; no cargo stage runs while the repository root holds a <code>.cargo</code> folder</td>
 </tr>
 <tr>
 <td>Rules</td>
-<td><code>cargo xtask rules</code>: the root and platform-folder layout; layers and dependency direction, in Swift too (the manifest, read by <code>swift package dump-package</code>), with no plugin depending on a plugin; the inherited lint table, weakened by no crate, module, clippy configuration, Cargo configuration or compiler wrapper, with a build script only for a crate the layer table marks, and <code>panic = &quot;unwind&quot;</code>; <code>unsafe</code> only in platform modules (D-20), read from Rust&#39;s syntax tree by <code>syn</code> (D-28); generated-file placement; the licences of what the builds ship — every external module resolved onto a Gradle library module&#39;s release runtime classpath, every package a <code>Package.swift</code> names and every pin a <code>Package.resolved</code> records, each declared in <code>tools/<wbr>licences.toml</code>, with build plugins checked by name; one copy of each EffectCraft, FilmCraft and Craft library crate (D-13)</td>
+<td><code>cargo xtask rules</code>: the root and platform-folder layout, with no <code>node_modules</code> in the code folders; layers and dependency direction, in Swift too (the manifest, read by <code>swift package dump-package</code>), with no plugin depending on a plugin; the inherited lint table, its five no-exception lints <code>forbid</code>, weakened by no crate, module, item (bar <code>expect_used</code>&#39;s literal), clippy configuration, Cargo configuration, target runner or compiler wrapper, with a build script (as <code>cargo metadata</code> reports it) only for a crate the layer table marks, no <code>#[path]</code> or <code>include!</code>, and <code>panic = &quot;unwind&quot;</code>; <code>unsafe</code> only in platform modules (D-20), read from Rust&#39;s syntax tree by <code>syn</code> (D-28); generated-file placement; one copy of each gate configuration, and none of the tool configurations that would switch a check off (Gate machinery, below); the licences of what the builds ship — every external module resolved onto a Gradle library module&#39;s release runtime classpath, every package a <code>Package.swift</code> names (as <code>swift package dump-package</code> reads it) and every pin a <code>Package.resolved</code> records, each declared in <code>tools/<wbr>licences.toml</code>, with build plugins checked by name from the catalog&#39;s <code>[plugins]</code>; one copy of each EffectCraft, FilmCraft and Craft library crate (D-13)</td>
 </tr>
 <tr>
 <td>Generated</td>
-<td><code>cargo xtask generate --check</code>: everything regenerated, any difference fails (L10)</td>
+<td><code>cargo xtask generate --check</code>: everything regenerated, any difference fails, and so does a file there git does not track (L10)</td>
 </tr>
 <tr>
 <td>Swift</td>
-<td><code>swift format lint --strict</code>, whose never-crash rules (force unwraps and <code>as!</code>, <code>try!</code>, implicitly unwrapped optionals) neither its configuration nor a file-wide <code>swift-format-ignore-file</code> switches off; SwiftLint for the never-crash calls (<code>fatalError</code>, <code>exit</code>, <code>abort()</code> and the like), <code>.unsafelyUnwrapped</code> and the pointer APIs confined to <code>Platform/<wbr></code>, read from Swift&#39;s own syntax tree (D-28); every target built for the iOS Simulator, with an import the package does not declare an error (<code>DIAGNOSE_MISSING_TARGET_DEPENDENCIES=YES_ERROR</code>), so <code>CraftBridge</code> cannot import a plugin</td>
+<td><code>swift format lint --strict</code> on every Swift file, symbolic links followed, whose never-crash rules (force unwraps and <code>as!</code>, <code>try!</code>, implicitly unwrapped optionals) neither its configuration nor a file-wide <code>swift-format-ignore-file</code> switches off, and whose own test exemption reaches only SwiftPM&#39;s test targets: <code>import XCTest</code> is refused everywhere and Swift Testing outside a test target; SwiftLint for the never-crash calls (<code>fatalError</code>, <code>exit</code>, <code>abort</code> and the like, called or taken as a value), every postfix <code>!</code>, <code>.unsafelyUnwrapped</code> and the pointer APIs confined to <code>Platform/<wbr></code> in tests too, read from Swift&#39;s own syntax tree (D-28); every target, test targets included (<code>build build-for-testing</code>), built for the iOS Simulator, with an import the package does not declare an error (<code>DIAGNOSE_MISSING_TARGET_DEPENDENCIES=YES_ERROR</code>), so <code>CraftBridge</code> cannot import a plugin</td>
 </tr>
 <tr>
 <td>Android</td>
-<td>Spotless (ktlint), detekt for the never-crash calls and the JNI declarations confined to <code>platform/<wbr></code>, read from Kotlin&#39;s own syntax tree (D-28), Android Lint and the release build, with warnings as errors; the build itself refuses a module that skips the convention plugin or sets its rules back, a check the gate asks for that no longer brings the tasks doing its work, and a project dependency, declared or resolved, from <code>:core</code> on any module or from a plugin module on anything but <code>:core</code>; a task any module disables or skips with <code>onlyIf</code> reports SKIPPED, which fails the stage</td>
+<td>Spotless (ktlint, from the root <code>.editorconfig</code> alone), detekt for the never-crash calls and the JNI declarations confined to <code>platform/<wbr></code> in every source set, read from Kotlin&#39;s own syntax tree (D-28), Android Lint, the release build and the unit-test and instrumented-test Kotlin compilations, with warnings as errors; the build itself refuses a module that skips the convention plugin or sets its rules back, a check the gate asks for that no longer brings the tasks doing its work, and a project dependency, declared or resolved, from <code>:core</code> on any module or from a plugin module on anything but <code>:core</code>; a task any module disables or skips with <code>onlyIf</code> reports SKIPPED, which <code>cargo xtask skipped-tasks</code> reads from Gradle&#39;s log and fails the stage on</td>
 </tr>
 <tr>
 <td>Shell</td>
-<td>shellcheck on every script</td>
+<td><code>shellcheck --norc</code> on every script, told by its extension or its <code>#!</code> line, bar the Gradle wrapper and the plan kit&#39;s <code>plan/<wbr>plan</code></td>
 </tr>
 <tr>
 <td>Duplicates</td>
-<td>jscpd over Rust, Swift, Kotlin and shell: a block of ten lines repeated anywhere fails; generated directories are skipped</td>
+<td>jscpd over Rust, Swift, Kotlin and shell: a block of ten lines, or of seventy tokens, repeated anywhere fails, in two passes because jscpd applies its two minimums together; generated directories and build output are skipped, and nothing else is: jscpd runs with <code>--no-gitignore</code>, and the rules refuse the <code>.ignore</code> files, nested <code>.gitignore</code> files and ignore markers it would honour</td>
 </tr>
 <tr>
 <td>Conformance</td>
@@ -1426,8 +1427,8 @@ impl Engine {
 </tr>
 </tbody></table>
 </div><p>Until OPS-6, OPS-7 and OPS-8 land, <code>cargo xtask rules</code> makes the Swift and Kotlin checks named in the Swift and Android rows, and reads <code>unsafe</code> and lint attributes in Rust, on text with its comments and literals stripped (OPS-3); each of those tasks moves its checks onto the language&#39;s syntax tree and out of the rules stage.</p>
-<p><strong>Gate machinery.</strong> The gate&#39;s own machinery decides what the gate checks, so it cannot guard itself: <code>tools/<wbr>ci.sh</code>, <code>tools/<wbr>env.sh</code>, <code>tools/<wbr>hooks/<wbr></code>, <code>rust/<wbr>xtask/<wbr></code>, <code>rust/<wbr>.cargo/<wbr>config.toml</code>, <code>android/<wbr>sdk/<wbr>settings.gradle.kts</code>, <code>android/<wbr>sdk/<wbr>gradle.properties</code>, <code>android/<wbr>sdk/<wbr>build-logic/<wbr></code>, and the single copy of each of <code>rust/<wbr>clippy.toml</code>, <code>rust/<wbr>rustfmt.toml</code>, <code>rust/<wbr>deny.toml</code>, <code>ios/<wbr>sdk/<wbr>.swift-format</code> and <code>tools/<wbr>licences.toml</code>. A change to any of those files is a gate change, which its pull request names and whose review checks for weakened rules; the gate fails on a second copy of any listed configuration file, or of a tool configuration that would act like one, anywhere in the tree (AGENTS §10, decision #120). Gradle reads a <code>gradle.properties</code> in a project&#39;s own folder as that project&#39;s properties, so no other <code>gradle.properties</code> sits under <code>android/<wbr>sdk</code>: the build&#39;s own is <code>android/<wbr>sdk/<wbr>gradle.properties</code> alone, and <code>android/<wbr>sdk/<wbr>build-logic</code>, an included build with properties of its own, is where its own may sit (AGENTS §10, decision #122).</p>
-<p><strong>Module build files.</strong> An Android module&#39;s build file holds only comments, <code>plugins { id(&quot;craftbridge.android.library&quot;) }</code>, <code>android { namespace = &quot;io.github.christopherlinnett.craftbridge.&lt;module&gt;&quot; }</code> and a <code>dependencies</code> block whose entries are <code>api</code>, <code>implementation</code>, <code>testImplementation</code> or <code>androidTestImplementation</code> of a <code>project(&quot;:…&quot;)</code> or a <code>libs.&lt;alias&gt;</code>; the root <code>android/<wbr>sdk/<wbr>build.gradle.kts</code> holds only comments and a <code>plugins</code> block of <code>alias(libs.plugins.&lt;alias&gt;) apply false</code> lines and <code>id(&quot;craftbridge.quality&quot;)</code>. Every module the settings include has its build file, spelled exactly <code>build.gradle.kts</code> because a case-insensitive disk would hand Gradle a <code>Build.gradle.kts</code> all the same, no build file is written in Groovy — Gradle would read <code>build.gradle</code> in place of <code>build.gradle.kts</code>, and the rule reads only Kotlin — and anything else a build needs is configured once in <code>android/<wbr>sdk/<wbr>build-logic</code>, so a module&#39;s file never carries the reach to rewire a check the gate relies on (AGENTS §10, decision #121).</p>
+<p><strong>Gate machinery.</strong> The gate&#39;s own machinery decides what the gate checks, so it cannot guard itself: <code>tools/<wbr>ci.sh</code>, <code>tools/<wbr>env.sh</code>, <code>tools/<wbr>hooks/<wbr></code>, <code>rust/<wbr>xtask/<wbr></code>, <code>rust/<wbr>.cargo/<wbr>config.toml</code>, <code>android/<wbr>sdk/<wbr>settings.gradle.kts</code>, <code>android/<wbr>sdk/<wbr>gradle.properties</code>, <code>android/<wbr>sdk/<wbr>build-logic/<wbr></code>, and the single copy of each of <code>rust/<wbr>clippy.toml</code>, <code>rust/<wbr>rustfmt.toml</code>, <code>rust/<wbr>deny.toml</code>, <code>ios/<wbr>sdk/<wbr>.swift-format</code>, <code>tools/<wbr>licences.toml</code> and the root <code>.editorconfig</code>. A change to any of those files is a gate change, which its pull request names and whose review checks for weakened rules; the gate fails on a second copy of any listed configuration file, or of a tool configuration that would act like one, anywhere in the tree (AGENTS §10, decision #120): cargo-deny&#39;s <code>deny.exceptions.toml</code> and <code>.deny.exceptions.toml</code> widen <code>rust/<wbr>deny.toml</code>&#39;s allowlist, ktlint merges every <code>.editorconfig</code> up to the root&#39;s, and Cargo reads a <code>rust/<wbr>.cargo/<wbr>config</code> in place of <code>config.toml</code>. Tool configurations the gate keeps none of fail it wherever they sit: <code>.shellcheckrc</code> and <code>shellcheckrc</code>, which shellcheck reads as directives (it also runs with <code>--norc</code>), <code>.ignore</code> and any <code>.gitignore</code> but the root&#39;s and <code>plan/<wbr></code>&#39;s, which jscpd honours (it also runs with <code>--no-gitignore</code>), and a jscpd ignore marker in the code folders. Gradle reads a <code>gradle.properties</code> in a project&#39;s own folder as that project&#39;s properties, so no other <code>gradle.properties</code> sits under <code>android/<wbr>sdk</code>: the build&#39;s own is <code>android/<wbr>sdk/<wbr>gradle.properties</code> alone, and <code>android/<wbr>sdk/<wbr>build-logic</code>, an included build with properties of its own, is where its own may sit (AGENTS §10, decision #122).</p>
+<p><strong>Module build files.</strong> An Android module&#39;s build file applies the convention plugin and names its namespace once, and holds only comments, <code>plugins { id(&quot;craftbridge.android.library&quot;) }</code>, <code>android { namespace = &quot;io.github.christopherlinnett.craftbridge.&lt;module&gt;&quot; }</code> and a <code>dependencies</code> block whose entries are <code>api</code>, <code>implementation</code>, <code>testImplementation</code> or <code>androidTestImplementation</code> of a <code>project(&quot;:…&quot;)</code> or a <code>libs.&lt;alias&gt;</code>; the root <code>android/<wbr>sdk/<wbr>build.gradle.kts</code> holds only comments and a <code>plugins</code> block of <code>alias(libs.plugins.&lt;alias&gt;) apply false</code> lines and <code>id(&quot;craftbridge.quality&quot;)</code>. Every module the settings include has its build file, spelled exactly <code>build.gradle.kts</code> because a case-insensitive disk would hand Gradle a <code>Build.gradle.kts</code> all the same, no build file is written in Groovy — Gradle would read <code>build.gradle</code> in place of <code>build.gradle.kts</code>, and the rule reads only Kotlin — and anything else a build needs is configured once in <code>android/<wbr>sdk/<wbr>build-logic</code>, so a module&#39;s file never carries the reach to rewire a check the gate relies on (AGENTS §10, decision #121).</p>
 <h2 id="16-core-runtime-design">16. Core runtime design<a class="anchor" href="#16-core-runtime-design" aria-label="link">#</a></h2>
 <p><code>craftbridge-core</code> is the universal runtime: it knows how to host a Craft app&#39;s session on a phone and nothing about EffectCraft (PD9). Lints: the workspace table every crate inherits, with <code>unsafe_code</code> denied (and, without a platform module, never allowed) and the never-crash <code>deny</code> list (<code>clippy::unwrap_used</code>, <code>expect_used</code>, <code>panic</code>, <code>unimplemented</code>, <code>todo</code>, <code>unreachable</code>), as in EffectCraft (<code>AGENTS.md</code>, &quot;Never crash&quot;).</p>
 <div class="table-wrap"><table>
@@ -1614,7 +1615,7 @@ impl Engine {
 <tr>
 <td><code>src/<wbr>session.rs</code></td>
 <td>NEW</td>
-<td>AD1: the session from EffectCraft&#39;s public fields with the app&#39;s folders; AD2: the phone&#39;s fonts</td>
+<td>AD1: the session from EffectCraft&#39;s public fields with the app&#39;s folders; AD2: the phone&#39;s fonts, and the font-list filter every app-facing call answers through</td>
 </tr>
 <tr>
 <td><code>src/<wbr>requests.rs</code></td>
@@ -1927,7 +1928,7 @@ which calls <code>request(&quot;exec&quot;, {&quot;command&quot;: &quot;layer.ne
 <ul>
 <li><strong>iOS 26 and later:</strong> the app starts the export from the user&#39;s tap inside a <code>BGContinuedProcessingTask</code>, reporting CraftBridge&#39;s progress to the task. With the <code>com.apple.developer.background-tasks.continued-processing.gpu</code> entitlement and a device that supports it, the app sets <code>BackgroundPolicy.keepGpu</code>; otherwise the engine continues on the CPU (<code>evidence/<wbr>05-mobile-platforms.md</code> Finding 19, L7).</li>
 <li><strong>iOS 17 to 25:</strong> the export continues for the short time iOS grants a backgrounded app; when the system stops the app, the pending-export journal removes the partial file at the next start (§16) and the sample offers to export again.</li>
-<li><strong>Android:</strong> a foreground service of type <code>mediaProcessing</code> with <code>FOREGROUND_SERVICE_MEDIA_PROCESSING</code> (<code>evidence/<wbr>05-mobile-platforms.md</code> Finding 20). The guide states the service type for Android 10–14 after V7 confirms it on those versions.</li>
+<li><strong>Android:</strong> a foreground service declared <code>android:foregroundServiceType=&quot;mediaProcessing|dataSync&quot;</code> with <code>FOREGROUND_SERVICE</code>, <code>FOREGROUND_SERVICE_DATA_SYNC</code> and <code>FOREGROUND_SERVICE_MEDIA_PROCESSING</code>, started from the user&#39;s tap while the app is in the foreground and always given its type: <code>mediaProcessing</code> from Android 15 (<code>SDK_INT &gt;= 35</code>), the type built for media work, and <code>dataSync</code> on Android 10–14, where Android 14 rejects <code>mediaProcessing</code> and a type-less start (V7: measured on API 29, 31, 34 and 37; 30, 32 and 33 from Android&#39;s &quot;Changes to foreground services&quot;; <code>evidence/<wbr>99-verification.md</code> findings 15–19; <code>evidence/<wbr>05-mobile-platforms.md</code> Finding 20). Both types need their Play Console declaration, and from Android 15 the service stops within seconds of <code>onTimeout</code>.</li>
 </ul>
 <p><strong>Tests.</strong> Both samples build in the gate and run the running example end to end on the simulator, the emulator and the acceptance devices (V5 records their timings).</p>
 <h2 id="26-backwards-compatibility-and-rollout">26. Backwards compatibility and rollout<a class="anchor" href="#26-backwards-compatibility-and-rollout" aria-label="link">#</a></h2>
@@ -2319,9 +2320,9 @@ which calls <code>request(&quot;exec&quot;, {&quot;command&quot;: &quot;layer.ne
 </tr>
 <tr>
 <td>R3</td>
-<td>An iOS app cannot read <code>/<wbr>System/<wbr>Library/<wbr>Fonts</code></td>
-<td>medium</td>
-<td>V1 before FX-3; if it cannot, AD2 registers no iOS system folder and apps bundle fonts through <code>Folders.fonts</code></td>
+<td>An iOS app cannot read the system fonts, or EffectCraft cannot draw them</td>
+<td>settled by V1</td>
+<td>V1 (closed): an app reads every font file CoreText reports, on the simulator and the iPhone, so AD2 registers CoreText&#39;s folders and <code>craftbridge-effects</code> lists only CoreText&#39;s faces plus the bundled ones; iOS 26&#39;s PingFang has only <code>hvgl</code> outlines EffectCraft cannot draw, so FX-3 bundles Noto Sans SC and TC Regular through <code>Folders.fonts</code> (<code>evidence/<wbr>99-verification.md</code> findings 9–14)</td>
 </tr>
 <tr>
 <td>R4</td>
@@ -2397,7 +2398,7 @@ which calls <code>request(&quot;exec&quot;, {&quot;command&quot;: &quot;layer.ne
 <p><strong>OPS: repository, release</strong> (W0, W5)</p>
 <ul>
 <li><input disabled="" type="checkbox"> OPS-1 · 0.5 d · W0 — Create the private <code>ChristopherLinnett/<wbr>craftbridge</code> repository from <code>artcraft-plugin-port/<wbr></code> with <code>README.md</code> (PD2 attribution), <code>NOTICE</code>, <code>LICENSE-MIT</code>, <code>LICENSE-APACHE</code>, <code>CHANGELOG.md</code>, <code>AGENTS.md</code> and <code>CLAUDE.md</code>, the git and editor files, and this plan in <code>plan/<wbr></code> (§15); each decision behind <code>AGENTS.md</code> is an issue labelled <code>decision</code>. Acceptance: P1 closed; the README carries no ArtCraft mark.</li>
-<li><input disabled="" type="checkbox"> OPS-2 · 0.5 d · W0 — <code>tools/<wbr>env.sh</code> and <code>tools/<wbr>doctor.sh</code>: checks the pinned Rust 1.99.1 and its four targets, cargo-deny, Xcode 26.6 with its iOS Simulator SDK and swift-format, Android platform and build tools 37, NDK r28, JDK 21, shellcheck, Node.js, <code>cargo-ndk</code> and the ChristopherLinnett token, printing the fix for each gap; <code>--gate</code> checks only what the gate needs, <code>--install-hooks</code> runs the gate before every push. Acceptance: P3 closed on this machine.</li>
+<li><input disabled="" type="checkbox"> OPS-2 · 0.5 d · W0 — <code>tools/<wbr>env.sh</code> and <code>tools/<wbr>doctor.sh</code>: checks the pinned Rust 1.99.1 and its four targets, cargo-deny, Xcode 26.6 with its iOS Simulator SDK and swift-format, Android platform 37 and build tools 37.0.0 (both read from the version catalog), NDK r28, JDK 21, shellcheck, Node.js, <code>cargo-ndk</code> and the ChristopherLinnett token, printing the fix for each gap; <code>--gate</code> checks only what the gate needs, <code>--install-hooks</code> runs the gate before every push. Acceptance: P3 closed on this machine.</li>
 <li><input disabled="" type="checkbox"> OPS-3 · 1.5 d · W0 — The three platform builds as skeletons (the Cargo workspace with every crate empty, the Swift package, the Gradle build with <code>build-logic</code>), their formatters and lints, <code>cargo xtask rules</code> and <code>generate</code>, and the <code>tools/<wbr>ci.sh</code> gate (§15). Acceptance: the gate passes on the skeleton, and each rule check fails on a planted violation.</li>
 <li><input disabled="" type="checkbox"> OPS-6 · 0.5 d · W0 — The Swift never-crash and pointer-API rules, and the refusal of a file-wide <code>swift-format-ignore-file</code> of a never-crash rule, as SwiftLint rules, pinned and checked by <code>tools/<wbr>doctor.sh</code> (D-28). Acceptance: each banned call, pointer API and file-wide ignore, planted, fails the Swift stage; a call inside a nested comment does not.</li>
 <li><input disabled="" type="checkbox"> OPS-7 · 0.5 d · W0 — The Kotlin never-crash and JNI rules as detekt rules, configured once in <code>build-logic</code> (D-28). Acceptance: each banned call, planted in a main source set, fails the Android stage.</li>
@@ -2418,7 +2419,7 @@ which calls <code>request(&quot;exec&quot;, {&quot;command&quot;: &quot;layer.ne
 <ul>
 <li><input disabled="" type="checkbox"> FX-1 · 9.5 d — <code>craftbridge-effects</code>: construction, the adaptations AD1 and AD3–AD7, and every method of §14&#39;s table (§15, §19). Acceptance: E5; T1–T22 on the desktop.</li>
 <li><input disabled="" type="checkbox"> FX-2 · 1 d — Plug-in policy, the Android <code>jsvalue-enum</code> dependency, GPU attach (§19). Acceptance: T24 and T18 on the desktop.</li>
-<li><input disabled="" type="checkbox"> FX-3 · 0.5 d — AD2: the phone&#39;s font folders through <code>effectcraft_text::add_source</code> (§15). Acceptance: V1 closed first; <code>list_fonts</code> shows the system families on the simulator and the emulator.</li>
+<li><input disabled="" type="checkbox"> FX-3 · 1.5 d — AD2: the phone&#39;s font folders through <code>effectcraft_text::fonts::add_source</code> (CoreText&#39;s folders on iOS, <code>/<wbr>system/<wbr>fonts</code> on Android, plus <code>Folders.fonts</code>), Noto Sans SC and TC Regular bundled and listed in <code>ATTRIBUTION.md</code>, and the font list filtered in <code>craftbridge-effects</code> on every app-facing call — the <code>list_fonts</code> method, <code>exec</code> of <code>text.fonts</code>, and the MCP tools <code>list_fonts</code>, <code>execute_command</code>, <code>command_run</code>, <code>command_batch</code> and <code>batch</code> with <code>text.fonts</code> — while code inside EffectCraft&#39;s dispatch sees the full registry, which the API guide says (§15, §19). Acceptance: V1 closed first; on the simulator every app-facing call lists exactly <code>UIFont.familyNames</code> plus the bundled families, with a matching <code>count</code>, while a character only an unlisted face covers (Adlam 𞤀) still draws; 汉 falls back to Noto Sans SC and 漢 to Noto Sans TC; where no face list is supplied the list is unfiltered; on the emulator <code>list_fonts</code> shows the system families.</li>
 </ul>
 <p><strong>QA: conformance</strong> (W2–W4)</p>
 <ul>
@@ -2875,7 +2876,7 @@ which calls <code>request(&quot;exec&quot;, {&quot;command&quot;: &quot;layer.ne
 </tr>
 <tr>
 <td class="rid">D-26</td>
-<td>Generated files live only in <code>generated</code> or <code>Generated</code> directories with an <code>@generated</code> header, are committed, and are written only by <code>cargo xtask generate</code></td>
+<td>Files a generator in this repository writes live only in <code>generated</code> or <code>Generated</code> directories with an <code>@generated</code> header, are committed, and are written only by <code>cargo xtask generate</code>; a build tool&#39;s own files, the upstream tables <code>tools/<wbr>update-upstream.sh</code> writes and the plan&#39;s views are outside the rule (§15)</td>
 <td>Swift Package Manager consumers cannot run a build step, and each generated API change shows in review (<code>evidence/<wbr>07-repository-conventions.md</code> Findings 3, 29, 31)</td>
 <td>§15, §21</td>
 </tr>

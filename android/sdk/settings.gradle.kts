@@ -65,6 +65,9 @@ val gateWorkers =
         "spotlessCheck" to listOf("spotlessKotlin", "spotlessKotlinCheck", "spotlessKotlinGradle", "spotlessKotlinGradleCheck"),
         "lint" to listOf("lintAnalyzeDebug", "lintDebug"),
         "assembleRelease" to listOf("compileReleaseKotlin", "bundleReleaseAar"),
+        // The tests' Kotlin compiles under the same rules, so a warning in a test fails too.
+        "compileDebugUnitTestSources" to listOf("compileDebugUnitTestKotlin"),
+        "compileDebugAndroidTestSources" to listOf("compileDebugAndroidTestKotlin"),
     )
 gradle.taskGraph.whenReady {
     val scheduled = allTasks.map { it.path }.toSet()

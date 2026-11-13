@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Runs the gate before every push, so no branch receives a state the gate has not passed (AGENTS.md).
+# Runs the gate on the checkout before every push (AGENTS.md): the working tree as it is, not the
+# commits being pushed, so commit or set aside unfinished edits first.
 # Installed by `tools/doctor.sh --install-hooks`.
 set -euo pipefail
 exec "$(git rev-parse --show-toplevel)/tools/ci.sh"

@@ -177,6 +177,13 @@ fn entry_error(at: &str, line: &str, block: Inside, kind: Kind, module: Option<&
 /// name the namespace's last segment must repeat, `None` for the root file.
 fn violations(name: &str, source: &str, kind: Kind, module: Option<&str>) -> Vec<String> {
     let mut errors = Vec::new();
+    // A carriage return that ends no line is a line break to some readers and not to others; no legal
+    // line needs one, so the question of which reading Gradle takes never arises.
+    for (index, line) in source.split('\n').enumerate() {
+        if line.trim_end_matches('\r').contains('\r') {
+            errors.push(format!("{name}:{}: a carriage return inside a line: end lines with a newline alone", index + 1));
+        }
+    }
     let mut inside = Inside::Outside;
     let mut opened = 0usize;
     let mut applied = false;
@@ -187,7 +194,7 @@ fn violations(name: &str, source: &str, kind: Kind, module: Option<&str>) -> Vec
     let mut refused_open = 0usize;
     // Comments blanked, strings kept: the grammar reads a quoted path exactly as written, and a line
     // hidden in a comment is nobody's statement — and nobody's hole.
-    for (index, stripped) in scan::strip_comments(source).lines().enumerate() {
+    for (index, stripped) in scan::strip_comments(source, scan::Language::Kotlin).lines().enumerate() {
         let line = stripped.trim();
         if line.is_empty() {
             continue;
@@ -251,7 +258,7 @@ fn violations(name: &str, source: &str, kind: Kind, module: Option<&str>) -> Vec
 /// here — a module whose file exists is still read by shape, and one that skips the convention plugin
 /// fails the settings guard at build time whatever this read.
 fn included_folders(settings: &Path) -> Result<Vec<String>, String> {
-    let text = scan::strip_comments(&scan::read_text(settings)?);
+    let text = scan::strip_comments(&scan::read_text(settings)?, scan::Language::Kotlin);
     let mut folders = Vec::new();
     for line in text.lines() {
         let Some(from) = line.find("include(") else { continue };
@@ -409,6 +416,28 @@ plugins {
             "plugins { id(\"craftbridge.android.library\") }\nandroid { namespace = \"io.github.christopherlinnett.craftbridge.core\" }\ndependencies { api(project(\":core\")), }\n",
         );
         assert!(errors.iter().any(|e| e.starts_with("android/sdk/core/build.gradle.kts:3:")), "{errors:?}");
+    }
+
+    #[test]
+    fn a_kotlin_char_literal_hides_nothing_from_the_grammar() {
+        // Read the Rust way, `'\u0041'` ran on to the next `}'` and blanked every line between, so the
+        // `afterEvaluate`, `gradle.` and `tasks` lines below passed unread. A char literal is kept, and a
+        // line holding one is no line the grammar allows.
+        let plant = "'\\u0041'.let(::plant)\n\nfun plant(c: Char) = afterEvaluate(::late)\n\nfun late(project: Project) = gradle.taskGraph.whenReady(::ready)\n\n\
+                     fun ready(graph: org.gradle.api.execution.TaskExecutionGraph) = tasks.configureEach(::quiet)\n\nval close = '}'\n";
+        let file = "android/sdk/core/build.gradle.kts";
+        let errors = module(file, &format!("{LEGAL_MODULE}{plant}").replace("effects", "core"));
+        for line in [15, 17, 19, 21, 23] {
+            assert!(errors.iter().any(|e| e.starts_with(&format!("{file}:{line}:"))), "line {line}: {errors:?}");
+        }
+    }
+
+    #[test]
+    fn a_carriage_return_inside_a_line_is_refused() {
+        let file = "android/sdk/effects/build.gradle.kts";
+        let errors = module(file, &LEGAL_MODULE.replace("// the engine's public surface", "// the engine's\rpublic surface"));
+        assert!(errors.len() == 1 && errors[0].starts_with(&format!("{file}:12: a carriage return")), "{errors:?}");
+        assert!(module(file, &LEGAL_MODULE.replace('\n', "\r\n")).is_empty(), "CRLF line endings are line endings");
     }
 
     #[test]

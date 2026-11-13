@@ -61,8 +61,8 @@ Which code, toolchains and platform facilities does a native iOS and Android SDK
 
 - The plugin's native core can depend on the unmodified upstream crates `effectcraft-engine`, `effectcraft-host`, `effectcraft-automation` and `effectcraft-gpu`; the CLI binary itself is not a dependency, because its orchestration is already in those libraries.
 - The generated API can take command ids, labels, parameter names and optionality from the registry, but parameter value types are not in the registry; typed values need either a hand-kept type map or an upstream change.
-- Native decoders slot in behind `FootageSource` with no upstream change; native encoders need a seam in `effectcraft-export`.
-- Config, cache and font folders, free memory and helper processes need platform handling on iOS and Android, either through environment overrides or upstream seams.
+- Native decoders slot in behind `FootageSource` with no upstream change; native encoders need a seam in `effectcraft-export`. *(Superseded by PD5, 2026-11-13: EffectCraft is never modified, so there are no seams; what a phone needs is an adaptation in CraftBridge's own crates on EffectCraft's public interfaces, plan §15.)*
+- Config, cache and font folders, free memory and helper processes need platform handling on iOS and Android, either through environment overrides or upstream seams. *(Superseded by PD5, 2026-11-13: EffectCraft is never modified, so there are no seams; what a phone needs is an adaptation in CraftBridge's own crates on EffectCraft's public interfaces, plan §15.)*
 - The FFI layer needs `unsafe` (exported symbols, raw window handles), which the upstream workspace forbids, so it lives outside that workspace.
 - The product name must not use the ArtCraft name unless the ArtCraft Team permits it.
 

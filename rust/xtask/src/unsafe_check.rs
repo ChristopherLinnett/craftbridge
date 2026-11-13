@@ -51,7 +51,13 @@ pub(crate) fn check_file(file: &RustFile<'_>) -> Vec<String> {
 
     let text = file.lines.join("\n");
     for allowance in attributes::allowances(&text) {
-        if !allowance.lints.iter().any(|lint| lint == UNSAFE_CODE) {
+        // A lint a macro fills in may be this one, so it is read as this one.
+        if !allowance.lints.iter().any(|lint| lint == UNSAFE_CODE || lint == attributes::UNREADABLE) {
+            continue;
+        }
+        let module = attributes::declared_module(&text, allowance.after);
+        // A whole attribute a macro forwards onto one item is the forwarding idiom, not a level.
+        if allowance.level == attributes::MACRO_ATTRIBUTE && !allowance.inner && module.is_none() {
             continue;
         }
         let at = format!("{}:{}: {}({UNSAFE_CODE})", file.path, allowance.line, allowance.level);
@@ -59,7 +65,7 @@ pub(crate) fn check_file(file: &RustFile<'_>) -> Vec<String> {
             if !(ffi_crate && file.is_lib_root) {
                 errors.push(format!("{at} crate-wide belongs only to an -ffi crate's own src/lib.rs"));
             }
-        } else if !(platform_crate && attributes::declared_module(&text, allowance.after) == Some(PLATFORM_MODULE)) {
+        } else if !(platform_crate && module == Some(PLATFORM_MODULE)) {
             errors.push(format!("{at} belongs only on a platform crate's `mod {PLATFORM_MODULE}` declaration"));
         }
     }
@@ -94,7 +100,9 @@ fn owning_crate(rust_dir: &Path, components: &[String]) -> Option<(String, PathB
 }
 
 /// Run the check: every `.rs` file under `rust/`, generated code excepted (a generator's output is
-/// checked by regenerating it, not by reading it).
+/// checked by regenerating it, not by reading it). A file in no crate's folder is reported rather than
+/// skipped: only `#[path]` or `include!` can bring it into a build, and the code it holds would then be
+/// judged as no crate's.
 pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     let rust_dir = root.join("rust");
     let mut errors = Vec::new();
@@ -103,7 +111,13 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
         if crate::generated::in_generated(&file.components) {
             continue;
         }
-        let Some((crate_name, crate_dir)) = owning_crate(&rust_dir, &file.components) else { continue };
+        let Some((crate_name, crate_dir)) = owning_crate(&rust_dir, &file.components) else {
+            errors.push(format!(
+                "{}: a Rust file in no crate's folder: a crate's code lives under its own Cargo.toml, where every rule reads it as that crate's",
+                report::shown(root, &file.path)
+            ));
+            continue;
+        };
         let shown = report::shown(root, &file.path);
         let input = RustFile {
             path: &shown,
@@ -138,8 +152,10 @@ mod tests {
         lib_of("craftbridge-media", source)
     }
 
-    fn core_lib(source: &str) -> Vec<String> {
-        lib_of("craftbridge-core", source)
+    /// The plugin crate, which the table does not mark as a platform crate: the example of a crate that
+    /// may hold no `unsafe` at all.
+    fn plugin_lib(source: &str) -> Vec<String> {
+        lib_of("craftbridge-effects", source)
     }
 
     #[test]
@@ -152,14 +168,15 @@ mod tests {
     #[test]
     fn unsafe_anywhere_else_is_reported_with_its_line() {
         let outside = "fn f() {\n    unsafe { }\n}\n";
-        let errors = core_lib(outside);
+        let errors = plugin_lib(outside);
         assert_eq!(errors.len(), 1);
         assert!(errors[0].ends_with(":2: unsafe outside a platform module"), "{errors:?}");
 
         // Even in a `src/platform/` folder, a crate the table does not mark as a platform crate may not
         // use unsafe.
         let wrong_crate = "unsafe { }\n";
-        let errors = check_file(&file("craftbridge-core/src/platform/x.rs", "craftbridge-core", vec!["craftbridge-core", "src", "platform"], wrong_crate));
+        let errors =
+            check_file(&file("craftbridge-effects/src/platform/x.rs", "craftbridge-effects", vec!["craftbridge-effects", "src", "platform"], wrong_crate));
         assert!(errors.iter().any(|e| e.contains("unsafe outside a platform module")), "{errors:?}");
     }
 
@@ -181,7 +198,7 @@ mod tests {
         for spelling in
             [format!("#![allow(\n    {UNSAFE_CODE},\n)]\n"), format!("#![cfg_attr(all(), allow({UNSAFE_CODE}))]\n"), format!("#![warn({UNSAFE_CODE})]\n")]
         {
-            let errors = core_lib(&spelling);
+            let errors = plugin_lib(&spelling);
             assert!(errors.iter().any(|e| e.contains(":1:") && e.contains("crate-wide")), "{spelling:?}: {errors:?}");
         }
     }
@@ -202,18 +219,18 @@ mod tests {
         {
             assert!(media_lib(elsewhere).iter().any(|e| e.contains("mod platform")), "{elsewhere:?}");
         }
-        let wrong_crate = core_lib("#[allow(unsafe_code)]\npub mod platform;\n");
+        let wrong_crate = plugin_lib("#[allow(unsafe_code)]\npub mod platform;\n");
         assert!(!wrong_crate.is_empty(), "{wrong_crate:?}");
     }
 
     #[test]
     fn a_quoted_or_commented_unsafe_does_not_count() {
         let source = "//! the keyword this rule confines is quoted in docs all the time: unsafe\nlet example = \"unsafe\";\n// unsafe\n/* unsafe */\nlet raw = r\"unsafe\";\nlet hint = \"#![allow(unsafe_code)]\";\n";
-        let errors = core_lib(source);
+        let errors = plugin_lib(source);
         assert!(errors.is_empty(), "{errors:?}");
         // And the keyword still counts on the line after a multi-line comment.
         let after = "/* doc\nunsafe */\nunsafe { }\n";
-        let errors = core_lib(after);
+        let errors = plugin_lib(after);
         assert!(errors.iter().any(|e| e.contains(":3:")), "{errors:?}");
     }
 
@@ -260,13 +277,55 @@ mod tests {
     #[test]
     fn a_platform_folder_outside_a_platform_crate_is_reported_once() {
         let copy = rust_tree_copy("planted-platform-dir");
-        copy.write("rust/core/craftbridge-core/src/platform/mod.rs", "//! Platform code.\n");
-        copy.write("rust/core/craftbridge-core/src/extra.rs", "//! More.\n");
+        copy.write("rust/effects/craftbridge-effects/src/platform/mod.rs", "//! Platform code.\n");
+        copy.write("rust/effects/craftbridge-effects/src/extra.rs", "//! More.\n");
         let errors = check(&copy.0).unwrap();
         assert_eq!(
             errors,
-            ["rust/core/craftbridge-core/src/platform: craftbridge-core is not a platform crate (rust/xtask/src/layers.rs), so it has no platform module"]
+            [
+                "rust/effects/craftbridge-effects/src/platform: craftbridge-effects is not a platform crate (rust/xtask/src/layers.rs), so it has no platform module"
+            ]
         );
+    }
+
+    #[test]
+    fn the_core_is_a_platform_crate_for_its_memory_module() {
+        // Plan §16 puts the core's memory-pressure code in `craftbridge-core/src/platform/`.
+        assert!(
+            check_file(&file(
+                "craftbridge-core/src/platform/memory.rs",
+                "craftbridge-core",
+                vec!["craftbridge-core", "src", "platform"],
+                "// SAFETY: x\nunsafe {}\n"
+            ))
+            .is_empty()
+        );
+        assert!(lib_of("craftbridge-core", "#[allow(unsafe_code)]\nmod platform;\n").is_empty());
+    }
+
+    #[test]
+    fn an_allow_spelt_as_the_compiler_also_reads_it_is_one() {
+        for spelling in ["#![allow(r#unsafe_code)]\n", "# ![allow(unsafe_code)]\n", "#\n![allow(unsafe_code)]\n"] {
+            let errors = lib_of("craftbridge-media", spelling);
+            assert!(errors.iter().any(|e| e.contains(":1:") && e.contains("crate-wide")), "{spelling:?}: {errors:?}");
+        }
+        let outer = lib_of("craftbridge-media", "# [allow(r#unsafe_code)]\nfn f() {}\n");
+        assert!(outer.iter().any(|e| e.contains("belongs only on a platform crate's `mod platform`")), "{outer:?}");
+        // A lint a macro fills in may be `unsafe_code`; an attribute forwarded onto one item is not a level.
+        let macro_lint = lib_of("craftbridge-media", "macro_rules! m { ($l:ident) => { #![allow($l)] }; }\n");
+        assert!(!macro_lint.is_empty(), "{macro_lint:?}");
+        assert!(lib_of("craftbridge-media", "macro_rules! m { ($(#[$a:meta])* $i:item) => { $(#[$a])* $i }; }\n").is_empty());
+    }
+
+    #[test]
+    fn a_rust_file_in_no_crate_is_reported() {
+        let copy = rust_tree_copy("planted-loose-file");
+        copy.write(
+            "rust/core/shared.rs",
+            "#![allow(unsafe_code)]\npub fn read(value: &u8) -> u8 {\n    // SAFETY: a reference is valid.\n    unsafe { *std::ptr::from_ref(value) }\n}\n",
+        );
+        let errors = check(&copy.0).unwrap();
+        assert!(errors.iter().any(|e| e.starts_with("rust/core/shared.rs: a Rust file in no crate's folder")), "{errors:?}");
     }
 
     #[test]

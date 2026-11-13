@@ -8,12 +8,17 @@
 //! in the output of a generator `cargo xtask generate` registers. Without that last rule a generated
 //! directory nothing owns would hold code every other rule skips and nothing compares.
 //!
-//! JSON is the exception the rule itself makes: it has no comment syntax, so it cannot carry a header.
-//! Binary files are skipped; they are not source. Two kinds of written-for-you file sit outside this
-//! rule, as §6 says: what a build tool writes for itself (`Cargo.lock`, `Package.resolved`, the Gradle
-//! wrapper), which the tool owns: their formats are not read here, bar the wrapper's properties file,
-//! which carries no marker; and the plan's views in `plan/`, which are not in the trees below at all —
-//! the plan kit builds them from their sources and its own `plan check --final` owns them.
+//! A header exists only where the format allows a comment, so every format is read for one except those
+//! that cannot hold a comment at all — JSON, which the rule itself names, lock files and plain text —
+//! and binary files, which are not source. A format nobody listed is read rather than skipped, because
+//! a list of what can hold a comment would quietly skip the next format to arrive. Markdown counts only
+//! its HTML comment, `<!--`, so a `# heading` that names the marker is not taken for a header. Two kinds of
+//! written-for-you file sit outside this rule, as §6 says: what a build tool writes for itself
+//! (`Cargo.lock`, `Package.resolved`, the Gradle wrapper), which the tool owns, so their files are not
+//! read here, bar the wrapper's properties file, which carries no marker; and the plan's views in
+//! `plan/`, which are not in the trees below at all — the plan kit builds them from their sources and
+//! its own `plan check --final` owns them. What `tools/update-upstream.sh` writes into `rust/Cargo.toml`
+//! is a table in a hand-written file, which this rule does not read either.
 
 use crate::scan::{self, FoundFile};
 use std::collections::BTreeSet;
@@ -23,56 +28,45 @@ use std::path::Path;
 /// The marker every generated file carries in its header.
 pub(crate) const MARKER: &str = "@generated";
 
-/// How many lines a header is allowed to hide in: UniFFI's and Cargo's own markers are first or second,
-/// and five is room enough for a shebang and a licence line without letting a marker sink out of sight.
+/// How many lines a header is allowed to hide in. Cargo's own banner is on line 1; UniFFI writes no
+/// marker at all, so whatever registers UniFFI's output prepends one. Five is a policy, room for a shebang
+/// and a licence line without letting a marker sink out of sight, not a fit to any tool's output.
 const HEADER_LINES: usize = 5;
 
-/// The comment openers a header can start with, across the formats in [`HEADER_EXTENSIONS`]: `#` (shell,
-/// TOML, YAML, ProGuard, properties), `//` (Rust, Swift, Kotlin, C, Objective-C, JS, module maps), `/*`
-/// (the same languages' block comments, CSS) and `<!--` (XML, SVG, HTML). The marker counts only inside
-/// a line that opens with one, which is what a *header* means.
+/// The comment openers a header can start with: `#` (shell, TOML, YAML, ProGuard, properties), `//`
+/// (Rust, Swift, Kotlin, C, Objective-C, JS, module maps), `/*` (the same languages' block comments,
+/// CSS) and `<!--` (XML, SVG, HTML, Markdown). The marker counts only inside a comment that opens a
+/// line, or inside a block comment opened that way, which is what a *header* means.
 const COMMENT_OPENERS: &[&str] = &["#", "//", "/*", "<!--"];
 
-/// The extensions of the formats these trees hold that can carry a header comment. A header exists only
-/// where the format allows a comment, so a file outside this list is neither required to carry one nor
-/// believed when it claims to: `.md`, `.json`, `.lock`, `.png` and the rest are not generated source.
-const HEADER_EXTENSIONS: &[&str] = &[
-    ".rs",
-    ".swift",
-    ".kt",
-    ".kts",
-    ".java",
-    ".h",
-    ".c",
-    ".m",
-    ".modulemap",
-    ".toml",
-    ".ts",
-    ".js",
-    ".py",
-    ".sh",
-    ".bash",
-    ".zsh",
-    ".yaml",
-    ".yml",
-    ".xml",
-    ".svg",
-    ".html",
-    ".css",
-    ".scss",
-    ".pro",
-    ".properties",
-    ".gradle",
-];
+/// The block comments a header may spread over lines, with what closes each.
+const BLOCK_COMMENTS: &[(&str, &str)] = &[("/*", "*/"), ("<!--", "-->")];
+
+/// Formats that hold no comment, so neither need nor can carry a header: a marker quoted in one (a
+/// Cargo.lock line, a JSON string) is data, not this repository claiming a file.
+const NO_COMMENT_EXTENSIONS: &[&str] = &[".json", ".lock", ".resolved", ".txt", ".jar"];
+
+/// Formats whose only comment is the HTML one.
+const HTML_COMMENT_ONLY: &[&str] = &[".md", ".markdown"];
+
+/// The files a build tool writes for itself, which §6 leaves to that tool.
+const BUILD_TOOL_FILES: &[&str] = &["Cargo.lock", "Package.resolved", "gradlew", "gradlew.bat"];
 
 /// The trees that hold code or data a generator could write.
-const TREES: &[&str] = &["rust", "ios", "android", "docs", "conformance", "tools", ".github"];
+pub(crate) const TREES: &[&str] = &["rust", "ios", "android", "docs", "conformance", "tools", ".github"];
 
-/// Can this file name hold a header comment at all? `.json` is named in the rule precisely because it
-/// cannot; everything outside [`HEADER_EXTENSIONS`] cannot for the same reason.
+/// Can this file hold a header comment at all? Every format can but those in [`NO_COMMENT_EXTENSIONS`]
+/// and the build tools' own files.
 fn can_carry_header(path: &Path) -> bool {
-    let name = path.file_name().map(|name| name.to_string_lossy().to_lowercase()).unwrap_or_default();
-    HEADER_EXTENSIONS.iter().any(|extension| name.ends_with(extension))
+    let stored = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = stored.to_lowercase();
+    !BUILD_TOOL_FILES.contains(&stored.as_str()) && !NO_COMMENT_EXTENSIONS.iter().any(|extension| name.ends_with(extension))
+}
+
+/// The comment openers a file's format has.
+fn openers_for(path: &str) -> &'static [&'static str] {
+    let name = path.to_lowercase();
+    if HTML_COMMENT_ONLY.iter().any(|extension| name.ends_with(extension)) { &["<!--"] } else { COMMENT_OPENERS }
 }
 
 /// A file's head, split into lines, with the marker question already answered.
@@ -103,19 +97,43 @@ pub(crate) fn check_head(head: &Head) -> Vec<String> {
     }
 }
 
-/// Does the head carry the marker, in a comment, within the first lines?
+/// Does the head carry the marker, in a comment, within the first lines? A line counts when it opens
+/// with one of the format's comment openers, or when it lies inside a block comment such a line opened
+/// (` * @generated` in a docblock).
 fn has_header(head: &Head) -> bool {
-    head.lines.iter().take(HEADER_LINES).any(|line| {
-        let text = line.trim_start();
-        COMMENT_OPENERS.iter().any(|opener| text.starts_with(opener)) && text.contains(MARKER)
-    })
+    let openers = openers_for(&head.path);
+    let mut open_block: Option<&str> = None;
+    for line in head.lines.iter().take(HEADER_LINES) {
+        let text = scan::without_bom(line).trim_start();
+        let commented = match open_block {
+            Some(closer) => {
+                if text.contains(closer) {
+                    open_block = None;
+                }
+                true
+            }
+            None => match openers.iter().find(|opener| text.starts_with(**opener)) {
+                Some(opener) => {
+                    let closer = BLOCK_COMMENTS.iter().find(|(block, _)| block == opener).map(|(_, closer)| *closer);
+                    open_block = closer.filter(|closer| !text.get(opener.len()..).is_some_and(|rest| rest.contains(closer)));
+                    true
+                }
+                None => false,
+            },
+        };
+        if commented && text.contains(MARKER) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Read the first `HEADER_LINES` lines without reading the rest: a marker is always near the top, and a
-/// large committed file is nobody's business here. A line that is not UTF-8 ends the head.
+/// large committed file is nobody's business here. A line that is not UTF-8 ends the head, and a leading
+/// byte-order mark is not part of the first line.
 fn head_lines(path: &Path) -> Vec<String> {
     match std::fs::File::open(path) {
-        Ok(file) => BufReader::new(file).lines().take(HEADER_LINES).map_while(Result::ok).collect(),
+        Ok(file) => BufReader::new(file).lines().take(HEADER_LINES).map_while(Result::ok).map(|line| scan::without_bom(&line).to_string()).collect(),
         Err(_) => Vec::new(),
     }
 }
@@ -253,6 +271,37 @@ mod tests {
         scratch.mkdir("plan");
         scratch.write("plan/GENERATED.md", format!("<!-- {MARKER} by the plan kit. -->\n"));
         assert!(check_against(&scratch.0, &[]).unwrap().is_empty(), "plan/ is not one of the trees this rule reads");
+    }
+
+    #[test]
+    fn every_format_that_holds_a_comment_is_read_and_only_those_that_cannot_are_skipped() {
+        for name in ["commands.md", "Bridge.mm", "Plant.xcconfig", "Info.plist", "tool.mjs", "plant.rb", "Package.swift", "pre-push"] {
+            assert!(can_carry_header(Path::new(name)), "{name} holds a comment");
+        }
+        for name in ["corpus.json", "Cargo.lock", "Package.resolved", "notes.txt", "gradlew", "gradlew.bat", "gradle-wrapper.jar"] {
+            assert!(!can_carry_header(Path::new(name)), "{name} holds none, or is its tool's");
+        }
+        // A generated Markdown file needs the marker in its HTML comment, and a stray one is caught.
+        let unmarked = head("docs/generated/commands.md", &["# Commands", ""], true);
+        assert!(check_head(&unmarked).iter().any(|e| e.contains("must carry")), "{unmarked:?}");
+        let stray = head("conformance/effects/README.md", &[&format!("<!-- {MARKER} by a tool -->")], false);
+        assert_eq!(check_head(&stray), ["conformance/effects/README.md: generated file outside a generated directory"]);
+        // A heading that names the marker is prose, not a header.
+        assert!(check_head(&head("docs/rules.md", &[&format!("# Why {MARKER} matters")], false)).is_empty());
+    }
+
+    #[test]
+    fn a_marker_inside_a_block_comment_or_after_a_byte_order_mark_counts() {
+        let docblock = head("rust/core/x/src/plant.rs", &["/*", &format!(" * {MARKER} by a tool"), " */"], false);
+        assert!(!check_head(&docblock).is_empty(), "a docblock marker outside a generated directory");
+        let generated = head("ios/sdk/Sources/Generated/Api.swift", &["/*", &format!(" * {MARKER} by a tool"), " */"], true);
+        assert!(check_head(&generated).is_empty(), "the same docblock is a header inside one");
+        let html = head("docs/generated/a.md", &["<!--", &format!("  {MARKER}"), "-->"], true);
+        assert!(check_head(&html).is_empty());
+        let closed = head("x.rs", &["/* a comment */", &format!("let marker = \"{MARKER}\";")], false);
+        assert!(check_head(&closed).is_empty(), "past a closed block comment the marker is code again");
+        let bom = head("rust/core/x/src/plant_bom.rs", &[&format!("{}// {MARKER}", '\u{FEFF}')], false);
+        assert!(!check_head(&bom).is_empty(), "a byte-order mark is not the line's first character");
     }
 
     #[test]

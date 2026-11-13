@@ -30,7 +30,8 @@ has() { command -v "$1" >/dev/null 2>&1; }
 if ! has rustup; then
   gap "rustup" "install it from https://rustup.rs"
 elif ! rustup run "$CRAFTBRIDGE_RUST_CHANNEL" rustc --version >/dev/null 2>&1; then
-  gap "Rust $CRAFTBRIDGE_RUST_CHANNEL" "rustup toolchain install $CRAFTBRIDGE_RUST_CHANNEL --component rustfmt,clippy"
+  # One fix for the toolchain and its targets, so a second run finds nothing left to do.
+  gap "Rust $CRAFTBRIDGE_RUST_CHANNEL" "rustup toolchain install $CRAFTBRIDGE_RUST_CHANNEL --component rustfmt,clippy --target $(printf '%s' "$CRAFTBRIDGE_RUST_TARGETS" | tr ' ' ',')"
 else
   ok "Rust $(rustup run "$CRAFTBRIDGE_RUST_CHANNEL" rustc --version | cut -d' ' -f2)"
   installed="$(rustup target list --installed --toolchain "$CRAFTBRIDGE_RUST_CHANNEL")"
@@ -42,27 +43,43 @@ if has cargo-deny; then ok "cargo-deny $(cargo deny --version | cut -d' ' -f2)";
 
 # Apple: the pinned Xcode, its iOS Simulator SDK and the formatter it ships.
 xcode="$(xcodebuild -version 2>/dev/null | sed -n 's/^Xcode //p' || true)"
+selected="$(xcode-select -p 2>/dev/null || true)"
 if [ "$xcode" = "$CRAFTBRIDGE_XCODE" ]; then
   ok "Xcode $xcode"
+elif [ -z "$xcode" ] && [ -d "$selected" ] && [ "${selected%/Contents/Developer}" != "$selected" ]; then
+  # An Xcode is selected but will not run: its licence is not accepted or its first launch is pending.
+  gap "Xcode $CRAFTBRIDGE_XCODE (the selected ${selected%/Contents/Developer} does not run)" "sudo xcodebuild -license accept && xcodebuild -runFirstLaunch"
 else
   gap "Xcode $CRAFTBRIDGE_XCODE (found: ${xcode:-none})" "install Xcode $CRAFTBRIDGE_XCODE from https://developer.apple.com/download/applications/ and select it: sudo xcode-select -s /Applications/Xcode.app"
 fi
 if xcrun --sdk iphonesimulator --show-sdk-path >/dev/null 2>&1; then ok "iOS Simulator SDK"; else gap "iOS Simulator SDK" "Xcode > Settings > Components: install the iOS platform"; fi
 if xcrun --find swift-format >/dev/null 2>&1; then ok "swift-format $(xcrun swift-format --version)"; else gap "swift-format" "it ships with Xcode $CRAFTBRIDGE_XCODE; select that Xcode"; fi
 
-# Android: the SDK platform and build tools Gradle compiles against, the NDK, and JDK 21.
+# Android: the SDK platform and build tools Gradle compiles against (both pinned in the version catalog),
+# and the JDK Gradle runs on.
+# The fix for an SDK package: the SDK's own sdkmanager, told which SDK it installs into. Another one on
+# PATH (Homebrew's, say) ignores ANDROID_HOME and installs somewhere the build never looks.
+sdk_fix() {
+  local sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+  local install="\"$sdkmanager\" --sdk_root=\"$ANDROID_HOME\" \"$1\""
+  if [ -x "$sdkmanager" ]; then
+    printf '%s' "$install"
+  else
+    printf 'install the Android SDK Command-line Tools (Android Studio > Settings > Android SDK > SDK Tools), then %s' "$install"
+  fi
+}
 if [ -d "$ANDROID_HOME/platforms" ]; then
   ok "Android SDK at $ANDROID_HOME"
-  if compgen -G "$ANDROID_HOME/platforms/android-$CRAFTBRIDGE_ANDROID_API*" >/dev/null; then ok "Android platform $CRAFTBRIDGE_ANDROID_API"; else gap "Android platform $CRAFTBRIDGE_ANDROID_API" "sdkmanager \"platforms;android-$CRAFTBRIDGE_ANDROID_API.0\""; fi
-  if compgen -G "$ANDROID_HOME/build-tools/$CRAFTBRIDGE_ANDROID_API.*" >/dev/null; then ok "Android build tools $CRAFTBRIDGE_ANDROID_API"; else gap "Android build tools $CRAFTBRIDGE_ANDROID_API" "sdkmanager \"build-tools;$CRAFTBRIDGE_ANDROID_API.0.0\""; fi
-  # `|| true`: with no ndk folder find fails, and under pipefail that would end the doctor before it
-  # printed the fix.
-  ndk="$(find "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -name "$CRAFTBRIDGE_NDK_MAJOR.*" 2>/dev/null | sort | tail -n 1 || true)"
-  if [ -n "$ndk" ]; then ok "Android NDK $(basename "$ndk")"; else gap "Android NDK r$CRAFTBRIDGE_NDK_MAJOR" "sdkmanager \"ndk;$CRAFTBRIDGE_NDK_VERSION\" (NDK r$CRAFTBRIDGE_NDK_MAJOR aligns native libraries to 16 KB pages)"; fi
+  if compgen -G "$ANDROID_HOME/platforms/android-$CRAFTBRIDGE_ANDROID_API*" >/dev/null; then ok "Android platform $CRAFTBRIDGE_ANDROID_API"; else gap "Android platform $CRAFTBRIDGE_ANDROID_API" "$(sdk_fix "platforms;android-$CRAFTBRIDGE_ANDROID_API.0")"; fi
+  if [ -d "$ANDROID_HOME/build-tools/$CRAFTBRIDGE_ANDROID_BUILD_TOOLS" ]; then ok "Android build tools $CRAFTBRIDGE_ANDROID_BUILD_TOOLS"; else gap "Android build tools $CRAFTBRIDGE_ANDROID_BUILD_TOOLS" "$(sdk_fix "build-tools;$CRAFTBRIDGE_ANDROID_BUILD_TOOLS")"; fi
 else
   gap "Android SDK (looked in $ANDROID_HOME)" "install Android Studio, or set ANDROID_HOME to an Android SDK"
 fi
-if [ -n "${CRAFTBRIDGE_JDK:-}" ]; then ok "JDK 21 at $CRAFTBRIDGE_JDK"; else gap "JDK 21 for Gradle" "brew install openjdk@21, or install Android Studio (it bundles JDK 21), or point JAVA_HOME at a JDK 21"; fi
+if [ -n "${CRAFTBRIDGE_JDK:-}" ]; then
+  ok "JDK $CRAFTBRIDGE_JDK_MAJOR at $CRAFTBRIDGE_JDK"
+else
+  gap "JDK $CRAFTBRIDGE_JDK_MAJOR for Gradle" "brew install openjdk@$CRAFTBRIDGE_JDK_MAJOR (tools/env.sh finds Homebrew's keg), or install Android Studio (it bundles JDK $CRAFTBRIDGE_JDK_MAJOR), or point JAVA_HOME at a JDK $CRAFTBRIDGE_JDK_MAJOR"
+fi
 
 # The gate's other tools.
 if has shellcheck; then ok "shellcheck $(shellcheck --version | sed -n 's/^version: //p')"; else gap "shellcheck" "brew install shellcheck"; fi
@@ -70,7 +87,14 @@ node_major="$(node --version 2>/dev/null | sed -n 's/^v\([0-9]*\).*/\1/p' || tru
 if [ -n "$node_major" ] && [ "$node_major" -ge 18 ] && has npx; then ok "Node.js $(node --version) (runs $CRAFTBRIDGE_JSCPD)"; else gap "Node.js 18 or later" "brew install node"; fi
 
 if [ "$mode" = full ]; then
-  # The mobile library builds.
+  # The mobile library builds. No gate stage compiles native code for Android yet (rust_mobile builds no
+  # C), so the NDK is a need of the library builds alone. `-H` follows an ndk/ that is itself a symbolic
+  # link; `|| true`: with no ndk folder find fails, and under pipefail that would end the doctor before
+  # it printed the fix.
+  if [ -d "$ANDROID_HOME/platforms" ]; then
+    ndk="$(find -H "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -name "$CRAFTBRIDGE_NDK_MAJOR.*" 2>/dev/null | sort | tail -n 1 || true)"
+    if [ -n "$ndk" ]; then ok "Android NDK $(basename "$ndk")"; else gap "Android NDK r$CRAFTBRIDGE_NDK_MAJOR" "$(sdk_fix "ndk;$CRAFTBRIDGE_NDK_VERSION") (NDK r$CRAFTBRIDGE_NDK_MAJOR aligns native libraries to 16 KB pages)"; fi
+  fi
   if has cargo-ndk; then ok "cargo-ndk $(cargo ndk --version | cut -d' ' -f2)"; else gap "cargo-ndk" "cargo install --locked cargo-ndk"; fi
   if [ -d "$CRAFTBRIDGE_ROOT/rust/uniffi-bindgen" ]; then
     ok "uniffi-bindgen (rust/uniffi-bindgen, at the library's UniFFI version)"
@@ -89,16 +113,21 @@ if [ "$mode" = full ]; then
     # One scope per line, matched whole: `repo:status` is not `repo`. `|| true` keeps a failed request
     # a missing scope rather than the end of the doctor.
     scopes="$(GH_TOKEN="$token" gh api -i user 2>/dev/null | sed -n 's/^[Xx]-[Oo][Aa]uth-[Ss]copes: //p' | tr -d '\r ' | tr ',' '\n' || true)"
+    # `gh auth refresh` acts on the active account only (it has no --user), so the fix switches to the
+    # owner's account first and back afterwards.
+    refresh() { printf 'gh auth switch --user %s && gh auth refresh -s %s, then gh auth switch back to the account you use' "$owner" "$1"; }
     for scope in repo workflow; do
-      if grep -qx "$scope" <<<"$scopes"; then ok "GitHub token for $owner: $scope"; else gap "GitHub token for $owner: $scope scope" "gh auth refresh -s $scope --user $owner"; fi
+      if grep -qx "$scope" <<<"$scopes"; then ok "GitHub token for $owner: $scope"; else gap "GitHub token for $owner: $scope scope" "$(refresh "$scope")"; fi
     done
-    if grep -qx "write:packages" <<<"$scopes"; then ok "GitHub token for $owner: write:packages"; else note "GitHub token for $owner lacks write:packages, which only publishing the Android libraries needs: gh auth refresh -s write:packages --user $owner"; fi
+    if grep -qx "write:packages" <<<"$scopes"; then ok "GitHub token for $owner: write:packages"; else note "GitHub token for $owner lacks write:packages, which only publishing the Android libraries needs: $(refresh write:packages)"; fi
   fi
 fi
 
 if [ "$install_hooks" = 1 ]; then
+  # Written to the repository's shared configuration, so every worktree of it gets the setting at once;
+  # the path is relative, so each runs its own tools/hooks/pre-push.
   git -C "$CRAFTBRIDGE_ROOT" config core.hooksPath tools/hooks
-  ok "git hooks: tools/hooks (the gate runs before every push)"
+  ok "git hooks: tools/hooks, for every worktree of this repository (the gate runs on the checkout before every push)"
 elif [ "$(git -C "$CRAFTBRIDGE_ROOT" config --get core.hooksPath 2>/dev/null || true)" = "tools/hooks" ]; then
   ok "git hooks: tools/hooks"
 else

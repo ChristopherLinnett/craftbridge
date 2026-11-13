@@ -34,6 +34,7 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
 
             extensions.configure<LibraryExtension> {
                 compileSdk = catalogVersion("android-compileSdk").toInt()
+                buildToolsVersion = catalogVersion("android-buildTools")
                 defaultConfig {
                     minSdk = catalogVersion("android-minSdk").toInt()
                     // Published inside the AAR, so an app that shrinks its code keeps what the native
@@ -41,8 +42,9 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                     consumerProguardFiles("consumer-rules.pro")
                 }
                 compileOptions {
-                    sourceCompatibility = JavaVersion.VERSION_17
-                    targetCompatibility = JavaVersion.VERSION_17
+                    val bytecode = JavaVersion.toVersion(catalogVersion("java-bytecode"))
+                    sourceCompatibility = bytecode
+                    targetCompatibility = bytecode
                 }
                 lint {
                     // A warning left in place becomes a permanent one, so it fails the build here.

@@ -1,4 +1,5 @@
-//! CraftBridge's rule checks and regeneration: `cargo xtask rules` and `cargo xtask generate`.
+//! CraftBridge's rule checks and regeneration: `cargo xtask rules` and `cargo xtask generate`, and the
+//! one judgement `tools/ci.sh` hands over from a stage it runs, `cargo xtask skipped-tasks <gradle log>`.
 //!
 //! The rules in `AGENTS.md` that no compiler, formatter or linter already enforces are checked here,
 //! behind one command, so a change cannot merge with one broken. Each check lives in its own module: a
@@ -14,6 +15,7 @@ mod direction;
 mod duplicates;
 mod generate;
 mod generated;
+mod gradle_log;
 mod layers;
 mod layout;
 mod licences;
@@ -47,6 +49,7 @@ fn main() -> ExitCode {
         ["rules"] => rules::run(&root),
         ["generate"] => generate::run(&root, false),
         ["generate", "--check"] => generate::run(&root, true),
+        ["skipped-tasks", log] => gradle_log::run(log),
         _ => {
             usage();
             ExitCode::from(2)
@@ -57,6 +60,7 @@ fn main() -> ExitCode {
 fn usage() {
     eprintln!("usage: cargo xtask rules");
     eprintln!("       cargo xtask generate [--check]");
+    eprintln!("       cargo xtask skipped-tasks <gradle log>");
 }
 
 /// Run every check, print one line per failure and `ok` per clean check, and fail if any failed.
@@ -65,9 +69,11 @@ mod rules {
     use std::path::Path;
     use std::process::ExitCode;
 
+    /// One check: its name, and what it reads from the repository to return its errors.
+    type Check = (&'static str, fn(&Path) -> Result<Vec<String>, String>);
+
     pub(super) fn run(root: &Path) -> ExitCode {
-        // Each check reads what it needs from the repository and returns its errors.
-        let checks: [(&str, fn(&Path) -> Result<Vec<String>, String>); 11] = [
+        let checks: [Check; 11] = [
             ("layout", crate::layout::check),
             ("machinery", crate::machinery::check),
             ("buildfiles", crate::buildfiles::check),
@@ -80,22 +86,50 @@ mod rules {
             ("licences", crate::licences::check),
             ("duplicates", crate::duplicates::check),
         ];
+        let (failed, lines) = outcome(root, &checks);
+        for line in lines {
+            println!("{line}");
+        }
+        if failed { ExitCode::from(1) } else { ExitCode::SUCCESS }
+    }
+
+    /// Run every check, even after one fails, and return whether any did with the lines to print: one
+    /// per failure, `ok` per clean check, and a check that could not run is a failure in its own words.
+    fn outcome(root: &Path, checks: &[Check]) -> (bool, Vec<String>) {
         let mut failed = false;
+        let mut lines = Vec::new();
         for (name, run_check) in checks {
             match run_check(root) {
-                Ok(errors) if errors.is_empty() => report::ok(name),
+                Ok(errors) if errors.is_empty() => lines.push(report::ok_line(name)),
                 Ok(errors) => {
                     failed = true;
-                    for error in errors {
-                        report::error(name, error);
-                    }
+                    lines.extend(errors.into_iter().map(|error| report::error_line(name, error)));
                 }
                 Err(failure) => {
                     failed = true;
-                    report::error(name, format!("could not run this check: {failure}"));
+                    lines.push(report::error_line(name, format!("could not run this check: {failure}")));
                 }
             }
         }
-        if failed { ExitCode::from(1) } else { ExitCode::SUCCESS }
+        (failed, lines)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn every_check_runs_after_one_fails_and_one_that_cannot_run_fails() {
+            let checks: [Check; 3] = [
+                ("first", |_| Ok(vec!["broken here".to_string()])),
+                ("second", |_| Err("cargo metadata exited with 101".to_string())),
+                ("third", |_| Ok(Vec::new())),
+            ];
+            let (failed, lines) = outcome(Path::new("."), &checks);
+            assert!(failed);
+            assert_eq!(lines, ["rules: first: broken here", "rules: second: could not run this check: cargo metadata exited with 101", "rules: third: ok"]);
+            let (failed, lines) = outcome(Path::new("."), &checks[2..]);
+            assert!(!failed && lines == ["rules: third: ok"]);
+        }
     }
 }

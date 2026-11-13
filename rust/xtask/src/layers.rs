@@ -54,7 +54,8 @@ pub(crate) struct Entry {
 }
 
 /// Every crate in the workspace, lowest layer first. Add a crate here in the same change that adds it,
-/// or the check fails; a row whose crate is gone fails it too.
+/// or the check fails; a row whose crate is gone fails it too, whether its folder went or the crate in it
+/// was renamed.
 pub(crate) const ENTRIES: &[Entry] = &[
     Entry {
         name: "craftbridge-media",
@@ -66,7 +67,7 @@ pub(crate) const ENTRIES: &[Entry] = &[
         build: false,
         upstream: &["filmcraft-codecs", "filmcraft-isobmff"],
     },
-    Entry { name: "craftbridge-core", kind: Kind::Core, rank: 1, ffi: false, distribution: false, platform: false, build: false, upstream: &[] },
+    Entry { name: "craftbridge-core", kind: Kind::Core, rank: 1, ffi: false, distribution: false, platform: true, build: false, upstream: &[] },
     Entry { name: "craftbridge-core-ffi", kind: Kind::Core, rank: 2, ffi: true, distribution: false, platform: true, build: false, upstream: &[] },
     Entry { name: "craftbridge-effects", kind: Kind::App("effects"), rank: 0, ffi: false, distribution: false, platform: false, build: false, upstream: &[] },
     Entry { name: "craftbridge-effects-ffi", kind: Kind::App("effects"), rank: 1, ffi: true, distribution: true, platform: false, build: false, upstream: &[] },
@@ -95,6 +96,14 @@ pub(crate) struct CraftApp {
     pub(crate) crates: &'static str,
 }
 
+impl CraftApp {
+    /// Is `name` one of this app's crates: its prefix, or the bare app name (`effectcraft`) the app's own
+    /// binary crate carries?
+    pub(crate) fn owns(&self, name: &str) -> bool {
+        name.starts_with(self.crates) || name == self.crates.trim_end_matches('-')
+    }
+}
+
 /// The Craft apps whose crates can reach this workspace: EffectCraft, which the effects plugin wraps, and
 /// FilmCraft, whose codecs EffectCraft decodes through. A plugin uses its own app's crates and no other's.
 pub(crate) const CRAFT_APPS: &[CraftApp] = &[CraftApp { noun: "effects", crates: "effectcraft-" }, CraftApp { noun: "film", crates: "filmcraft-" }];
@@ -104,7 +113,7 @@ pub(crate) const CRAFT_LIBRARY_PREFIX: &str = "craft-";
 
 /// The Craft app whose crate `name` is, if it is one.
 fn craft_app_of(name: &str) -> Option<&'static CraftApp> {
-    CRAFT_APPS.iter().find(|app| name.starts_with(app.crates))
+    CRAFT_APPS.iter().find(|app| app.owns(name))
 }
 
 /// A dependency one package declares.
@@ -113,6 +122,11 @@ pub(crate) struct Dependency {
     pub(crate) name: String,
     /// The workspace crate it points at, when it points at one.
     pub(crate) workspace: Option<String>,
+    /// A declared path that is no workspace package's folder, as a message shows it: a crate the table
+    /// and the lint table never see, linked in anyway.
+    pub(crate) outside: Option<String>,
+    /// A dev-dependency: built for the crate's own tests only.
+    pub(crate) dev: bool,
 }
 
 /// A package reduced to what the layer rules read. A struct rather than a tuple because the types would
@@ -123,119 +137,167 @@ pub(crate) struct CrateInput {
     pub(crate) name: String,
     /// The crate's folder relative to `rust/`, `/` separated (`core/craftbridge-core`).
     pub(crate) folder: String,
+    /// The crate's manifest as a message names it, from the repository root.
+    pub(crate) manifest: String,
     pub(crate) dependencies: Vec<Dependency>,
     /// `crate_types` of the package's library targets.
     pub(crate) crate_types: Vec<String>,
+    /// The names of the package's library targets, which are what code imports and what a native
+    /// library's file is called.
+    pub(crate) library_names: Vec<String>,
 }
 
-/// The folder the table says a crate lives in: `<app>/<name>` for an app plugin, `core/<name>` for the
-/// core, and for a tool either `<app>/<name>` when it is an app's tool or `<name>` directly under
-/// `rust/`. Either way the folder name is the crate's name.
-fn expected_folders(row: &Entry) -> Vec<String> {
+/// The one folder the table says a crate lives in: `<app>/<name>` for an app plugin, `core/<name>` for
+/// the core, and for a tool `<app>/<name>` when it is an app's tool (`craftbridge-<app>-…`) or `<name>`
+/// directly under `rust/` when it is no app's. The folder name is always the crate's name.
+fn expected_folder(row: &Entry) -> String {
     match row.kind {
-        Kind::Core => vec![format!("core/{}", row.name)],
-        Kind::App(app) => vec![format!("{app}/{}", row.name)],
-        Kind::Tool => {
-            let mut folders = vec![row.name.to_string()];
-            folders.extend(
-                app_nouns(ENTRIES).into_iter().filter(|app| row.name.starts_with(&format!("craftbridge-{app}-"))).map(|app| format!("{app}/{}", row.name)),
-            );
-            folders
-        }
+        Kind::Core => format!("core/{}", row.name),
+        Kind::App(app) => format!("{app}/{}", row.name),
+        Kind::Tool => match app_nouns(ENTRIES).into_iter().find(|app| row.name.starts_with(&format!("craftbridge-{app}-"))) {
+            Some(app) => format!("{app}/{}", row.name),
+            None => row.name.to_string(),
+        },
     }
 }
 
-/// Check one package: its folder, its name, every edge and its native-library targets.
+/// Check one package: its folder, its name, every edge and its native-library targets. Every message
+/// opens with the crate's manifest, the file to open.
 pub(crate) fn check_crate(input: &CrateInput) -> Vec<String> {
+    let at = &input.manifest;
     let Some(row) = entry(&input.name) else {
-        return vec![format!("{}: not in the layer table (rust/xtask/src/layers.rs)", input.name)];
+        return vec![format!("{at}: {} is not in the layer table (rust/xtask/src/layers.rs)", input.name)];
     };
     let mut errors = Vec::new();
-    let folders = expected_folders(row);
-    if !folders.iter().any(|folder| folder == &input.folder) {
+    let folder = expected_folder(row);
+    if folder != input.folder {
         errors.push(format!(
-            "{}: lives in `{}`, the table says {} (a crate's folder is its name, under its kind)",
+            "{at}: {} lives in `{}`, the table says `{folder}` (a crate's folder is its name, under its kind's folder)",
             input.name,
-            input.folder,
-            folders.join(" or ")
+            if input.folder.is_empty() { "outside rust/" } else { &input.folder }
         ));
     }
-    check_name(row, &mut errors);
+    check_name(row, at, &mut errors);
+    // Cargo names a library target after its package, `-` read as `_`; a `[lib] name` of another name
+    // renames what code imports and the native library that ships, past every naming rule above.
+    let library = row.name.replace('-', "_");
+    for name in input.library_names.iter().filter(|name| **name != library) {
+        errors.push(format!("{at}: {}'s library is named `{name}`: a crate's library carries the crate's name, `{library}`", row.name));
+    }
     for dependency in &input.dependencies {
+        if let Some(path) = &dependency.outside {
+            errors.push(format!(
+                "{at}: {} depends on {} by a path outside the workspace (`{path}`): a crate lives at rust/<kind>/<name> as a workspace member with a row in the layer table",
+                row.name, dependency.name
+            ));
+            continue;
+        }
         match &dependency.workspace {
             Some(target_name) => match entry(target_name) {
-                Some(target) => check_edge(row, target, &mut errors),
-                None => errors.push(format!("{} depends on {target_name}: {target_name} is not in the layer table (rust/xtask/src/layers.rs)", row.name)),
+                Some(target) => check_edge(row, target, dependency.dev, at, &mut errors),
+                None => errors.push(format!("{at}: {} depends on {target_name}: {target_name} is not in the layer table (rust/xtask/src/layers.rs)", row.name)),
             },
-            None => check_external(row, &dependency.name, &mut errors),
+            None if entry(&dependency.name).is_some() => errors.push(format!(
+                "{at}: {} depends on {} from outside the workspace: that is the name of this workspace's own crate, which is taken by its path",
+                row.name, dependency.name
+            )),
+            None => check_external(row, &dependency.name, dependency.dev, at, &mut errors),
         }
     }
+    if input.crate_types.iter().any(|kind| kind == "dylib") {
+        errors.push(format!("{at}: {} is built as a Rust dylib, which carries its own copy of the Rust runtime: an app links one native library", row.name));
+    }
     if builds_native(&input.crate_types) && !row.distribution {
-        errors.push(format!("{} is built as a staticlib or cdylib: only the distribution library the table marks may be", row.name));
+        errors.push(format!("{at}: {} is built as a staticlib or cdylib: only the distribution library the table marks may be", row.name));
+    }
+    if row.distribution && !(input.crate_types.iter().any(|kind| kind == "staticlib") && input.crate_types.iter().any(|kind| kind == "cdylib")) {
+        errors.push(format!(
+            "{at}: {} is the app's distribution library, so it builds both a staticlib (iOS) and a cdylib (Android): crate-type = [\"staticlib\", \"cdylib\", \"lib\"]",
+            row.name
+        ));
     }
     errors
 }
 
 /// A core crate is `craftbridge-<area>`; an app plugin carries its app's noun, which stops one app's
-/// crate being mistaken for another's. A tool keeps the name its convention gives it (`xtask`).
-fn check_name(row: &Entry, errors: &mut Vec<String>) {
+/// crate being mistaken for another's, and so does an app's tool. Any other tool keeps the name its
+/// convention gives it (`xtask`, `uniffi-bindgen`). `at` is how a message names the crate's manifest.
+fn check_name(row: &Entry, at: &str, errors: &mut Vec<String>) {
     match row.kind {
         Kind::Core => {
             if !row.name.starts_with("craftbridge-") {
-                errors.push(format!("{}: a core crate is named craftbridge-<area>", row.name));
+                errors.push(format!("{at}: {}: a core crate is named craftbridge-<area>", row.name));
             }
         }
         Kind::App(app) => {
             let prefixed = format!("craftbridge-{app}-");
             if row.name != format!("craftbridge-{app}") && !row.name.starts_with(&prefixed) {
-                errors.push(format!("{}: a {} plugin crate is named craftbridge-{app} or craftbridge-{app}-…", row.name, app));
+                errors.push(format!("{at}: {}: {} plugin crate is named craftbridge-{app} or craftbridge-{app}-…", row.name, with_article(app)));
             }
         }
-        Kind::Tool => {}
+        Kind::Tool => {
+            let noun = CRAFT_APPS.iter().map(|app| app.noun).find(|noun| row.name.split('-').any(|segment| segment == *noun));
+            if let Some(noun) = noun.filter(|noun| !row.name.starts_with(&format!("craftbridge-{noun}-"))) {
+                errors.push(format!("{at}: {}: a tool of the {noun} app is named craftbridge-{noun}-…, like the app's other crates", row.name));
+            }
+        }
     }
 }
 
-/// One edge between two workspace crates.
-fn check_edge(row: &Entry, target: &Entry, errors: &mut Vec<String>) {
+/// `a` or `an` before an app noun, as a sentence says it.
+fn with_article(noun: &str) -> String {
+    let article = if noun.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" };
+    format!("{article} {noun}")
+}
+
+/// One edge between two workspace crates. A dev-dependency is held to the isolation rules alone — the
+/// core knows no app plugin, and a plugin knows no other app's — because a crate's tests are its code;
+/// the rank and tool rules are about what ships, and a test build ships nothing.
+fn check_edge(row: &Entry, target: &Entry, dev: bool, at: &str, errors: &mut Vec<String>) {
     match (&row.kind, &target.kind) {
         // A tool may depend on anything; nothing may depend on a tool.
         (Kind::Tool, _) => {}
-        (_, Kind::Tool) => errors.push(edge(row, target, "nothing depends on a host tool")),
-        (Kind::Core, Kind::App(app)) => errors.push(edge(row, target, format!("the universal core never depends on the {app} plugin"))),
-        (Kind::App(other), Kind::App(app)) if other != app => {
-            errors.push(edge(row, target, format!("an app plugin never depends on another app's plugin ({other} on {app})")))
+        (Kind::Core, Kind::App(app)) => {
+            errors.push(edge(at, row, target, format!("the universal core never depends on the {app} plugin, not even in its tests")))
         }
+        (Kind::App(other), Kind::App(app)) if other != app => {
+            errors.push(edge(at, row, target, format!("an app plugin never depends on another app's plugin ({other} on {app}), not even in its tests")))
+        }
+        _ if dev => {}
+        (_, Kind::Tool) => errors.push(edge(at, row, target, "nothing depends on a host tool")),
         // Within one kind, and only within it, ranks order the edges; the same rank is a cycle waiting
         // to happen, so equality is not allowed either.
         (Kind::Core, Kind::Core) | (Kind::App(_), Kind::App(_)) if target.rank >= row.rank => {
-            errors.push(edge(row, target, format!("layers point down: {} is rank {} and {} is rank {}", row.name, row.rank, target.name, target.rank)));
+            errors.push(edge(at, row, target, format!("layers point down: {} is rank {} and {} is rank {}", row.name, row.rank, target.name, target.rank)));
         }
         _ => {}
     }
 }
 
-fn edge(row: &Entry, target: &Entry, reason: impl AsRef<str>) -> String {
-    format!("{} depends on {}: {}", row.name, target.name, reason.as_ref())
+fn edge(at: &str, row: &Entry, target: &Entry, reason: impl AsRef<str>) -> String {
+    format!("{at}: {} depends on {}: {}", row.name, target.name, reason.as_ref())
 }
 
 /// An external crate: `uniffi` only at a UniFFI boundary; no Craft app's crates in the universal core
 /// beyond the row's `upstream`; and in an app plugin, its own Craft app's crates and no sibling's. A tool
-/// may depend on anything.
-fn check_external(row: &Entry, name: &str, errors: &mut Vec<String>) {
+/// may depend on anything. A dev-dependency is held to the Craft-app rules only, as in [`check_edge`].
+fn check_external(row: &Entry, name: &str, dev: bool, at: &str, errors: &mut Vec<String>) {
     if row.kind == Kind::Tool {
         return;
     }
-    if name.starts_with("uniffi") && !row.ffi {
-        errors.push(format!("{} depends on {name}: uniffi appears only in -ffi crates (rust/xtask/src/layers.rs)", row.name));
+    if name.starts_with("uniffi") && !row.ffi && !dev {
+        errors.push(format!("{at}: {} depends on {name}: uniffi appears only in -ffi crates (rust/xtask/src/layers.rs)", row.name));
     }
     let Some(app) = craft_app_of(name) else { return };
     match row.kind {
         Kind::Core if !row.upstream.contains(&name) => {
-            errors.push(format!("{} depends on {name}: the universal core knows nothing about any Craft app", row.name));
+            errors.push(format!("{at}: {} depends on {name}: the universal core knows nothing about any Craft app", row.name));
         }
         Kind::App(noun) if noun != app.noun => {
-            errors
-                .push(format!("{} depends on {name}: an app plugin uses only its own Craft app's crates; code two plugins need moves into the core", row.name));
+            errors.push(format!(
+                "{at}: {} depends on {name}: an app plugin uses only its own Craft app's crates; code two plugins need moves into the core",
+                row.name
+            ));
         }
         _ => {}
     }
@@ -280,16 +342,42 @@ fn table_errors(table: &[Entry]) -> Vec<String> {
     errors
 }
 
-/// A table row whose folder is not on disk, so a crate renamed or deleted cannot leave a dead row.
-fn missing_folders(rust_dir: &Path) -> Vec<String> {
-    ENTRIES
-        .iter()
-        .flat_map(|row| {
-            let folders = expected_folders(row);
-            let found = folders.iter().any(|folder| rust_dir.join(folder).is_dir());
-            if found { Vec::new() } else { vec![format!("{}: the table says {}, but there is no such folder under rust/", row.name, folders.join(" or "))] }
-        })
-        .collect()
+/// A table row whose folder is not on disk, or whose crate no workspace package is any more, so a crate
+/// renamed in place or deleted cannot leave a dead row.
+fn missing_crates(rust_dir: &Path, packages: &[&str]) -> Vec<String> {
+    let mut errors = Vec::new();
+    for row in ENTRIES {
+        let folder = expected_folder(row);
+        if !rust_dir.join(&folder).is_dir() {
+            errors.push(format!("rust/xtask/src/layers.rs: {}: the table says `rust/{folder}`, but there is no such folder", row.name));
+        } else if !packages.contains(&row.name) {
+            errors.push(format!("rust/xtask/src/layers.rs: {}: the table has a row for it, but no workspace package is called that any more", row.name));
+        }
+    }
+    errors
+}
+
+/// A crate folder whose name differs from the table's only in case. A case-insensitive disk lets Cargo
+/// find `rust/Core/…` through the members glob `core/*`, so the build passes here and the folder looks
+/// right to every name the rules compare; a case-sensitive checkout then finds no crate at all. The
+/// listing of each parent folder is what the disk really holds.
+fn folder_case_errors(rust_dir: &Path, inputs: &[CrateInput]) -> Vec<String> {
+    let mut errors = Vec::new();
+    for input in inputs.iter().filter(|input| !input.folder.is_empty()) {
+        let mut dir = rust_dir.to_path_buf();
+        for part in input.folder.split('/') {
+            let listed: Vec<String> =
+                std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|entry| entry.file_name().to_string_lossy().into_owned()).collect();
+            if !listed.iter().any(|name| name == part) {
+                if let Some(stored) = listed.iter().find(|name| name.eq_ignore_ascii_case(part)) {
+                    errors.push(format!("{}: the folder `{part}` is stored as `{stored}`: a case-sensitive checkout would find no crate here", input.manifest));
+                }
+                break;
+            }
+            dir = dir.join(part);
+        }
+    }
+    errors
 }
 
 /// A manifest's folder relative to `rust/`, `/` separated, or `None` outside it.
@@ -299,9 +387,10 @@ fn manifest_folder(rust_dir: &Path, manifest: &str) -> Option<String> {
 }
 
 /// Reduce `cargo metadata` to the rules' input. A dependency belongs to the workspace when its declared
-/// path is the folder of a workspace package's manifest; a dependency without a path, or with one
-/// outside the workspace, is external and is judged by its name.
-fn inputs_from(crates: &[Crate], rust_dir: &Path) -> Vec<CrateInput> {
+/// path is the folder of a workspace package's manifest; a dependency with a path anywhere else is a
+/// crate no row and no lint table governs, and is refused; one without a path is external and is judged
+/// by its name. `root` is the repository root, which messages name files from.
+fn inputs_from(crates: &[Crate], rust_dir: &Path, root: &Path) -> Vec<CrateInput> {
     let owner_at = |path: &str| {
         crates.iter().find(|candidate| Path::new(&candidate.manifest_path).parent() == Some(Path::new(path))).map(|candidate| candidate.name.clone())
     };
@@ -310,12 +399,18 @@ fn inputs_from(crates: &[Crate], rust_dir: &Path) -> Vec<CrateInput> {
         .map(|package| CrateInput {
             name: package.name.clone(),
             folder: manifest_folder(rust_dir, &package.manifest_path).unwrap_or_default(),
+            manifest: crate::report::shown(root, Path::new(&package.manifest_path)),
             dependencies: package
                 .dependencies
                 .iter()
-                .map(|dependency| Dependency { name: dependency.name.clone(), workspace: dependency.path.as_deref().and_then(owner_at) })
+                .map(|dependency| {
+                    let workspace = dependency.path.as_deref().and_then(owner_at);
+                    let outside = dependency.path.as_deref().filter(|_| workspace.is_none()).map(|path| crate::report::shown(root, Path::new(path)));
+                    Dependency { name: dependency.name.clone(), workspace, outside, dev: dependency.dev }
+                })
                 .collect(),
             crate_types: package.library_targets.iter().flat_map(|target| target.crate_types.iter().cloned()).collect(),
+            library_names: package.library_targets.iter().map(|target| target.name.clone()).collect(),
         })
         .collect()
 }
@@ -326,12 +421,15 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     let rust_dir = root.join("rust");
     let crates = crate::meta::read(&rust_dir, true)?;
     let mut errors = table_errors(ENTRIES);
-    for input in &inputs_from(&crates, &rust_dir) {
+    let inputs = inputs_from(&crates, &rust_dir, root);
+    for input in &inputs {
         errors.extend(check_crate(input));
     }
+    errors.extend(folder_case_errors(&rust_dir, &inputs));
     // A crate in the workspace but not in the table is reported by check_crate; a table row with no
     // crate is reported here.
-    errors.extend(missing_folders(&rust_dir));
+    let names: Vec<&str> = crates.iter().map(|package| package.name.as_str()).collect();
+    errors.extend(missing_crates(&rust_dir, &names));
     Ok(errors)
 }
 
@@ -342,15 +440,32 @@ mod tests {
     use crate::scratch::Scratch;
 
     fn workspace(name: &str) -> Dependency {
-        Dependency { name: name.to_string(), workspace: Some(name.to_string()) }
+        Dependency { name: name.to_string(), workspace: Some(name.to_string()), outside: None, dev: false }
     }
 
     fn external(name: &str) -> Dependency {
-        Dependency { name: name.to_string(), workspace: None }
+        Dependency { name: name.to_string(), workspace: None, outside: None, dev: false }
+    }
+
+    fn dev(dependency: Dependency) -> Dependency {
+        Dependency { dev: true, ..dependency }
     }
 
     fn input(name: &str, folder: &str, dependencies: Vec<Dependency>, crate_types: Vec<&str>) -> CrateInput {
-        CrateInput { name: name.to_string(), folder: folder.to_string(), dependencies, crate_types: crate_types.iter().map(|kind| kind.to_string()).collect() }
+        CrateInput {
+            name: name.to_string(),
+            folder: folder.to_string(),
+            manifest: format!("rust/{folder}/Cargo.toml"),
+            dependencies,
+            crate_types: crate_types.iter().map(|kind| kind.to_string()).collect(),
+            library_names: if crate_types.is_empty() { Vec::new() } else { vec![name.replace('-', "_")] },
+        }
+    }
+
+    /// The crate types each row is built as when it is compliant: the distribution library builds both
+    /// native kinds, every other crate a plain library.
+    fn compliant_types(row: &Entry) -> Vec<&'static str> {
+        if row.distribution { vec!["staticlib", "cdylib", "lib"] } else { vec!["lib"] }
     }
 
     /// The table as its rows must satisfy it with no edges at all: this is what a fresh skeleton must pass.
@@ -358,55 +473,99 @@ mod tests {
     fn every_table_row_satisfies_its_own_rules() {
         assert!(table_errors(ENTRIES).is_empty(), "{:?}", table_errors(ENTRIES));
         for row in ENTRIES {
-            let folder = expected_folders(row).remove(0);
-            let errors = check_crate(&input(row.name, &folder, Vec::new(), vec!["lib"]));
+            let errors = check_crate(&input(row.name, &expected_folder(row), Vec::new(), compliant_types(row)));
             assert!(errors.is_empty(), "{}: {errors:?}", row.name);
         }
     }
 
-    /// Every table row has its folder on disk.
+    /// Every table row has its folder and its crate on disk.
     #[test]
     fn the_table_matches_the_workspace_on_disk() {
-        let errors = missing_folders(&crate::repo_root().join("rust"));
+        let names: Vec<&str> = ENTRIES.iter().map(|row| row.name).collect();
+        let errors = missing_crates(&crate::repo_root().join("rust"), &names);
         assert!(errors.is_empty(), "{errors:?}");
     }
 
     #[test]
-    fn an_unlisted_crate_is_reported() {
+    fn an_unlisted_crate_is_reported_with_its_manifest() {
         let errors = check_crate(&input("craftbridge-mystery", "core/craftbridge-mystery", Vec::new(), Vec::new()));
-        assert_eq!(errors.len(), 1);
-        assert!(errors[0].contains("not in the layer table"), "{errors:?}");
+        assert_eq!(errors, ["rust/core/craftbridge-mystery/Cargo.toml: craftbridge-mystery is not in the layer table (rust/xtask/src/layers.rs)"]);
     }
 
     #[test]
-    fn a_table_row_without_a_folder_is_reported() {
+    fn a_table_row_without_a_folder_or_a_crate_is_reported() {
         // A folder tree missing one row's folder reports that row, and only it.
         let scratch = Scratch::new("complete");
         for row in ENTRIES.iter().skip(1) {
-            scratch.mkdir(&expected_folders(row).remove(0));
+            scratch.mkdir(&expected_folder(row));
         }
-        let errors = missing_folders(&scratch.0);
+        let names: Vec<&str> = ENTRIES.iter().map(|row| row.name).collect();
+        let errors = missing_crates(&scratch.0, &names);
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert!(errors[0].contains(ENTRIES[0].name), "{errors:?}");
+        assert!(errors[0].contains(ENTRIES[0].name) && errors[0].contains("no such folder"), "{errors:?}");
         // And a folder tree holding every row finds nothing, which is the compliant case.
-        scratch.mkdir(&expected_folders(&ENTRIES[0]).remove(0));
-        assert!(missing_folders(&scratch.0).is_empty());
+        scratch.mkdir(&expected_folder(&ENTRIES[0]));
+        assert!(missing_crates(&scratch.0, &names).is_empty());
+        // A crate renamed in place keeps its folder, and its row is dead all the same.
+        let renamed: Vec<&str> = names.iter().copied().filter(|name| *name != "craftbridge-core").collect();
+        let errors = missing_crates(&scratch.0, &renamed);
+        assert!(errors.len() == 1 && errors[0].contains("craftbridge-core: the table has a row for it"), "{errors:?}");
     }
 
     #[test]
     fn a_crate_in_the_wrong_folder_is_reported() {
         let errors = check_crate(&input("craftbridge-core", "effects/craftbridge-core", Vec::new(), Vec::new()));
-        assert!(errors.iter().any(|e| e.contains("core/craftbridge-core")), "{errors:?}");
-        // An app's tool may live under its app; a tool that is not an app's tool must sit at the top.
+        assert!(errors.iter().any(|e| e.contains("`core/craftbridge-core`")), "{errors:?}");
+        // An app's tool lives under its app, and only there; a tool that is no app's sits at the top.
         assert!(check_crate(&input("craftbridge-effects-codegen", "effects/craftbridge-effects-codegen", Vec::new(), Vec::new())).is_empty());
+        let top = check_crate(&input("craftbridge-effects-codegen", "craftbridge-effects-codegen", Vec::new(), Vec::new()));
+        assert!(top.iter().any(|e| e.contains("the table says `effects/craftbridge-effects-codegen`")), "{top:?}");
         assert!(!check_crate(&input("xtask", "core/xtask", Vec::new(), Vec::new())).is_empty());
+        // A plugin crate in the core's folder is in the wrong kind's folder.
+        let plugin_in_core = check_crate(&input("craftbridge-effects", "core/craftbridge-effects", Vec::new(), Vec::new()));
+        assert!(plugin_in_core.iter().any(|e| e.contains("the table says `effects/craftbridge-effects`")), "{plugin_in_core:?}");
+    }
+
+    #[test]
+    fn a_folder_of_the_right_kind_with_another_name_is_reported() {
+        let renamed = check_crate(&input("craftbridge-media", "core/media", Vec::new(), Vec::new()));
+        assert!(renamed.iter().any(|e| e.contains("lives in `core/media`")), "{renamed:?}");
+        // Two crates that swapped folders are each in a folder that is not their name.
+        let codegen = check_crate(&input("craftbridge-effects-codegen", "effects/craftbridge-effects-conformance", Vec::new(), Vec::new()));
+        let conformance = check_crate(&input("craftbridge-effects-conformance", "effects/craftbridge-effects-codegen", Vec::new(), Vec::new()));
+        assert!(codegen.iter().any(|e| e.contains("lives in")) && conformance.iter().any(|e| e.contains("lives in")), "{codegen:?} {conformance:?}");
+        let outside = check_crate(&input("craftbridge-core", "", Vec::new(), Vec::new()));
+        assert!(outside.iter().any(|e| e.contains("lives in `outside rust/`")), "{outside:?}");
+    }
+
+    #[test]
+    fn a_folder_stored_in_another_case_is_reported() {
+        let scratch = Scratch::new("case-folder");
+        scratch.mkdir("Core/craftbridge-core");
+        let errors = folder_case_errors(&scratch.0, &[input("craftbridge-core", "core/craftbridge-core", Vec::new(), Vec::new())]);
+        assert!(errors.len() == 1 && errors[0].contains("`core` is stored as `Core`"), "{errors:?}");
+        scratch.mkdir("core-other");
+        let scratch = Scratch::new("case-folder-ok");
+        scratch.mkdir("core/craftbridge-core");
+        assert!(folder_case_errors(&scratch.0, &[input("craftbridge-core", "core/craftbridge-core", Vec::new(), Vec::new())]).is_empty());
     }
 
     #[test]
     fn an_app_crate_must_carry_its_app_noun() {
         let effects = entry("craftbridge-effects").unwrap();
         assert!(check_name_of(effects, "craftbridge-effects").is_empty() && check_name_of(effects, "craftbridge-effects-ffi").is_empty());
-        assert!(check_name_of(effects, "craftbridge-other").iter().any(|e| e.contains("effects plugin crate is named")));
+        let other = check_name_of(effects, "craftbridge-other");
+        assert!(other.iter().any(|e| e.contains("an effects plugin crate is named")), "{other:?}");
+    }
+
+    #[test]
+    fn an_app_s_tool_carries_the_app_prefix_and_other_tools_their_own_names() {
+        let tool = entry("xtask").unwrap();
+        assert!(check_name_of(tool, "xtask").is_empty() && check_name_of(tool, "uniffi-bindgen").is_empty());
+        assert!(check_name_of(tool, "craftbridge-film-codegen").is_empty());
+        for misnamed in ["film-codegen", "codegen-effects"] {
+            assert!(check_name_of(tool, misnamed).iter().any(|e| e.contains("a tool of the")), "{misnamed}");
+        }
     }
 
     #[test]
@@ -417,11 +576,55 @@ mod tests {
     }
 
     #[test]
+    fn a_library_target_named_otherwise_is_reported() {
+        let mut ffi = input("craftbridge-effects-ffi", "effects/craftbridge-effects-ffi", Vec::new(), vec!["staticlib", "cdylib", "lib"]);
+        assert!(check_crate(&ffi).is_empty());
+        ffi.library_names = vec!["film_ffi".to_string()];
+        let errors = check_crate(&ffi);
+        assert!(errors.len() == 1 && errors[0].contains("library is named `film_ffi`") && errors[0].contains("`craftbridge_effects_ffi`"), "{errors:?}");
+    }
+
+    #[test]
     fn core_to_app_is_forbidden_and_app_to_core_is_allowed() {
         let upward = check_crate(&input("craftbridge-core", "core/craftbridge-core", vec![workspace("craftbridge-effects")], Vec::new()));
         assert!(upward.iter().any(|e| e.contains("the universal core never depends on the effects plugin")), "{upward:?}");
         let downward = check_crate(&input("craftbridge-effects", "effects/craftbridge-effects", vec![workspace("craftbridge-core")], Vec::new()));
         assert!(downward.is_empty(), "{downward:?}");
+    }
+
+    #[test]
+    fn dev_dependencies_keep_the_isolation_rules_and_nothing_else() {
+        // The core's tests are the core's code: they know no app plugin and no Craft app either.
+        let core = check_crate(&input(
+            "craftbridge-core",
+            "core/craftbridge-core",
+            vec![dev(workspace("craftbridge-effects")), dev(external("effectcraft-time"))],
+            Vec::new(),
+        ));
+        assert_eq!(core.len(), 2, "{core:?}");
+        // A test build ships nothing, so the rank, tool and uniffi rules leave dev-dependencies alone.
+        let shipping_rules = check_crate(&input(
+            "craftbridge-media",
+            "core/craftbridge-media",
+            vec![dev(workspace("craftbridge-core")), dev(workspace("craftbridge-effects-conformance")), dev(external("uniffi"))],
+            Vec::new(),
+        ));
+        assert!(shipping_rules.is_empty(), "{shipping_rules:?}");
+    }
+
+    #[test]
+    fn a_path_dependency_outside_the_workspace_is_refused() {
+        let outside =
+            Dependency { name: "craftbridge-effects-helper".into(), workspace: None, outside: Some("tools/craftbridge-effects-helper".into()), dev: false };
+        let errors = check_crate(&input("craftbridge-core", "core/craftbridge-core", vec![outside], Vec::new()));
+        assert!(
+            errors.len() == 1
+                && errors[0].contains("depends on craftbridge-effects-helper by a path outside the workspace (`tools/craftbridge-effects-helper`)"),
+            "{errors:?}"
+        );
+        // The workspace's own crate under its name, taken from anywhere but its path, is a copy of it.
+        let copy = check_crate(&input("craftbridge-core", "core/craftbridge-core", vec![external("craftbridge-media")], Vec::new()));
+        assert!(copy.iter().any(|e| e.contains("from outside the workspace")), "{copy:?}");
     }
 
     #[test]
@@ -465,8 +668,8 @@ mod tests {
     fn apps_never_depend_on_each_other() {
         let effects = entry("craftbridge-effects").unwrap();
         let mut errors = Vec::new();
-        check_edge(effects, &FILM, &mut errors);
-        check_edge(&FILM, effects, &mut errors);
+        check_edge(effects, &FILM, false, "x", &mut errors);
+        check_edge(&FILM, effects, true, "x", &mut errors);
         assert_eq!(errors.len(), 2, "{errors:?}");
         assert!(errors.iter().all(|e| e.contains("another app's plugin")), "{errors:?}");
         // Two crates of the same app are ordered by rank, and the compliant edge passes.
@@ -486,14 +689,16 @@ mod tests {
         let own = check_crate(&input(
             "craftbridge-effects",
             "effects/craftbridge-effects",
-            vec![external("effectcraft-host"), external("craft-docpath")],
+            vec![external("effectcraft-host"), external("craft-docpath"), external("effectcraft")],
             Vec::new(),
         ));
         assert!(own.is_empty(), "{own:?}");
         let sibling = check_crate(&input("craftbridge-effects", "effects/craftbridge-effects", vec![external("filmcraft-media")], Vec::new()));
         assert!(sibling.iter().any(|e| e.contains("its own Craft app's crates")), "{sibling:?}");
+        let bare = check_crate(&input("craftbridge-effects", "effects/craftbridge-effects", vec![external("filmcraft")], Vec::new()));
+        assert!(bare.iter().any(|e| e.contains("its own Craft app's crates")), "the app's bare crate name is the app's: {bare:?}");
         let mut errors = Vec::new();
-        check_external(&FILM, "effectcraft-engine", &mut errors);
+        check_external(&FILM, "effectcraft-engine", false, "x", &mut errors);
         assert!(errors.iter().any(|e| e.contains("its own Craft app's crates")), "{errors:?}");
     }
 
@@ -507,6 +712,7 @@ mod tests {
         assert!(media.is_empty(), "{media:?}");
         assert!(!check_crate(&input("craftbridge-media", "core/craftbridge-media", vec![external("filmcraft-media")], Vec::new())).is_empty());
         assert!(!check_crate(&input("craftbridge-core", "core/craftbridge-core", vec![external("filmcraft-codecs")], Vec::new())).is_empty());
+        assert!(!check_crate(&input("craftbridge-core", "core/craftbridge-core", vec![external("effectcraft")], Vec::new())).is_empty());
         assert!(check_crate(&input("craftbridge-core", "core/craftbridge-core", vec![external("craft-docpath"), external("serde")], Vec::new())).is_empty());
     }
 
@@ -522,6 +728,12 @@ mod tests {
         let stray = check_crate(&input("craftbridge-effects", "effects/craftbridge-effects", Vec::new(), vec!["cdylib"]));
         assert!(stray.iter().any(|e| e.contains("staticlib or cdylib")), "{stray:?}");
         assert!(check_crate(&input("craftbridge-effects-ffi", "effects/craftbridge-effects-ffi", Vec::new(), vec!["staticlib", "cdylib", "lib"])).is_empty());
+        // The distribution library must build both native kinds, or the app has no native library.
+        let lib_only = check_crate(&input("craftbridge-effects-ffi", "effects/craftbridge-effects-ffi", Vec::new(), vec!["lib"]));
+        assert!(lib_only.iter().any(|e| e.contains("builds both a staticlib")), "{lib_only:?}");
+        // A Rust dylib carries its own runtime, which two native libraries in one app would duplicate.
+        let dylib = check_crate(&input("craftbridge-core", "core/craftbridge-core", Vec::new(), vec!["dylib"]));
+        assert!(dylib.iter().any(|e| e.contains("Rust dylib")), "{dylib:?}");
     }
 
     #[test]
@@ -555,12 +767,13 @@ mod tests {
     /// what the naming rule says about a crate the table does not contain verbatim.
     fn check_name_of(row: &'static Entry, name: &'static str) -> Vec<String> {
         let mut errors = Vec::new();
-        check_name(&Entry { name, ..*row }, &mut errors);
+        check_name(&Entry { name, ..*row }, "x", &mut errors);
         errors
     }
 
     #[test]
     fn folders_and_workspace_edges_come_from_manifest_paths() {
+        let dependency = |name: &str, path: Option<&str>| CrateDependency { name: name.into(), path: path.map(str::to_string), dev: false };
         let crates = vec![
             Crate {
                 name: "craftbridge-core".into(),
@@ -568,11 +781,13 @@ mod tests {
                 source: None,
                 manifest_path: "/repo/rust/core/craftbridge-core/Cargo.toml".into(),
                 dependencies: vec![
-                    CrateDependency { name: "serde".into(), path: None },
-                    CrateDependency { name: "craftbridge-media".into(), path: Some("/repo/rust/core/craftbridge-media".into()) },
-                    CrateDependency { name: "effectcraft-time".into(), path: Some("/elsewhere/effectcraft/crates/time".into()) },
+                    dependency("serde", None),
+                    dependency("craftbridge-media", Some("/repo/rust/core/craftbridge-media")),
+                    dependency("effectcraft-time", Some("/elsewhere/effectcraft/crates/time")),
                 ],
-                library_targets: vec![CrateTarget { crate_types: vec!["lib".into()] }],
+                library_targets: vec![CrateTarget { name: "craftbridge_core".into(), crate_types: vec!["lib".into()] }],
+                build_script: None,
+                depends_on: Vec::new(),
             },
             Crate {
                 name: "craftbridge-media".into(),
@@ -581,14 +796,19 @@ mod tests {
                 manifest_path: "/repo/rust/core/craftbridge-media/Cargo.toml".into(),
                 dependencies: Vec::new(),
                 library_targets: Vec::new(),
+                build_script: None,
+                depends_on: Vec::new(),
             },
         ];
-        let inputs = inputs_from(&crates, Path::new("/repo/rust"));
+        let inputs = inputs_from(&crates, Path::new("/repo/rust"), Path::new("/repo"));
         assert_eq!(inputs[0].folder, "core/craftbridge-core");
+        assert_eq!(inputs[0].manifest, "rust/core/craftbridge-core/Cargo.toml");
         assert_eq!(inputs[0].dependencies[0].workspace, None, "an external dependency points at no workspace crate");
+        assert_eq!(inputs[0].dependencies[0].outside, None, "and has no path to be outside of");
         assert_eq!(inputs[0].dependencies[1].workspace.as_deref(), Some("craftbridge-media"));
-        assert_eq!(inputs[0].dependencies[2].workspace, None, "a path outside the workspace is external");
+        assert_eq!(inputs[0].dependencies[2].outside.as_deref(), Some("/elsewhere/effectcraft/crates/time"), "a path outside the workspace is refused");
         assert_eq!(inputs[0].crate_types, ["lib"]);
+        assert_eq!(inputs[0].library_names, ["craftbridge_core"]);
         assert_eq!(manifest_folder(Path::new("/repo/rust"), "/repo/rust-other/x/Cargo.toml"), None);
     }
 

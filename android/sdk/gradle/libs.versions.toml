@@ -4,6 +4,12 @@
 [versions]
 android-compileSdk = "37"
 android-minSdk = "29"
+# The build tools every compile uses, pinned so the doctor checks the very ones the build asks for:
+# AGP's own default (36.0.0 for AGP 9.5) would otherwise change with AGP and go unchecked.
+android-buildTools = "37.0.0"
+# The JDK Gradle and the convention plugins run on, and the Java level the libraries compile to.
+jdk = "21"
+java-bytecode = "17"
 agp = "9.5.1"
 kotlin = "2.4.21"
 spotless = "8.11.0"

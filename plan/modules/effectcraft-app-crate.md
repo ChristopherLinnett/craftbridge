@@ -14,7 +14,7 @@
 | `src/methods.rs` | NEW | one function per method, each calling the upstream function named in §14's table |
 | `src/plugins.rs` | NEW | PD13: plug-in policy |
 | `src/info.rs` | NEW | `info`: engine version and pin from the generator's constants (§21), counts, GPU and decoder state |
-| `src/session.rs` | NEW | AD1: the session from EffectCraft's public fields with the app's folders; AD2: the phone's fonts |
+| `src/session.rs` | NEW | AD1: the session from EffectCraft's public fields with the app's folders; AD2: the phone's fonts, and the font-list filter every app-facing call answers through |
 | `src/requests.rs` | NEW | AD3 `RenderRequest` and AD4 `FrameRequest` |
 | `src/runner.rs` | NEW | AD3: the render runner; AD5: the template runner |
 | `src/timings.rs` | NEW | AD6 |

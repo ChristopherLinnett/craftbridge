@@ -1,5 +1,9 @@
 # cargo deny check licenses bans sources (tools/ci.sh). Advisories need the network and run separately.
 
+[graph]
+# Every feature's dependencies, so one a feature pulls in is licence-checked like the rest.
+all-features = true
+
 [licenses]
 version = 2
 # The one licence allowlist. `cargo xtask rules` reads it for Gradle and SwiftPM dependencies too.
@@ -17,10 +21,9 @@ allow = [
     "BSL-1.0",
     "MPL-2.0",
 ]
+# No `[licenses.private]`: cargo-deny's `ignore = true` skips every crate marked `publish = false`,
+# a git dependency's too, not only this workspace's own crates, which carry the allowed MIT OR Apache-2.0.
 confidence-threshold = 0.9
-
-[licenses.private]
-ignore = true
 
 [bans]
 # Duplicates of EffectCraft, FilmCraft and Craft library crates are an error (`cargo xtask rules`);

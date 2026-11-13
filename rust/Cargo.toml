@@ -30,13 +30,16 @@ toml = "0.9"
 unsafe_code = "deny"
 
 [workspace.lints.clippy]
-# Never crash (the Craft house rules): no panicking shortcuts outside tests.
-unwrap_used = "deny"
+# Never crash (the Craft house rules): no panicking shortcuts outside tests. The five with no exception
+# are `forbid`, so the compiler itself refuses every `allow` of them, however it is spelt and wherever
+# the file sits; tests keep `unwrap`, `expect` and `panic!` through rust/clippy.toml's `allow-*-in-tests`.
+# `expect_used` stays `deny` for its one exception, an item-level allow on a provably infallible literal.
+unwrap_used = "forbid"
 expect_used = "deny"
-panic = "deny"
-unimplemented = "deny"
-todo = "deny"
-unreachable = "deny"
+panic = "forbid"
+unimplemented = "forbid"
+todo = "forbid"
+unreachable = "forbid"
 undocumented_unsafe_blocks = "deny"
 # EffectCraft's own workspace lints, so CraftBridge's code meets the bar EffectCraft's does. `dbg_macro`
 # is denied where EffectCraft only warns: a `dbg!` left in a library prints into the host app's log.

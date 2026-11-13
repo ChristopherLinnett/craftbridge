@@ -23,8 +23,10 @@ class QualityConventionPlugin : Plugin<Project> {
         with(target) {
             pluginManager.apply("com.diffplug.spotless")
             val ktlintVersion = catalogVersion("ktlint")
-            // Named explicitly rather than found by a search upwards, so an .editorconfig added in a
-            // nested folder can never change the rules. The build sits at android/sdk.
+            // The repository's one .editorconfig, named so its rules reach ktlint as an input of every
+            // Spotless task. ktlint still merges any other .editorconfig between a file and this one, so
+            // the gate refuses every other copy (`cargo xtask rules`, machinery), which is what keeps the
+            // style in this file alone. The build sits at android/sdk.
             val editorConfig = rootDir.resolve("../../.editorconfig")
 
             // Named apart from Spotless's own ktlint(), which a call inside its blocks would reach first.
@@ -37,15 +39,18 @@ class QualityConventionPlugin : Plugin<Project> {
             // while the compile tasks running beside these ones rewrite it, and the walk then fails on a
             // file that vanished under it.
             val atRoot = this == rootProject
+            val buildLogicOutputs = listOf("build/**", "*/build/**", ".gradle/**", "*/.gradle/**", ".kotlin/**", "*/.kotlin/**")
 
             // What this plugin formats, kept to itself so the read-back below can compare against it.
             // The build-logic trees exclude the included build's own output folders, which hold copies
-            // of these scripts under `build`.
+            // of these scripts under `build`: each project's own, at the top of the included build and of
+            // its one project, never a source folder that happens to be called `build` (the plugins'
+            // own package is `…craftbridge.build`).
             val writtenKotlin =
                 if (atRoot) {
                     fileTree("build-logic") {
                         include("**/*.kt")
-                        exclude("**/build/**", "**/.gradle/**", "**/.kotlin/**")
+                        exclude(buildLogicOutputs)
                     }
                 } else {
                     // Every source set; generated bindings live in src/generated and are never
@@ -60,7 +65,7 @@ class QualityConventionPlugin : Plugin<Project> {
                     files("build.gradle.kts", "settings.gradle.kts") +
                         fileTree("build-logic") {
                             include("**/*.gradle.kts")
-                            exclude("**/build/**", "**/.gradle/**", "**/.kotlin/**")
+                            exclude(buildLogicOutputs)
                         }
                 } else {
                     files("build.gradle.kts")

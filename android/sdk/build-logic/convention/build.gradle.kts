@@ -10,9 +10,11 @@ group = "io.github.christopherlinnett.craftbridge.build"
 
 kotlin {
     // The plugins run inside the Gradle daemon, so they compile against the JDK Gradle
-    // itself runs on (JDK 21 here), not against a downloaded toolchain.
+    // itself runs on (the catalog's `jdk`, which tools/env.sh finds), not against a downloaded toolchain.
     compilerOptions {
-        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
+        jvmTarget =
+            org.jetbrains.kotlin.gradle.dsl.JvmTarget
+                .fromTarget(libs.versions.jdk.get())
     }
 }
 

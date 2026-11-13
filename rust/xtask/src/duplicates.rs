@@ -17,11 +17,13 @@ use std::path::Path;
 /// Is `name` a crate of one of the families that must appear once: a Craft app's (the layer table's
 /// list) or a shared Craft library?
 fn owned(name: &str) -> bool {
-    name.starts_with(CRAFT_LIBRARY_PREFIX) || CRAFT_APPS.iter().any(|app| name.starts_with(app.crates))
+    name.starts_with(CRAFT_LIBRARY_PREFIX) || CRAFT_APPS.iter().any(|app| app.owns(name))
 }
 
-/// Group packages by name and return every owned name that has more than one copy, with their ids.
-pub(crate) fn duplicate_ids(crates: &[Crate]) -> Vec<String> {
+/// Group packages by name and return every owned name that has more than one copy, with their ids and
+/// what asks for each: a manifest in the repository by its path from `root`, any other package by its id,
+/// so the message points at the line to change.
+pub(crate) fn duplicate_ids(crates: &[Crate], root: &Path) -> Vec<String> {
     let mut names: Vec<&str> = crates.iter().map(|package| package.name.as_str()).filter(|name| owned(name)).collect();
     names.sort_unstable();
     names.dedup();
@@ -29,7 +31,21 @@ pub(crate) fn duplicate_ids(crates: &[Crate]) -> Vec<String> {
     for name in names {
         let copies: Vec<&Crate> = crates.iter().filter(|package| package.name == name).collect();
         if copies.len() > 1 {
-            let ids: Vec<String> = copies.iter().map(|package| format!("{} ({})", package.id, package.source.as_deref().unwrap_or("a local path"))).collect();
+            let ids: Vec<String> = copies
+                .iter()
+                .map(|package| {
+                    let requesters: Vec<String> = crates
+                        .iter()
+                        .filter(|requester| requester.depends_on.contains(&package.id))
+                        .map(|requester| {
+                            let manifest = Path::new(&requester.manifest_path);
+                            if manifest.starts_with(root) { crate::report::shown(root, manifest) } else { requester.id.clone() }
+                        })
+                        .collect();
+                    let asked = if requesters.is_empty() { String::new() } else { format!(", asked for by {}", requesters.join(", ")) };
+                    format!("{} ({}{asked})", package.id, package.source.as_deref().unwrap_or("a local path"))
+                })
+                .collect();
             errors.push(format!("{} is in the graph {} times: {}", name, copies.len(), ids.join("; ")));
         }
     }
@@ -45,13 +61,15 @@ fn package(name: &str, id: &str, source: Option<&str>) -> Crate {
         manifest_path: format!("/repo/rust/{name}/Cargo.toml"),
         dependencies: Vec::new(),
         library_targets: Vec::new(),
+        build_script: None,
+        depends_on: Vec::new(),
     }
 }
 
 /// Run the check against the resolved graph: `cargo metadata` with dependencies.
 pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     let crates = crate::meta::read(&root.join("rust"), false)?;
-    Ok(duplicate_ids(&crates))
+    Ok(duplicate_ids(&crates, root))
 }
 
 #[cfg(test)]
@@ -73,10 +91,27 @@ mod tests {
             ),
             package("filmcraft-media", "path+file:///repo/rust/core/filmcraft-media#0.1.0", None),
         ];
-        let errors = duplicate_ids(&crates);
+        let errors = duplicate_ids(&crates, Path::new("/repo"));
         assert_eq!(errors.len(), 1);
         assert!(errors[0].starts_with("effectcraft-engine is in the graph 2 times"), "{errors:?}");
         assert!(errors[0].contains("crates.io-index") && errors[0].contains("storytold/effectcraft"), "both copies must be named: {errors:?}");
+    }
+
+    #[test]
+    fn each_copy_names_the_manifest_that_asks_for_it() {
+        let registry = "registry+https://github.com/rust-lang/crates.io-index#effectcraft-time@1.0.0";
+        let git = "git+https://github.com/storytold/effectcraft?rev=abcd#effectcraft-time@1.1.0";
+        let mut ours = package("craftbridge-effects", "path+file:///repo/rust/effects/craftbridge-effects#0.1.0", None);
+        ours.manifest_path = "/repo/rust/effects/craftbridge-effects/Cargo.toml".to_string();
+        ours.depends_on = vec![git.to_string()];
+        let mut theirs = package("effectcraft-engine", "git+https://github.com/storytold/effectcraft?rev=abcd#effectcraft-engine@1.1.0", None);
+        theirs.manifest_path = "/home/.cargo/git/checkouts/engine/Cargo.toml".to_string();
+        theirs.depends_on = vec![registry.to_string()];
+        let crates = vec![package("effectcraft-time", registry, Some("registry")), package("effectcraft-time", git, Some("git")), ours, theirs];
+        let errors = duplicate_ids(&crates, Path::new("/repo"));
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("asked for by rust/effects/craftbridge-effects/Cargo.toml"), "{errors:?}");
+        assert!(errors[0].contains("asked for by git+https://github.com/storytold/effectcraft?rev=abcd#effectcraft-engine@1.1.0"), "{errors:?}");
     }
 
     #[test]
@@ -90,7 +125,7 @@ mod tests {
             package("filmcraft-media", "path+file:///repo/core/filmcraft-media#0.1.0", None),
             package("craft-core", "path+file:///repo/core/craft-core#0.1.0", None),
         ];
-        assert!(duplicate_ids(&crates).is_empty());
+        assert!(duplicate_ids(&crates, Path::new("/repo")).is_empty());
     }
 
     #[test]
@@ -101,6 +136,9 @@ mod tests {
             package("craftbridge-effects", "path+file:///repo/effects/craftbridge-effects#0.1.0", None),
             package("effectcraftness", "path+file:///repo/x#1.0.0", None),
         ];
-        assert!(duplicate_ids(&crates).is_empty(), "an unowned duplicate and a crate that merely starts like an owned prefix are both left alone");
+        assert!(
+            duplicate_ids(&crates, Path::new("/repo")).is_empty(),
+            "an unowned duplicate and a crate that merely starts like an owned prefix are both left alone"
+        );
     }
 }

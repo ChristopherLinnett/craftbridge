@@ -53,7 +53,7 @@ None. This file draws conclusions from `evidence/01`–`05`; their Calls tables 
 ## Consequences for the design
 
 - Go: proceed to the scoping plan once the business questions are answered.
-- The plan builds around the engine, never inside it: upstream stays unmodified except for the seams the user approves (Q5).
+- The plan builds around the engine, never inside it: upstream stays unmodified except for the seams the user approves (Q5). *(Superseded by PD5, 2026-11-13: EffectCraft is never modified, so there are no seams; what a phone needs is an adaptation in CraftBridge's own crates on EffectCraft's public interfaces, plan §15.)*
 
 ## Raised as questions
 

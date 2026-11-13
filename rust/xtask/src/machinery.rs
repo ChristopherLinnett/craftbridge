@@ -3,14 +3,15 @@
 //! The gate's machinery (`tools/ci.sh`, `tools/env.sh`, `tools/hooks/`, `rust/xtask/`,
 //! `rust/.cargo/config.toml`, `android/sdk/settings.gradle.kts`, `android/sdk/gradle.properties`,
 //! `android/sdk/build-logic/`, and the one copy of each configuration listed below) decides what the gate
-//! checks, so it cannot guard itself: a
-//! change to one of those files is a gate change, which its pull request names and its review checks for
-//! weakened rules. What a check can enforce is the other half: that each configuration stays the only
-//! copy. A tool reads its configuration from the folder of what it checks and the folders above it, so a
-//! second copy somewhere in the tree is read for the code below it and not beside others, and the gate
-//! would then run two rule sets while printing the name of one. Every configuration the gate's tools read
-//! therefore sits at exactly one path here; a second copy of any of them, and a Cargo configuration
-//! anywhere but `rust/.cargo/`, fails the gate. Names are matched the way the machine's file systems
+//! checks, so it cannot guard itself: a change to one of those files is a gate change, which its pull
+//! request names and its review checks for weakened rules. What a check can enforce is the other half:
+//! that each configuration stays the only copy. A tool reads its configuration from the folder of what it
+//! checks and the folders above it, so a second copy somewhere in the tree is read for the code below it
+//! and not beside others, and the gate would then run two rule sets while printing the name of one. Every
+//! configuration the gate's tools read therefore sits at exactly one path here; a second copy of any of
+//! them, a Cargo configuration anywhere but `rust/.cargo/config.toml`, and a tool configuration the gate
+//! keeps none of ([`REFUSED`]: shellcheck's rc files, the `.ignore` and nested `.gitignore` files jscpd
+//! honours, and jscpd's ignore markers) fail the gate. Names are matched the way the machine's file systems
 //! match them, and on this machine that is more than ASCII case: besides comparing the names ignoring
 //! case, the check asks the file system (see `scan::reads_as`) whether opening a listed name in a file's
 //! folder reaches that file, because a case-insensitive disk folds more letters than case changes
@@ -30,14 +31,55 @@ pub(crate) const CLIPPY_CONFIGURATION_NAMES: &[&str] = &["clippy.toml", ".clippy
 /// Each configuration the gate's tools read: its one path, and the file names a tool reads it under.
 /// rustfmt reads `rustfmt.toml` (or `.rustfmt.toml`) from the crate folder and above; `swift format`
 /// reads `.swift-format` from the formatted file's folder and above; cargo-deny reads `deny.toml` beside
-/// the workspace; and the licence rule of AGENTS §8 is only one rule while `licences.toml` is one file.
+/// the workspace and merges the licence exceptions of a `deny.exceptions.toml` (or `.deny.exceptions.toml`,
+/// also in a `.cargo` folder) it finds from there up, which would widen the one allowlist without it; ktlint
+/// merges every `.editorconfig` from a Kotlin file up to the root's, so the root's is its configuration and
+/// a nested one rewrites it for the code below; and the licence rule of AGENTS §8 is only one rule while
+/// `licences.toml` is one file.
 pub(crate) const CONFIGURATIONS: &[(&str, &[&str])] = &[
     (CLIPPY_CONFIGURATION, CLIPPY_CONFIGURATION_NAMES),
     ("rust/rustfmt.toml", &["rustfmt.toml", ".rustfmt.toml"]),
-    ("rust/deny.toml", &["deny.toml"]),
+    ("rust/deny.toml", &["deny.toml", "deny.exceptions.toml", ".deny.exceptions.toml"]),
     ("ios/sdk/.swift-format", &[".swift-format"]),
     ("tools/licences.toml", &["licences.toml"]),
+    (".editorconfig", &[".editorconfig"]),
 ];
+
+/// Every file and folder of the gate's machinery (AGENTS.md §10) besides the configurations above: the
+/// list the docs test holds both rule paragraphs to, so neither can drop a path the other keeps. The
+/// check itself needs no list of them: a change to any is reviewed by hand.
+#[cfg(test)]
+const MACHINERY: &[&str] = &[
+    "tools/ci.sh",
+    "tools/env.sh",
+    "tools/hooks/",
+    "rust/xtask/",
+    CARGO_CONFIGURATION,
+    "android/sdk/settings.gradle.kts",
+    GRADLE_PROPERTIES,
+    "android/sdk/build-logic/",
+];
+
+/// Tool configurations the gate keeps no copy of, refused wherever they sit, with what each would do:
+/// shellcheck reads `.shellcheckrc` or `shellcheckrc` from a script's folder up as file-wide directives
+/// (the shell stage also runs it with `--norc`); jscpd skips what an `.ignore` file lists, at any depth.
+const REFUSED: &[(&str, &str)] = &[
+    (".shellcheckrc", "shellcheck reads it as directives for every script below it, so it can switch the shell stage's checks off"),
+    ("shellcheckrc", "shellcheck reads it as directives for every script below it, so it can switch the shell stage's checks off"),
+    (".ignore", "jscpd skips what it lists, so it can hide a copied block from the duplicates stage"),
+];
+
+/// jscpd honours a `.gitignore` at any depth too, and the duplicates stage runs it with `--no-gitignore`
+/// as well; the repository needs one at the root, and the plan kit keeps its own under `plan/`, which
+/// jscpd never reads.
+const GITIGNORE: &str = ".gitignore";
+
+/// The folders the duplicates stage reads, where a jscpd ignore marker would hide a block from it.
+const CODE_TREES: &[&str] = &["rust", "ios", "android", "conformance", "tools", "docs", ".github"];
+
+/// jscpd's marker pair (its name, a colon, then `ignore-start` and `ignore-end`), which switches the check
+/// off between them. Spelt in two halves so this file does not carry it.
+const JSCPD_MARKER: &str = concat!("jscpd", ":ignore");
 
 /// Cargo merges a configuration from every `.cargo` folder from the folder it runs in up to the root,
 /// so exactly one may reach a gate command: the one in `rust/.cargo`, which is also the only one the
@@ -47,6 +89,9 @@ pub(crate) const CONFIGURATIONS: &[(&str, &[&str])] = &[
 const CARGO_FOLDER: &str = ".cargo";
 pub(crate) const CARGO_CONFIGURATION_FOLDER: &str = "rust/.cargo";
 pub(crate) const CARGO_CONFIGURATION_NAMES: &[&str] = &["config.toml", "config"];
+/// The one Cargo configuration: Cargo reads the extensionless `config` instead when both exist, so a
+/// `config` beside it would replace the listed file, unseen.
+pub(crate) const CARGO_CONFIGURATION: &str = "rust/.cargo/config.toml";
 
 /// The build's Gradle properties, and the one copy of them. Gradle reads a
 /// `gradle.properties` in a project's own folder as that project's properties, so any other copy under
@@ -94,12 +139,35 @@ pub(crate) fn second_copy(shown: &str, name: &str, folders: &[String]) -> Option
     if folders.last().is_some_and(|folder| folder.eq_ignore_ascii_case(CARGO_FOLDER))
         && CARGO_CONFIGURATION_NAMES.iter().any(|file| name.eq_ignore_ascii_case(file))
     {
-        return (!shown.starts_with(&format!("{CARGO_CONFIGURATION_FOLDER}/"))).then(|| cargo_outside_message(shown));
+        if shown == CARGO_CONFIGURATION {
+            return None;
+        }
+        return Some(if shown.starts_with(&format!("{CARGO_CONFIGURATION_FOLDER}/")) {
+            format!(
+                "{shown}: a second Cargo configuration beside `{CARGO_CONFIGURATION}`: Cargo reads this one instead when both exist, so the listed file would stop being read"
+            )
+        } else {
+            cargo_outside_message(shown)
+        });
     }
     if name.eq_ignore_ascii_case(GRADLE_PROPERTIES_NAME) {
         return second_gradle_properties(shown, folders);
     }
+    if let Some((_, does)) = REFUSED.iter().find(|(refused, _)| name.eq_ignore_ascii_case(refused)) {
+        return Some(format!("{shown}: {does}; the gate keeps no such file"));
+    }
+    if name.eq_ignore_ascii_case(GITIGNORE) && shown != GITIGNORE && !folders.first().is_some_and(|first| first == "plan") {
+        return Some(format!(
+            "{shown}: a nested .gitignore: jscpd skips what it lists, so it can hide a copied block from the duplicates stage; ignore patterns live in the root .gitignore"
+        ));
+    }
     None
+}
+
+/// The lines of a code file that carry jscpd's ignore marker, which switches the duplicates check off
+/// between a start and an end.
+fn jscpd_markers(text: &str) -> Vec<usize> {
+    text.lines().enumerate().filter(|(_, line)| line.contains(JSCPD_MARKER)).map(|(index, _)| index + 1).collect()
 }
 
 fn second_copy_message(shown: &str, configuration: &str) -> String {
@@ -159,6 +227,14 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
             Some(error) => errors.push(error),
             None => errors.extend(second_spelling(&file, &shown)),
         }
+        if file.components.first().is_some_and(|tree| CODE_TREES.contains(&tree.as_str()))
+            && !scan::looks_binary(&file.path)
+            && let Ok(text) = std::fs::read_to_string(&file.path)
+        {
+            for line in jscpd_markers(&text) {
+                errors.push(format!("{shown}:{line}: a jscpd ignore marker hides the code after it from the duplicates stage"));
+            }
+        }
     }
     Ok(errors)
 }
@@ -192,6 +268,13 @@ mod tests {
             ("ios/sdk/Sources/.swift-format", "{{}}\n"),
             ("tools/other/licences.toml", "[allow]\n"),
             ("tools/LICENCES.toml", "[allow]\n"),
+            // cargo-deny merges these into the licence configuration, widening the one allowlist.
+            ("rust/deny.exceptions.toml", "exceptions = []\n"),
+            ("rust/core/.deny.exceptions.toml", "exceptions = []\n"),
+            ("rust/.cargo/deny.exceptions.toml", "exceptions = []\n"),
+            // ktlint merges every .editorconfig up to the root's.
+            ("rust/core/craftbridge-core/.editorconfig", "[*.kt]\nktlint_standard = disabled\n"),
+            ("ios/sdk/.EditorConfig", "[*]\n"),
         ];
         for (path, text) in plants {
             copy.write(path, text);
@@ -230,7 +313,41 @@ mod tests {
         assert!(second_copy("ios/sdk/.swift-format", ".swift-format", &["ios".into(), "sdk".into()]).is_none());
         assert!(second_copy("tools/licences.toml", "licences.toml", &["tools".into()]).is_none());
         assert!(second_copy("rust/.cargo/config.toml", "config.toml", &["rust".into(), ".cargo".into()]).is_none());
-        assert!(second_copy("rust/.cargo/config", "config", &["rust".into(), ".cargo".into()]).is_none());
+        assert!(second_copy(".editorconfig", ".editorconfig", &[]).is_none());
+        // Cargo reads the extensionless name in place of the listed one, so it is a second copy there.
+        let beside = second_copy("rust/.cargo/config", "config", &["rust".into(), ".cargo".into()]);
+        assert!(beside.as_deref().is_some_and(|e| e.contains("a second Cargo configuration beside `rust/.cargo/config.toml`")), "{beside:?}");
+    }
+
+    #[test]
+    fn a_tool_configuration_the_gate_keeps_none_of_is_refused_wherever_it_sits() {
+        let scratch = crate::scratch::Scratch::new("machinery-refused");
+        scratch.write(".gitignore", "/target/\n");
+        scratch.write("plan/.gitignore", "node_modules/\n");
+        assert!(check(&scratch.0).unwrap().is_empty(), "the root's and the plan kit's .gitignore are the repository's own");
+        let plants = ["tools/.shellcheckrc", "tools/sub/shellcheckrc", "conformance/dup/.ignore", "conformance/dup/.gitignore", "rust/core/.GitIgnore"];
+        for plant in plants {
+            scratch.write(plant, "disable=all\n");
+        }
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), plants.len(), "{errors:?}");
+        for plant in plants {
+            assert!(errors.iter().any(|e| e.starts_with(&format!("{plant}: "))), "{plant} missing from {errors:?}");
+        }
+    }
+
+    #[test]
+    fn a_jscpd_ignore_marker_in_the_code_trees_is_refused() {
+        let scratch = crate::scratch::Scratch::new("machinery-jscpd");
+        let marker = format!("// {JSCPD_MARKER}-start\nfn copied() {{}}\n// {JSCPD_MARKER}-end\n");
+        scratch.write("rust/core/x/src/plant.rs", &marker);
+        scratch.write("conformance/plant.sh", format!("# {JSCPD_MARKER}-start\n"));
+        scratch.write("plan/notes.md", &marker);
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 3, "{errors:?}");
+        assert!(errors.iter().any(|e| e.starts_with("rust/core/x/src/plant.rs:1: a jscpd ignore marker")), "{errors:?}");
+        assert!(errors.iter().any(|e| e.starts_with("rust/core/x/src/plant.rs:3: ")), "{errors:?}");
+        assert!(errors.iter().any(|e| e.starts_with("conformance/plant.sh:1: ")), "plan/ is outside the duplicates stage: {errors:?}");
     }
 
     /// The build reads one properties file, `android/sdk/gradle.properties`; a copy in a
@@ -283,16 +400,17 @@ mod tests {
         }
     }
 
-    /// AGENTS.md §10 and plan §15 name the machinery's configurations for people in one paragraph each;
-    /// this list is what the gate holds them to. A path added here and not there is one list split in
-    /// two, so each paragraph must name every path the list holds.
+    /// AGENTS.md §10 and plan §15 name the machinery for people in one paragraph each; these lists are
+    /// what the gate holds them to. A path added here and not there is one list split in two, so each
+    /// paragraph must name every machinery path and every listed configuration, and every file the gate
+    /// refuses outright.
     #[test]
-    fn agents_and_the_plan_name_every_listed_configuration() {
-        let cargo = format!("{CARGO_CONFIGURATION_FOLDER}/{}", CARGO_CONFIGURATION_NAMES[0]);
+    fn agents_and_the_plan_name_every_machinery_path() {
         for (document, opening) in [("AGENTS.md", "- The gate's own machinery"), ("plan/EFFECTCRAFT-PLUGIN-PORT-SCOPING.md", "**Gate machinery.**")] {
             let text = std::fs::read_to_string(crate::repo_root().join(document)).unwrap();
             let paragraph = text.lines().find(|line| line.starts_with(opening)).unwrap_or_else(|| panic!("{document} has no paragraph opening {opening:?}"));
-            for path in CONFIGURATIONS.iter().map(|(path, _)| *path).chain([cargo.as_str(), GRADLE_PROPERTIES]) {
+            let named = MACHINERY.iter().copied().chain(CONFIGURATIONS.iter().map(|(path, _)| *path)).chain(REFUSED.iter().map(|(name, _)| *name));
+            for path in named {
                 assert!(paragraph.contains(&format!("`{path}`")), "{document}'s machinery paragraph does not name `{path}`");
             }
         }

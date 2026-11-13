@@ -2,9 +2,12 @@
 //!
 //! A generated file is committed and never edited by hand, so the generator that writes it has to be the
 //! only writer, and the gate has to prove nobody hand-edited one. Both come from one registry: each
-//! generator names the output directory it owns and writes its files there. `generate` runs them into
-//! the real directories; `generate --check` runs them into a scratch copy and compares byte for byte,
-//! so a hand edit or a generator that depends on the date fails the gate with the file named.
+//! generator names the output directory it owns and writes its files there. `generate` runs each into a
+//! scratch folder and replaces the real directory only when it succeeded; `generate --check` runs them
+//! into a scratch copy and compares byte for byte, so a hand edit or a generator that depends on the date
+//! fails the gate with the file named, and asks git whether every file there is committed, because a
+//! comparison with the working tree alone would pass files that were never committed or that a
+//! `.gitignore` hides.
 //!
 //! The registry is empty today; the first generator (the codegen's API surface and its Swift and Kotlin
 //! facades) registers itself here in the change that adds it.
@@ -51,21 +54,33 @@ pub(crate) fn run(root: &Path, check: bool) -> ExitCode {
     if check { check_against_registry(root, &registry) } else { write_registry(root, &registry) }
 }
 
-/// What makes a registry unsafe to run. A generator's output directory is emptied before every run, so
-/// it must be a `generated`/`Generated` directory inside the repository — never the root, a source folder
-/// or a path that climbs out — and two generators may not share or nest one, or each run would delete
-/// the other's files.
+/// What makes a registry unsafe to run. A generator's output directory is replaced by every run, so it
+/// must be a `generated`/`Generated` directory inside one of the trees `rules: generated` reads — never
+/// the root, a source folder, `plan/` or a path that climbs out — and two generators may neither share a
+/// name, which every message goes by, nor share or nest an output, or each run would delete the other's
+/// files.
 fn registry_problems(registry: &[Generator]) -> Vec<String> {
     let mut problems = Vec::new();
-    for generator in registry {
+    for (index, generator) in registry.iter().enumerate() {
         let output = Path::new(generator.output_dir);
         let stays_inside = output.components().all(|part| matches!(part, std::path::Component::Normal(_)));
         let generated = output.file_name().is_some_and(|name| name == "generated" || name == "Generated");
         if !stays_inside || !generated {
             problems.push(format!("{}: output `{}` must be a generated or Generated directory inside the repository", generator.name, generator.output_dir));
         }
-        for other in registry.iter().filter(|other| other.name != generator.name) {
-            if output.starts_with(other.output_dir) {
+        if !crate::generated::TREES.iter().any(|tree| output.starts_with(tree)) {
+            problems.push(format!(
+                "{}: output `{}` lies outside the trees `rules: generated` reads ({})",
+                generator.name,
+                generator.output_dir,
+                crate::generated::TREES.join(", ")
+            ));
+        }
+        if registry.iter().take(index).any(|earlier| earlier.name == generator.name) {
+            problems.push(format!("{}: a second generator of that name", generator.name));
+        }
+        for (other_index, other) in registry.iter().enumerate().filter(|(other_index, _)| *other_index != index) {
+            if output.starts_with(other.output_dir) && (output != Path::new(other.output_dir) || other_index < index) {
                 problems.push(format!("{}: output `{}` lies in {}'s `{}`", generator.name, generator.output_dir, other.name, other.output_dir));
             }
         }
@@ -73,12 +88,19 @@ fn registry_problems(registry: &[Generator]) -> Vec<String> {
     problems
 }
 
-/// Write every generator into the directory it owns.
+/// Write every generator into the directory it owns: into a scratch folder first, and over the committed
+/// directory only once the generator succeeded, so a generator that fails leaves the committed files as
+/// they were rather than deleted.
 fn write_registry(root: &Path, registry: &[Generator]) -> ExitCode {
     let mut failed = false;
     for generator in registry {
-        let out_dir = root.join(generator.output_dir);
-        match generate_into(generator, &out_dir) {
+        let written = crate::scratch::create("generate-write").and_then(|scratch| {
+            let fresh = scratch.join("out");
+            let result = generate_into(generator, &fresh).and_then(|()| replace_tree(&fresh, &root.join(generator.output_dir)));
+            let _ = fs::remove_dir_all(&scratch);
+            result
+        });
+        match written {
             Ok(()) => println!("generate: {} wrote {}", generator.name, generator.output_dir),
             Err(error) => {
                 failed = true;
@@ -87,6 +109,27 @@ fn write_registry(root: &Path, registry: &[Generator]) -> ExitCode {
         }
     }
     if failed { ExitCode::from(1) } else { ExitCode::SUCCESS }
+}
+
+/// Replace the tree at `to` with a copy of the tree at `from`.
+fn replace_tree(from: &Path, to: &Path) -> Result<(), String> {
+    if to.exists() {
+        fs::remove_dir_all(to).map_err(|error| format!("could not clear {}: {error}", to.display()))?;
+    }
+    let mut stack = vec![from.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let target = to.join(dir.strip_prefix(from).unwrap_or(&dir));
+        fs::create_dir_all(&target).map_err(|error| format!("could not create {}: {error}", target.display()))?;
+        for entry in fs::read_dir(&dir).map_err(|error| format!("{}: {error}", dir.display()))? {
+            let path = entry.map_err(|error| format!("{}: {error}", dir.display()))?.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if let Some(name) = path.file_name() {
+                fs::copy(&path, target.join(name)).map_err(|error| format!("could not copy {}: {error}", path.display()))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Regenerate everything into a scratch directory and compare it with what is committed.
@@ -117,9 +160,9 @@ fn check_in(root: &Path, registry: &[Generator], scratch: &Path) -> ExitCode {
                 Ok(differences) if differences.is_empty() => {}
                 Ok(differences) => {
                     failed = true;
-                    println!("generate: {} is not what the committed files say it should be", generator.name);
+                    println!("generate: {} ({}) is not what the committed files say it should be", generator.name, generator.output_dir);
                     for difference in differences {
-                        println!("generate: {difference}");
+                        println!("generate: {}/{difference}", generator.output_dir.trim_end_matches('/'));
                     }
                 }
                 Err(error) => {
@@ -128,12 +171,27 @@ fn check_in(root: &Path, registry: &[Generator], scratch: &Path) -> ExitCode {
                 }
             },
         }
+        for file in uncommitted(root, generator.output_dir) {
+            failed = true;
+            println!("generate: {file}: not committed: git does not track it, so the gate compared a file no branch holds");
+        }
     }
     if let Err(error) = fs::remove_dir_all(scratch) {
         println!("generate: could not remove {}: {error}", scratch.display());
         failed = true;
     }
     if failed { ExitCode::from(1) } else { ExitCode::SUCCESS }
+}
+
+/// The files under `output_dir` git does not track, ignored ones included (`git ls-files --others`
+/// applies no ignore rules unless asked to), as paths from the root. Outside a git checkout there is no
+/// commit to compare with, so there is nothing to report.
+fn uncommitted(root: &Path, output_dir: &str) -> Vec<String> {
+    let output = std::process::Command::new("git").arg("-C").arg(root).args(["ls-files", "--others", "--"]).arg(output_dir).output();
+    match output {
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout).lines().map(str::to_string).collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// A generator's own output, so a generator that left a file from a previous run in place cannot hide it
@@ -160,8 +218,8 @@ pub(crate) fn tree_differences(regenerated: &Path, committed: &Path) -> Result<V
         match (fresh.get(name), existing.get(name)) {
             (Some(bytes), Some(old)) if bytes == old => {}
             (Some(_), Some(_)) => differences.push(format!("{name}: changed")),
-            (Some(_), None) => differences.push(format!("{name}: added (not committed)")),
-            (None, Some(_)) => differences.push(format!("{name}: removed (committed, the generator no longer writes it)")),
+            (Some(_), None) => differences.push(format!("{name}: the generator writes it, and it is not committed")),
+            (None, Some(_)) => differences.push(format!("{name}: committed, but not written by the generator")),
             (None, None) => {}
         }
     }
@@ -247,9 +305,9 @@ mod tests {
         assert_eq!(
             differences,
             vec![
-                "nested/second.txt: added (not committed)",
-                "stale.txt: removed (committed, the generator no longer writes it)",
-                "surprise.txt: added (not committed)"
+                "nested/second.txt: the generator writes it, and it is not committed",
+                "stale.txt: committed, but not written by the generator",
+                "surprise.txt: the generator writes it, and it is not committed"
             ]
         );
     }
@@ -262,7 +320,7 @@ mod tests {
         fs::remove_dir_all(fresh.0.join("nested")).unwrap();
         fake_generator(&committed.0).unwrap();
         let differences = tree_differences(&fresh.0, &committed.0).unwrap();
-        assert_eq!(differences, vec!["nested/second.txt: removed (committed, the generator no longer writes it)"]);
+        assert_eq!(differences, vec!["nested/second.txt: committed, but not written by the generator"]);
     }
 
     #[test]
@@ -352,6 +410,53 @@ mod tests {
         }
         let nested = registry_problems(&[generator("a", "x/generated"), generator("b", "x/generated/y/generated")]);
         assert!(nested.iter().any(|problem| problem.starts_with("b:")), "{nested:?}");
+    }
+
+    #[test]
+    fn a_registry_with_two_names_alike_or_an_output_outside_the_trees_is_refused() {
+        let generator = |name: &'static str, output_dir: &'static str| Generator { name, output_dir, generate: fake_generator };
+        let twice = registry_problems(&[generator("a", "rust/x/generated"), generator("a", "rust/y/generated")]);
+        assert!(twice.iter().any(|problem| problem == "a: a second generator of that name"), "{twice:?}");
+        let shared = registry_problems(&[generator("a", "rust/x/generated"), generator("b", "rust/x/generated")]);
+        assert_eq!(shared.len(), 1, "one output shared by two generators is reported once: {shared:?}");
+        let plan = registry_problems(&[generator("a", "plan/generated")]);
+        assert!(plan.iter().any(|problem| problem.contains("outside the trees")), "{plan:?}");
+    }
+
+    #[test]
+    fn a_failing_write_leaves_the_committed_files_in_place() {
+        fn failing(out_dir: &Path) -> Result<(), String> {
+            fs::write(out_dir.join("half.txt"), "half\n").map_err(|error| error.to_string())?;
+            Err("the engine's registry could not be read".to_string())
+        }
+        let root = Scratch::new("write-failing");
+        root.write("conformance/generated/first.txt", "committed\n");
+        let registry = vec![Generator { name: "failing", output_dir: "conformance/generated", generate: failing }];
+        assert_eq!(code(write_registry(&root.0, &registry)), 1);
+        assert_eq!(fs::read_to_string(root.0.join("conformance/generated/first.txt")).unwrap(), "committed\n");
+        assert!(!root.0.join("conformance/generated/half.txt").exists());
+        // A generator that succeeds replaces the directory with exactly what it wrote.
+        let registry = vec![Generator { name: "fake", output_dir: "conformance/generated", generate: fake_generator }];
+        assert_eq!(code(write_registry(&root.0, &registry)), 0);
+        assert!(root.0.join("conformance/generated/nested/second.txt").exists() && !root.0.join("conformance/generated/half.txt").exists());
+    }
+
+    #[test]
+    fn generated_files_git_does_not_track_fail_the_check() {
+        let root = Scratch::new("check-untracked");
+        let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(&root.0).args(args).output().unwrap();
+        assert!(git(&["init", "-q"]).status.success());
+        fake_generator(&root.0.join("conformance/generated")).unwrap();
+        let registry = vec![Generator { name: "fake", output_dir: "conformance/generated", generate: fake_generator }];
+        assert_eq!(uncommitted(&root.0, "conformance/generated"), ["conformance/generated/first.txt", "conformance/generated/nested/second.txt"]);
+        assert_eq!(code(check_against_registry(&root.0, &registry)), 1, "the files match but no branch holds them");
+        // An ignored file is no more committed than an untracked one.
+        root.write(".gitignore", "conformance/generated/\n");
+        assert_eq!(uncommitted(&root.0, "conformance/generated").len(), 2);
+        fs::remove_file(root.0.join(".gitignore")).unwrap();
+        assert!(git(&["add", "conformance"]).status.success());
+        assert!(uncommitted(&root.0, "conformance/generated").is_empty());
+        assert_eq!(code(check_against_registry(&root.0, &registry)), 0);
     }
 
     #[test]

@@ -110,24 +110,72 @@ pub(crate) fn package_errors(package: &serde_json::Value) -> Vec<String> {
     errors
 }
 
-/// Run the check on the repository's Swift package. A tree without one (a scratch tree) has nothing to ask.
-pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
-    let sdk = root.join("ios").join("sdk");
-    if !sdk.join("Package.swift").is_file() {
-        return Ok(Vec::new());
+/// SwiftPM's own reading of the `Package.swift` in `package_dir`, or `None` where there is none (a
+/// scratch tree). The one way every check asks a Swift package what it holds — its targets, their types
+/// and paths, and the packages it takes — so a manifest spelling SwiftPM still accepts (a deprecated
+/// `.package(name:url:…)`, a target moved by `path:`) cannot be read one way by one check and another way,
+/// or not at all, by the next. `shown` is how a message names the manifest.
+pub(crate) fn dump_package(package_dir: &Path, shown: &str) -> Result<Option<serde_json::Value>, String> {
+    if !package_dir.join("Package.swift").is_file() {
+        return Ok(None);
     }
     let output = Command::new("xcrun")
         .args(["swift", "package", "dump-package"])
-        .current_dir(&sdk)
+        .current_dir(package_dir)
         .output()
-        .map_err(|error| format!("{FILE}: cannot ask SwiftPM for its manifest: {error}"))?;
+        .map_err(|error| format!("{shown}: cannot ask SwiftPM for its manifest: {error}"))?;
     if !output.status.success() {
         let text = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("{FILE}: `swift package dump-package` failed: {}", text.trim()));
+        return Err(format!("{shown}: `swift package dump-package` failed: {}", text.trim()));
     }
-    let package: serde_json::Value =
-        serde_json::from_slice(&output.stdout).map_err(|error| format!("{FILE}: dump-package is not JSON this check can read: {error}"))?;
-    Ok(package_errors(&package))
+    serde_json::from_slice(&output.stdout).map(Some).map_err(|error| format!("{shown}: dump-package is not JSON this check can read: {error}"))
+}
+
+/// The folders of a dumped package's test targets, relative to the package: a target's own `path`, or
+/// SwiftPM's default `Tests/<name>`. Only SwiftPM's `test` type makes a target a test, whatever its
+/// folder is called, so a shipping target moved under `Tests/` is still a shipping target.
+pub(crate) fn test_target_folders(package: &serde_json::Value) -> Vec<String> {
+    package
+        .get("targets")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|target| target.get("type").and_then(serde_json::Value::as_str) == Some("test"))
+        .filter_map(|target| {
+            let name = target.get("name").and_then(serde_json::Value::as_str)?;
+            Some(target.get("path").and_then(serde_json::Value::as_str).map_or_else(|| format!("Tests/{name}"), |path| path.trim_end_matches('/').to_string()))
+        })
+        .collect()
+}
+
+/// The published packages a dumped package takes: each source-control dependency's URL and each
+/// registry dependency's identity. SwiftPM prints a remote location as a plain string or, in newer
+/// versions, as `{"urlString": …}`; both are read.
+pub(crate) fn published_packages(package: &serde_json::Value) -> Vec<String> {
+    let mut packages = Vec::new();
+    for dependency in package.get("dependencies").and_then(serde_json::Value::as_array).into_iter().flatten() {
+        for source in dependency.get("sourceControl").and_then(serde_json::Value::as_array).into_iter().flatten() {
+            let remotes = source.get("location").and_then(|location| location.get("remote")).and_then(serde_json::Value::as_array);
+            for remote in remotes.into_iter().flatten() {
+                if let Some(url) = remote.as_str().or_else(|| remote.get("urlString").and_then(serde_json::Value::as_str)) {
+                    packages.push(url.to_string());
+                }
+            }
+        }
+        for registry in dependency.get("registry").and_then(serde_json::Value::as_array).into_iter().flatten() {
+            if let Some(identity) = registry.get("identity").and_then(serde_json::Value::as_str) {
+                packages.push(identity.to_string());
+            }
+        }
+    }
+    packages.sort();
+    packages.dedup();
+    packages
+}
+
+/// Run the check on the repository's Swift package. A tree without one (a scratch tree) has nothing to ask.
+pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
+    Ok(dump_package(&root.join("ios").join("sdk"), FILE)?.map(|package| package_errors(&package)).unwrap_or_default())
 }
 
 #[cfg(test)]
@@ -218,6 +266,40 @@ mod tests {
         ));
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].contains("local package `/tmp/probe/localgit`"), "{errors:?}");
+    }
+
+    /// The shapes `swift package dump-package` printed for a scratch manifest holding `.package(url:)`,
+    /// the deprecated `.package(name:url:)`, `.package(id:)`, a library target moved under `Tests/` and a
+    /// test target with a `path:` of its own.
+    const PROBED: &str = r#"{
+        "dependencies": [
+            {"sourceControl": [{"identity": "swift-log", "location": {"remote": [{"urlString": "https://github.com/apple/swift-log"}]}}]},
+            {"sourceControl": [{"identity": "swift-collections", "location": {"remote": [{"urlString": "https://github.com/apple/swift-collections"}]},
+                                "nameForTargetDependencyResolutionOnly": "swift-collections"}]},
+            {"sourceControl": [{"identity": "uniffi", "location": {"remote": ["https://github.com/mozilla/uniffi.git"]}}]},
+            {"registry": [{"identity": "mona.LinkedList"}]}
+        ],
+        "targets": [
+            {"name": "A", "type": "regular", "path": null},
+            {"name": "B", "type": "regular", "path": "Tests/Support"},
+            {"name": "ATests", "type": "test", "path": null},
+            {"name": "CTests", "type": "test", "path": "Checks/"}
+        ]
+    }"#;
+
+    #[test]
+    fn every_published_dependency_is_read_however_the_manifest_spells_it() {
+        let package: serde_json::Value = serde_json::from_str(PROBED).unwrap();
+        assert_eq!(
+            published_packages(&package),
+            ["https://github.com/apple/swift-collections", "https://github.com/apple/swift-log", "https://github.com/mozilla/uniffi.git", "mona.LinkedList"]
+        );
+    }
+
+    #[test]
+    fn only_a_target_of_the_test_type_is_a_test_folder() {
+        let package: serde_json::Value = serde_json::from_str(PROBED).unwrap();
+        assert_eq!(test_target_folders(&package), ["Tests/ATests", "Checks"], "a library moved under Tests/ is not a test");
     }
 
     #[test]
