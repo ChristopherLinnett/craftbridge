@@ -1,0 +1,15 @@
+[package]
+name = "craftbridge-core"
+description = "The universal runtime that hosts a Craft app's session on iOS and Android."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+craftbridge-media.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,172 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.6.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :fgslab:preBuild UP-TO-DATE
+> Task :fgslab:preComboDebugBuild UP-TO-DATE
+> Task :fgslab:mergeComboDebugNativeDebugMetadata NO-SOURCE
+> Task :fgslab:generateComboDebugResources
+> Task :fgslab:packageComboDebugResources
+> Task :fgslab:processComboDebugNavigationResources
+> Task :fgslab:generateComboDebugAssets UP-TO-DATE
+> Task :fgslab:javaPreCompileComboDebug
+> Task :fgslab:mergeComboDebugAssets
+> Task :fgslab:compressComboDebugAssets
+> Task :fgslab:parseComboDebugLocalResources
+> Task :fgslab:generateComboDebugGlobalSynthetics
+> Task :fgslab:desugarComboDebugFileDependencies
+> Task :fgslab:checkComboDebugDuplicateClasses
+> Task :fgslab:generateComboDebugRFile
+> Task :fgslab:checkComboDebugAarMetadata
+> Task :fgslab:mapComboDebugSourceSetPaths
+> Task :fgslab:mergeLibDexComboDebug
+> Task :fgslab:compileComboDebugNavigationResources
+> Task :fgslab:mergeComboDebugResources
+> Task :fgslab:createComboDebugCompatibleScreenManifests
+> Task :fgslab:extractDeepLinksComboDebug
+> Task :fgslab:processComboDebugMainManifest
+> Task :fgslab:processComboDebugManifest
+> Task :fgslab:mergeComboDebugJniLibFolders
+> Task :fgslab:mergeComboDebugNativeLibs NO-SOURCE
+> Task :fgslab:stripComboDebugDebugSymbols NO-SOURCE
+> Task :fgslab:validateSigningComboDebug
+> Task :fgslab:writeComboDebugAppMetadata
+> Task :fgslab:writeComboDebugSigningConfigVersions
+> Task :fgslab:preFullDebugBuild UP-TO-DATE
+> Task :fgslab:processComboDebugManifestForPackage
+> Task :fgslab:mergeFullDebugNativeDebugMetadata NO-SOURCE
+> Task :fgslab:generateFullDebugResources
+> Task :fgslab:packageFullDebugResources
+> Task :fgslab:processFullDebugNavigationResources
+> Task :fgslab:generateFullDebugAssets UP-TO-DATE
+> Task :fgslab:javaPreCompileFullDebug
+> Task :fgslab:parseFullDebugLocalResources
+> Task :fgslab:mergeFullDebugAssets
+> Task :fgslab:compressFullDebugAssets
+> Task :fgslab:generateFullDebugRFile
+> Task :fgslab:mergeExtDexComboDebug
+> Task :fgslab:processComboDebugResources
+> Task :fgslab:generateFullDebugGlobalSynthetics
+> Task :fgslab:checkFullDebugDuplicateClasses
+> Task :fgslab:desugarFullDebugFileDependencies
+> Task :fgslab:checkFullDebugAarMetadata
+> Task :fgslab:mergeLibDexFullDebug
+> Task :fgslab:mapFullDebugSourceSetPaths
+> Task :fgslab:compileFullDebugNavigationResources
+> Task :fgslab:mergeFullDebugResources
+> Task :fgslab:createFullDebugCompatibleScreenManifests
+> Task :fgslab:extractDeepLinksFullDebug
+> Task :fgslab:processFullDebugMainManifest
+> Task :fgslab:processFullDebugManifest
+> Task :fgslab:mergeFullDebugJniLibFolders
+> Task :fgslab:mergeFullDebugNativeLibs NO-SOURCE
+> Task :fgslab:stripFullDebugDebugSymbols NO-SOURCE
+> Task :fgslab:validateSigningFullDebug
+> Task :fgslab:writeFullDebugAppMetadata
+> Task :fgslab:writeFullDebugSigningConfigVersions
+> Task :fgslab:preNoneDebugBuild UP-TO-DATE
+> Task :fgslab:mergeNoneDebugNativeDebugMetadata NO-SOURCE
+> Task :fgslab:generateNoneDebugResources
+> Task :fgslab:packageNoneDebugResources
+> Task :fgslab:processNoneDebugNavigationResources
+> Task :fgslab:generateNoneDebugAssets UP-TO-DATE
+> Task :fgslab:javaPreCompileNoneDebug
+> Task :fgslab:parseNoneDebugLocalResources
+> Task :fgslab:mergeNoneDebugAssets
+> Task :fgslab:compressNoneDebugAssets
+> Task :fgslab:generateNoneDebugRFile
+> Task :fgslab:mergeExtDexFullDebug
+> Task :fgslab:generateNoneDebugGlobalSynthetics
+> Task :fgslab:checkNoneDebugDuplicateClasses
+> Task :fgslab:desugarNoneDebugFileDependencies
+> Task :fgslab:mergeLibDexNoneDebug
+> Task :fgslab:checkNoneDebugAarMetadata
+> Task :fgslab:mapNoneDebugSourceSetPaths
+> Task :fgslab:compileNoneDebugNavigationResources
+> Task :fgslab:mergeNoneDebugResources
+> Task :fgslab:createNoneDebugCompatibleScreenManifests
+> Task :fgslab:extractDeepLinksNoneDebug
+> Task :fgslab:processNoneDebugMainManifest
+> Task :fgslab:processNoneDebugManifest
+> Task :fgslab:mergeNoneDebugJniLibFolders
+> Task :fgslab:mergeNoneDebugNativeLibs NO-SOURCE
+> Task :fgslab:stripNoneDebugDebugSymbols NO-SOURCE
+> Task :fgslab:validateSigningNoneDebug
+> Task :fgslab:writeNoneDebugAppMetadata
+> Task :fgslab:writeNoneDebugSigningConfigVersions
+> Task :fgslab:preNopermDebugBuild UP-TO-DATE
+> Task :fgslab:mergeNopermDebugNativeDebugMetadata NO-SOURCE
+> Task :fgslab:generateNopermDebugResources
+> Task :fgslab:packageNopermDebugResources
+> Task :fgslab:processNopermDebugNavigationResources
+> Task :fgslab:generateNopermDebugAssets UP-TO-DATE
+> Task :fgslab:javaPreCompileNopermDebug
+> Task :fgslab:mergeNopermDebugAssets
+> Task :fgslab:parseNopermDebugLocalResources
+> Task :fgslab:compressNopermDebugAssets
+> Task :fgslab:generateNopermDebugRFile
+> Task :fgslab:mergeExtDexNoneDebug
+> Task :fgslab:generateNopermDebugGlobalSynthetics
+> Task :fgslab:checkNopermDebugDuplicateClasses
+> Task :fgslab:processFullDebugManifestForPackage
+> Task :fgslab:desugarNopermDebugFileDependencies
+> Task :fgslab:checkNopermDebugAarMetadata
+> Task :fgslab:mapNopermDebugSourceSetPaths
+> Task :fgslab:mergeLibDexNopermDebug
+> Task :fgslab:compileNopermDebugNavigationResources
+> Task :fgslab:mergeNopermDebugResources
+> Task :fgslab:createNopermDebugCompatibleScreenManifests
+> Task :fgslab:extractDeepLinksNopermDebug
+> Task :fgslab:processNopermDebugMainManifest
+> Task :fgslab:processFullDebugResources
+> Task :fgslab:processNopermDebugManifest
+> Task :fgslab:mergeNopermDebugJniLibFolders
+> Task :fgslab:mergeNopermDebugNativeLibs NO-SOURCE
+> Task :fgslab:stripNopermDebugDebugSymbols NO-SOURCE
+> Task :fgslab:validateSigningNopermDebug
+> Task :fgslab:writeNopermDebugAppMetadata
+> Task :fgslab:writeNopermDebugSigningConfigVersions
+> Task :fgslab:processNopermDebugManifestForPackage
+> Task :fgslab:processNoneDebugManifestForPackage
+> Task :fgslab:processNopermDebugResources
+> Task :fgslab:processNoneDebugResources
+> Task :fgslab:mergeExtDexNopermDebug
+> Task :fgslab:compileNopermDebugKotlin
+> Task :fgslab:compileComboDebugKotlin
+> Task :fgslab:compileNoneDebugKotlin
+> Task :fgslab:compileFullDebugKotlin
+> Task :fgslab:compileComboDebugJavaWithJavac NO-SOURCE
+> Task :fgslab:compressComboDebugJavaRes
+> Task :fgslab:mergeComboDebugJavaResource
+> Task :fgslab:dexBuilderComboDebug
+> Task :fgslab:compileFullDebugJavaWithJavac NO-SOURCE
+> Task :fgslab:compressFullDebugJavaRes
+> Task :fgslab:mergeProjectDexComboDebug
+> Task :fgslab:mergeFullDebugJavaResource
+> Task :fgslab:dexBuilderFullDebug
+> Task :fgslab:compileNoneDebugJavaWithJavac NO-SOURCE
+> Task :fgslab:compressNoneDebugJavaRes
+> Task :fgslab:mergeProjectDexFullDebug
+> Task :fgslab:mergeNoneDebugJavaResource
+> Task :fgslab:dexBuilderNoneDebug
+> Task :fgslab:compileNopermDebugJavaWithJavac NO-SOURCE
+> Task :fgslab:compressNopermDebugJavaRes
+> Task :fgslab:mergeProjectDexNoneDebug
+> Task :fgslab:mergeNopermDebugJavaResource
+> Task :fgslab:dexBuilderNopermDebug
+> Task :fgslab:mergeProjectDexNopermDebug
+> Task :fgslab:packageNoneDebug
+> Task :fgslab:createNoneDebugApkListingFileRedirect
+> Task :fgslab:assembleNoneDebug
+> Task :fgslab:packageComboDebug
+> Task :fgslab:createComboDebugApkListingFileRedirect
+> Task :fgslab:assembleComboDebug
+> Task :fgslab:packageNopermDebug
+> Task :fgslab:createNopermDebugApkListingFileRedirect
+> Task :fgslab:assembleNopermDebug
+> Task :fgslab:packageFullDebug
+> Task :fgslab:createFullDebugApkListingFileRedirect
+> Task :fgslab:assembleFullDebug
+> Task :fgslab:assembleDebug
+
+BUILD SUCCESSFUL in 8s
+136 actionable tasks: 136 executed
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.6.1/userguide/configuration_cache_enabling.html

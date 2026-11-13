@@ -6,5 +6,5 @@
 ## 31. Team task lists
 
 **IOS: Swift packages** (W3, W4)
-- [ ] IOS-1 · 3 d · W3 — The binary and FFI targets in `ios/sdk/Package.swift`, `tools/build-xcframework.sh`, the `CraftBridge` and `CraftBridgeEffects` APIs (§22). Acceptance: E1 on the simulator.
+- [ ] IOS-1 · 3 d · W3 — The binary and FFI targets in `ios/sdk/Package.swift`, `tools/build-xcframework.sh` (which calls `cargo xtask generate` for the Swift bindings, §20), the `CraftBridge` and `CraftBridgeEffects` APIs (§22). Acceptance: E1 on the simulator.
 - [ ] IOS-2 · 2 d · W4 — `CAMetalLayer` preview, `CVPixelBuffer` frames, `BackgroundPolicy` (§17, §22). Acceptance: E6; V4 on the iPhone.

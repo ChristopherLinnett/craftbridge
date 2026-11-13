@@ -1,0 +1,53 @@
+## EffectCraft 103760584a60074c9aaeef686d2d05d89f08155e, read with git show (ec/ holds the copies)
+## file.runScript with inline steps: each step runs with s.execute and its raw output goes into results; no $N substitution
+   533	    };
+   534	    // A command script read from a file is a script: it can't change what scripts may do.
+   535	    let from_file = p.get("steps").is_none();
+   536	    let mut results = vec![];
+   537	    for (i, step) in steps.iter().enumerate() {
+   538	        let (id, params) = match (step.get("command").or(step.get("id")).and_then(Value::as_str), step.get("method").and_then(Value::as_str)) {
+   539	            (Some(id), _) => (id.to_string(), step.get("params").cloned().unwrap_or(json!({}))),
+   540	            (None, Some("engine.execute")) => {
+   541	                let pp = step.get("params").cloned().unwrap_or(json!({}));
+   542	                (pp.get("id").and_then(Value::as_str).unwrap_or_default().to_string(), pp.get("params").cloned().unwrap_or(json!({})))
+   543	            }
+   544	            _ => return Err(bad("file.runScript", format!("step {}: needs `command`", i + 1))),
+   545	        };
+   546	        if super::scripts::RUNS_SCRIPTS.contains(&id.as_str()) {
+   547	            return Err(bad("file.runScript", "scripts can't run scripts"));
+   548	        }
+   549	        let r = if from_file { s.execute_for_script(&id, params) } else { s.execute(&id, params) };
+   550	        let r = r.map_err(|e| EngineError::Other(format!("step {} ({id}): {e}", i + 1)))?;
+   551	        results.push(r);
+   552	    }
+   553	    if let Some(path) = script_path {
+   554	        remember_script(s, crate::prefs::RecentScript::Path(path));
+   555	    }
+   556	    Ok(json!({"steps": results.len(), "results": results}))
+## engine.batch: the same {steps, results} shape; $N substitution (the only in-dispatch consumer) at 85
+    85	            let params = substitute(step.get("params").unwrap_or(&json!({})), results)?;
+    86	            s.execute_checked(id, params)
+   119	    Ok(json!({"steps": results.len(), "results": results}))
+## MCP batch tool: b.exec("engine.batch") and returns the same results
+   496	fn batch_tool(b: &mut Backend, a: &Value) -> Result<Reply> {
+   497	    let steps = need(a, "steps")?;
+   498	    let steps = match steps {
+   499	        Value::String(_) => params_of(Some(steps))?,
+   500	        v => v.clone(),
+   501	    };
+   502	    json_reply(b.exec("engine.batch", obj(&[("steps", Some(&steps)), ("label", get(a, "label")), ("atomic", get(a, "atomic"))]))?)
+## MCP execute_command / command_run: b.exec(id, params) for any id, engine.batch and file.runScript included
+   202	fn execute_command(b: &mut Backend, a: &Value) -> Result<Reply> {
+   203	    let id = get(a, "command").or(get(a, "id")).and_then(Value::as_str).ok_or_else(|| Error::BadArgs("missing `command` (e.g. `comp.new`)".into()))?;
+   204	    let params = params_of(get(a, "params"))?;
+   205	    json_reply(b.exec(id, params)?)
+   206	}
+## replay expect: runs the query inside EffectCraft and compares its value there
+   477	        Step::Expect { query, params, pointer, equals } => {
+   478	            sr.kind = "expect";
+   479	            let (r, panicked) = exec(s, &query, params);
+   480	            sr.command = Some(query);
+   481	            sr.panicked = panicked;
+   482	            sr.error = expectation_error(r, panicked, pointer.as_deref(), equals.as_ref());
+   483	            sr.ok = sr.error.is_none() && !panicked;
+   484	        }

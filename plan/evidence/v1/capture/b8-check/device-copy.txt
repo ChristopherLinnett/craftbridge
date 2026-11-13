@@ -1,0 +1,5 @@
+17:17:44  Acquired tunnel connection to device.
+17:17:44  Enabling developer disk image services.
+17:17:44  Acquired usage assertion.
+File received from Device
+/private/tmp/craftbridge-v1/capture/b8-check/device-documents-report.txt

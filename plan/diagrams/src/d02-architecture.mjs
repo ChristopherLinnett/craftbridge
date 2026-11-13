@@ -1,6 +1,6 @@
 import { diagram } from '../../build/drawio-kit.mjs';
 
-// Question: what does CraftBridge add, and what does it change upstream?
+// Question: what does CraftBridge add, and what does it build on?
 // Columns (node w 230): A 60 · B 320 · C 580 · D 870 · E 1120. Rows (node y): R1 136 · R2 292 · R3 448 · R4 548 · R5 704 · R6 804.
 // Groups: app (C, R1) · packages (B, D at R2) · native library (C at R3; B, D, E at R4) ·
 // EffectCraft at the pin (A, B, C at R5; A, B at R6) · platform (D, E at R5).
@@ -13,8 +13,8 @@ const cx = (c, f = 0.5) => col[c] + W * f;
 export default {
   id,
   xml: diagram({ id, name: 'What changes, where', width: 1400, height: 'auto' }, (d) => {
-    d.title('CraftBridge wraps the unchanged engine; seven seams are the only upstream changes', 'New repository ChristopherLinnett/craftbridge · EffectCraft pinned at 10376058 (+ seams S1–S7 until merged)', { w: 820 });
-    d.legend({ x: 880, y: 26, items: ['new', 'mod', 'chk', 'none'], names: { new: 'New', mod: 'Seam', chk: 'Unchanged', none: 'Platform, app' } });
+    d.title('CraftBridge wraps the unchanged engine; everything new lives in its own repository', 'New repository ChristopherLinnett/craftbridge · EffectCraft at its official revision 10376058, never modified', { w: 820 });
+    d.legend({ x: 880, y: 26, items: ['new', 'chk', 'none'], names: { new: 'New', chk: 'Unchanged', none: 'Platform, app' } });
 
     const n = (key, c, r, main, sub, kind) => d.node(key, main, { x: col[c], y: row[r], w: W, h: H, kind, sub });
 
@@ -27,15 +27,15 @@ export default {
 
     d.group('glib', 'Native library', { x: 300, y: 404, w: 1060, h: 226 });
     n('ffi', 'C', 'R3', 'UniFFI exports', 'Engine object · platform handles', 'new');
-    n('fx', 'B', 'R4', 'craftbridge-effects', 'EffectCraft method table', 'new');
+    n('fx', 'B', 'R4', 'craftbridge-effects', 'method table · adaptations AD1–AD7', 'new');
     n('core', 'D', 'R4', 'craftbridge-core', 'engine thread · GPU device · folders', 'new');
     n('media', 'E', 'R4', 'craftbridge-media', 'hardware decoders → FilmCraft registry', 'new');
 
-    d.group('gup', 'EffectCraft', { x: 40, y: 660, w: 790, h: 226 });
-    n('auto', 'A', 'R5', 'automation + CLI', 'S4 orchestration · S5 timings', 'mod');
-    n('host', 'B', 'R5', 'host', 'S1 folders · S2 no helpers', 'mod');
+    d.group('gup', 'EffectCraft at the pin', { x: 40, y: 660, w: 790, h: 226 });
+    n('auto', 'A', 'R5', 'automation', 'Backend · McpServer · tools', 'chk');
+    n('host', 'B', 'R5', 'host', 'FileExporter', 'chk');
     n('gpu', 'C', 'R5', 'GPU compositor', 'Gpu::new · render_display', 'chk');
-    n('eng', 'A', 'R6', 'engine · text · export', 'S3 fonts · S6 memory · S7 encoders', 'mod');
+    n('eng', 'A', 'R6', 'engine · text · export', 'Session · render queue · fonts', 'chk');
     n('reg', 'B', 'R6', 'FilmCraft decoder registry', 'filmcraft-codecs at d5ead4ba', 'chk');
 
     d.group('gplat', 'Platform', { x: 850, y: 660, w: 510, h: 126 });

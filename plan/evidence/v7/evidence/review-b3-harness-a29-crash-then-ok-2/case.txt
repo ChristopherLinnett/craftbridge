@@ -1,0 +1,12 @@
+case=review-b3-harness-a29-crash-then-ok-2
+apk=apk-b1/fgslab-combo-ts37.apk
+apk_md5=3d45b867f8c088c64cd874303ccad7bc
+serial=emulator-5554 device_sdk=29
+type=mediaProcessing duration_s=45
+start=2026-11-13T15:32:40+08:00
+install_rc=0
+pid=5284
+home_sent_device=15:32:49.793
+home_sent=2026-11-13T15:32:50+08:00
+result=EXPORT_DONE end=2026-11-13T15:33:30+08:00
+target_sdk=37

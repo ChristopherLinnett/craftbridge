@@ -1,0 +1,87 @@
+.Al Nile PUA/Regular
+.Al Nile PUA/Bold
+.Damascus PUA/Regular
+.Damascus PUA/Light
+.Damascus PUA/Medium
+.Damascus PUA/Bold
+.Damascus PUA/Semi Bold
+.Farah PUA/Regular
+Hiragino Mincho Pro/W3
+Hiragino Mincho Pro/W6
+.Apple SD Gothic NeoI/Regular
+.Apple SD Gothic NeoW/Regular
+.Apple SD Gothic NeoI/Medium
+.Apple SD Gothic NeoW/Medium
+.Apple SD Gothic NeoI/SemiBold
+.Apple SD Gothic NeoW/SemiBold
+.Apple SD Gothic NeoI/Bold
+.Apple SD Gothic NeoW/Bold
+.Apple SD Gothic NeoI/Light
+.Apple SD Gothic NeoW/Light
+.Apple SD Gothic NeoI/Thin
+.Apple SD Gothic NeoW/Thin
+.Apple SD Gothic NeoI/UltraLight
+.Apple SD Gothic NeoW/UltraLight
+.Geeza Pro Interface/Regular
+.Geeza Pro Interface/Bold
+.Geeza Pro Interface/Light
+.Geeza Pro PUA/Regular
+.Geeza Pro PUA/Bold
+.Hiragino Kaku Gothic Interface/W1
+.Hiragino Kaku Gothic InterfaceWatch/W1
+.Hiragino Kaku Gothic Interface/W2
+.Hiragino Kaku Gothic InterfaceWatch/W2
+.Hiragino Kaku Gothic Interface/W3
+.Hiragino Kaku Gothic InterfaceWatch/W3
+Hiragino Kaku Gothic ProN/W3
+Hiragino Kaku Gothic Pro/W3
+.Hiragino Kaku Gothic Interface/W4
+.Hiragino Kaku Gothic InterfaceWatch/W4
+.Hiragino Kaku Gothic Interface/W5
+.Hiragino Kaku Gothic InterfaceWatch/W5
+.Hiragino Kaku Gothic Interface/W6
+.Hiragino Kaku Gothic InterfaceWatch/W6
+Hiragino Kaku Gothic ProN/W6
+Hiragino Kaku Gothic Pro/W6
+.Hiragino Kaku Gothic Interface/W7
+.Hiragino Kaku Gothic InterfaceWatch/W7
+.Hiragino Kaku Gothic Interface/W8
+.Hiragino Kaku Gothic InterfaceWatch/W8
+Hiragino Kaku Gothic Std/W8
+Hiragino Kaku Gothic StdN/W8
+.Noto Nastaliq Urdu UI/Regular
+.Noto Nastaliq Urdu UI/Bold
+Noto Sans Zawgyi/Bold
+Noto Sans Zawgyi/Light
+Noto Sans Zawgyi/Regular
+.Apple Color Emoji UI/Regular
+Hiragino Maru Gothic Pro/W4
+.Savoye LET CC./Plain
+.PingFang UI SC/DefaultText
+.PingFang UI TC/DefaultText
+.PingFang UI HK/DefaultText
+.PingFang UI MO/DefaultText
+.PingFang UI JA/DefaultText
+.PingFang UI SC/DefaultDisplay
+.PingFang UI TC/DefaultDisplay
+.PingFang UI HK/DefaultDisplay
+.PingFang UI MO/DefaultDisplay
+.PingFang UI JA/DefaultDisplay
+.PingFang UI Watch SC/DefaultText
+.PingFang UI Watch TC/DefaultText
+.PingFang UI Watch HK/DefaultText
+.PingFang UI Watch MO/DefaultText
+.PingFang UI Watch JA/DefaultText
+.PingFang UI Watch SC/DefaultDisplay
+.PingFang UI Watch TC/DefaultDisplay
+.PingFang UI Watch HK/DefaultDisplay
+.PingFang UI Watch MO/DefaultDisplay
+.PingFang UI Watch JA/DefaultDisplay
+.PingFang SC/Medium
+.PingFang TC/Medium
+.PingFang HK/Medium
+.PingFang MO/Medium
+.PingFang Watch SC/Medium
+.PingFang Watch TC/Medium
+.PingFang Watch HK/Medium
+.PingFang Watch MO/Medium

@@ -1,0 +1,7 @@
+$ adb shell device_config put activity_manager data_sync_fgs_timeout_duration 60000
+$ adb shell device_config get activity_manager data_sync_fgs_timeout_duration
+60000
+$ adb shell device_config delete activity_manager data_sync_fgs_timeout_duration
+Successfully deleted data_sync_fgs_timeout_duration from activity_manager
+$ adb shell device_config get activity_manager data_sync_fgs_timeout_duration
+null

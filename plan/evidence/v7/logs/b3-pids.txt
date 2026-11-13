@@ -1,0 +1,4 @@
+Pixel_6_API_29 port 5554 pid=16451 started=2026-11-13T15:07:53+08:00
+Pixel_6_API_31 port 5556 pid=16452 started=2026-11-13T15:07:53+08:00
+Pixel_6_API_29 port 5554 pid=16451 stopped=2026-11-13T16:08:41+08:00 (adb emu kill; confirmed gone in ps)
+Pixel_6_API_31 port 5556 pid=16452 stopped=2026-11-13T16:08:41+08:00 (adb emu kill; confirmed gone in ps)

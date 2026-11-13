@@ -1,0 +1,46 @@
+## families only with [<RuntimeRoot>/System/Library/Fonts]
+.ADT Slab Time
+.New York Time
+.SF Rail Time
+.SF Rounded Time
+.SF Soft Time
+.SF Stencil Time
+Sukhumvit Set
+## families only with CoreText's folders
+.PingFang HK
+.PingFang MO
+.PingFang SC
+.PingFang TC
+.PingFang UI HK
+.PingFang UI JA
+.PingFang UI MO
+.PingFang UI SC
+.PingFang UI TC
+.PingFang UI Watch HK
+.PingFang UI Watch JA
+.PingFang UI Watch MO
+.PingFang UI Watch SC
+.PingFang UI Watch TC
+.PingFang Watch HK
+.PingFang Watch MO
+.PingFang Watch SC
+.PingFang Watch TC
+PingFang HK
+PingFang MO
+PingFang SC
+PingFang TC
+## the files behind the first list: EffectCraft's faces in <RuntimeRoot>/System/Library/Fonts/Watch
+ADTTime.ttc: 6 faces
+  .ADT Slab Time/Regular (index 0, full ".ADT Slab Time")
+  .New York Time/Regular (index 1, full ".New York Time")
+  .SF Rail Time/Black (index 2, full ".SF Rail Time Black")
+  .SF Rounded Time/Regular (index 3, full ".SF Rounded Time")
+  .SF Soft Time/Regular (index 4, full ".SF Soft Time")
+  .SF Stencil Time/Regular (index 5, full ".SF Stencil Time")
+SukhumvitSet.ttc: 6 faces
+  Sukhumvit Set/Thin (index 0, full "SukhumvitSet-Thin")
+  Sukhumvit Set/Light (index 1, full "SukhumvitSet-Light")
+  Sukhumvit Set/Text (index 2, full "SukhumvitSet-Text")
+  Sukhumvit Set/Medium (index 3, full "SukhumvitSet-Medium")
+  Sukhumvit Set/Semi Bold (index 4, full "SukhumvitSet-SemiBold")
+  Sukhumvit Set/Bold (index 5, full "SukhumvitSet-Bold")

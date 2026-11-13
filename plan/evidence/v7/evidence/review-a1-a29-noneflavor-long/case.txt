@@ -1,0 +1,10 @@
+case=review-a1-a29-noneflavor-long
+apk=/tmp/craftbridge-v7/apk2/fgslab-none-ts37.apk
+apk_md5=2d6d8586c490a30d179d30fe0611fc59
+serial=emulator-5554 device_sdk=29
+type=none duration_s=660
+start=2026-11-13T10:13:46+08:00
+install_rc=0
+pid=5558
+home_sent=2026-11-13T10:13:55+08:00
+result=EXPORT_DONE end=2026-11-13T10:24:49+08:00

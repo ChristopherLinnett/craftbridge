@@ -1,0 +1,20 @@
+# Links EffectCraft's real text crate (pinned revision, fetched read-only from the local clone)
+# into FontProbe, so the simulator runs the exact calls AD2 would make.
+[package]
+name = "ecprobe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+# staticlib for FontProbe; rlib so the examples share the folder-list reader in src/lib.rs.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+effectcraft-text = { git = "file:///Users/christopherlinnett/dev/artcraft-dev/effectcraft/repository", rev = "103760584a60074c9aaeef686d2d05d89f08155e" }
+# Only the fallbackcost example needs it, to read each face's cmap for sample characters; the
+# answers themselves come from effectcraft-text's public API. Same version effectcraft-text pins.
+skrifa = "0.44"
+
+[profile.release]
+debug = false

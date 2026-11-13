@@ -1,0 +1,7 @@
+case=a37-full-specialuse
+apk=/tmp/craftbridge-v7/apk2/fgslab-full-ts37.apk
+type=specialUse duration_s=45
+start=2026-11-13T01:54:38+08:00
+install_rc=0
+home_sent=2026-11-13T01:54:47+08:00
+result=EXPORT_DONE end=2026-11-13T01:55:27+08:00

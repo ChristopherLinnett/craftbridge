@@ -1,0 +1,13 @@
+$ adb install -r -g /tmp/craftbridge-v7/apk-b1/fgslab-combo-ts37.apk
+Performing Streamed Install
+Success
+$ adb shell am compat enable 255039210 com.example.fgslab
+Enabled change 255039210 for com.example.fgslab.
+$ adb shell dumpsys platform_compat | grep 255039210
+ChangeId(255039210; name=FGS_TYPE_DATA_SYNC_DEPRECATION_CHANGE_ID; disabled; packageOverrides={com.example.fgslab=true}; rawOverrides={com.example.fgslab=true}; overridable)
+$ adb shell dumpsys platform_compat | grep 255039210   # after the run
+ChangeId(255039210; name=FGS_TYPE_DATA_SYNC_DEPRECATION_CHANGE_ID; disabled; packageOverrides={com.example.fgslab=true}; rawOverrides={com.example.fgslab=true}; overridable)
+$ adb shell am compat reset 255039210 com.example.fgslab
+Reset change 255039210 for com.example.fgslab to default value.
+$ adb shell dumpsys platform_compat | grep 255039210   # after reset
+ChangeId(255039210; name=FGS_TYPE_DATA_SYNC_DEPRECATION_CHANGE_ID; disabled; overridable)

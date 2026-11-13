@@ -1,0 +1,37 @@
+.Al Nile PUA
+.Apple Color Emoji UI
+.Apple SD Gothic NeoI
+.Apple SD Gothic NeoW
+.Damascus PUA
+.Farah PUA
+.Geeza Pro Interface
+.Geeza Pro PUA
+.Hiragino Kaku Gothic Interface
+.Hiragino Kaku Gothic InterfaceWatch
+.Noto Nastaliq Urdu UI
+.PingFang HK
+.PingFang MO
+.PingFang SC
+.PingFang TC
+.PingFang UI HK
+.PingFang UI JA
+.PingFang UI MO
+.PingFang UI SC
+.PingFang UI TC
+.PingFang UI Watch HK
+.PingFang UI Watch JA
+.PingFang UI Watch MO
+.PingFang UI Watch SC
+.PingFang UI Watch TC
+.PingFang Watch HK
+.PingFang Watch MO
+.PingFang Watch SC
+.PingFang Watch TC
+.Savoye LET CC.
+Hiragino Kaku Gothic Pro
+Hiragino Kaku Gothic ProN
+Hiragino Kaku Gothic Std
+Hiragino Kaku Gothic StdN
+Hiragino Maru Gothic Pro
+Hiragino Mincho Pro
+Noto Sans Zawgyi

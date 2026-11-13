@@ -1,0 +1,7 @@
+case=a31-noperm-datasync
+apk=/tmp/craftbridge-v7/apk/fgslab-noperm-ts37.apk
+type=dataSync duration_s=45
+start=2026-11-13T01:25:47+08:00
+install_rc=0
+home_sent=2026-11-13T01:25:56+08:00
+result=EXPORT_DONE end=2026-11-13T01:26:36+08:00

@@ -1,0 +1,13 @@
+# final-v7 process check 21:32:51
+pid 27136 gone
+pid 27137 gone
+pid 39156 gone
+$ ps -axo pid,comm | grep -E 'qemu-system|/emulator$'
+(none)
+$ pgrep -fl 'emulator -avd|qemu-system'
+(none)
+$ pgrep -fl 'netsimd|crashpad_handler'
+(none)
+$ adb devices
+List of devices attached
+

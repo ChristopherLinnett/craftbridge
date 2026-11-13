@@ -1,0 +1,27 @@
+$ adb shell aflags list | grep -i -E 'fgs_timeout|fgs.*crash'
+rc=1
+$ adb shell aflags list | grep -c .
+1
+$ adb shell getprop ro.build.fingerprint
+google/sdk_gphone16k_arm64/emu64a16k:17/CP41.260828.004.A7/16296984:user/dev-keys
+
+# aflags needs root on this user build (Error: must be root); reading the flag declarations directly:
+$ adb shell 'grep -a -o "[a-z_]*fgs[a-z_]*" /system/etc/aconfig_flags.pb | sort -u'
+always_revoke_audio_capability_above_bfgs
+always_revoke_audio_capability_above_bfgs_flag_values
+asynchronous_fgs_logging_lms
+asynchronous_fgs_logging_lms_flag_values
+fgs_delegate_system_api
+fgs_delegate_system_api_flag_values
+$ adb shell 'grep -a -c enable_fgs_timeout_crash_behavior /system/etc/aconfig_flags.pb /system_ext/etc/aconfig_flags.pb /product/etc/aconfig_flags.pb /vendor/etc/aconfig_flags.pb /system/etc/aconfig/flag.map'
+/system/etc/aconfig_flags.pb:0
+/system_ext/etc/aconfig_flags.pb:0
+/product/etc/aconfig_flags.pb:0
+/vendor/etc/aconfig_flags.pb:0
+/system/etc/aconfig/flag.map:0
+$ adb shell 'grep -a -c fgs_delegate_system_api /system/etc/aconfig_flags.pb'   # control: a flag that does exist
+2
+$ adb shell 'for f in /apex/*/etc/aconfig_flags.pb /system/etc/aconfig/*; do c=$(grep -a -c enable_fgs_timeout_crash_behavior $f); [ "$c" != 0 ] && echo $f $c; done; echo searched'
+/apex/*/etc/aconfig_flags.pb 
+searched 5 files
+# (the /apex/*/etc/aconfig_flags.pb glob matched no file, so that line is the unexpanded pattern; no file contains the flag name)

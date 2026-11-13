@@ -1,0 +1,23 @@
+ACTIVITY MANAGER SERVICES (dumpsys activity services)
+  User 0 active services:
+  * ServiceRecord{7a6300f u0 com.example.fgslab/.ExportService}
+    intent={cmp=com.example.fgslab/.ExportService}
+    packageName=com.example.fgslab
+    processName=com.example.fgslab
+    baseDir=/data/app/~~Dtzq0CYK9qANsWcwChMCWw==/com.example.fgslab-Uwxsbp12f2cPG_DnSotLig==/base.apk
+    dataDir=/data/user/0/com.example.fgslab
+    app=ProcessRecord{2dbd542 4993:com.example.fgslab/u0a146}
+    allowWhileInUsePermissionInFgs=true
+    recentCallingPackage=com.example.fgslab
+    recentCallingUid=10146
+    allowStartForeground=12
+    startForegroundCount=0
+    infoAllowStartForeground=[callingPackage: com.example.fgslab; callingUid: 10146; uidState: TOP ; intent: Intent { cmp=com.example.fgslab/.ExportService (has extras) }; code:PROC_STATE_TOP; tempAllowListReason:<null>; targetSdkVersion:37; callerTargetSdkVersion:37; startForegroundCount:0; bindFromPackage:null]
+    createTime=-8s929ms startingBgTimeout=--
+    lastActivity=-8s929ms restartTime=-8s929ms createdFromFg=true
+    startRequested=true delayedStop=false stopIfKilled=false callStart=false lastStartId=1
+    executeNesting=1 executeFg=true executingStart=-8s929ms
+    restartCount=0 restartDelay=-- nextRestartTime=-- crashCount=1
+    Delivered Starts:
+    #0 id=1 dur=-8s929ms dc=1
+      intent=Intent { cmp=com.example.fgslab/.ExportService (has extras) }

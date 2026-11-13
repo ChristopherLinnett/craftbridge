@@ -1,0 +1,99 @@
+device_time=21:13:27.231
+ACTIVITY MANAGER RUNNING PROCESSES (dumpsys activity processes)
+  All known processes:
+  *APP* UID 10230 ProcessRecord{f412c7b 4609:com.example.fgslab/u0a230}
+    user #0 uid=10230 gids={50230, 20230, 9997}
+    mRequiredAbi=arm64-v8a instructionSet=null 
+    dir=/data/app/~~dXUrmPiQusbhBM1lMbBM2A==/com.example.fgslab-G_g2jCvw7vka_c74NermrA==/base.apk publicDir=/data/app/~~dXUrmPiQusbhBM1lMbBM2A==/com.example.fgslab-G_g2jCvw7vka_c74NermrA==/base.apk data=/data/user/0/com.example.fgslab 
+    packageList={com.example.fgslab}
+    compat={420dpi} 
+    thread=com.android.server.am.ApplicationThreadDeferred@ed6f1a5 
+    pid=4609 
+    lastActivityTime=-38s837ms startUpTime=-39s357ms startElapsedTime=-39s357ms
+    startSeq=92 lruSeq=1396 
+    mountMode=DEFAULT 
+    pendingUiClean=true 
+    lastRssTime=-39s360ms rssProcState=20 rssStatType=0 nextRssTime=+17m55s737ms
+    lastRss=0.00 lastCachedRss=0.00
+    trimMemoryLevel=0
+    procStateMemTracker: best=4 () / pending state=2 highest=2 1.0x
+    lastRequestedGc=-39s29ms lastLowMemory=-39s29ms reportLowMemory=false
+    currentHostingComponentTypes=0x190 historicalHostingComponentTypes=0x190
+    reportedInteraction=false fgInteractionTime=-29s159ms
+    adjSeq=2089 
+    oom adj: max=1001 curRaw=50 setRaw=50 cur=50 set=50 
+    mCurSchedGroup=2 setSchedGroup=2 systemNoUi=false 
+    curProcState=4 mRepProcState=4 setProcState=4 lastStateTime=-29s159ms
+    curCapability=---NFUATI setCapability=---NFUATI
+    curCpuTimeReasons=0x1 setCpuTimeReasons=0x1 curImplicitCpuTimeReasons=0x1 setImplicitCpuTimeReasons=0x1 
+    
+    hasShownUi=true 
+    cached=false empty=false 
+    lastTopTime=-29s159ms
+    lastInvisibleTime=2026-11-13 13:12:57.018 (-30s232ms)
+    hasStartedServices=true 
+    hasForegroundServices=true forcedToImportant=false toastActive=false 
+    Services:
+      - ServiceRecord{fe46f7 u0 com.example.fgslab/.ExportService c:com.example.fgslab}
+    scheduleServiceTimeoutPending=false 
+    Connected Providers:
+      - 65dcdb3/com.android.providers.settings/.SettingsProvider->4609:com.example.fgslab/u0a230 s1/1 u0/0 +38s804ms
+    mIsReceivingBroadcast=false 
+    mBroadcastReceiverSchedGroup=-2147483648 
+    lastCompactTime=0 lastCompactProfile=INVALID 
+    hasPendingCompaction=false 
+    isPendingFreeze=false isFrozen=false 
+    earliestFreezableTimeMs=--
+    Activities:
+      - ActivityRecord{80293804 u0 com.example.fgslab/.MainActivity t9}
+    Recent Tasks:
+      - Task{137e475 #9 type=standard A=10230:com.example.fgslab}
+    Configuration={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long compactNeeded port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} as.3 s.63 fontWeightAdjustment=0} 
+    OverrideConfiguration={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long compactNeeded port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} as.3 s.2 fontWeightAdjustment=0} 
+    mLastReportedConfiguration={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long compactNeeded port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} as.3 s.63 fontWeightAdjustment=0} 
+  
+  OOM levels:
+    -900: SYSTEM_ADJ (   73,728K)
+    -800: PERSISTENT_PROC_ADJ (   73,728K)
+    -700: PERSISTENT_SERVICE_ADJ (   73,728K)
+      0: FOREGROUND_APP_ADJ (   73,728K)
+     100: VISIBLE_APP_ADJ (   92,160K)
+     200: PERCEPTIBLE_APP_ADJ (  110,592K)
+     225: PERCEPTIBLE_MEDIUM_APP_ADJ (  129,024K)
+     250: PERCEPTIBLE_LOW_APP_ADJ (  129,024K)
+     300: BACKUP_APP_ADJ (  221,184K)
+     400: HEAVY_WEIGHT_APP_ADJ (  221,184K)
+     500: SERVICE_ADJ (  221,184K)
+     600: HOME_APP_ADJ (  221,184K)
+     700: PREVIOUS_APP_ADJ (  221,184K)
+     800: SERVICE_B_ADJ (  221,184K)
+     900: CACHED_APP_MIN_ADJ (  221,184K)
+     999: CACHED_APP_MAX_ADJ (  322,560K)
+  
+  Process OOM control (60 total, non-act at 2, non-svc at 2):
+    Proc #1: fg   +50 F/S/FGS  ---NFUATI  t: 0 4609:com.example.fgslab/u0a230 (fg-service-act)
+        oom: max=1001 curRaw=50 setRaw=50 cur=50 set=50 
+        state: cur=FGS  set=FGS   lastRss=0.00 lastCachedRss=0.00
+        cached=false empty=false hasAboveClient=false 
+  
+    mHomeProcess: ProcessRecord{9137e46 1067:com.google.android.apps.nexuslauncher/u0a197}
+    mPreviousProcess: ProcessRecord{f412c7b 4609:com.example.fgslab/u0a230}
+
+  Raw LRU list (dumpsys activity lru):
+    Activities:
+    #58: fg   +50 FGS  ---NFUATI 4609:com.example.fgslab/u0a230 act:activities|recents
+
+  Process LRU list (sorted by oom_adj, 60 total, non-act at 2, non-svc at 2):
+    Proc #1: fg   +50 F/S/FGS  ---NFUATI  t: 0 4609:com.example.fgslab/u0a230 (fg-service-act)
+  
+  PID mappings:
+    PID #4609: ProcessRecord{f412c7b 4609:com.example.fgslab/u0a230}
+  
+  mPreviousProcess: ProcessRecord{f412c7b 4609:com.example.fgslab/u0a230}
+  mPreviousProcessVisibleTime: +1m36s705ms
+  mDeviceIdleAllowlist=[2000, 10104, 10115, 10121, 10146, 10200, 10202, 10206, 10210, 10226]
+  mDeviceIdleExceptIdleAllowlist=[2000, 10104, 10107, 10115, 10116, 10121, 10146, 10151, 10154, 10200, 10202, 10206, 10210, 10226]
+  mDeviceIdleTempAllowlist=[]
+  mFgsStartTempAllowList:
+  mFgsBootCompletedStartTempAllowList:
+  mForceBackgroundCheck=false

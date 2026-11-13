@@ -1,0 +1,4 @@
+faces scanned: 645
+faces with hvgl: 32
+faces lacking glyf/CFF/CFF2/sbix/CBDT/COLR/EBDT: 32
+faces with hvgl AND lacking every drawable table: 32

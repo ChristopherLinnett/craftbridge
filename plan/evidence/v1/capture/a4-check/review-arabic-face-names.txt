@@ -1,0 +1,29 @@
+## Mac /System/Library/Fonts/Supplemental/Al Nile.ttc | runtime <RuntimeRoot>/System/Library/Fonts/AppFonts/AlNile.ttc: same face names
+  النيل/عادي (index 0, full "النيل عادي")
+  .Al Nile PUA/Regular (index 1, full ".Al Nile PUA")
+  النيل/عريض (index 2, full "النيل عريض")
+  .Al Nile PUA/Bold (index 3, full ".Al Nile PUA Bold")
+## Mac /System/Library/Fonts/Supplemental/Damascus.ttc | runtime <RuntimeRoot>/System/Library/Fonts/AppFonts/Damascus.ttc: same face names
+  ڈیمسکس/ریگولر (index 0, full "ڈیمسکس ریگولر")
+  .Damascus PUA/Regular (index 1, full ".Damascus PUA")
+  ڈیمسکس/لائٹ (index 2, full "ڈیمسکس لائٹ")
+  .Damascus PUA/Light (index 3, full ".Damascus PUA Light")
+  ڈیمسکس/میڈیم (index 4, full "ڈیمسکس میڈیم")
+  .Damascus PUA/Medium (index 5, full ".Damascus PUA Medium")
+  ڈیمسکس/بولڈ (index 6, full "ڈیمسکس بولڈ")
+  .Damascus PUA/Bold (index 7, full ".Damascus PUA Bold")
+  ڈیمسکس/سیمی بولڈ (index 8, full "ڈیمسکس سیمی بولڈ")
+  .Damascus PUA/Semi Bold (index 9, full ".Damascus PUA Semi Bold")
+## Mac /System/Library/Fonts/Supplemental/Farah.ttc | runtime <RuntimeRoot>/System/Library/Fonts/AppFonts/Farah.ttc: same face names
+  فرح/عادي (index 0, full "فرح عادي")
+  .Farah PUA/Regular (index 1, full ".Farah PUA")
+## Mac /System/Library/Fonts/GeezaPro.ttc | runtime <RuntimeRoot>/System/Library/Fonts/Core/GeezaPro.ttc: same face names
+  گیزا پرو/Regular (index 0, full "گیزا پرو ریگولر")
+  گیزا پرو/Bold (index 1, full "گیزا پرو بولڈ")
+  .Geeza Pro Interface/Regular (index 2, full ".Geeza Pro Interface Regular")
+  .Geeza Pro Interface/Bold (index 3, full ".Geeza Pro Interface Bold")
+  .Geeza Pro Interface/Light (index 4, full ".Geeza Pro Interface Light")
+  .Geeza Pro PUA/Regular (index 5, full ".Geeza Pro PUA")
+  .Geeza Pro PUA/Bold (index 6, full ".Geeza Pro PUA Bold")
+## Mac /System/Library/Fonts/Supplemental/Mishafi.ttf | runtime <RuntimeRoot>/System/Library/Fonts/AppFonts/Mishafi.ttf: same face names
+  مِصحفي/عادي (index 0, full "مِصحفي عادي")

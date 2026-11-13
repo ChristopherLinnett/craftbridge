@@ -1,0 +1,9 @@
+$ adb shell device_config put activity_manager data_sync_fgs_timeout_duration 60000
+$ adb shell device_config get activity_manager data_sync_fgs_timeout_duration
+60000
+$ adb shell dumpsys platform_compat | grep FGS_INTRODUCE_TIME_LIMITS
+(no such change id on this platform)
+$ adb shell device_config delete activity_manager data_sync_fgs_timeout_duration
+Failed to delete data_sync_fgs_timeout_duration from activity_manager
+$ adb shell am compat enable FGS_INTRODUCE_TIME_LIMITS com.example.fgslab
+Unknown or invalid change: 'FGS_INTRODUCE_TIME_LIMITS'.

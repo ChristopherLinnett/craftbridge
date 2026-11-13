@@ -1,0 +1,767 @@
+distinct quoted passages checked: 488
+
+=== segments NOT found in any docs file: 382 ===
+  [code] FULL: REVIEW-<round>.md
+         MISSING SEGMENT: REVIEW-<round>.md
+  [code] FULL: CASE_TAG=<round>
+         MISSING SEGMENT: CASE_TAG=<round>
+  [code] FULL: ) on four local emulator AVDs; every claim cites a captured artifact under
+         MISSING SEGMENT: ) on four local emulator AVDs; every claim cites a captured artifact under
+  [code] FULL: case.txt
+         MISSING SEGMENT: case.txt
+  [code] FULL: logcat_full.txt
+         MISSING SEGMENT: logcat_full.txt
+  [code] FULL: dumpsys_early.txt
+         MISSING SEGMENT: dumpsys_early.txt
+  [code] FULL: dumpsys_late.txt
+         MISSING SEGMENT: dumpsys_late.txt
+  [code] FULL: install.txt
+         MISSING SEGMENT: install.txt
+  [code] FULL: am_start.txt
+         MISSING SEGMENT: am_start.txt
+  [code] FULL: review-a1-*
+         MISSING SEGMENT: review-a1-*
+  [code] FULL: review-b1-*
+         MISSING SEGMENT: review-b1-*
+  [code] FULL: dumpsys_bg.txt
+         MISSING SEGMENT: dumpsys_bg.txt
+  [code] FULL: resumed_bg.txt
+         MISSING SEGMENT: resumed_bg.txt
+  [code] FULL: timeout_knob.txt
+         MISSING SEGMENT: timeout_knob.txt
+  [straight] FULL: mediaProcessing|dataSync
+         MISSING SEGMENT: mediaProcessing|dataSync
+  [code] FULL: android:foregroundServiceType="mediaProcessing|dataSync"
+         MISSING SEGMENT: android:foregroundServiceType="mediaProcessing|dataSync"
+  [code] FULL: Build.VERSION.SDK_INT >= 35
+         MISSING SEGMENT: Build.VERSION.SDK_INT >= 35
+  [code] FULL: a34-full-ts34-mediaproc
+         MISSING SEGMENT: a34-full-ts34-mediaproc
+  [code] FULL: review-a1-a34-combo-mediaproc
+         MISSING SEGMENT: review-a1-a34-combo-mediaproc
+  [code] FULL: is rejected the same way on Android 14 (
+         MISSING SEGMENT: is rejected the same way on Android 14 (
+  [code] FULL: EXPORT_DONE
+         MISSING SEGMENT: EXPORT_DONE
+  [code] FULL: IllegalArgumentException ... not a subset ... 0x00002001
+         MISSING SEGMENT: 0x00002001
+  [code] FULL: review-b1-a29-combo-none
+         MISSING SEGMENT: review-b1-a29-combo-none
+  [code] FULL: review-b1-a29-combo-short-notdeclared
+         MISSING SEGMENT: review-b1-a29-combo-short-notdeclared
+  [code] FULL: review-b1-a31-combo-none
+         MISSING SEGMENT: review-b1-a31-combo-none
+  [code] FULL: review-b1-a31-combo-short-notdeclared
+         MISSING SEGMENT: review-b1-a31-combo-short-notdeclared
+  [code] FULL: 0cea776e2569a7e153abb28b42a2a29d
+         MISSING SEGMENT: 0cea776e2569a7e153abb28b42a2a29d
+  [code] FULL: apk-a1/
+         MISSING SEGMENT: apk-a1/
+  [code] FULL: apk-b1/
+         MISSING SEGMENT: apk-b1/
+  [code] FULL: 3d45b867f8c088c64cd874303ccad7bc
+         MISSING SEGMENT: 3d45b867f8c088c64cd874303ccad7bc
+  [code] FULL: review-b1-a34-combo-auto-long
+         MISSING SEGMENT: review-b1-a34-combo-auto-long
+  [code] FULL: review-b1-a37-combo-auto-long
+         MISSING SEGMENT: review-b1-a37-combo-auto-long
+  [code] FULL: review-a3-a29-combo-auto-long
+         MISSING SEGMENT: review-a3-a29-combo-auto-long
+  [code] FULL: fileKiB=420224
+         MISSING SEGMENT: fileKiB=420224
+  [code] FULL: review-a3-a31-combo-auto-long
+         MISSING SEGMENT: review-a3-a31-combo-auto-long
+  [code] FULL: fileKiB=417792
+         MISSING SEGMENT: fileKiB=417792
+  [code] FULL: onTimeout(startId, fgsType)
+         MISSING SEGMENT: onTimeout(startId, fgsType)
+  [code] FULL: review-a1-a37-combo-auto-knob60
+         MISSING SEGMENT: review-a1-a37-combo-auto-knob60
+  [code] FULL: /Applications/Android Studio.app/Contents/jbr/Contents/Home
+         MISSING SEGMENT: /Applications/Android Studio.app/Contents/jbr/Contents/Home
+  [code] FULL: ro.build.version.sdk=37
+         MISSING SEGMENT: ro.build.version.sdk=37
+  [code] FULL: pixel_6
+         MISSING SEGMENT: pixel_6
+  [code] FULL: config.ini
+         MISSING SEGMENT: config.ini
+  [code] FULL: Pixel_6_API_29
+         MISSING SEGMENT: Pixel_6_API_29
+  [code] FULL: system-images;android-29;google_apis;arm64-v8a
+         MISSING SEGMENT: system-images;android-29;google_apis;arm64-v8a
+  [code] FULL: Pixel_6_API_31
+         MISSING SEGMENT: Pixel_6_API_31
+  [code] FULL: system-images;android-31;google_apis;arm64-v8a
+         MISSING SEGMENT: system-images;android-31;google_apis;arm64-v8a
+  [code] FULL: Pixel_6_API_34
+         MISSING SEGMENT: Pixel_6_API_34
+  [code] FULL: system-images;android-34;google_apis;arm64-v8a
+         MISSING SEGMENT: system-images;android-34;google_apis;arm64-v8a
+  [code] FULL: Pixel_6_API_37
+         MISSING SEGMENT: Pixel_6_API_37
+  [code] FULL: system-images;android-37.2;google_apis_playstore_ps16k;arm64-v8a
+         MISSING SEGMENT: system-images;android-37.2;google_apis_playstore_ps16k;arm64-v8a
+  [code] FULL: ro.build.version.sdk
+         MISSING SEGMENT: ro.build.version.sdk
+  [code] FULL: ...emu64a16k:17/CP41.260828.004.A7...:user
+         MISSING SEGMENT: emu64a16k:17/CP41.260828.004.A7
+  [code] FULL: emulator -avd Pixel_6_API_NN -port 5554|5556 -no-window -no-audio -no-boot-anim -no-snapshot -gpu auto
+         MISSING SEGMENT: emulator -avd Pixel_6_API_NN -port 5554|5556 -no-window -no-audio -no-boot-anim -no-snapshot -gpu auto
+  [code] FULL: adb shell getprop ro.build.version.sdk
+         MISSING SEGMENT: adb shell getprop ro.build.version.sdk
+  [code] FULL: device_sdk=
+         MISSING SEGMENT: device_sdk=
+  [code] FULL: target_sdk=
+         MISSING SEGMENT: target_sdk=
+  [code] FULL: review-b1-harness-smoke-*
+         MISSING SEGMENT: review-b1-harness-smoke-*
+  [code] FULL: review-a2-*
+         MISSING SEGMENT: review-a2-*
+  [code] FULL: com.example.fgslab
+         MISSING SEGMENT: com.example.fgslab
+  [code] FULL: , flag sync
+         MISSING SEGMENT: flag sync
+  [code] FULL: where the command exists (34, 37).
+         MISSING SEGMENT: where the command exists (34, 37)
+  [code] FULL: REVIEW-A2.md
+         MISSING SEGMENT: REVIEW-A2.md
+  [code] FULL: evidence/apk-md5.txt
+         MISSING SEGMENT: evidence/apk-md5.txt
+  [code] FULL: (first build) ran the whole
+         MISSING SEGMENT: (first build) ran the whole
+  [code] FULL: *-combo-final
+         MISSING SEGMENT: *-combo-final
+  [code] FULL: dexdump
+         MISSING SEGMENT: dexdump
+  [code] FULL: ExportService
+         MISSING SEGMENT: ExportService
+  [code] FULL: a29/a31-combo-final
+         MISSING SEGMENT: a29/a31-combo-final
+  [code] FULL: review-a1-a*
+         MISSING SEGMENT: review-a1-a*
+  [code] FULL: after the review-A1 fixes; its merged manifests equal
+         MISSING SEGMENT: after the review-A1 fixes; its merged manifests equal
+  [code] FULL: aapt2 dump xmltree
+         MISSING SEGMENT: aapt2 dump xmltree
+  [code] FULL: <activity>
+         MISSING SEGMENT: <activity>
+  [code] FULL: review-a1-fixed-*
+         MISSING SEGMENT: review-a1-fixed-*
+  [code] FULL: apk-b1-ts34/
+         MISSING SEGMENT: apk-b1-ts34/
+  [code] FULL: apk-b1-ts33/
+         MISSING SEGMENT: apk-b1-ts33/
+  [code] FULL: 8e76be90bf0ea2a6aaee830dd0873506
+         MISSING SEGMENT: 8e76be90bf0ea2a6aaee830dd0873506
+  [code] FULL: 16fad23e7bf3978c928a81eaac0df26b
+         MISSING SEGMENT: 16fad23e7bf3978c928a81eaac0df26b
+  [code] FULL: 15b2745f2b375a3a020f5e40707f7612
+         MISSING SEGMENT: 15b2745f2b375a3a020f5e40707f7612
+  [code] FULL: is exactly what review A1 tested. Every
+         MISSING SEGMENT: is exactly what review A1 tested. Every
+  [code] FULL: assembleDebug
+         MISSING SEGMENT: assembleDebug
+  [code] FULL: -PtargetSdk=34
+         MISSING SEGMENT: -PtargetSdk=34
+  [code] FULL: -PtargetSdk=33
+         MISSING SEGMENT: -PtargetSdk=33
+  [code] FULL: BUILD SUCCESSFUL
+         MISSING SEGMENT: BUILD SUCCESSFUL
+  [code] FULL: logs/b1-build-*.log
+         MISSING SEGMENT: logs/b1-build-*.log
+  [code] FULL: apk_md5=
+         MISSING SEGMENT: apk_md5=
+  [code] FULL: review-<round>-*
+         MISSING SEGMENT: review-<round>-*
+  [code] FULL: review-b2-*
+         MISSING SEGMENT: review-b2-*
+  [code] FULL: review-b2-b1apk-*
+         MISSING SEGMENT: review-b2-b1apk-*
+  [code] FULL: queue.sh
+         MISSING SEGMENT: queue.sh
+  [code] FULL: MainActivity
+         MISSING SEGMENT: MainActivity
+  [code] FULL: adb shell am start
+         MISSING SEGMENT: adb shell am start
+  [code] FULL: none|dataSync|mediaProcessing|specialUse|shortService|auto
+         MISSING SEGMENT: none|dataSync|mediaProcessing|specialUse|shortService|auto
+  [code] FULL: fgs_duration_ms
+         MISSING SEGMENT: fgs_duration_ms
+  [code] FULL: ExportService.startExport()
+         MISSING SEGMENT: ExportService.startExport()
+  [code] FULL: startForeground(id, notif)
+         MISSING SEGMENT: startForeground(id, notif)
+  [code] FULL: startForeground(id, notif, typeBit)
+         MISSING SEGMENT: startForeground(id, notif, typeBit)
+  [code] FULL: filesDir/export.bin
+         MISSING SEGMENT: filesDir/export.bin
+  [code] FULL: TICK elapsedS=60 fileKiB=38208
+         MISSING SEGMENT: TICK elapsedS=60 fileKiB=38208
+  [code] FULL: log line every 60 s.
+         MISSING SEGMENT: log line every 60 s
+  [code] FULL: CraftFGS
+         MISSING SEGMENT: CraftFGS
+  [code] FULL: (foregroundServiceType, timeoutSource)
+         MISSING SEGMENT: (foregroundServiceType, timeoutSource)
+  [code] FULL: FGS_ON_TIMEOUT fgsType=A timeoutSource=B
+         MISSING SEGMENT: FGS_ON_TIMEOUT fgsType=A timeoutSource=B
+  [code] FULL: FGS_ON_TIMEOUT_2ARG startId=... fgsType=...
+         MISSING SEGMENT: FGS_ON_TIMEOUT_2ARG startId=
+  [code] FULL: FGS_ON_TIMEOUT_2ARG startId=... fgsType=...
+         MISSING SEGMENT: fgsType=
+  [code] FULL: src/main
+         MISSING SEGMENT: src/main
+  [code] FULL: dataSync|mediaProcessing|specialUse|shortService
+         MISSING SEGMENT: dataSync|mediaProcessing|specialUse|shortService
+  [code] FULL: mediaProcessing|dataSync
+         MISSING SEGMENT: mediaProcessing|dataSync
+  [code] FULL: attribute at all (
+         MISSING SEGMENT: attribute at all (
+  [code] FULL: dataSync|mediaProcessing|specialUse
+         MISSING SEGMENT: dataSync|mediaProcessing|specialUse
+  [code] FULL: cd app && ./gradlew assembleDebug
+         MISSING SEGMENT: cd app && ./gradlew assembleDebug
+  [code] FULL: run_case.sh
+         MISSING SEGMENT: run_case.sh
+  [code] FULL: adb logcat -b all -c
+         MISSING SEGMENT: adb logcat -b all -c
+  [code] FULL: adb install -r -g <apk>
+         MISSING SEGMENT: adb install -r -g <apk>
+  [code] FULL: adb shell am start -W -n com.example.fgslab/.MainActivity --es fgs_type <t> --el fgs_duration_ms <ms>
+         MISSING SEGMENT: adb shell am start -W -n com.example.fgslab/.MainActivity --es fgs_type <t> --el fgs_duration_ms <ms>
+  [code] FULL: dumpsys activity services com.example.fgslab
+         MISSING SEGMENT: dumpsys activity services com.example.fgslab
+  [code] FULL: home_sent_device=
+         MISSING SEGMENT: home_sent_device=
+  [code] FULL: adb shell input keyevent KEYCODE_HOME
+         MISSING SEGMENT: adb shell input keyevent KEYCODE_HOME
+  [code] FULL: dumpsys activity processes
+         MISSING SEGMENT: dumpsys activity processes
+  [code] FULL: processes_bg.txt
+         MISSING SEGMENT: processes_bg.txt
+  [code] FULL: logcat --pid
+         MISSING SEGMENT: logcat --pid
+  [code] FULL: STARTFOREGROUND_FAIL
+         MISSING SEGMENT: STARTFOREGROUND_FAIL
+  [code] FULL: FGS_ON_TIMEOUT
+         MISSING SEGMENT: FGS_ON_TIMEOUT
+  [code] FULL: FATAL EXCEPTION
+         MISSING SEGMENT: FATAL EXCEPTION
+  [code] FULL: am start -W
+         MISSING SEGMENT: am start -W
+  [code] FULL: logcat -d -v time
+         MISSING SEGMENT: logcat -d -v time
+  [code] FULL: fatal_exception=
+         MISSING SEGMENT: fatal_exception=
+  [code] FULL: fatal_exception_at_launch=
+         MISSING SEGMENT: fatal_exception_at_launch=
+  [code] FULL: Caused by:
+         MISSING SEGMENT: Caused by
+  [code] FULL: a29-noneflavor-long
+         MISSING SEGMENT: a29-noneflavor-long
+  [code] FULL: review-a1-a29-noneflavor-long
+         MISSING SEGMENT: review-a1-a29-noneflavor-long
+  [code] FULL: review-a1-a29-noneflavor-long-aborted
+         MISSING SEGMENT: review-a1-a29-noneflavor-long-aborted
+  [code] FULL: adb uninstall
+         MISSING SEGMENT: adb uninstall
+  [code] FULL: STARTFOREGROUND_OK requested=none typeBit=0
+         MISSING SEGMENT: STARTFOREGROUND_OK requested=none typeBit=0
+  [code] FULL: a29-full-none
+         MISSING SEGMENT: a29-full-none
+  [code] FULL: EXPORT_DONE type=none elapsedS=660 fileKiB=421504
+         MISSING SEGMENT: EXPORT_DONE type=none elapsedS=660 fileKiB=421504
+  [code] FULL: isForeground=true
+         MISSING SEGMENT: isForeground=true
+  [code] FULL: a29-noneflavor-none
+         MISSING SEGMENT: a29-noneflavor-none
+  [code] FULL: a29-full-datasync
+         MISSING SEGMENT: a29-full-datasync
+  [code] FULL: STARTFOREGROUND_OK requested=mediaProcessing typeBit=8192
+         MISSING SEGMENT: STARTFOREGROUND_OK requested=mediaProcessing typeBit=8192
+  [code] FULL: a29-full-mediaproc
+         MISSING SEGMENT: a29-full-mediaproc
+  [code] FULL: a29-full-specialuse
+         MISSING SEGMENT: a29-full-specialuse
+  [code] FULL: TICK elapsedS=180
+         MISSING SEGMENT: TICK elapsedS=180
+  [code] FULL: EXPORT_DONE type=shortService elapsedS=240
+         MISSING SEGMENT: EXPORT_DONE type=shortService elapsedS=240
+  [code] FULL: a29-full-short
+         MISSING SEGMENT: a29-full-short
+  [code] FULL: review-a1-a29-full-short-240
+         MISSING SEGMENT: review-a1-a29-full-short-240
+  [code] FULL: a29-noperm-datasync
+         MISSING SEGMENT: a29-noperm-datasync
+  [code] FULL: a29-noperm-mediaproc
+         MISSING SEGMENT: a29-noperm-mediaproc
+  [code] FULL: STARTFOREGROUND_OK requested=auto typeBit=1
+         MISSING SEGMENT: STARTFOREGROUND_OK requested=auto typeBit=1
+  [code] FULL: EXPORT_DONE elapsedS=660 fileKiB=415232
+         MISSING SEGMENT: EXPORT_DONE elapsedS=660 fileKiB=415232
+  [code] FULL: a29-combo-final
+         MISSING SEGMENT: a29-combo-final
+  [code] FULL: EXPORT_DONE elapsedS=660 fileKiB=417280
+         MISSING SEGMENT: EXPORT_DONE elapsedS=660 fileKiB=417280
+  [code] FULL: a29-combo-auto-long
+         MISSING SEGMENT: a29-combo-auto-long
+  [code] FULL: java.lang.IllegalArgumentException: foregroundServiceType 0x00000800 is not a subset of foregroundServiceType attribute 0x00002001 in service element of manifes
+         MISSING SEGMENT: java.lang.IllegalArgumentException: foregroundServiceType 0x00000800 is not a subset of foregroundServiceType attribute 0x00002001 in service element of manifes
+  [code] FULL: android.app.RemoteServiceException: Context.startForegroundService() did not then call Service.startForeground()
+         MISSING SEGMENT: android.app.RemoteServiceException: Context.startForegroundService() did not then call Service.startForeground()
+  [code] FULL: typeBit=8192
+         MISSING SEGMENT: typeBit=8192
+  [code] FULL: review-b1-a29-combo-mediaproc
+         MISSING SEGMENT: review-b1-a29-combo-mediaproc
+  [code] FULL: FOREGROUND_SERVICE_*
+         MISSING SEGMENT: FOREGROUND_SERVICE_*
+  [code] FULL: install_rc=0
+         MISSING SEGMENT: install_rc=0
+  [code] FULL: a31-full-mediaproc
+         MISSING SEGMENT: a31-full-mediaproc
+  [code] FULL: a31-full-specialuse
+         MISSING SEGMENT: a31-full-specialuse
+  [code] FULL: a31-full-short
+         MISSING SEGMENT: a31-full-short
+  [code] FULL: a31-noperm-*
+         MISSING SEGMENT: a31-noperm-*
+  [code] FULL: a31-noneflavor-none
+         MISSING SEGMENT: a31-noneflavor-none
+  [code] FULL: a31-noneflavor-long
+         MISSING SEGMENT: a31-noneflavor-long
+  [code] FULL: EXPORT_DONE type=none elapsedS=660
+         MISSING SEGMENT: EXPORT_DONE type=none elapsedS=660
+  [code] FULL: a31-combo-auto-long
+         MISSING SEGMENT: a31-combo-auto-long
+  [code] FULL: a31-combo-final
+         MISSING SEGMENT: a31-combo-final
+  [code] FULL: review-b1-a31-combo-auto
+         MISSING SEGMENT: review-b1-a31-combo-auto
+  [code] FULL: review-b1-a31-combo-mediaproc
+         MISSING SEGMENT: review-b1-a31-combo-mediaproc
+  [code] FULL: android.app.ForegroundServiceDidNotStartInTimeException
+         MISSING SEGMENT: android.app.ForegroundServiceDidNotStartInTimeException
+  [code] FULL: types=40002001
+         MISSING SEGMENT: types=40002001
+  [code] FULL: startForeground(): FOREGROUND_SERVICE_TYPE_SHORT_SERVICE is combined with other types. SHORT_SERVICE will be ignored.
+         MISSING SEGMENT: startForeground(): FOREGROUND_SERVICE_TYPE_SHORT_SERVICE is combined with other types. SHORT_SERVICE will be ignored
+  [code] FULL: a34-full-none
+         MISSING SEGMENT: a34-full-none
+  [code] FULL: android.app.InvalidForegroundServiceTypeException: Starting FGS with type unknown callerApp=ProcessRecord{...} targetSDK=37 has been prohibited
+         MISSING SEGMENT: android.app.InvalidForegroundServiceTypeException: Starting FGS with type unknown callerApp=ProcessRecord{
+  [code] FULL: android.app.InvalidForegroundServiceTypeException: Starting FGS with type unknown callerApp=ProcessRecord{...} targetSDK=37 has been prohibited
+         MISSING SEGMENT: } targetSDK=37 has been prohibited
+  [code] FULL: review-a1-a34-combo-none
+         MISSING SEGMENT: review-a1-a34-combo-none
+  [code] FULL: review-b1-a34-combo-none
+         MISSING SEGMENT: review-b1-a34-combo-none
+  [code] FULL: android.app.MissingForegroundServiceTypeException: Starting FGS without a type callerApp=ProcessRecord{...} targetSDK=37
+         MISSING SEGMENT: android.app.MissingForegroundServiceTypeException: Starting FGS without a type callerApp=ProcessRecord{
+  [code] FULL: android.app.MissingForegroundServiceTypeException: Starting FGS without a type callerApp=ProcessRecord{...} targetSDK=37
+         MISSING SEGMENT: } targetSDK=37
+  [code] FULL: targetSDK=34
+         MISSING SEGMENT: targetSDK=34
+  [code] FULL: a34-noneflavor-none
+         MISSING SEGMENT: a34-noneflavor-none
+  [code] FULL: a34-none-ts34-none
+         MISSING SEGMENT: a34-none-ts34-none
+  [code] FULL: SERVICE_CREATED sdk=34 targetSdk=33
+         MISSING SEGMENT: SERVICE_CREATED sdk=34 targetSdk=33
+  [code] FULL: STARTFOREGROUND_OK
+         MISSING SEGMENT: STARTFOREGROUND_OK
+  [code] FULL: a34-none-ts33-none
+         MISSING SEGMENT: a34-none-ts33-none
+  [code] FULL: typeBit=1 → EXPORT_DONE elapsedS=660
+         MISSING SEGMENT: typeBit=1 → EXPORT_DONE elapsedS=660
+  [code] FULL: 09:26:53.725 STARTFOREGROUND_OK requested=auto typeBit=1
+         MISSING SEGMENT: 09:26:53.725 STARTFOREGROUND_OK requested=auto typeBit=1
+  [code] FULL: 09:37:53.824 EXPORT_DONE elapsedS=660 fileKiB=416512
+         MISSING SEGMENT: 09:37:53.824 EXPORT_DONE elapsedS=660 fileKiB=416512
+  [code] FULL: isForeground=true ... types=00000001
+         MISSING SEGMENT: isForeground=true
+  [code] FULL: isForeground=true ... types=00000001
+         MISSING SEGMENT: types=00000001
+  [code] FULL: a34-full-datasync
+         MISSING SEGMENT: a34-full-datasync
+  [code] FULL: review-a1-a34-combo-datasync
+         MISSING SEGMENT: review-a1-a34-combo-datasync
+  [code] FULL: review-b1-a34-combo-datasync
+         MISSING SEGMENT: review-b1-a34-combo-datasync
+  [code] FULL: a34-combo-auto-long
+         MISSING SEGMENT: a34-combo-auto-long
+  [code] FULL: review-a1-a34-combo-auto-long
+         MISSING SEGMENT: review-a1-a34-combo-auto-long
+  [code] FULL: Unknown or invalid change
+         MISSING SEGMENT: Unknown or invalid change
+  [code] FULL: dumpsys platform_compat
+         MISSING SEGMENT: dumpsys platform_compat
+  [code] FULL: review-b1-a34-combo-datasync-knob60
+         MISSING SEGMENT: review-b1-a34-combo-datasync-knob60
+  [code] FULL: review-a2-guarded-a34-combo-datasync-knob60
+         MISSING SEGMENT: review-a2-guarded-a34-combo-datasync-knob60
+  [code] FULL: review-a1-
+         MISSING SEGMENT: review-a1-
+  [code] FULL: review-a2-a34-combo-datasync-knob60
+         MISSING SEGMENT: review-a2-a34-combo-datasync-knob60
+  [code] FULL: review-a1-a34-combo-datasync-knob60
+         MISSING SEGMENT: review-a1-a34-combo-datasync-knob60
+  [code] FULL: a34-full-mediaproc
+         MISSING SEGMENT: a34-full-mediaproc
+  [code] FULL: review-b1-a34-combo-mediaproc
+         MISSING SEGMENT: review-b1-a34-combo-mediaproc
+  [code] FULL: EXPORT_DONE type=specialUse elapsedS=660
+         MISSING SEGMENT: EXPORT_DONE type=specialUse elapsedS=660
+  [code] FULL: a34-full-specialuse
+         MISSING SEGMENT: a34-full-specialuse
+  [code] FULL: a34-full-specialuse-long
+         MISSING SEGMENT: a34-full-specialuse-long
+  [code] FULL: typeBit=2048
+         MISSING SEGMENT: typeBit=2048
+  [code] FULL: 01:54:59.821 STARTFOREGROUND_OK
+         MISSING SEGMENT: 01:54:59.821 STARTFOREGROUND_OK
+  [code] FULL: 01:57:59.828 ActivityManager: Short FGS timed out
+         MISSING SEGMENT: 01:57:59.828 ActivityManager: Short FGS timed out
+  [code] FULL: 01:57:59.829 FGS_ON_TIMEOUT_1ARG startId=1
+         MISSING SEGMENT: 01:57:59.829 FGS_ON_TIMEOUT_1ARG startId=1
+  [code] FULL: EXPORT_ABORTED elapsedS=180
+         MISSING SEGMENT: EXPORT_ABORTED elapsedS=180
+  [code] FULL: 09:20:44.751
+         MISSING SEGMENT: 09:20:44.751
+  [code] FULL: 09:23:44.755
+         MISSING SEGMENT: 09:23:44.755
+  [code] FULL: 10:40:54.212
+         MISSING SEGMENT: 10:40:54.212
+  [code] FULL: 10:43:54.229
+         MISSING SEGMENT: 10:43:54.229
+  [code] FULL: review-b1-a34-full-short-timeout
+         MISSING SEGMENT: review-b1-a34-full-short-timeout
+  [code] FULL: a34-full-short-timeout
+         MISSING SEGMENT: a34-full-short-timeout
+  [code] FULL: review-a1-a34-full-short-timeout
+         MISSING SEGMENT: review-a1-a34-full-short-timeout
+  [code] FULL: ActivityManager: Bringing down service while still waiting for start foreground
+         MISSING SEGMENT: ActivityManager: Bringing down service while still waiting for start foreground
+  [code] FULL: FATAL EXCEPTION ... RemoteServiceException$ForegroundServiceDidNotStartInTimeException: Context.startForegroundService() did not then call Service.startForegrou
+         MISSING SEGMENT: FATAL EXCEPTION
+  [code] FULL: FATAL EXCEPTION ... RemoteServiceException$ForegroundServiceDidNotStartInTimeException: Context.startForegroundService() did not then call Service.startForegrou
+         MISSING SEGMENT: RemoteServiceException$ForegroundServiceDidNotStartInTimeException: Context.startForegroundService() did not then call Service.startForeground()
+  [code] FULL: a34-combo-short-notdeclared
+         MISSING SEGMENT: a34-combo-short-notdeclared
+  [code] FULL: review-b1-a34-combo-short-notdeclared
+         MISSING SEGMENT: review-b1-a34-combo-short-notdeclared
+  [code] FULL: java.lang.SecurityException: Starting FGS with type dataSync ... targetSDK=37 requires permissions: all of the permissions allOf=true [android.permission.FOREGR
+         MISSING SEGMENT: java.lang.SecurityException: Starting FGS with type dataSync
+  [code] FULL: java.lang.SecurityException: Starting FGS with type dataSync ... targetSDK=37 requires permissions: all of the permissions allOf=true [android.permission.FOREGR
+         MISSING SEGMENT: targetSDK=37 requires permissions: all of the permissions allOf=true [android.permission.FOREGROUND_SERVICE_DATA_SYNC]
+  [code] FULL: a34-noperm-datasync
+         MISSING SEGMENT: a34-noperm-datasync
+  [code] FULL: InvalidForegroundServiceTypeException: ... type unknown ... prohibited
+         MISSING SEGMENT: type unknown
+  [code] FULL: a34-noperm-mediaproc
+         MISSING SEGMENT: a34-noperm-mediaproc
+  [code] FULL: java.lang.SecurityException: ... type specialUse ... requires permissions: all of the permissions allOf=true [android.permission.FOREGROUND_SERVICE_SPECIAL_USE]
+         MISSING SEGMENT: java.lang.SecurityException
+  [code] FULL: java.lang.SecurityException: ... type specialUse ... requires permissions: all of the permissions allOf=true [android.permission.FOREGROUND_SERVICE_SPECIAL_USE]
+         MISSING SEGMENT: type specialUse
+  [code] FULL: java.lang.SecurityException: ... type specialUse ... requires permissions: all of the permissions allOf=true [android.permission.FOREGROUND_SERVICE_SPECIAL_USE]
+         MISSING SEGMENT: requires permissions: all of the permissions allOf=true [android.permission.FOREGROUND_SERVICE_SPECIAL_USE]
+  [code] FULL: a34-noperm-specialuse
+         MISSING SEGMENT: a34-noperm-specialuse
+  [code] FULL: a34/a37-noperm-*
+         MISSING SEGMENT: a34/a37-noperm-*
+  [code] FULL: review-b1-a37-combo-none
+         MISSING SEGMENT: review-b1-a37-combo-none
+  [code] FULL: review-a2-a31-combo-short-notdeclared
+         MISSING SEGMENT: review-a2-a31-combo-short-notdeclared
+  [code] FULL: android.app.RemoteServiceException$ForegroundServiceDidNotStartInTimeException
+         MISSING SEGMENT: android.app.RemoteServiceException$ForegroundServiceDidNotStartInTimeException
+  [code] FULL: a37-combo-short-notdeclared
+         MISSING SEGMENT: a37-combo-short-notdeclared
+  [code] FULL: ActiveServices.java
+         MISSING SEGMENT: ActiveServices.java
+  [code] FULL: docs/aosp-android14-release-ActiveServices.java
+         MISSING SEGMENT: docs/aosp-android14-release-ActiveServices.java
+  [code] FULL: ForegroundServiceTypePolicy.java
+         MISSING SEGMENT: ForegroundServiceTypePolicy.java
+  [code] FULL: docs/aosp-android14-release-ForegroundServiceTypePolicy.java
+         MISSING SEGMENT: docs/aosp-android14-release-ForegroundServiceTypePolicy.java
+  [code] FULL: a37-noperm-mediaproc
+         MISSING SEGMENT: a37-noperm-mediaproc
+  [code] FULL: fileManagement
+         MISSING SEGMENT: fileManagement
+  [code] FULL: types=0x40002001
+         MISSING SEGMENT: types=0x40002001
+  [code] FULL: a37-full-none
+         MISSING SEGMENT: a37-full-none
+  [code] FULL: review-a1-a37-combo-none
+         MISSING SEGMENT: review-a1-a37-combo-none
+  [code] FULL: MissingForegroundServiceTypeException: Starting FGS without a type ... targetSDK=37
+         MISSING SEGMENT: MissingForegroundServiceTypeException: Starting FGS without a type
+  [code] FULL: MissingForegroundServiceTypeException: Starting FGS without a type ... targetSDK=37
+         MISSING SEGMENT: targetSDK=37
+  [code] FULL: a37-noneflavor-none
+         MISSING SEGMENT: a37-noneflavor-none
+  [code] FULL: resolves to mediaProcessing) |
+         MISSING SEGMENT: resolves to mediaProcessing) |
+  [code] FULL: review-a1-a37-combo-datasync
+         MISSING SEGMENT: review-a1-a37-combo-datasync
+  [code] FULL: review-b1-a37-combo-datasync
+         MISSING SEGMENT: review-b1-a37-combo-datasync
+  [code] FULL: 09:25:49
+         MISSING SEGMENT: 09:25:49
+  [code] FULL: 09:26:50.332 ActivityManager: FGS (dataSync) timed out
+         MISSING SEGMENT: 09:26:50.332 ActivityManager: FGS (dataSync) timed out
+  [code] FULL: FGS_ON_TIMEOUT fgsType=1 timeoutSource=1
+         MISSING SEGMENT: FGS_ON_TIMEOUT fgsType=1 timeoutSource=1
+  [code] FULL: EXPORT_ABORTED elapsedS=69
+         MISSING SEGMENT: EXPORT_ABORTED elapsedS=69
+  [code] FULL: review-a1-a37-combo-datasync-knob60
+         MISSING SEGMENT: review-a1-a37-combo-datasync-knob60
+  [code] FULL: review-b1-a37-combo-datasync-knob60
+         MISSING SEGMENT: review-b1-a37-combo-datasync-knob60
+  [code] FULL: a37-full-mediaproc
+         MISSING SEGMENT: a37-full-mediaproc
+  [code] FULL: review-a1-a37-combo-mediaproc
+         MISSING SEGMENT: review-a1-a37-combo-mediaproc
+  [code] FULL: a37-full-ts34-mediaproc
+         MISSING SEGMENT: a37-full-ts34-mediaproc
+  [code] FULL: review-b1-a37-combo-mediaproc
+         MISSING SEGMENT: review-b1-a37-combo-mediaproc
+  [code] FULL: a37-full-specialuse
+         MISSING SEGMENT: a37-full-specialuse
+  [code] FULL: a37-full-specialuse-long
+         MISSING SEGMENT: a37-full-specialuse-long
+  [code] FULL: 01:55:28.103
+         MISSING SEGMENT: 01:55:28.103
+  [code] FULL: 01:58:28.109 FGS_ON_TIMEOUT_1ARG startId=1
+         MISSING SEGMENT: 01:58:28.109 FGS_ON_TIMEOUT_1ARG startId=1
+  [code] FULL: FGS_ON_TIMEOUT fgsType=1 timeoutSource=2048
+         MISSING SEGMENT: FGS_ON_TIMEOUT fgsType=1 timeoutSource=2048
+  [code] FULL: a37-full-short-timeout
+         MISSING SEGMENT: a37-full-short-timeout
+  [code] FULL: review-b1-a37-combo-short-notdeclared
+         MISSING SEGMENT: review-b1-a37-combo-short-notdeclared
+  [code] FULL: SecurityException: ... type dataSync ... requires permissions: all of the permissions [android.permission.FOREGROUND_SERVICE_DATA_SYNC]
+         MISSING SEGMENT: requires permissions: all of the permissions [android.permission.FOREGROUND_SERVICE_DATA_SYNC]
+  [code] FULL: a37-noperm-datasync
+         MISSING SEGMENT: a37-noperm-datasync
+  [code] FULL: SecurityException: ... type mediaProcessing ... requires permissions: all of the permissions [android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING]
+         MISSING SEGMENT: type mediaProcessing
+  [code] FULL: SecurityException: ... type mediaProcessing ... requires permissions: all of the permissions [android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING]
+         MISSING SEGMENT: requires permissions: all of the permissions [android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING]
+  [code] FULL: STARTFOREGROUND_OK requested=auto typeBit=8192
+         MISSING SEGMENT: STARTFOREGROUND_OK requested=auto typeBit=8192
+  [code] FULL: EXPORT_DONE elapsedS=660 fileKiB=408256
+         MISSING SEGMENT: EXPORT_DONE elapsedS=660 fileKiB=408256
+  [code] FULL: 09:27:20.276 STARTFOREGROUND_OK requested=auto typeBit=8192
+         MISSING SEGMENT: 09:27:20.276 STARTFOREGROUND_OK requested=auto typeBit=8192
+  [code] FULL: 09:38:20.286 EXPORT_DONE elapsedS=660 fileKiB=409664
+         MISSING SEGMENT: 09:38:20.286 EXPORT_DONE elapsedS=660 fileKiB=409664
+  [code] FULL: types=0x00002000
+         MISSING SEGMENT: types=0x00002000
+  [code] FULL: a37-combo-auto-long
+         MISSING SEGMENT: a37-combo-auto-long
+  [code] FULL: review-a1-a37-combo-auto-long
+         MISSING SEGMENT: review-a1-a37-combo-auto-long
+  [code] FULL: fileKiB=413440
+         MISSING SEGMENT: fileKiB=413440
+  [code] FULL: STARTFOREGROUND_OK 09:24:01.849
+         MISSING SEGMENT: STARTFOREGROUND_OK 09:24:01.849
+  [code] FULL: 09:24:10.0
+         MISSING SEGMENT: 09:24:10.0
+  [code] FULL: 09:25:11.030 ActivityManager: FGS (mediaProcessing) timed out
+         MISSING SEGMENT: 09:25:11.030 ActivityManager: FGS (mediaProcessing) timed out
+  [code] FULL: FGS_ON_TIMEOUT fgsType=1 timeoutSource=8192
+         MISSING SEGMENT: FGS_ON_TIMEOUT fgsType=1 timeoutSource=8192
+  [code] FULL: review-b1-a37-combo-auto-knob60
+         MISSING SEGMENT: review-b1-a37-combo-auto-knob60
+  [code] FULL: isForeground=true foregroundId=4711 types=0x00002000 foregroundNoti=Notification(channel=export ... flags=ONGOING_EVENT|ONLY_ALERT_ONCE|NO_CLEAR|FOREGROUND_SERV
+         MISSING SEGMENT: isForeground=true foregroundId=4711 types=0x00002000 foregroundNoti=Notification(channel=export
+  [code] FULL: isForeground=true foregroundId=4711 types=0x00002000 foregroundNoti=Notification(channel=export ... flags=ONGOING_EVENT|ONLY_ALERT_ONCE|NO_CLEAR|FOREGROUND_SERV
+         MISSING SEGMENT: flags=ONGOING_EVENT|ONLY_ALERT_ONCE|NO_CLEAR|FOREGROUND_SERVICE
+  [code] FULL: from scratch (
+         MISSING SEGMENT: from scratch (
+  [code] FULL: , md5s identical to
+         MISSING SEGMENT: md5s identical to
+  [code] FULL: logs/b1-verify.txt
+         MISSING SEGMENT: logs/b1-verify.txt
+  [code] FULL: CASE_TAG
+         MISSING SEGMENT: CASE_TAG
+  [code] FULL: evidence/...
+         MISSING SEGMENT: evidence/
+  [code] FULL: InvalidForegroundServiceTypeException: ... type unknown ... targetSDK=37 has been prohibited
+         MISSING SEGMENT: type unknown
+  [code] FULL: InvalidForegroundServiceTypeException: ... type unknown ... targetSDK=37 has been prohibited
+         MISSING SEGMENT: targetSDK=37 has been prohibited
+  [code] FULL: typeBit=1
+         MISSING SEGMENT: typeBit=1
+  [code] FULL: types=00000001
+         MISSING SEGMENT: types=00000001
+  [code] FULL: RemoteServiceException$ForegroundServiceDidNotStartInTimeException
+         MISSING SEGMENT: RemoteServiceException$ForegroundServiceDidNotStartInTimeException
+  [code] FULL: FGS_ON_TIMEOUT_1ARG
+         MISSING SEGMENT: FGS_ON_TIMEOUT_1ARG
+  [code] FULL: EXPORT_DONE elapsedS=660 fileKiB=419392
+         MISSING SEGMENT: EXPORT_DONE elapsedS=660 fileKiB=419392
+  [code] FULL: types=0x00002001
+         MISSING SEGMENT: types=0x00002001
+  [code] FULL: -datasync
+         MISSING SEGMENT: -datasync
+  [code] FULL: FGS_ON_TIMEOUT_2ARG startId=1 fgsType=8192
+         MISSING SEGMENT: FGS_ON_TIMEOUT_2ARG startId=1 fgsType=8192
+  [code] FULL: FGS_ON_TIMEOUT_2ARG startId=1 fgsType=1
+         MISSING SEGMENT: FGS_ON_TIMEOUT_2ARG startId=1 fgsType=1
+  [code] FULL: elapsedS=69
+         MISSING SEGMENT: elapsedS=69
+  [code] FULL: EXPORT_DONE elapsedS=660 fileKiB=413440
+         MISSING SEGMENT: EXPORT_DONE elapsedS=660 fileKiB=413440
+  [code] FULL: review-b1-a37-exhaust-1st-timeout
+         MISSING SEGMENT: review-b1-a37-exhaust-1st-timeout
+  [code] FULL: -2nd-foreground
+         MISSING SEGMENT: -2nd-foreground
+  [code] FULL: review-b1-a37-datasync-exhaust-reset/
+         MISSING SEGMENT: review-b1-a37-datasync-exhaust-reset/
+  [code] FULL: -combo-mediaproc
+         MISSING SEGMENT: -combo-mediaproc
+  [code] FULL: -combo-none
+         MISSING SEGMENT: -combo-none
+  [code] FULL: review-b1-a31-combo-bad-type-name
+         MISSING SEGMENT: review-b1-a31-combo-bad-type-name
+  [code] FULL: IllegalArgumentException: unknown type name: bogus
+         MISSING SEGMENT: IllegalArgumentException: unknown type name: bogus
+  [code] FULL: a<api>-
+         MISSING SEGMENT: a<api>-
+  [code] FULL: review-b1-a29-noperm-datasync
+         MISSING SEGMENT: review-b1-a29-noperm-datasync
+  [code] FULL: adb install
+         MISSING SEGMENT: adb install
+  [code] FULL: Can't find service: package
+         MISSING SEGMENT: Can't find service: package
+  [code] FULL: VOID-review-b1.txt
+         MISSING SEGMENT: VOID-review-b1.txt
+  [code] FULL: POST_NOTIFICATIONS
+         MISSING SEGMENT: POST_NOTIFICATIONS
+  [code] FULL: foregroundServiceType=0x40002001
+         MISSING SEGMENT: foregroundServiceType=0x40002001
+  [code] FULL: apk2/fgslab-combo-ts37.apk
+         MISSING SEGMENT: apk2/fgslab-combo-ts37.apk
+  [code] FULL: EXPORT_DONE elapsedS=660 fileKiB=414528
+         MISSING SEGMENT: EXPORT_DONE elapsedS=660 fileKiB=414528
+  [code] FULL: EXPORT_DONE elapsedS=660 fileKiB=413632
+         MISSING SEGMENT: EXPORT_DONE elapsedS=660 fileKiB=413632
+  [code] FULL: fileKiB=416512
+         MISSING SEGMENT: fileKiB=416512
+  [code] FULL: fileKiB=419392
+         MISSING SEGMENT: fileKiB=419392
+  [code] FULL: fileKiB=409664
+         MISSING SEGMENT: fileKiB=409664
+  [code] FULL: SERVICE_CREATED sdk=29
+         MISSING SEGMENT: SERVICE_CREATED sdk=29
+  [code] FULL: evidence/
+         MISSING SEGMENT: evidence/
+  [code] FULL: review-a1-fixed-a*
+         MISSING SEGMENT: review-a1-fixed-a*
+  [code] FULL: ran 45 s on all three (
+         MISSING SEGMENT: ran 45 s on all three (
+  [code] FULL: unknown type name: bogus
+         MISSING SEGMENT: unknown type name: bogus
+  [code] FULL: SERVICE_CREATED sdk=34
+         MISSING SEGMENT: SERVICE_CREATED sdk=34
+  [code] FULL: onTimeout(int,int)
+         MISSING SEGMENT: onTimeout(int,int)
+  [code] FULL: docs/aosp-android14-release-ActivityManagerConstants.java
+         MISSING SEGMENT: docs/aosp-android14-release-ActivityManagerConstants.java
+  [code] FULL: docs/aosp-android15-release-ActivityManagerConstants.java
+         MISSING SEGMENT: docs/aosp-android15-release-ActivityManagerConstants.java
+  [code] FULL: onTimeout(startId=1, fgsType=1)
+         MISSING SEGMENT: onTimeout(startId=1, fgsType=1)
+  [code] FULL: FGS_INTRODUCE_TIME_LIMITS; enableSinceTargetSdk=35
+         MISSING SEGMENT: FGS_INTRODUCE_TIME_LIMITS; enableSinceTargetSdk=35
+  [code] FULL: onTimeout(startId=1, fgsType=8192)
+         MISSING SEGMENT: onTimeout(startId=1, fgsType=8192)
+  [code] FULL: review-a1-fixed-a37-combo-auto-knob60
+         MISSING SEGMENT: review-a1-fixed-a37-combo-auto-knob60
+  [code] FULL: RemoteServiceException: "A foreground service of type [service type] did not stop within its timeout"
+         MISSING SEGMENT: RemoteServiceException: "A foreground service of type [service type] did not stop within its timeout"
+  [straight] FULL: , the Service.onTimeout(int,int) reference says
+         MISSING SEGMENT: the Service.onTimeout(int,int) reference says
+  [code] FULL: ActivityStartInterceptor: Starting home with component specified
+         MISSING SEGMENT: ActivityStartInterceptor: Starting home with component specified
+  [code] FULL: ActivityManager: FGS (<type>) timed out
+         MISSING SEGMENT: ActivityManager: FGS (<type>) timed out
+  [code] FULL: home_sent=
+         MISSING SEGMENT: home_sent=
+  [code] FULL: Service.onTimeout(int,int)
+         MISSING SEGMENT: Service.onTimeout(int,int)
+  [code] FULL: lastTopTime + limit
+         MISSING SEGMENT: lastTopTime + limit
+  [code] FULL: ActiveServices.onFgsTimeout
+         MISSING SEGMENT: ActiveServices.onFgsTimeout
+  [code] FULL: docs/aosp-android15-release-ActiveServices.java
+         MISSING SEGMENT: docs/aosp-android15-release-ActiveServices.java
+  [straight] FULL: extra second
+         MISSING SEGMENT: extra second
+  [code] FULL: review-a2-a37-combo-auto-knob60
+         MISSING SEGMENT: review-a2-a37-combo-auto-knob60
+  [code] FULL: review-a2-guarded-a37-combo-auto-knob60
+         MISSING SEGMENT: review-a2-guarded-a37-combo-auto-knob60
+  [code] FULL: review-a2-guarded-a37-combo-datasync-knob60
+         MISSING SEGMENT: review-a2-guarded-a37-combo-datasync-knob60
+  [code] FULL: review-a2-a37-exhaust-{1st-timeout,2nd-foreground}
+         MISSING SEGMENT: review-a2-a37-exhaust-{1st-timeout,2nd-foreground}
+  [code] FULL: review-a2-guarded-a37-exhaust-{1st-timeout,2nd-foreground}
+         MISSING SEGMENT: review-a2-guarded-a37-exhaust-{1st-timeout,2nd-foreground}
+  [code] FULL: only when the aconfig flag
+         MISSING SEGMENT: only when the aconfig flag
+  [code] FULL: logs/a4-flag37.txt
+         MISSING SEGMENT: logs/a4-flag37.txt
+  [code] FULL: review-b1-a37-exhaust-*
+         MISSING SEGMENT: review-b1-a37-exhaust-*
+  [code] FULL: review-a2-a37-exhaust-*
+         MISSING SEGMENT: review-a2-a37-exhaust-*
+  [code] FULL: ActivityManagerConstants.java
+         MISSING SEGMENT: ActivityManagerConstants.java
+  [code] FULL: review-b1-a37-datasync-exhaust-reset/knob.txt
+         MISSING SEGMENT: review-b1-a37-datasync-exhaust-reset/knob.txt
+  [code] FULL: ServiceCompat.startForeground()
+         MISSING SEGMENT: ServiceCompat.startForeground()
+  [straight] FULL: no type on old devices
+         MISSING SEGMENT: no type on old devices
+  [straight] FULL: If Yes, you might need to use a wake lock. However, you should still check to see if you're already using an API or doing an action that declares a wake lock on
+         MISSING SEGMENT: If Yes, you might need to use a wake lock. However, you should still check to see if you're already using an API or doing an action that declares a wake lock on
+  [straight] FULL: If you're using task scheduling APIs or libraries such as WorkManager, JobScheduler, or DownloadManager, the system or library acquires a wake lock that is attr
+         MISSING SEGMENT: If you're using task scheduling APIs or libraries such as WorkManager, JobScheduler, or DownloadManager, the system or library acquires a wake lock that is attr
+  [straight] FULL: If you're using Media3 ExoPlayer, you can use ExoPlayer.setWakeMode() to have the player set a wake lock for you
+         MISSING SEGMENT: If you're using Media3 ExoPlayer, you can use ExoPlayer.setWakeMode() to have the player set a wake lock for you
+  [code] FULL: a29/a31-noperm-datasync
+         MISSING SEGMENT: a29/a31-noperm-datasync
+  [code] FULL: a34/a37-combo-short-notdeclared
+         MISSING SEGMENT: a34/a37-combo-short-notdeclared
+  [code] FULL: a34/a37-full-specialuse-long
+         MISSING SEGMENT: a34/a37-full-specialuse-long
+  [code] FULL: ...-datasync-knob60
+         MISSING SEGMENT: -datasync-knob60
+  [code] FULL: onTimeout(startId)
+         MISSING SEGMENT: onTimeout(startId)
+  [code] FULL: PARTIAL_WAKE_LOCK
+         MISSING SEGMENT: PARTIAL_WAKE_LOCK
+  [code] FULL: WAKE_LOCK
+         MISSING SEGMENT: WAKE_LOCK
+  [straight] FULL: autostart
+         MISSING SEGMENT: autostart
+  [straight] FULL: Swipe to dismiss from recents
+         MISSING SEGMENT: Swipe to dismiss from recents
+  [code] FULL: review-b1-a37-exhaust-2nd-foreground
+         MISSING SEGMENT: review-b1-a37-exhaust-2nd-foreground
+  [code] FULL: STARTFOREGROUND_OK requested=dataSync
+         MISSING SEGMENT: STARTFOREGROUND_OK requested=dataSync
+  [code] FULL: adb install -g
+         MISSING SEGMENT: adb install -g
+  [code] FULL: review-a1-fixed-a29-combo-mediaproc
+         MISSING SEGMENT: review-a1-fixed-a29-combo-mediaproc
+  [code] FULL: review-<round>-...
+         MISSING SEGMENT: review-<round>-
+  [code] FULL: ?format=TEXT
+         MISSING SEGMENT: ?format=TEXT
+  [code] FULL: ServiceRecord.java
+         MISSING SEGMENT: ServiceRecord.java

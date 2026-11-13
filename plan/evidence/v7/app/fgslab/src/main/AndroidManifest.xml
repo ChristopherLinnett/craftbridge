@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:label="FGS Lab"
+        android:allowBackup="false">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Material.Light">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Declared once; each flavor sets fgsTypes in build.gradle.kts, and the
+             flavor manifests add only what differs (permissions, property, removal). -->
+        <service
+            android:name="com.example.fgslab.ExportService"
+            android:exported="false"
+            android:foregroundServiceType="${fgsTypes}" />
+    </application>
+</manifest>

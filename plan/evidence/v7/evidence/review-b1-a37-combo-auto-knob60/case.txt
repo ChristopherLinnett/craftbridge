@@ -1,0 +1,10 @@
+case=review-b1-a37-combo-auto-knob60
+apk=/tmp/craftbridge-v7/apk-b1/fgslab-combo-ts37.apk
+apk_md5=3d45b867f8c088c64cd874303ccad7bc
+serial=emulator-5556 device_sdk=37
+type=auto duration_s=300
+start=2026-11-13T10:41:49+08:00
+install_rc=0
+pid=9515
+home_sent=2026-11-13T10:41:58+08:00
+result=FGS_ON_TIMEOUT end=2026-11-13T10:43:28+08:00

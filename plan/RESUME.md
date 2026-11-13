@@ -121,19 +121,19 @@ Optional: plan.mjs deck init --title "<title>" to build the team presentation.
 
 No open questions.
 
-Answered: 20 (Q1→PD1, Q2→PD2, Q3→PD3, Q4→PD4, Q5→PD5, Q6→PD6, Q7→PD7, Q8→PD8, Q9→PD9, Q10→PD10, Q11→PD11, Q12→PD12, Q13→PD13, Q14→PD14, Q15→PD15, Q16→PD16, Q17→PD18, Q18→PD17, Q19→PD19, Q20→PD3). Answers are recorded as PDs in the master.
+Answered: 21 (Q1→PD1, Q2→PD2, Q3→PD3, Q4→PD4, Q5→PD5, Q6→PD6, Q7→PD7, Q8→PD8, Q9→PD9, Q10→PD10, Q11→PD11, Q12→PD12, Q13→PD13, Q14→PD14, Q15→PD15, Q16→PD16, Q17→PD18, Q18→PD17, Q19→PD19, Q20→PD3, Q21→PD5). Answers are recorded as PDs in the master.
 
 ## Recent log
 
-- 2026-11-12 10:36 done design/tasks
-- 2026-11-12 10:36 started design/prereqs
-- 2026-11-12 10:36 done design/prereqs
-- 2026-11-12 10:36 started design/signoff
-- 2026-11-12 10:36 done design/signoff
-- 2026-11-12 10:36 started design/modules
-- 2026-11-12 10:36 done design/modules
-- 2026-11-12 10:36 started design/eng-decisions
-- 2026-11-12 10:36 done design/eng-decisions
-- 2026-11-12 10:36 started design/glossary
-- 2026-11-12 10:36 done design/glossary
-- 2026-11-12 10:37 Amended for PD19 (one folder per platform, Package.swift at ios/sdk, craftbridge-swift written by each release) and PD3 (public when hosted CI starts): §1, §5–§8, §11, §12, §15–§16, §18, §20–§28, §31–§33, Appendices A, B, D; D-1 rewritten, D-24–D-27 added; research/07 conventions; check --final clean; anchors re-resolved (62, the same nine accepted warnings).
+- 2026-11-12 17:15 reopened design/roadmap
+- 2026-11-12 17:15 reopened design/surface:upstream-update-loop
+- 2026-11-12 17:15 reopened design/tasks
+- 2026-11-12 17:15 reopened diagrams/d06-rollout
+- 2026-11-12 17:15 started design/roadmap
+- 2026-11-12 17:15 done design/roadmap
+- 2026-11-12 17:15 started design/surface:upstream-update-loop
+- 2026-11-12 17:15 done design/surface:upstream-update-loop
+- 2026-11-12 17:15 started design/tasks
+- 2026-11-12 17:15 done design/tasks
+- 2026-11-12 17:15 started diagrams/d06-rollout
+- 2026-11-12 17:15 done diagrams/d06-rollout

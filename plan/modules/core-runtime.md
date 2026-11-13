@@ -5,7 +5,7 @@
 
 ## 16. Core runtime design
 
-`craftbridge-core` is the universal runtime: it knows how to host a Craft app's session on a phone and nothing about EffectCraft (PD9). Lints: the workspace table every crate inherits, with `unsafe_code` denied (and, without a platform module, never allowed) and the never-crash `deny` list (`clippy::unwrap_used`, `expect_used`, `panic`, `unimplemented`, `todo`, `unreachable`), as in EffectCraft (`AGENTS.md`, "Never crash").
+`craftbridge-core` is the universal runtime: it knows how to host a Craft app's session on a phone and nothing about EffectCraft (PD9). Lints: the workspace table every crate inherits, with `unsafe_code` denied (and, without a platform module, never allowed) and the never-crash lints (`clippy::unwrap_used`, `panic`, `unimplemented`, `todo` and `unreachable` at `forbid`, `expect_used` at `deny`, and the same calls named by path in `rust/clippy.toml`), stricter than EffectCraft's (`AGENTS.md`, "Never crash").
 
 | File | Change | What |
 |---|---|---|
@@ -15,6 +15,7 @@
 | `src/cancel.rs` | NEW | `CancelToken` (`Arc<AtomicBool>`); the progress closure returns `false` once it is set |
 | `src/folders.rs` | NEW | `Folders` → `Confinement` read roots (container, bundle) and write root (container) (L5) |
 | `src/error.rs` | NEW | `CraftError` and the mapping in §14 |
+| `src/platform/memory.rs` | NEW | `available_memory()`: what the platform says the app may still allocate, `os_proc_available_memory()` on iOS and `MemAvailable` from `/proc/meminfo` on Android, for AD7 (§15). The core never depends on EffectCraft (PD9), and EffectCraft's `sysinfo` has no branch for either platform, so the core reads it itself; the layer table marks `craftbridge-core` a platform crate for this module (D-20) |
 | `src/gpu.rs`, `src/surface.rs`, `src/blit.wgsl`, `src/frames.rs` | NEW | §17 |
 
 **Behaviour.**

@@ -6,5 +6,5 @@
 ## 31. Team task lists
 
 **AND: Kotlin libraries** (W3, W4)
-- [ ] AND-1 · 3 d · W3 — `tools/build-android.sh`, the generated bindings in `:core` and `:effects`, the Kotlin APIs and publishing (§23). Acceptance: E2 on the emulator; V6.
+- [ ] AND-1 · 3 d · W3 — `tools/build-android.sh`, the generated bindings in `:core` and `:effects` (written by generators registered with `cargo xtask generate`, §20), the Kotlin APIs and publishing (§23). Acceptance: E2 on the emulator; V6.
 - [ ] AND-2 · 2 d · W4 — `NativeSurfaces`, surface preview, `Bitmap` and `HardwareBuffer` frames (§17, §23). Acceptance: E7; V4 on both phones.

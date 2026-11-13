@@ -1,0 +1,13 @@
+ACTIVITY MANAGER SERVICES (dumpsys activity services)
+  User 0 active services:
+  * ServiceRecord{d131e71 u0 com.example.fgslab/.ExportService}
+    intent={cmp=com.example.fgslab/.ExportService}
+    packageName=com.example.fgslab
+    processName=com.example.fgslab
+    baseDir=/data/app/com.example.fgslab-tpITrtVZSRZ9koLpYUt3Zw==/base.apk
+    dataDir=/data/user/0/com.example.fgslab
+    app=ProcessRecord{acfe77 3999:com.example.fgslab/u0a144}
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export pri=0 contentView=null vibrate=null sound=null defaults=0x0 flags=0x6a color=0x00000000 vis=PRIVATE)
+    createTime=-39s93ms startingBgTimeout=--
+    lastActivity=-39s93ms restartTime=-39s93ms createdFromFg=true
+    startRequested=true delayedStop=false stopIfKilled=true callStart=true lastStartId=1

@@ -27,10 +27,10 @@ Which branches, pull requests, issues and deployments are changing the surfaces 
 ## Consequences for the design
 
 - **Leaves alone:** the desktop-UI ports (#1401, #2361 series). The SDK does not ship the egui editor; developers bring their own interface (RQ7).
-- **Builds on, when merged:** #1401's iOS config folder. Until it merges, the SDK supplies the folder through `EFFECTCRAFT_CONFIG_DIR` or the upstream seam the plan proposes (Q5). Whichever lands first, the other adapts.
+- **Builds on, when merged:** #1401's iOS config folder. Until it merges, the SDK supplies the folder through `EFFECTCRAFT_CONFIG_DIR` or the upstream seam the plan proposes (Q5). Whichever lands first, the other adapts. *(Superseded by PD5, 2026-11-13: EffectCraft is never modified, so there are no seams; what a phone needs is an adaptation in CraftBridge's own crates on EffectCraft's public interfaces, plan §15.)*
 - **Keeps platform FFI out of upstream:** the maintainers' decision on #819 means hardware codecs, exported symbols and raw window handles live in the plugin repository, never in the EffectCraft workspace. This rules out putting the mobile crates inside storytold/effectcraft without a policy change (Q4, option C).
 - **Uses FilmCraft's FFI crate, outside EffectCraft:** `filmcraft-platform` is FilmCraft's one crate allowed `unsafe`; the plugin may link it because the plugin is not the shipped EffectCraft binary.
-- **Sequences after #1840 for hardware encoding:** the encoder seam it needs in `effectcraft-export` is the same seam the plugin needs. The plan proposes an FFI-free version of that seam upstream (Q5) and keeps software encoding until it lands.
+- **Sequences after #1840 for hardware encoding:** the encoder seam it needs in `effectcraft-export` is the same seam the plugin needs. The plan proposes an FFI-free version of that seam upstream (Q5) and keeps software encoding until it lands. *(Superseded by PD5, 2026-11-13: EffectCraft is never modified, so there are no seams; what a phone needs is an adaptation in CraftBridge's own crates on EffectCraft's public interfaces, plan §15.)*
 - **Learns from #1518:** the plugin creates the GPU device itself with limits clamped to the adapter and passes it to `Gpu::new`, rather than relying on the compositor's default request.
 
 ## Raised as questions

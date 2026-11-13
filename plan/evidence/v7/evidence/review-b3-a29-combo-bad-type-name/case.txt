@@ -1,0 +1,14 @@
+case=review-b3-a29-combo-bad-type-name
+apk=/tmp/craftbridge-v7/apk-b1/fgslab-combo-ts37.apk
+apk_md5=3d45b867f8c088c64cd874303ccad7bc
+serial=emulator-5554 device_sdk=29
+type=bogus duration_s=45
+start=2026-11-13T15:15:07+08:00
+install_rc=0
+am_start_wait=gave_up_after_30s
+pid=4087
+home_sent_device=15:15:45.926
+home_sent=2026-11-13T15:15:46+08:00
+result=APP_CRASHED end=2026-11-13T15:15:56+08:00
+target_sdk=37
+fatal_exception=java.lang.RuntimeException;java.lang.IllegalArgumentException

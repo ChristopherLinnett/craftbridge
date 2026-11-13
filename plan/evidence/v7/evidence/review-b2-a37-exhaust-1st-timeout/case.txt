@@ -1,0 +1,12 @@
+case=review-b2-a37-exhaust-1st-timeout
+apk=/tmp/craftbridge-v7/apk2/fgslab-combo-ts37.apk
+apk_md5=0cea776e2569a7e153abb28b42a2a29d
+serial=emulator-5556 device_sdk=37
+type=dataSync duration_s=300
+start=2026-11-13T13:48:25+08:00
+install_rc=0
+pid=26970
+home_sent_device=13:48:34.626
+home_sent=2026-11-13T13:48:34+08:00
+result=FGS_ON_TIMEOUT end=2026-11-13T13:50:05+08:00
+target_sdk=37

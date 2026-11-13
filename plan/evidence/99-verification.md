@@ -19,10 +19,31 @@ Does every code anchor in the master still say what its sentence claims at the p
 ### Work in flight, re-swept (`node build/inflight.mjs --gh`, 2026-11-12 08:31)
 
 4. **effectcraft**: `origin/main` is `24df676a`, 7 commits past the pin; `git diff --stat 10376058 origin/main` over every file the plan anchors or watches is empty. The pin stays `10376058`, the revision the device runs used (`evidence/03-device-feasibility.md`).
-5. Two active branches touch seam areas: `origin/codecs-from-craft-libs` (head `3b8d2313`) moves EffectCraft's encoders to craft-libs and edits `crates/export/src/encode.rs` and `lib.rs` (30 lines changed), the files S7 changes; `origin/fix/1615-auto-cpu-frames` edits `crates/host/src/lib.rs`, the file S1 changes. Whichever lands first, the seam rebases onto it (upstream wins, §15).
+5. Two active branches touch seam areas: `origin/codecs-from-craft-libs` (head `3b8d2313`) moves EffectCraft's encoders to craft-libs and edits `crates/export/src/encode.rs` and `lib.rs` (30 lines changed), the files S7 changes; `origin/fix/1615-auto-cpu-frames` edits `crates/host/src/lib.rs`, the file S1 changes. Whichever lands first, the seam rebases onto it (upstream wins, §15). *(Superseded by PD5: EffectCraft is never modified, so there are no seams to rebase; the adaptations AD1–AD7 sit in CraftBridge's own crates, and an update names the ones whose EffectCraft files changed, §15, §24.)*
 6. **filmcraft**: pinned at `d5ead4ba` on purpose, as EffectCraft's own dependency revision (`Cargo.toml:89-90` upstream); FilmCraft's `main` (`f7db6cdb`) is not what CraftBridge builds against.
 7. **figcraft**: `origin/main` is `0d6ce112`, 472 commits past `a4251ca8`; `crates/engine/src/lib.rs` changed, and its `Session` still holds no `Arc<dyn …>` field at `0d6ce112` (`grep -c 'Arc<dyn'` = 0), so `evidence/04-craft-suite-shared-core.md` Finding 2 holds. FigCraft is read for the assessment only.
 8. No branch, pull request or issue for a mobile SDK, FFI layer or UniFFI appeared since `evidence/02-in-flight-work.md`.
+
+### V1: the iOS system fonts (#28, 2026-11-13)
+
+Measured in an app in the iOS 26.5 simulator and on the acceptance iPhone (iPhone 12 Pro, iOS 26.6.1), against EffectCraft's text crate at `10376058` linked into the app; the full record is `evidence/v1/RESULT.md` with its captures, probe sources and scripts (the built binaries it cites are listed in `evidence/v1/MANIFEST.md`).
+
+9. In the simulator the app's `/System/Library/Fonts` is the Mac's folder (372 files, the Mac volume's `st_dev`), so it says nothing about an iPhone's sandbox. CoreText in the same app reports the iOS fonts: `CTFontCollectionCreateFromAvailableFonts` gives 303 faces in 103 files in 8 folders, one of them outside `Fonts/` (`PrivateFrameworks/FontServices.framework/CorePrivate`, which holds PingFang), and the app reads all 103 files, on the simulator and on the iPhone (`OK 103, FAIL 0`).
+10. `effectcraft_text::fonts::add_source(&DirectorySource { dirs })` on CoreText's folders registers 633 faces from 263 files in 311 families, the same on both; every one of the 86 `UIFont.familyNames` families is among them, 5 (Al Nile, Damascus, Farah, Geeza Pro, Mishafi) under their Arabic names. On the iPhone a hard-coded `/System/Library/Fonts` gives 613 faces and misses `CorePrivate`.
+11. Matched face by face, by (file, PostScript name), 266 of the 633 faces are the ones CoreText offers, and their families are exactly the 86, on the simulator and on the iPhone.
+12. iOS 26's PingFang has only `hvgl` outlines, which skrifa 0.44.0 cannot draw; of EffectCraft's 20 Chinese fallback families iOS has only PingFang SC and TC, so 汉 (zh-Hans) gets no face and 漢 (zh-Hant) Hiragino Sans. Chinese needs a bundled CJK font.
+13. Registering only the 266 matched faces would leave 134 script families with no covering face (for example 𞤀 → `Noto Sans Adlam / Regular` with all 633, none with 266).
+14. **Decided on FX-3 (#113):** `dirs` comes from CoreText's folders, never a hard-coded `/System/Library/Fonts`; every face stays registered; `craftbridge-effects` filters the list to CoreText's faces plus the bundled ones on every response that comes back through it carrying `text.fonts`' output: `exec` of `text.fonts` and the `run` method, the MCP tools `list_fonts`, `execute_command`, `command_run`, `command_batch` and `batch` with `text.fonts`, and every `text.fonts` entry of the `results` `engine.batch` and `file.runScript` (inline `steps`, or a command list it reads from a file) return, each step's raw output (`effectcraft: crates/engine/src/cmd/batch.rs:66-119`, `crates/engine/src/cmd/file_more.rs:516-556`); what runs inside EffectCraft's own dispatch sees the full registry, which the owner accepted: scripts (the `script` method, `script.run`, the MCP `run_script` tool, and `file.runScript` of a `.js`/`.jsx` file or a named script), `engine.batch`'s `$N` references, substituted inside EffectCraft, and `replay`'s `expect` steps, which compare inside it (`crates/engine/src/replay.rs:477-483`); Noto Sans SC and TC Regular (noto-cjk's region-subset OTFs, 14.0 MB, SIL OFL 1.1) are bundled. R3 is settled.
+
+### V7: the foreground-service type for a long Android export (#30, 2026-11-13)
+
+Measured with a test app's 45-second and 660-second exports on emulator images of API 29 (`QSR1.211112.011`), 31 (`SE1A.220630.001.A1`), 34 (`UE1A.230829.050`, the first Android 14 release) and 37 (`CP41.260828.004.A7`); the full record is `evidence/v7/RESULT.md` with its evidence folders, the test app's sources and scripts (each case's full logcat and the saved documentation pages are listed in `evidence/v7/MANIFEST.md`).
+
+15. **The declaration:** `android:foregroundServiceType="mediaProcessing|dataSync"`, with `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC` and `FOREGROUND_SERVICE_MEDIA_PROCESSING`; it installs on every level measured.
+16. **The runtime type, always passed explicitly:** `mediaProcessing` when `SDK_INT >= 35`, `dataSync` below. On API 34 a type-less start inherits the unknown `mediaProcessing` bit from that manifest and throws `InvalidForegroundServiceTypeException` (C3: `review-a1-a34-combo-none`, `review-v7-a34-combo-none`).
+17. **Per level:** 29 and 31 enforce no type policy, only that the runtime type is a subset of the manifest's (C4: `review-b1-a29-combo-short-notdeclared`, `review-b1-a31-combo-short-notdeclared`); 34 rejects an explicit `mediaProcessing` (C2: `a34-full-mediaproc`, `a34-full-ts34-mediaproc`, `review-v7-a34-combo-mediaproc`); `dataSync` is accepted on 29, 31 and 34 and a 660-second export started in the foreground keeps running after HOME, with no time limit below 35 (C5: `review-v7-a29-combo-auto-long`, `review-v7-a34-combo-auto-long`, the 15 earlier 660-second runs); 37 accepts `mediaProcessing` (`a37-full-mediaproc`).
+18. **API 30, 32 and 33 rest on documentation, not measurement:** the owner chose not to download those images. Android's "Changes to foreground services" (saved as `docs/fgs-changes.html`, listed in `evidence/v7/MANIFEST.md` with its SHA-256) changes nothing for these types before Android 14 (Android 11 adds only the camera and microphone types; 12L and 13 have no entry), so they are expected to behave like 29 and 31.
+19. **Amendment to §25 PD14:** Android uses `mediaProcessing` only from Android 15 on, and `dataSync` on Android 10–14. Of Android 14's two compat switches for `dataSync`, only `FGS_TYPE_DATA_SYNC_DISABLED_CHANGE_ID` (255659651) refuses it, with an `InvalidForegroundServiceTypeException` the host app catches; the deprecation one (255039210) only logs a warning (`final-v7-a34-combo-datasync-compat-disabled`, `-deprecated`). `specialUse` works on 29, 31, 34 and 37 as a Play-reviewed fallback.
 
 ### Claims
 
@@ -61,7 +82,8 @@ Does every code anchor in the master still say what its sentence claims at the p
 | `PluginLoader` is a plain function pointer taking the source | `crates/engine/src/lib.rs:294` @ `10376058` | 2026-11-12 | true |
 | Template rendering and render timings exist only in the CLI binary | `apps/effectcraft-cli/src/template.rs`, `apps/effectcraft-cli/src/main.rs:1265-1350`, `:1507-1616` @ `10376058` | 2026-11-12 | true |
 | Release library size about 62 MB stripped per architecture | Android release build of the CLI (`analysis/device-probe/build-release.log`) | 2026-11-12 | true (the CLI; the plugin library is measured in V5) |
-| iOS apps can read `/System/Library/Fonts` | not checkable without an app on a device | — | open: V1 |
+| An iOS app can list and read its system fonts | an app in the iOS 26.5 simulator and on the acceptance iPhone (findings 9–14) | 2026-11-13 | true, through CoreText's folders; the simulator's `/System/Library/Fonts` is the Mac's (V1) |
+| Android 10–14 accept `dataSync` for a long export, `mediaProcessing` only from 15 | emulator runs on API 29, 31, 34 and 37; 30, 32 and 33 from Android's documentation (findings 15–19) | 2026-11-13 | true where measured; expected from the documentation on 30, 32 and 33 (V7) |
 | Physical-device GPU limits, hardware decoding, performance | not checkable without devices | — | open: V2–V5 |
 
 ## Calls the design makes into this system
@@ -71,7 +93,9 @@ None beyond those traced in `evidence/01`–`05`; this file records their verifi
 ## Consequences for the design
 
 - The pin stays `10376058`; nothing anchored has changed upstream.
-- Seams S1 and S7 rebase onto `fix/1615-auto-cpu-frames` and `codecs-from-craft-libs` if those land first.
+- Seams S1 and S7 rebase onto `fix/1615-auto-cpu-frames` and `codecs-from-craft-libs` if those land first. *(Superseded by PD5: there are no seams; the adaptations that rely on those files are rechecked when an update moves the pin.)*
+- AD2 builds its iOS folders from CoreText and `craftbridge-effects` filters the font list; FX-3 grows to 1.5 engineer-days (V1).
+- The Android background recipe (PD14) uses `mediaProcessing` from Android 15 and `dataSync` on 10–14 (V7).
 - P2 gains the `write:packages` scope for publishing.
 
 ## Raised as questions

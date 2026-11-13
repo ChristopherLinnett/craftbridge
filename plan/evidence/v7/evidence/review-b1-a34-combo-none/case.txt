@@ -1,0 +1,10 @@
+case=review-b1-a34-combo-none
+apk=/tmp/craftbridge-v7/apk-b1/fgslab-combo-ts37.apk
+apk_md5=3d45b867f8c088c64cd874303ccad7bc
+serial=emulator-5554 device_sdk=34
+type=none duration_s=45
+start=2026-11-13T10:40:31+08:00
+install_rc=0
+pid=4691
+home_sent=2026-11-13T10:40:40+08:00
+result=STARTFOREGROUND_FAIL end=2026-11-13T10:40:53+08:00

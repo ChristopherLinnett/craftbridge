@@ -8,3 +8,4 @@ Every artifact (the Rust crates, the Swift package and both Maven artifacts) sha
 
 - The repository: its rules in `AGENTS.md`, the licences, and the plan of record in `plan/`.
 - `tools/doctor.sh`: checks every prerequisite of the build and prints the fix for each gap; `--gate` checks only what the gate needs.
+- The workspace skeleton (the Cargo workspace in `rust/`, the Swift package in `ios/sdk/`, the Gradle build in `android/sdk/`) and the gate, `tools/ci.sh`: formatters, linters, tests, `cargo xtask rules` and `cargo xtask generate --check`; `tools/doctor.sh --install-hooks` runs it before every push.

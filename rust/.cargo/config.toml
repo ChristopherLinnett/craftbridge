@@ -1,0 +1,5 @@
+[alias]
+# `--locked`: the rule checks read the graph Cargo.lock pins and never rewrite the lock file under a
+# change. tools/ci.sh builds the package and runs its binary itself, because this file could redefine
+# the alias, or set a runner that `cargo run` would start in the binary's place.
+xtask = "run --package xtask --locked --quiet --"

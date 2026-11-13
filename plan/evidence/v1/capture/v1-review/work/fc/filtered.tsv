@@ -1,0 +1,226 @@
+meta	filtered	ecfaces	633	matched	266	added	266	registered	273
+sample	.CJK Symbols Fallback HK	U+2FF0	⿰	none
+sample	.CJK Symbols Fallback JA	U+2FF0	⿰	none
+sample	.CJK Symbols Fallback MO	U+2FF0	⿰	none
+sample	.CJK Symbols Fallback SC	U+2FF0	⿰	none
+sample	.CJK Symbols Fallback TC	U+2FF0	⿰	none
+sample	.CJK Symbols Fallback Watch HK	U+2FF0	⿰	none
+sample	.CJK Symbols Fallback Watch JA	U+2FF0	⿰	none
+sample	.CJK Symbols Fallback Watch MO	U+2FF0	⿰	none
+sample	.CJK Symbols Fallback Watch SC	U+2FF0	⿰	none
+sample	.CJK Symbols Fallback Watch TC	U+2FF0	⿰	none
+sample	.DecoType Nastaleeq Urdu UI	U+061D	؝	none
+sample	.PhoneFallback	U+10A0	Ⴀ	none
+sample	.PhoneKeyCaps	U+0FFA	࿺	none
+sample	.SF Arabic	U+0605	؅	none
+sample	.SF Arabic Rounded	U+0605	؅	none
+sample	.SF Armenian	U+0531	Ա	none
+sample	.SF Armenian Rounded	U+0531	Ա	none
+sample	.SF Compact	U+20C1	⃁	none
+sample	.SF Compact Rounded	U+20C1	⃁	none
+sample	.SF Compact Soft	U+1C50	᱐	none
+sample	.SF Devanagari	U+A8FE	ꣾ	none
+sample	.SF Gujarati	U+0AFA	ૺ	none
+sample	.SF Kannada	U+0C84	಄	none
+sample	.SF Malayalam	U+0D00	ഀ	none
+sample	.SF Numeric	U+1C50	᱐	none
+sample	.SF Odia	U+0B55	୕	none
+sample	.SF Soft Numeric	U+1C50	᱐	none
+sample	.SF Stencil Numeric	U+1C50	᱐	none
+sample	.SF Telugu	U+0C04	ఄ	none
+sample	.SF UI Rounded	U+20C1	⃁	none
+sample	Carlito	U+208F	₏	none
+sample	Courier	U+2180	ↀ	none
+sample	Noto Sans Adlam	U+1E900	𞤀	none
+sample	Noto Sans Armenian	U+0531	Ա	none
+sample	Noto Sans Avestan	U+10B00	𐬀	none
+sample	Noto Sans Bamum	U+A6A0	ꚠ	none
+sample	Noto Sans Bassa Vah	U+16AD0	𖫐	none
+sample	Noto Sans Batak	U+1BC0	ᯀ	none
+sample	Noto Sans Bhaiksuki	U+11C00	𑰀	none
+sample	Noto Sans Buginese	U+1A00	ᨀ	none
+sample	Noto Sans Buhid	U+1735	᜵	none
+sample	Noto Sans Carian	U+102A0	𐊠	none
+sample	Noto Sans Caucasian Albanian	U+10530	𐔰	none
+sample	Noto Sans Chakma	U+11100	𑄀	none
+sample	Noto Sans Cham	U+AA00	ꨀ	none
+sample	Noto Sans Coptic	U+2C80	Ⲁ	none
+sample	Noto Sans Cuneiform	U+12000	𒀀	none
+sample	Noto Sans Cypriot	U+10800	𐠀	none
+sample	Noto Sans Duployan	U+1BC00	𛰀	none
+sample	Noto Sans Egyptian Hieroglyphs	U+13000	𓀀	none
+sample	Noto Sans Elbasan	U+10500	𐔀	none
+sample	Noto Sans Glagolitic	U+2C00	Ⰰ	none
+sample	Noto Sans Gothic	U+10330	𐌰	none
+sample	Noto Sans Gunjala Gondi	U+11D60	𑵠	none
+sample	Noto Sans Hanifi Rohingya	U+10D00	𐴀	none
+sample	Noto Sans Hanunoo	U+1720	ᜠ	none
+sample	Noto Sans Hatran	U+108E0	𐣠	none
+sample	Noto Sans Imperial Aramaic	U+10840	𐡀	none
+sample	Noto Sans Inscriptional Pahlavi	U+10B60	𐭠	none
+sample	Noto Sans Inscriptional Parthian	U+10B40	𐭀	none
+sample	Noto Sans Javanese	U+A980	ꦀ	none
+sample	Noto Sans Kaithi	U+11080	𑂀	none
+sample	Noto Sans Kayah Li	U+A900	꤀	none
+sample	Noto Sans Kharoshthi	U+10A00	𐨀	none
+sample	Noto Sans Khojki	U+11200	𑈀	none
+sample	Noto Sans Khudawadi	U+112B0	𑊰	none
+sample	Noto Sans Lepcha	U+1C00	ᰀ	none
+sample	Noto Sans Limbu	U+1900	ᤀ	none
+sample	Noto Sans Linear A	U+10600	𐘀	none
+sample	Noto Sans Linear B	U+10000	𐀀	none
+sample	Noto Sans Lisu	U+A4D0	ꓐ	none
+sample	Noto Sans Lycian	U+10280	𐊀	none
+sample	Noto Sans Lydian	U+10920	𐤠	none
+sample	Noto Sans Mahajani	U+11150	𑅐	none
+sample	Noto Sans Mandaic	U+0840	ࡀ	none
+sample	Noto Sans Manichaean	U+10AC0	𐫀	none
+sample	Noto Sans Marchen	U+11C70	𑱰	none
+sample	Noto Sans Masaram Gondi	U+11D00	𑴀	none
+sample	Noto Sans Meetei Mayek	U+AAE0	ꫠ	none
+sample	Noto Sans Mende Kikakui	U+1E800	𞠀	none
+sample	Noto Sans Meroitic	U+10980	𐦀	none
+sample	Noto Sans Miao	U+16F00	𖼀	none
+sample	Noto Sans Modi	U+11600	𑘀	none
+sample	Noto Sans Mongolian	U+1800	᠀	none
+sample	Noto Sans Mro	U+16A40	𖩀	none
+sample	Noto Sans Multani	U+11280	𑊀	none
+sample	Noto Sans NKo	U+07C0	߀	none
+sample	Noto Sans Nabataean	U+10880	𐢀	none
+sample	Noto Sans Nag Mundari	U+1E4D0	𞓐	none
+sample	Noto Sans New Tai Lue	U+1980	ᦀ	none
+sample	Noto Sans Newa	U+11400	𑐀	none
+sample	Noto Sans Ol Chiki	U+1C50	᱐	none
+sample	Noto Sans Old Hungarian	U+10C80	𐲀	none
+sample	Noto Sans Old Italic	U+10300	𐌀	none
+sample	Noto Sans Old North Arabian	U+10A80	𐪀	none
+sample	Noto Sans Old Permic	U+10350	𐍐	none
+sample	Noto Sans Old Persian	U+103A0	𐎠	none
+sample	Noto Sans Old South Arabian	U+10A60	𐩠	none
+sample	Noto Sans Old Turkic	U+10C00	𐰀	none
+sample	Noto Sans Osage	U+104B0	𐒰	none
+sample	Noto Sans Osmanya	U+10480	𐒀	none
+sample	Noto Sans Pahawh Hmong	U+16B00	𖬀	none
+sample	Noto Sans Palmyrene	U+10860	𐡠	none
+sample	Noto Sans Pau Cin Hau	U+11AC0	𑫀	none
+sample	Noto Sans PhagsPa	U+1801	᠁	none
+sample	Noto Sans Phoenician	U+10900	𐤀	none
+sample	Noto Sans Psalter Pahlavi	U+10B80	𐮀	none
+sample	Noto Sans Rejang	U+A930	ꤰ	none
+sample	Noto Sans Samaritan	U+0800	ࠀ	none
+sample	Noto Sans Saurashtra	U+A880	ꢀ	none
+sample	Noto Sans Sharada	U+1CD7	᳗	none
+sample	Noto Sans Siddham	U+11580	𑖀	none
+sample	Noto Sans Sora Sompeng	U+110D0	𑃐	none
+sample	Noto Sans Sundanese	U+1B80	ᮀ	none
+sample	Noto Sans Syloti Nagri	U+A800	ꠀ	none
+sample	Noto Sans Tagalog	U+1700	ᜀ	none
+sample	Noto Sans Tagbanwa	U+1735	᜵	none
+sample	Noto Sans Tai Le	U+1950	ᥐ	none
+sample	Noto Sans Tai Tham	U+1A20	ᨠ	none
+sample	Noto Sans Tai Viet	U+AA80	ꪀ	none
+sample	Noto Sans Takri	U+11680	𑚀	none
+sample	Noto Sans Thaana	U+0780	ހ	none
+sample	Noto Sans Tifinagh	U+2D30	ⴰ	none
+sample	Noto Sans Tirhuta	U+11480	𑒀	none
+sample	Noto Sans Ugaritic	U+10380	𐎀	none
+sample	Noto Sans Vai	U+A500	ꔀ	none
+sample	Noto Sans Wancho	U+1E2C0	𞋀	none
+sample	Noto Sans Warang Citi	U+118A0	𑢠	none
+sample	Noto Sans Yi	U+301A	〚	none
+sample	Noto Serif Ahom	U+11700	𑜀	none
+sample	Noto Serif Balinese	U+1B00	ᬀ	none
+sample	Noto Serif Hmong Nyiakeng	U+1E100	𞄀	none
+sample	Noto Serif Yezidi	U+10E80	𐺀	none
+sample	System Font	U+20C1	⃁	none
+nosample	.ADT Slab Numeric
+nosample	.ADT Slab Soft Numeric
+nosample	.Al Nile PUA
+nosample	.Apple Color Emoji UI
+nosample	.Apple SD Gothic NeoI
+nosample	.Apple SD Gothic NeoW
+nosample	.Damascus PUA
+nosample	.Farah PUA
+nosample	.Geeza Pro Interface
+nosample	.Geeza Pro PUA
+nosample	.Helvetica Neue Interface
+nosample	.Hiragino Kaku Gothic Interface
+nosample	.Hiragino Kaku Gothic InterfaceWatch
+nosample	.Keycaps
+nosample	.Keycaps A
+nosample	.Keycaps B
+nosample	.Keycaps Pad
+nosample	.Keycaps Pad A
+nosample	.LastResort
+nosample	.Lock Clock
+nosample	.New York
+nosample	.New York Numeric
+nosample	.New York Soft Numeric
+nosample	.Noto Nastaliq Urdu UI
+nosample	.PhonepadTwo
+nosample	.PingFang HK
+nosample	.PingFang MO
+nosample	.PingFang SC
+nosample	.PingFang TC
+nosample	.PingFang UI HK
+nosample	.PingFang UI JA
+nosample	.PingFang UI MO
+nosample	.PingFang UI SC
+nosample	.PingFang UI TC
+nosample	.PingFang UI Watch HK
+nosample	.PingFang UI Watch JA
+nosample	.PingFang UI Watch MO
+nosample	.PingFang UI Watch SC
+nosample	.PingFang UI Watch TC
+nosample	.PingFang Watch HK
+nosample	.PingFang Watch MO
+nosample	.PingFang Watch SC
+nosample	.PingFang Watch TC
+nosample	.SF Adaptive Numeric
+nosample	.SF Adaptive Soft Numeric
+nosample	.SF Bangla
+nosample	.SF Camera
+nosample	.SF Georgian
+nosample	.SF Georgian Rounded
+nosample	.SF Gurmukhi
+nosample	.SF Hebrew
+nosample	.SF Hebrew Rounded
+nosample	.SF Rail Numeric
+nosample	.SF Rail Rounded Numeric
+nosample	.SF Rounded Numeric
+nosample	.SF Tamil
+nosample	.SF UI Mono
+nosample	.SF UI Soft
+nosample	.SF UI Symbols
+nosample	.Savoye LET CC.
+nosample	.ThonburiUI
+nosample	.ThonburiUIWatch
+nosample	AppleGothic
+nosample	Asphalt
+nosample	Athelas
+nosample	Balega
+nosample	Bebas Neue
+nosample	DB LCD Temp
+nosample	Dear Joe Four
+nosample	Druk
+nosample	Druk Text
+nosample	Druk Wide
+nosample	Fakt Slab Stencil Pro
+nosample	Hiragino Kaku Gothic Pro
+nosample	Hiragino Kaku Gothic ProN
+nosample	Hiragino Kaku Gothic Std
+nosample	Hiragino Kaku Gothic StdN
+nosample	Hiragino Maru Gothic Pro
+nosample	Hiragino Mincho Pro
+nosample	Iowan Old Style
+nosample	Journal Sans New
+nosample	Marion
+nosample	Noto Sans Brahmi
+nosample	Noto Sans Canadian Aboriginal
+nosample	Noto Sans Zawgyi
+nosample	STIXGeneral
+nosample	Scheme
+nosample	Seravek
+nosample	SignPainter
+nosample	Superclarendon
+nosample	The Hand Serif

@@ -1,0 +1,10 @@
+review-a4-a29-combo-none EXPORT_DONE
+review-a4-a29-combo-short-notdeclared PROCESS_GONE_AT_LAUNCH
+review-a4-a29-combo-mediaproc EXPORT_DONE
+review-a4-a29-combo-datasync EXPORT_DONE
+/tmp/craftbridge-v7/run_case.sh: line 64: 77161 Terminated: 15          $ADB -s $SER shell am start -W -n $PKG/.MainActivity --es fgs_type "$TYPE" --el fgs_duration_ms $((DUR*1000)) > "$OUT/am_start.txt" 2>&1
+review-a4-a29-combo-bad-type-name APP_CRASHED
+review-a4-a29-combo-auto-long EXPORT_DONE
+Success
+QUEUE_amendments_29 DONE
+Q29 EXIT 0

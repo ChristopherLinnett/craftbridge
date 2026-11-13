@@ -1,0 +1,30 @@
+ACTIVITY MANAGER SERVICES (dumpsys activity services)
+  Last ANR service:
+ServiceRecord{90a2e7b u0 com.example.fgslab/.ExportService}
+    intent={cmp=com.example.fgslab/.ExportService}
+    packageName=com.example.fgslab
+    processName=com.example.fgslab
+    baseDir=/data/app/com.example.fgslab-bbCxGhh28d6sxloHrGkIIg==/base.apk
+    dataDir=/data/user/0/com.example.fgslab
+    app=ProcessRecord{501fee9 4032:com.example.fgslab/u0a144}
+    createTime=-3m30s7ms startingBgTimeout=--
+    lastActivity=-3m28s941ms restartTime=-- createdFromFg=false
+    startRequested=false delayedStop=false stopIfKilled=false callStart=false lastStartId=1
+    executeNesting=2 executeFg=false executingStart=-3m20s1ms
+    destroying=true destroyTime=-3m20s1ms
+    restartCount=0 restartDelay=-- nextRestartTime=-3m28s970ms crashCount=2
+
+  Destroying services:
+  * Destroy ServiceRecord{781f6e6 u0 com.example.fgslab/.ExportService}
+    intent={cmp=com.example.fgslab/.ExportService}
+    packageName=com.example.fgslab
+    processName=com.example.fgslab
+    baseDir=/data/app/com.example.fgslab-E07wpvKM_rBjjYKIZymrdQ==/base.apk
+    dataDir=/data/user/0/com.example.fgslab
+    app=ProcessRecord{7be0fe7 5428:com.example.fgslab/u0a146}
+    createTime=-38s198ms startingBgTimeout=--
+    lastActivity=-37s147ms restartTime=-- createdFromFg=false
+    startRequested=false delayedStop=false stopIfKilled=false callStart=false lastStartId=1
+    executeNesting=2 executeFg=false executingStart=-28s188ms
+    destroying=true destroyTime=-28s188ms
+    restartCount=0 restartDelay=-- nextRestartTime=-37s166ms crashCount=2

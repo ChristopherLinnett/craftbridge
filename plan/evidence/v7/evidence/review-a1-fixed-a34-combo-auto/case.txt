@@ -1,0 +1,10 @@
+case=review-a1-fixed-a34-combo-auto
+apk=/tmp/craftbridge-v7/apk-a1/fgslab-combo-ts37.apk
+apk_md5=3d45b867f8c088c64cd874303ccad7bc
+serial=emulator-5554 device_sdk=34
+type=auto duration_s=45
+start=2026-11-13T09:38:17+08:00
+install_rc=0
+pid=6585
+home_sent=2026-11-13T09:38:25+08:00
+result=EXPORT_DONE end=2026-11-13T09:39:05+08:00

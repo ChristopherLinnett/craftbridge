@@ -25,7 +25,7 @@ One Swift package in `ios/sdk/`, `Package.swift` at its top (PD19), iOS 17 (PD11
 
 **`CraftBridgeEffects`:** `EffectsEngine.start(folders:gpu:)`, `exec`, `run`, `props`, `get`, `set`, `frame`, `export`, `templates.open` and `templates.render` (returning a `TemplateInstance` with `set(_:_:)` and `set(_:media:)`), `script`, `replay`, `timings`, `mcp`, and the generated command namespaces. These are the calls used in §5.
 
-**Build.** `tools/build-xcframework.sh` builds `craftbridge-effects-ffi` with `--release` for `aarch64-apple-ios` and `aarch64-apple-ios-sim` with `IPHONEOS_DEPLOYMENT_TARGET=17.0`, runs UniFFI's Swift generator from `rust/uniffi-bindgen` in library mode, and joins the two static libraries with `xcodebuild -create-xcframework` into `ios/sdk/Frameworks/`.
+**Build.** `tools/build-xcframework.sh` builds `craftbridge-effects-ffi` with `--release` for `aarch64-apple-ios` and `aarch64-apple-ios-sim` with `IPHONEOS_DEPLOYMENT_TARGET=17.0`, runs `cargo xtask generate`, whose registered generator writes the Swift bindings into `Generated/` (§20), and joins the two static libraries with `xcodebuild -create-xcframework` into `ios/sdk/Frameworks/`.
 
 **States.** Development (`ios/sdk/` by local path, the local XCFramework) · release (`craftbridge-swift` by URL, the XCFramework downloaded and checksum-verified by SwiftPM).
 

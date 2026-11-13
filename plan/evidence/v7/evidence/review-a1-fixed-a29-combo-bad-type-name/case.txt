@@ -1,0 +1,11 @@
+case=review-a1-fixed-a29-combo-bad-type-name
+apk=/tmp/craftbridge-v7/apk-a1/fgslab-combo-ts37.apk
+apk_md5=3d45b867f8c088c64cd874303ccad7bc
+serial=emulator-5554 device_sdk=29
+type=bogus duration_s=45
+start=2026-11-13T10:12:57+08:00
+install_rc=0
+am_start_wait=gave_up_after_30s
+pid=5428
+home_sent=2026-11-13T10:13:36+08:00
+result=APP_CRASHED end=2026-11-13T10:13:46+08:00

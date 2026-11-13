@@ -1,0 +1,15 @@
+ACTIVITY MANAGER SERVICES (dumpsys activity services)
+  Destroying services:
+  * Destroy ServiceRecord{a618834 u0 com.example.fgslab/.ExportService}
+    intent={cmp=com.example.fgslab/.ExportService}
+    packageName=com.example.fgslab
+    processName=com.example.fgslab
+    baseDir=/data/app/com.example.fgslab-UjAB2qdFABxME3Q7Jeyg4A==/base.apk
+    dataDir=/data/user/0/com.example.fgslab
+    app=ProcessRecord{b0355d8 3972:com.example.fgslab/u0a144}
+    createTime=-38s108ms startingBgTimeout=--
+    lastActivity=-37s51ms restartTime=-- createdFromFg=false
+    startRequested=false delayedStop=false stopIfKilled=false callStart=false lastStartId=1
+    executeNesting=2 executeFg=false executingStart=-28s103ms
+    destroying=true destroyTime=-28s103ms
+    restartCount=0 restartDelay=-- nextRestartTime=-37s68ms crashCount=2

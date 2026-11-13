@@ -1,0 +1,124 @@
+## families EffectCraft reads from the 103 files CoreText lists: 123 (30 dot-named)
+.Al Nile PUA
+.Apple Color Emoji UI
+.Apple SD Gothic NeoI
+.Apple SD Gothic NeoW
+.Damascus PUA
+.Farah PUA
+.Geeza Pro Interface
+.Geeza Pro PUA
+.Hiragino Kaku Gothic Interface
+.Hiragino Kaku Gothic InterfaceWatch
+.Noto Nastaliq Urdu UI
+.PingFang HK
+.PingFang MO
+.PingFang SC
+.PingFang TC
+.PingFang UI HK
+.PingFang UI JA
+.PingFang UI MO
+.PingFang UI SC
+.PingFang UI TC
+.PingFang UI Watch HK
+.PingFang UI Watch JA
+.PingFang UI Watch MO
+.PingFang UI Watch SC
+.PingFang UI Watch TC
+.PingFang Watch HK
+.PingFang Watch MO
+.PingFang Watch SC
+.PingFang Watch TC
+.Savoye LET CC.
+Academy Engraved LET
+American Typewriter
+Apple Color Emoji
+Apple SD Gothic Neo
+Apple Symbols
+Arial
+Arial Hebrew
+Arial Rounded MT Bold
+Avenir
+Avenir Next
+Avenir Next Condensed
+Baskerville
+Bodoni 72
+Bodoni 72 Oldstyle
+Bodoni 72 Smallcaps
+Bodoni Ornaments
+Bradley Hand
+Chalkboard SE
+Chalkduster
+Charter
+Cochin
+Copperplate
+Courier New
+DIN Alternate
+DIN Condensed
+Devanagari Sangam MN
+Didot
+Euphemia UCAS
+Futura
+Galvji
+Georgia
+Gill Sans
+Grantha Sangam MN
+Helvetica
+Helvetica Neue
+Hiragino Kaku Gothic Pro
+Hiragino Kaku Gothic ProN
+Hiragino Kaku Gothic Std
+Hiragino Kaku Gothic StdN
+Hiragino Maru Gothic Pro
+Hiragino Maru Gothic ProN
+Hiragino Mincho Pro
+Hiragino Mincho ProN
+Hiragino Sans
+Hoefler Text
+Impact
+Kailasa
+Kefa III
+Khmer Sangam MN
+Kohinoor Bangla
+Kohinoor Devanagari
+Kohinoor Gujarati
+Kohinoor Telugu
+Lao Sangam MN
+Malayalam Sangam MN
+Marker Felt
+Menlo
+Mukta Mahee
+Myanmar Sangam MN
+Noteworthy
+Noto Nastaliq Urdu
+Noto Sans Kannada
+Noto Sans Myanmar
+Noto Sans Oriya
+Noto Sans Syriac
+Noto Sans Zawgyi
+Optima
+Palatino
+Papyrus
+Party LET
+PingFang HK
+PingFang MO
+PingFang SC
+PingFang TC
+Rockwell
+STIX Two Math
+STIX Two Text
+Savoye LET
+Sinhala Sangam MN
+Snell Roundhand
+Symbol
+Tamil Sangam MN
+Thonburi
+Times New Roman
+Trebuchet MS
+Verdana
+Zapf Dingbats
+Zapfino
+النيل
+فرح
+مِصحفي
+ڈیمسکس
+گیزا پرو
