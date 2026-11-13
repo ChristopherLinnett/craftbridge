@@ -535,8 +535,10 @@ queue.sh                 one device through a case set (matrix | review-a1 | smo
 summarize.sh             one block per case, own-process log lines only
 docs/                    saved copies of the developer.android.com / Play Console pages cited, Changes to
                          foreground services included (`fgs-changes.html`, its text in `fgs-changes.txt`;
-                         FGS troubleshooting and the notification-permission page were read live
-                         only; the
+                         FGS troubleshooting and the notification-permission page, read live on
+                         2026-11-13, were saved on 2026-11-14 as `fgs-troubleshooting.html` and
+                         `notification-permission.html`, their text in `.txt`, with the quoted
+                         sentences still in them; the
                          ServiceInfo reference was saved twice, as `serviceinfo-ref.txt` and as
                          `docs_tmp.html`), plus docs/aosp-*.java — AOSP `ActiveServices`
                          (android10/14/15-release), `ActivityManagerConstants` (14/15),
