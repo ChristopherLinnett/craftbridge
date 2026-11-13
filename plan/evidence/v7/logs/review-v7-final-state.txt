@@ -1,0 +1,39 @@
+== emulator-5556 (2026-11-13T18:02:53+08:00) sdk=29
+$ pm list packages com.example.fgslab
+(end of package list)
+$ device_config get activity_manager data_sync_fgs_timeout_duration
+null
+$ device_config get activity_manager media_processing_fgs_timeout_duration
+null
+$ device_config get activity_manager short_fgs_timeout_duration
+null
+$ device_config get_sync_disabled_for_tests
+Invalid command: get_sync_disabled_for_tests
+== emulator-5554 (2026-11-13T18:07:43+08:00) sdk=34
+$ pm list packages com.example.fgslab
+(end of package list)
+$ device_config get activity_manager data_sync_fgs_timeout_duration
+null
+$ device_config get activity_manager media_processing_fgs_timeout_duration
+null
+$ device_config get activity_manager short_fgs_timeout_duration
+null
+$ device_config set_sync_disabled_for_tests none
+$ device_config get_sync_disabled_for_tests
+none
+$ dumpsys platform_compat (FGS dataSync/none change ids, read-only)
+ChangeId(254662522; name=FGS_TYPE_PERMISSION_CHANGE_ID; enableSinceTargetSdk=34; overridable)
+ChangeId(170668199; name=FGS_BG_START_RESTRICTION_CHANGE_ID; enableSinceTargetSdk=31; overridable)
+ChangeId(255038118; name=FGS_TYPE_NONE_DISABLED_CHANGE_ID; enableSinceTargetSdk=34; overridable)
+ChangeId(255659651; name=FGS_TYPE_DATA_SYNC_DISABLED_CHANGE_ID; disabled; overridable)
+ChangeId(255039210; name=FGS_TYPE_DATA_SYNC_DEPRECATION_CHANGE_ID; disabled; overridable)
+== after shutdown (2026-11-13T18:07:52+08:00)
+pid 26809 gone
+pid 26810 gone
+$ ps -axo pid,comm | grep -E 'qemu-system|emulator$'
+(no qemu-system or emulator process)
+$ pgrep -fl 'emulator -avd|qemu-system'
+(none)
+$ adb devices
+List of devices attached
+

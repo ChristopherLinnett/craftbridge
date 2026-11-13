@@ -5,9 +5,15 @@
 CRAFTBRIDGE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export CRAFTBRIDGE_ROOT
 
-# Every pin is read from the file that pins it, never written here a second time. A TOML string value,
-# whatever the spacing around `=` and whatever comment follows it: `craftbridge_toml_string <file> <key>`.
+# Every pin is read from the file that pins it, never written here a second time. This reader knows one
+# form, a basic (double-quoted) TOML string, whatever the spacing around `=` and whatever comment follows
+# it: `craftbridge_toml_string <file> <key>`. A key written any other way (a 'literal' string, say, which
+# rustup and Gradle read too) stops every script, naming the file, rather than being misread.
 craftbridge_toml_string() {
+  if grep -Eq "^[[:space:]]*$2[[:space:]]*=[[:space:]]*'" "$1"; then
+    echo "tools/env.sh: $2 in ${1#"$CRAFTBRIDGE_ROOT"/} is a 'literal' string: write it as a \"basic\" one, the form this reader knows" >&2
+    exit 1
+  fi
   sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*\"\([^\"]*\)\".*$/\1/p" "$1" | head -n 1
 }
 # A value the build cannot do without stops every script here, naming the file to fix, so no check can
@@ -20,20 +26,28 @@ craftbridge_require() {
 }
 
 # The Rust toolchain pinned by rust/rust-toolchain.toml; rustup picks it up inside rust/. The target list
-# is read from `targets = [` to its `]`, on one line or many, without comments, quotes or commas.
+# is read from `targets = [` to its `]`, on one line or many, without comments, double quotes or commas; a
+# 'literal' string there stops every script, as for any pin.
 craftbridge_toolchain="$CRAFTBRIDGE_ROOT/rust/rust-toolchain.toml"
 CRAFTBRIDGE_RUST_CHANNEL="$(craftbridge_toml_string "$craftbridge_toolchain" channel)"
 CRAFTBRIDGE_RUST_TARGETS="$(awk '
   { sub(/#.*/, "") }
   !inside && /^[[:space:]]*targets[[:space:]]*=/ { inside = 1; sub(/^[^=]*=/, "") }
-  inside { done = index($0, "]") > 0; gsub(/[][",]/, " "); printf "%s ", $0; if (done) exit }
+  inside { done = index($0, "]") > 0; if (index($0, "\047") > 0) { print "LITERAL"; exit } gsub(/[][",]/, " "); printf "%s ", $0; if (done) exit }
 ' "$craftbridge_toolchain" | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//')"
+if [ "$CRAFTBRIDGE_RUST_TARGETS" != "${CRAFTBRIDGE_RUST_TARGETS%LITERAL}" ]; then
+  echo "tools/env.sh: targets in rust/rust-toolchain.toml holds a 'literal' string: write each as a \"basic\" one, the form this reader knows" >&2
+  exit 1
+fi
 craftbridge_require "Rust channel" "$CRAFTBRIDGE_RUST_CHANNEL" "$craftbridge_toolchain"
 craftbridge_require "Rust targets" "$CRAFTBRIDGE_RUST_TARGETS" "$craftbridge_toolchain"
 export CRAFTBRIDGE_RUST_CHANNEL CRAFTBRIDGE_RUST_TARGETS
 # Each worktree builds into its own rust/target: a machine-wide CARGO_TARGET_DIR would share one target
-# folder between worktrees, whose gates would then reuse each other's artifacts.
+# folder between worktrees, whose gates would then reuse each other's artifacts. A machine-wide
+# CARGO_BUILD_TARGET would send the host build of xtask to rust/target/<triple>/, and the gate would run
+# whatever older binary sits at rust/target/debug/xtask.
 export CARGO_TARGET_DIR="$CRAFTBRIDGE_ROOT/rust/target"
+unset CARGO_BUILD_TARGET
 
 # The Xcode release the iOS build is made and tested with.
 export CRAFTBRIDGE_XCODE="26.6"
@@ -78,13 +92,3 @@ if CRAFTBRIDGE_JDK="$(craftbridge_find_jdk)"; then export JAVA_HOME="$CRAFTBRIDG
 
 # The copy-paste detector, pinned so every machine finds the same clones.
 export CRAFTBRIDGE_JSCPD="jscpd@5.4.3"
-
-# Where tools write output instead of hand-written code, as paths from the repository root: every build
-# output folder .gitignore names (the Cargo, SwiftPM and Gradle folders, the built xcframework in
-# ios/sdk/Frameworks and the native libraries copied into jniLibs), generated code, which is committed but
-# written by a generator, and node_modules, which the rules refuse in the code folders. The shell stages
-# prune these paths and jscpd ignores them, so a source folder that only shares a name with build output
-# (a Rust module `src/target/`) is still read. rust/xtask/src/scan.rs makes the same cut by its own rule,
-# a build folder only beside the file of the tool that writes it: a folder added to one list belongs in
-# the other.
-export CRAFTBRIDGE_BUILD_OUTPUTS="rust/target ios/**/.build ios/**/.swiftpm ios/sdk/Frameworks android/**/build android/**/.gradle android/**/.kotlin android/sdk/*/src/main/jniLibs **/generated **/Generated **/node_modules"

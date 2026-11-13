@@ -1,0 +1,12 @@
+case=final-v7-a31-combo-datasync
+apk=/tmp/craftbridge-v7/apk-b1/fgslab-combo-ts37.apk
+apk_md5=3d45b867f8c088c64cd874303ccad7bc
+serial=emulator-5554 device_sdk=31
+type=dataSync duration_s=45
+start=2026-11-13T21:13:34+08:00
+install_rc=0
+pid=4857
+home_sent_device=21:13:43.879
+home_sent=2026-11-13T21:13:44+08:00
+result=EXPORT_DONE end=2026-11-13T21:14:24+08:00
+target_sdk=37

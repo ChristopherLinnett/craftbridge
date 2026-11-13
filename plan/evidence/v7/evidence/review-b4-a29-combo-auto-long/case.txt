@@ -1,0 +1,12 @@
+case=review-b4-a29-combo-auto-long
+apk=/tmp/craftbridge-v7/apk-b1/fgslab-combo-ts37.apk
+apk_md5=3d45b867f8c088c64cd874303ccad7bc
+serial=emulator-5554 device_sdk=29
+type=auto duration_s=660
+start=2026-11-13T16:58:53+08:00
+install_rc=0
+pid=4178
+home_sent_device=16:59:01.936
+home_sent=2026-11-13T16:59:02+08:00
+result=EXPORT_DONE end=2026-11-13T17:09:59+08:00
+target_sdk=37

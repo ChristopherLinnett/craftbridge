@@ -21,6 +21,7 @@ craftbridge-effects = { path = "effects/craftbridge-effects" }
 # xtask
 serde_json = "1"
 toml = "0.9"
+unicode-normalization = "0.1"
 
 # One definition for every crate: each manifest says `[lints] workspace = true`, and
 # `cargo xtask rules` fails if one does not or if this table is weakened.
@@ -41,6 +42,10 @@ unimplemented = "forbid"
 todo = "forbid"
 unreachable = "forbid"
 undocumented_unsafe_blocks = "deny"
+# The same calls by path (rust/clippy.toml), which also reach a macro's expansion and a method taken as a
+# value; `deny`, because an item's `.expect("…")` on a provably infallible literal allows both.
+disallowed_methods = "deny"
+disallowed_macros = "deny"
 # EffectCraft's own workspace lints, so CraftBridge's code meets the bar EffectCraft's does. `dbg_macro`
 # is denied where EffectCraft only warns: a `dbg!` left in a library prints into the host app's log.
 cognitive_complexity = "deny"

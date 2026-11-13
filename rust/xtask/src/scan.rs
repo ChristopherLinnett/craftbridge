@@ -7,14 +7,13 @@
 //! string removal live here once, and each check only says which extension it wants.
 
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Build output and tool caches, each skipped only where its tool writes it: beside the file that tool
 /// reads. Matching the name alone would also skip source that happens to share it — a Rust module
-/// `target/`, a Swift folder `Build/` — and every rule would silently stop reading that code.
-/// `tools/env.sh` names the same folders for the shell stages as paths from the repository root; keep
-/// the two in step.
+/// `target/`, a Kotlin package `build/` — and every rule would silently stop reading that code. This is
+/// the gate's one definition of build output: the shell, Swift-format and duplicate stages read the
+/// file lists this walk makes (`cargo xtask files`).
 const BUILD_OUTPUTS: &[(&str, &[&str])] = &[
     ("target", &["Cargo.toml"]),
     (".build", &["Package.swift"]),
@@ -73,8 +72,8 @@ pub(crate) fn is_build_output(dir: &Path) -> bool {
 /// Walk a tree depth first, yielding files whose name ends with `extension` — every file when it is
 /// empty — and skipping build output. A missing root is an empty tree; a directory that exists but
 /// cannot be read is an error, because a rule that cannot see a file must not report it clean. The
-/// extension is compared without ASCII case: on a case-insensitive disk `mod inner;` compiles an
-/// `inner.RS`, so a rule that skipped it would skip code the compiler reads.
+/// extension is compared exactly: `rules: hygiene` refuses every other spelling of a known one (an
+/// `inner.RS` a case-insensitive disk would compile), so no rule needs to guess at folds.
 pub(crate) fn walk(root: &Path, extension: &str) -> Result<Vec<FoundFile>, String> {
     let mut files = Vec::new();
     if !root.is_dir() {
@@ -93,7 +92,7 @@ pub(crate) fn walk(root: &Path, extension: &str) -> Result<Vec<FoundFile>, Strin
                     deeper.push(name);
                     stack.push((path, deeper));
                 }
-            } else if extension.is_empty() || ends_with_ignoring_case(&name, extension) {
+            } else if extension.is_empty() || name.ends_with(extension) {
                 let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
                 files.push(FoundFile { path, relative, components: components.clone() });
             }
@@ -101,11 +100,6 @@ pub(crate) fn walk(root: &Path, extension: &str) -> Result<Vec<FoundFile>, Strin
     }
     files.sort_by(|left, right| left.relative.cmp(&right.relative));
     Ok(files)
-}
-
-/// Does `name` end with `suffix`, ASCII case aside?
-fn ends_with_ignoring_case(name: &str, suffix: &str) -> bool {
-    name.len() >= suffix.len() && name.get(name.len() - suffix.len()..).is_some_and(|end| end.eq_ignore_ascii_case(suffix))
 }
 
 /// Read a file as UTF-8 text, without the byte-order mark an editor may write first. Every tool the
@@ -118,21 +112,6 @@ pub(crate) fn read_text(path: &Path) -> Result<String, String> {
 /// Text without a leading byte-order mark.
 pub(crate) fn without_bom(text: &str) -> &str {
     text.strip_prefix('\u{FEFF}').unwrap_or(text)
-}
-
-/// Has a file's first 8 KB a NUL byte? That is what text tools call binary, and finding it does not
-/// need the whole file decoded.
-pub(crate) fn looks_binary(path: &Path) -> bool {
-    match fs::File::open(path) {
-        Ok(mut file) => {
-            let mut buffer = vec![0u8; 8192];
-            match file.read(&mut buffer) {
-                Ok(read) => buffer.get(..read).is_some_and(|head| head.contains(&0)),
-                Err(_) => true,
-            }
-        }
-        Err(_) => true,
-    }
 }
 
 /// May `c` sit inside an identifier? ASCII alphanumerics and underscore only, which is all that
@@ -810,21 +789,13 @@ mod tests {
     }
 
     #[test]
-    fn the_extension_is_matched_without_case() {
+    fn the_extension_is_matched_exactly_because_hygiene_refuses_every_other_spelling() {
         let root = Scratch::new("walker-case");
-        root.write("src/inner.RS", "// x");
         root.write("src/lib.rs", "// x");
         root.write("src/notes.rst", "x");
-        assert_eq!(relative_names(&walk(&root.0, ".rs").unwrap()), ["src/inner.RS", "src/lib.rs"]);
-    }
-
-    #[test]
-    fn binary_detection_reads_the_head_only() {
-        let root = Scratch::new("binary");
-        root.write("blob.rs", [b'a', 0, b'b']);
-        root.write("text.rs", "// fine\n");
-        assert!(looks_binary(&root.0.join("blob.rs")));
-        assert!(!looks_binary(&root.0.join("text.rs")));
+        root.write("src/inner.RS", "// x");
+        assert_eq!(relative_names(&walk(&root.0, ".rs").unwrap()), ["src/lib.rs"]);
+        assert!(!crate::hygiene::spelling_problems("src/inner.RS").is_empty(), "the spelling the walk skips is refused");
     }
 
     #[test]

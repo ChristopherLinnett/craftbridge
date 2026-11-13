@@ -1,0 +1,1 @@
+2026-11-13 09:31:19.112 FontProbe[41812:181099403] FontProbe report: 52582 bytes, written to Documents/fontprobe_report.txt

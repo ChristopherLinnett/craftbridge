@@ -85,8 +85,17 @@ fn plugin_entry(line: &str, kind: Kind) -> bool {
 /// without applying it — the accessor's spelling of any catalog alias.
 fn catalog_plugin_alias(line: &str) -> bool {
     let Some(inner) = line.strip_prefix("alias(").and_then(|rest| rest.strip_suffix(") apply false")) else { return false };
-    let Some(alias) = inner.strip_prefix("libs.plugins.") else { return false };
-    !alias.is_empty() && alias.starts_with(|c: char| c.is_ascii_lowercase()) && alias.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.')
+    inner.strip_prefix("libs.plugins.").is_some_and(catalog_accessor)
+}
+
+/// The accessor Gradle generates for a version-catalog alias, after `libs.` or `libs.plugins.`: Gradle's
+/// own rule for an alias — it starts with a lowercase ASCII letter, and its parts are ASCII letters and
+/// digits — with each `-`, `_` or `.` separator written as a dot (`kotlin-android` and `kotlinAndroid`
+/// become `kotlin.android` and `kotlinAndroid`). The root's plugin lines and a module's dependencies read
+/// the same notion through this one definition.
+fn catalog_accessor(accessor: &str) -> bool {
+    accessor.starts_with(|c: char| c.is_ascii_lowercase())
+        && accessor.split('.').all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric()))
 }
 
 /// Does a line name the module's namespace, and what segment after the fixed prefix?
@@ -112,14 +121,9 @@ fn project_target(target: &str) -> bool {
     !path.is_empty() && path.split(':').all(|segment| !segment.is_empty() && segment.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
 }
 
-/// `libs.kotlin`, `libs.kotlinx.coroutines.android`: a catalog accessor — dotted words, no empty one.
+/// `libs.kotlin`, `libs.kotlinx.coroutines.android`, `libs.kotlinAndroid`: a catalog accessor.
 fn libs_target(target: &str) -> bool {
-    let Some(alias) = target.strip_prefix("libs.") else { return false };
-    !alias.is_empty()
-        && !alias.ends_with('.')
-        && !alias.contains("..")
-        && alias.starts_with(|c: char| c.is_ascii_alphabetic())
-        && alias.chars().all(|c| c.is_ascii_alphanumeric() || c == '.')
+    target.strip_prefix("libs.").is_some_and(catalog_accessor)
 }
 
 /// Refusing a line says what the file may hold and where what it tried to say lives instead.
@@ -280,13 +284,14 @@ fn included_folders(settings: &Path) -> Result<Vec<String>, String> {
 /// The file Gradle reads a project's Kotlin build from.
 const BUILD_FILE: &str = "build.gradle.kts";
 
+/// The included build that holds the convention plugins: machinery, read by review, not by this rule.
+const BUILD_LOGIC: &str = "build-logic";
+
 /// Run the check over `android/sdk` when the tree has it: every module's and the root's build file by
-/// shape, the root file and every included module's file present, and no Groovy build file at all.
-/// Files are matched as Gradle finds them, not by the name on the directory entry: Gradle opens
-/// `build.gradle.kts` by name, and a case-insensitive disk answers with any spelling it folds to that
-/// name — ASCII case, the Kelvin sign for `k`, a long s for `s`, and beyond (see `scan::reads_as`).
-/// Every such file is therefore read by shape, and one not spelled the exact name is refused besides,
-/// since a case-sensitive disk would not read it at all.
+/// shape, the root file and every included module's file present, no Groovy build file, and no other
+/// place a build's setup could run from — a `buildSrc`, which Gradle builds and whose scripts it runs on
+/// every run, or a settings file but the build's and `build-logic`'s. Names are compared exactly:
+/// `rules: hygiene` refuses every other spelling of a name Gradle opens.
 pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     let sdk = root.join("android").join("sdk");
     if !sdk.join("settings.gradle.kts").is_file() {
@@ -294,17 +299,31 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     }
     let mut errors = Vec::new();
     let files = scan::walk(&sdk, "")?;
+    let mut build_sources = std::collections::BTreeSet::new();
     for found in &files {
         let Some(name) = found.path.file_name().and_then(|name| name.to_str()) else { continue };
-        let opened_as_build_file = name == BUILD_FILE || scan::reads_as(found.path.parent().unwrap_or(Path::new(".")), &found.path, BUILD_FILE);
-        if !opened_as_build_file || found.components.first().map(String::as_str) == Some("build-logic") {
+        if found.components.first().map(String::as_str) == Some(BUILD_LOGIC) {
             continue;
         }
         let shown = crate::report::shown(root, &found.path);
-        if name != BUILD_FILE {
+        if let Some(depth) = found.components.iter().position(|component| component == "buildSrc") {
+            build_sources.insert(format!("android/sdk/{}", found.components.get(..=depth).unwrap_or_default().join("/")));
+            continue;
+        }
+        if (name == "settings.gradle.kts" || name == "settings.gradle") && !found.components.is_empty() {
             errors.push(format!(
-                "{shown}: spell it {BUILD_FILE}: a case-insensitive disk reads this as the project's build file, and a case-sensitive one ignores it"
+                "{shown}: a settings file of a build of its own, whose scripts run outside the convention plugins: the SDK's one build is android/sdk, and shared setup lives in android/sdk/build-logic"
             ));
+            continue;
+        }
+        if name.ends_with(".gradle") {
+            errors.push(format!(
+                "{shown}: Gradle reads this Groovy file in place of the `.kts` file of the same project, and this rule cannot read Groovy: the build is written in Kotlin DSL, and shared setup lives in android/sdk/build-logic"
+            ));
+            continue;
+        }
+        if name != BUILD_FILE {
+            continue;
         }
         let source = scan::read_text(&found.path)?;
         let kind = if found.components.is_empty() { Kind::Root } else { Kind::Module };
@@ -314,6 +333,9 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
         };
         errors.extend(violations(&shown, &source, kind, module));
     }
+    errors.extend(build_sources.into_iter().map(|folder| {
+        format!("{folder}: Gradle builds a buildSrc and runs its scripts on every run of the build, outside the convention plugins: shared setup lives in android/sdk/build-logic")
+    }));
     if !sdk.join(BUILD_FILE).is_file() {
         errors.push("android/sdk/build.gradle.kts: the root build file is missing: it applies id(\"craftbridge.quality\"), which formats and checks the shared Gradle scripts".to_string());
     }
@@ -321,26 +343,6 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
         if !sdk.join(&folder).join(BUILD_FILE).is_file() {
             errors.push(format!("android/sdk/{folder}/build.gradle.kts: the settings include `:{}` but there is no build file: every module has one, applying the convention plugin (android/sdk/build-logic)", folder.replace('/', ":")));
         }
-    }
-    for groovy in &files {
-        if groovy.components.first().map(String::as_str) == Some("build-logic") {
-            continue;
-        }
-        let Some(name) = groovy.path.file_name().and_then(|name| name.to_str()) else { continue };
-        // The plain `.gradle` ending catches every case spelling of it; the file system is asked besides,
-        // because the letters of the ending have Unicode case pairs of their own (a script g folds to a
-        // plain one), and Gradle reads such a `build.gradle` in place of the module's `.kts` file.
-        let dir = groovy.path.parent().unwrap_or(Path::new("."));
-        let is_groovy = name.to_ascii_lowercase().ends_with(".gradle")
-            || scan::reads_as(dir, &groovy.path, "build.gradle")
-            || scan::reads_as(dir, &groovy.path, "settings.gradle");
-        if !is_groovy {
-            continue;
-        }
-        errors.push(format!(
-            "{}: Gradle reads this Groovy file in place of the `.kts` file of the same project, and this rule cannot read Groovy: the build is written in Kotlin DSL, and shared setup lives in android/sdk/build-logic",
-            crate::report::shown(root, &groovy.path)
-        ));
     }
     Ok(errors)
 }
@@ -565,51 +567,54 @@ plugins {
         assert!(errors.iter().all(|e| e.contains("Groovy")), "{errors:?}");
     }
 
+    /// A case-insensitive disk hands Gradle `Build.gradle.kts`, `BUILD.GRADLE`, or a name carrying the Kelvin
+    /// sign or a long s, where it opens `build.gradle.kts` or `build.gradle` (running Gradle on this APFS
+    /// volume proved the folds). `rules: hygiene` refuses every such spelling the disk folds, and every
+    /// ASCII-case one on any disk, so this rule reads the exact names only. Where the disk does not fold the
+    /// name, Gradle does not open the file either, and the module simply has no build file.
     #[test]
-    fn a_build_file_spelled_in_another_case_is_read_by_shape_and_refused() {
-        // A case-insensitive disk hands Gradle `Build.gradle.kts` when it asks for `build.gradle.kts`, so
-        // the file is the module's build all the same: its lines are read, and the spelling is refused.
-        let scratch = setup();
-        std::fs::remove_file(scratch.0.join("android/sdk/effects/build.gradle.kts")).unwrap();
-        scratch.write("android/sdk/effects/Build.gradle.kts", format!("{LEGAL_MODULE}tasks.named(\"lintDebug\") {{ onlyIf {{ false }} }}\n"));
-        scratch.write("android/sdk/core/BUILD.GRADLE", "tasks.named(\"lintDebug\") { onlyIf { false } }\n");
-        let errors = check(&scratch.0).unwrap();
-        assert!(errors.iter().any(|e| e.starts_with("android/sdk/effects/Build.gradle.kts: spell it build.gradle.kts")), "{errors:?}");
-        assert!(errors.iter().any(|e| e.starts_with("android/sdk/effects/Build.gradle.kts:15:")), "{errors:?}");
-        assert!(errors.iter().any(|e| e.starts_with("android/sdk/core/BUILD.GRADLE: Gradle reads this Groovy file")), "{errors:?}");
-    }
-
-    /// A case-insensitive volume folds more than ASCII case: on this machine's APFS, running Gradle
-    /// itself proved that a module's `build.gradle.Ꝁts` (Kelvin sign) and `build.gradle.ktſ` (long s)
-    /// are opened where Gradle opens `build.gradle.kts`. Such a spelling is therefore the module's
-    /// build file, read by shape and refused like any unread one. Where the volume folds neither name,
-    /// Gradle opens neither and the check must see only a missing build file; the probe asks the file
-    /// system which machine this is rather than assume either.
-    #[test]
-    fn a_build_file_spelled_in_a_name_the_disk_folds_under_the_exact_name_is_read_and_refused() {
-        for folded_name in ["build.gradle.\u{212A}ts", "build.gradle.kt\u{017F}"] {
+    fn a_build_file_spelled_otherwise_is_refused_by_hygiene() {
+        for spelling in ["Build.gradle.kts", "build.gradle.\u{212A}ts", "build.gradle.kt\u{017F}", "BUILD.GRADLE"] {
             let scratch = setup();
             std::fs::remove_file(scratch.0.join("android/sdk/effects/build.gradle.kts")).unwrap();
-            scratch.write(&format!("android/sdk/effects/{folded_name}"), format!("{LEGAL_MODULE}tasks.named(\"lintDebug\") {{ onlyIf {{ false }} }}\n"));
-            let folded = std::fs::canonicalize(scratch.0.join("android/sdk/effects/build.gradle.kts")).ok()
-                == std::fs::canonicalize(scratch.0.join("android/sdk/effects").join(folded_name)).ok();
-            let errors = check(&scratch.0).unwrap();
-            if folded {
-                assert!(
-                    errors.iter().any(|e| e.starts_with(&format!("android/sdk/effects/{folded_name}: spell it build.gradle.kts"))),
-                    "{folded_name}: {errors:?}"
-                );
-                assert!(errors.iter().any(|e| e.starts_with(&format!("android/sdk/effects/{folded_name}:15:"))), "{folded_name}: {errors:?}");
-            } else {
+            scratch.write(&format!("android/sdk/effects/{spelling}"), format!("{LEGAL_MODULE}tasks.named(\"lintDebug\") {{ onlyIf {{ false }} }}\n"));
+            let plain = if spelling.eq_ignore_ascii_case("BUILD.GRADLE") { "build.gradle" } else { "build.gradle.kts" };
+            let folded = std::fs::canonicalize(scratch.0.join("android/sdk/effects").join(plain)).ok()
+                == std::fs::canonicalize(scratch.0.join("android/sdk/effects").join(spelling)).ok();
+            let refused = crate::hygiene::check(&scratch.0).unwrap().iter().any(|e| e.starts_with(&format!("android/sdk/effects/{spelling}: spell")));
+            assert_eq!(refused, folded || spelling.eq_ignore_ascii_case(plain), "{spelling}");
+            if !folded && plain == "build.gradle.kts" {
+                let errors = check(&scratch.0).unwrap();
                 assert!(
                     errors.iter().any(|e| e.contains("effects/build.gradle.kts: the settings include") && e.contains("no build file")),
-                    "{folded_name}: {errors:?}"
-                );
-                assert!(
-                    !errors.iter().any(|e| e.starts_with(&format!("android/sdk/effects/{folded_name}"))),
-                    "{folded_name} is no build file here: {errors:?}"
+                    "{spelling}: {errors:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn a_build_source_or_another_settings_file_is_refused() {
+        let scratch = setup();
+        scratch.write("android/sdk/buildSrc/settings.gradle.kts", "gradle.parent?.let { it.projectsEvaluated { } }\n");
+        scratch.write("android/sdk/buildSrc/src/main/kotlin/Late.kt", "\n");
+        scratch.write("android/sdk/core/settings.gradle.kts", "rootProject.name = \"apart\"\n");
+        scratch.write("android/sdk/build-logic/settings.gradle.kts", "rootProject.name = \"build-logic\"\n");
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(errors.iter().any(|e| e.starts_with("android/sdk/buildSrc: Gradle builds a buildSrc")), "{errors:?}");
+        assert!(errors.iter().any(|e| e.starts_with("android/sdk/core/settings.gradle.kts: a settings file of a build of its own")), "{errors:?}");
+    }
+
+    #[test]
+    fn a_catalog_accessor_is_read_by_gradle_s_alias_rule_in_the_root_and_in_a_module() {
+        for accessor in ["kotlin.android", "kotlinAndroid", "spotless.gradle.plugin", "androidx.core.ktx2"] {
+            assert!(catalog_plugin_alias(&format!("alias(libs.plugins.{accessor}) apply false")), "{accessor}");
+            assert!(libs_target(&format!("libs.{accessor}")), "{accessor}");
+        }
+        for accessor in ["", "Kotlin", "kotlin..android", "kotlin.", "kotlin-android", "kotlin_android", "4kotlin"] {
+            assert!(!catalog_plugin_alias(&format!("alias(libs.plugins.{accessor}) apply false")), "{accessor:?}");
+            assert!(!libs_target(&format!("libs.{accessor}")), "{accessor:?}");
         }
     }
 

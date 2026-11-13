@@ -1,0 +1,785 @@
+## Face-by-face identity of CoreText's faces and the faces EffectCraft registers from CoreText's folders,
+## the (file, PostScript name) pair: the rule FX-3's list_fonts follows (RESULT §4). Made by engine-checks.sh:
+## review-scripts/coretext-faces.swift run with simctl spawn booted (sections 1-2), then ecprobe's facematch
+## example over review-coretext-dirs.txt (sections 3-5). A "-" in a first column means no PostScript name.
+## 1. CoreText's faces: PostScript name, file, family, one line per descriptor, sorted:
+AcademyEngravedLetPlain	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AcademyEngraved.ttf	Academy Engraved LET
+AlNile	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AlNile.ttc	Al Nile
+AlNile-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AlNile.ttc	Al Nile
+AmericanTypewriter	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/AmericanTypewriter.ttc	American Typewriter
+AmericanTypewriter-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/AmericanTypewriter.ttc	American Typewriter
+AmericanTypewriter-Condensed	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/AmericanTypewriter.ttc	American Typewriter
+AmericanTypewriter-CondensedBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/AmericanTypewriter.ttc	American Typewriter
+AmericanTypewriter-CondensedLight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/AmericanTypewriter.ttc	American Typewriter
+AmericanTypewriter-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/AmericanTypewriter.ttc	American Typewriter
+AmericanTypewriter-Semibold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/AmericanTypewriter.ttc	American Typewriter
+AppleColorEmoji	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreAddition/AppleColorEmoji-160px.ttc	Apple Color Emoji
+AppleSDGothicNeo-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	Apple SD Gothic Neo
+AppleSDGothicNeo-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	Apple SD Gothic Neo
+AppleSDGothicNeo-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	Apple SD Gothic Neo
+AppleSDGothicNeo-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	Apple SD Gothic Neo
+AppleSDGothicNeo-SemiBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	Apple SD Gothic Neo
+AppleSDGothicNeo-Thin	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	Apple SD Gothic Neo
+AppleSDGothicNeo-UltraLight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	Apple SD Gothic Neo
+AppleSymbols	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSymbols.ttf	Apple Symbols
+Arial-BoldItalicMT	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/WebFonts/ArialBoldItalic.ttf	Arial
+Arial-BoldMT	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/WebFonts/ArialBold.ttf	Arial
+Arial-ItalicMT	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/WebFonts/ArialItalic.ttf	Arial
+ArialHebrew	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/ArialHB.ttc	Arial Hebrew
+ArialHebrew-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/ArialHB.ttc	Arial Hebrew
+ArialHebrew-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/ArialHB.ttc	Arial Hebrew
+ArialMT	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/WebFonts/Arial.ttf	Arial
+ArialRoundedMTBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/WebFonts/ArialRoundedMTBold.ttf	Arial Rounded MT Bold
+Avenir-Black	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-BlackOblique	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-Book	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-BookOblique	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-Heavy	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-HeavyOblique	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-LightOblique	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-MediumOblique	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-Oblique	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-Roman	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Avenir.ttc	Avenir
+AvenirNext-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-BoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-DemiBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-DemiBoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-Heavy	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-HeavyItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-MediumItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-UltraLight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-UltraLightItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNextCondensed-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-BoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-DemiBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-DemiBoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-Heavy	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-HeavyItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-MediumItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-UltraLight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-UltraLightItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+Baskerville	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Baskerville.ttc	Baskerville
+Baskerville-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Baskerville.ttc	Baskerville
+Baskerville-BoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Baskerville.ttc	Baskerville
+Baskerville-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Baskerville.ttc	Baskerville
+Baskerville-SemiBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Baskerville.ttc	Baskerville
+Baskerville-SemiBoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Baskerville.ttc	Baskerville
+BodoniOrnamentsITCTT	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Bodoni-Ornaments.ttf	Bodoni Ornaments
+BodoniSvtyTwoITCTT-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Bodoni72.ttc	Bodoni 72
+BodoniSvtyTwoITCTT-Book	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Bodoni72.ttc	Bodoni 72
+BodoniSvtyTwoITCTT-BookIta	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Bodoni72.ttc	Bodoni 72
+BodoniSvtyTwoOSITCTT-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Bodoni72-OldStyle.ttc	Bodoni 72 Oldstyle
+BodoniSvtyTwoOSITCTT-Book	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Bodoni72-OldStyle.ttc	Bodoni 72 Oldstyle
+BodoniSvtyTwoOSITCTT-BookIt	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Bodoni72-OldStyle.ttc	Bodoni 72 Oldstyle
+BodoniSvtyTwoSCITCTT-Book	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Bodoni72-Book-SmallCaps.ttf	Bodoni 72 Smallcaps
+BradleyHandITCTT-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/BradleyHand-Bold.ttf	Bradley Hand
+ChalkboardSE-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/ChalkboardSE.ttc	Chalkboard SE
+ChalkboardSE-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/ChalkboardSE.ttc	Chalkboard SE
+ChalkboardSE-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/ChalkboardSE.ttc	Chalkboard SE
+Chalkduster	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Chalkduster.ttf	Chalkduster
+Charter-Black	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Charter.ttc	Charter
+Charter-BlackItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Charter.ttc	Charter
+Charter-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Charter.ttc	Charter
+Charter-BoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Charter.ttc	Charter
+Charter-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Charter.ttc	Charter
+Charter-Roman	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Charter.ttc	Charter
+Cochin	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Cochin.ttc	Cochin
+Cochin-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Cochin.ttc	Cochin
+Cochin-BoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Cochin.ttc	Cochin
+Cochin-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Cochin.ttc	Cochin
+Copperplate	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Copperplate.ttc	Copperplate
+Copperplate-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Copperplate.ttc	Copperplate
+Copperplate-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Copperplate.ttc	Copperplate
+CourierNewPS-BoldItalicMT	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/CourierNewBoldItalic.ttf	Courier New
+CourierNewPS-BoldMT	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/CourierNewBold.ttf	Courier New
+CourierNewPS-ItalicMT	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/CourierNewItalic.ttf	Courier New
+CourierNewPSMT	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/CourierNew.ttf	Courier New
+DINAlternate-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/DINAlternate-bold.ttf	DIN Alternate
+DINCondensed-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/DINCondensed-bold.ttf	DIN Condensed
+Damascus	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Damascus.ttc	Damascus
+DamascusBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Damascus.ttc	Damascus
+DamascusLight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Damascus.ttc	Damascus
+DamascusMedium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Damascus.ttc	Damascus
+DamascusSemiBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Damascus.ttc	Damascus
+DevanagariSangamMN	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/DevanagariSangamMN.ttc	Devanagari Sangam MN
+DevanagariSangamMN-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/DevanagariSangamMN.ttc	Devanagari Sangam MN
+Didot	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Didot.ttc	Didot
+Didot-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Didot.ttc	Didot
+Didot-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Didot.ttc	Didot
+DiwanMishafi	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Mishafi.ttf	Mishafi
+EuphemiaUCAS	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/EuphemiaCAS.ttc	Euphemia UCAS
+EuphemiaUCAS-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/EuphemiaCAS.ttc	Euphemia UCAS
+EuphemiaUCAS-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/EuphemiaCAS.ttc	Euphemia UCAS
+Farah	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Farah.ttc	Farah
+Futura-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Futura.ttc	Futura
+Futura-CondensedExtraBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Futura.ttc	Futura
+Futura-CondensedMedium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Futura.ttc	Futura
+Futura-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Futura.ttc	Futura
+Futura-MediumItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Futura.ttc	Futura
+Galvji	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Galvji.ttc	Galvji
+Galvji-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Galvji.ttc	Galvji
+GeezaPro	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/GeezaPro.ttc	Geeza Pro
+GeezaPro-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/GeezaPro.ttc	Geeza Pro
+Georgia	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/WebFonts/Georgia.ttf	Georgia
+Georgia-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/WebFonts/GeorgiaBold.ttf	Georgia
+Georgia-BoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/WebFonts/GeorgiaBoldItalic.ttf	Georgia
+Georgia-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/WebFonts/GeorgiaItalic.ttf	Georgia
+GillSans	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GillSans-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GillSans-BoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GillSans-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GillSans-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GillSans-LightItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GillSans-SemiBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GillSans-SemiBoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GillSans-UltraBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GranthaSangamMN-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/TamilSangamMN.ttc	Grantha Sangam MN
+GranthaSangamMN-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/TamilSangamMN.ttc	Grantha Sangam MN
+Helvetica	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Helvetica.ttc	Helvetica
+Helvetica-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Helvetica.ttc	Helvetica
+Helvetica-BoldOblique	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Helvetica.ttc	Helvetica
+Helvetica-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Helvetica.ttc	Helvetica
+Helvetica-LightOblique	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Helvetica.ttc	Helvetica
+Helvetica-Oblique	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Helvetica.ttc	Helvetica
+HelveticaNeue	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-BoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-CondensedBlack	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeueExtras.ttc	Helvetica Neue
+HelveticaNeue-CondensedBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeueExtras.ttc	Helvetica Neue
+HelveticaNeue-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-LightItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-MediumItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-Thin	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-ThinItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-UltraLight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-UltraLightItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HiraMaruProN-W4	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/HiraginoMaruGothProN.ttc	Hiragino Maru Gothic ProN
+HiraMinProN-W3	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/HiraginoMincho.ttc	Hiragino Mincho ProN
+HiraMinProN-W6	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/HiraginoMincho.ttc	Hiragino Mincho ProN
+HiraginoSans-W3	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Sans
+HiraginoSans-W4	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Sans
+HiraginoSans-W5	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Sans
+HiraginoSans-W6	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Sans
+HiraginoSans-W7	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Sans
+HiraginoSans-W8	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Sans
+HoeflerText-Black	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/HoeflerText.ttc	Hoefler Text
+HoeflerText-BlackItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/HoeflerText.ttc	Hoefler Text
+HoeflerText-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/HoeflerText.ttc	Hoefler Text
+HoeflerText-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/HoeflerText.ttc	Hoefler Text
+Impact	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/WebFonts/Impact.ttf	Impact
+Kailasa	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Kailasa.ttc	Kailasa
+Kailasa-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Kailasa.ttc	Kailasa
+KefaIII-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KefaIII.ttf	Kefa III
+KefaIII-ExtraBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KefaIII.ttf	Kefa III
+KefaIII-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KefaIII.ttf	Kefa III
+KefaIII-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KefaIII.ttf	Kefa III
+KhmerSangamMN	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KhmerSangamMN.ttf	Khmer Sangam MN
+KohinoorBangla-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KohinoorBangla.ttc	Kohinoor Bangla
+KohinoorBangla-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KohinoorBangla.ttc	Kohinoor Bangla
+KohinoorBangla-Semibold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KohinoorBangla.ttc	Kohinoor Bangla
+KohinoorDevanagari-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/LanguageSupport/Kohinoor.ttc	Kohinoor Devanagari
+KohinoorDevanagari-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/LanguageSupport/Kohinoor.ttc	Kohinoor Devanagari
+KohinoorDevanagari-Semibold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/LanguageSupport/Kohinoor.ttc	Kohinoor Devanagari
+KohinoorGujarati-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KohinoorGujarati.ttc	Kohinoor Gujarati
+KohinoorGujarati-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KohinoorGujarati.ttc	Kohinoor Gujarati
+KohinoorGujarati-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KohinoorGujarati.ttc	Kohinoor Gujarati
+KohinoorTelugu-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KohinoorTelugu.ttc	Kohinoor Telugu
+KohinoorTelugu-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KohinoorTelugu.ttc	Kohinoor Telugu
+KohinoorTelugu-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KohinoorTelugu.ttc	Kohinoor Telugu
+LaoSangamMN	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/LaoSangamMN.ttf	Lao Sangam MN
+MalayalamSangamMN	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/MalayalamSangamMN.ttc	Malayalam Sangam MN
+MalayalamSangamMN-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/MalayalamSangamMN.ttc	Malayalam Sangam MN
+MarkerFelt-Thin	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/MarkerFeltThin.ttf	Marker Felt
+MarkerFelt-Wide	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/MarkerFeltWide.ttf	Marker Felt
+Menlo-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Menlo.ttc	Menlo
+Menlo-BoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Menlo.ttc	Menlo
+Menlo-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Menlo.ttc	Menlo
+Menlo-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Menlo.ttc	Menlo
+MuktaMahee-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/MuktaMahee.ttc	Mukta Mahee
+MuktaMahee-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/MuktaMahee.ttc	Mukta Mahee
+MuktaMahee-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/MuktaMahee.ttc	Mukta Mahee
+MyanmarSangamMN	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/MyanmarSangamMN.ttc	Myanmar Sangam MN
+MyanmarSangamMN-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/MyanmarSangamMN.ttc	Myanmar Sangam MN
+Noteworthy-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Noteworthy.ttc	Noteworthy
+Noteworthy-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Noteworthy.ttc	Noteworthy
+NotoNastaliqUrdu	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NotoNastaliq.ttc	Noto Nastaliq Urdu
+NotoNastaliqUrdu-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NotoNastaliq.ttc	Noto Nastaliq Urdu
+NotoSansKannada-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NotoSansKannada.ttc	Noto Sans Kannada
+NotoSansKannada-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NotoSansKannada.ttc	Noto Sans Kannada
+NotoSansKannada-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NotoSansKannada.ttc	Noto Sans Kannada
+NotoSansMyanmar-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NotoSansMyanmar.ttc	Noto Sans Myanmar
+NotoSansMyanmar-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NotoSansMyanmar.ttc	Noto Sans Myanmar
+NotoSansMyanmar-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NotoSansMyanmar.ttc	Noto Sans Myanmar
+NotoSansOriya	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NotoSansOriya.ttc	Noto Sans Oriya
+NotoSansOriya-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NotoSansOriya.ttc	Noto Sans Oriya
+NotoSansSyriac-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+NotoSansSyriac-Regular_Black	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+NotoSansSyriac-Regular_Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+NotoSansSyriac-Regular_ExtraBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+NotoSansSyriac-Regular_ExtraLight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+NotoSansSyriac-Regular_Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+NotoSansSyriac-Regular_Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+NotoSansSyriac-Regular_SemiBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+NotoSansSyriac-Regular_Thin	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+Optima-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Optima.ttc	Optima
+Optima-BoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Optima.ttc	Optima
+Optima-ExtraBlack	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Optima.ttc	Optima
+Optima-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Optima.ttc	Optima
+Optima-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Optima.ttc	Optima
+Palatino-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Palatino.ttc	Palatino
+Palatino-BoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Palatino.ttc	Palatino
+Palatino-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Palatino.ttc	Palatino
+Palatino-Roman	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Palatino.ttc	Palatino
+Papyrus	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Papyrus.ttc	Papyrus
+Papyrus-Condensed	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Papyrus.ttc	Papyrus
+PartyLetPlain	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/PartyLET.ttf	Party LET
+PingFangHK-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK
+PingFangHK-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK
+PingFangHK-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK
+PingFangHK-Semibold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK
+PingFangHK-Thin	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK
+PingFangHK-Ultralight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK
+PingFangMO-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO
+PingFangMO-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO
+PingFangMO-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO
+PingFangMO-Semibold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO
+PingFangMO-Thin	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO
+PingFangMO-Ultralight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO
+PingFangSC-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC
+PingFangSC-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC
+PingFangSC-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC
+PingFangSC-Semibold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC
+PingFangSC-Thin	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC
+PingFangSC-Ultralight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC
+PingFangTC-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC
+PingFangTC-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC
+PingFangTC-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC
+PingFangTC-Semibold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC
+PingFangTC-Thin	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC
+PingFangTC-Ultralight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC
+Rockwell-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Rockwell.ttc	Rockwell
+Rockwell-BoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Rockwell.ttc	Rockwell
+Rockwell-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Rockwell.ttc	Rockwell
+Rockwell-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Rockwell.ttc	Rockwell
+STIXTwoMath-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoMath.otf	STIX Two Math
+STIXTwoText	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoText.ttf	STIX Two Text
+STIXTwoText-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoText-Italic.ttf	STIX Two Text
+STIXTwoText-Italic_Bold-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoText-Italic.ttf	STIX Two Text
+STIXTwoText-Italic_Medium-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoText-Italic.ttf	STIX Two Text
+STIXTwoText-Italic_SemiBold-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoText-Italic.ttf	STIX Two Text
+STIXTwoText_Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoText.ttf	STIX Two Text
+STIXTwoText_Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoText.ttf	STIX Two Text
+STIXTwoText_SemiBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoText.ttf	STIX Two Text
+SavoyeLetPlain	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Savoye.ttc	Savoye LET
+SinhalaSangamMN	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SinhalaSangamMN.ttc	Sinhala Sangam MN
+SinhalaSangamMN-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SinhalaSangamMN.ttc	Sinhala Sangam MN
+SnellRoundhand	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/SnellRoundhand.ttc	Snell Roundhand
+SnellRoundhand-Black	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/SnellRoundhand.ttc	Snell Roundhand
+SnellRoundhand-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/SnellRoundhand.ttc	Snell Roundhand
+Symbol	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Symbol.ttf	Symbol
+TamilSangamMN	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/TamilSangamMN.ttc	Tamil Sangam MN
+TamilSangamMN-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/TamilSangamMN.ttc	Tamil Sangam MN
+Thonburi	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Thonburi.ttc	Thonburi
+Thonburi-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Thonburi.ttc	Thonburi
+Thonburi-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Thonburi.ttc	Thonburi
+TimesNewRomanPS-BoldItalicMT	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/TimesNewRomanBoldItalic.ttf	Times New Roman
+TimesNewRomanPS-BoldMT	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/TimesNewRomanBold.ttf	Times New Roman
+TimesNewRomanPS-ItalicMT	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/TimesNewRomanItalic.ttf	Times New Roman
+TimesNewRomanPSMT	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/TimesNewRoman.ttf	Times New Roman
+Trebuchet-BoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/TrebuchetMSBoldItalic.ttf	Trebuchet MS
+TrebuchetMS	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/TrebuchetMS.ttf	Trebuchet MS
+TrebuchetMS-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/TrebuchetMSBold.ttf	Trebuchet MS
+TrebuchetMS-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/TrebuchetMSItalic.ttf	Trebuchet MS
+Verdana	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/WebFonts/Verdana.ttf	Verdana
+Verdana-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/WebFonts/VerdanaBold.ttf	Verdana
+Verdana-BoldItalic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/WebFonts/VerdanaBoldItalic.ttf	Verdana
+Verdana-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/WebFonts/VerdanaItalic.ttf	Verdana
+ZapfDingbatsITC	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/ZapfDingbats.ttf	Zapf Dingbats
+Zapfino	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Zapfino.ttf	Zapfino
+## 2. UIFont.familyNames, sorted:
+Academy Engraved LET
+Al Nile
+American Typewriter
+Apple Color Emoji
+Apple SD Gothic Neo
+Apple Symbols
+Arial
+Arial Hebrew
+Arial Rounded MT Bold
+Avenir
+Avenir Next
+Avenir Next Condensed
+Baskerville
+Bodoni 72
+Bodoni 72 Oldstyle
+Bodoni 72 Smallcaps
+Bodoni Ornaments
+Bradley Hand
+Chalkboard SE
+Chalkduster
+Charter
+Cochin
+Copperplate
+Courier New
+DIN Alternate
+DIN Condensed
+Damascus
+Devanagari Sangam MN
+Didot
+Euphemia UCAS
+Farah
+Futura
+Galvji
+Geeza Pro
+Georgia
+Gill Sans
+Grantha Sangam MN
+Helvetica
+Helvetica Neue
+Hiragino Maru Gothic ProN
+Hiragino Mincho ProN
+Hiragino Sans
+Hoefler Text
+Impact
+Kailasa
+Kefa III
+Khmer Sangam MN
+Kohinoor Bangla
+Kohinoor Devanagari
+Kohinoor Gujarati
+Kohinoor Telugu
+Lao Sangam MN
+Malayalam Sangam MN
+Marker Felt
+Menlo
+Mishafi
+Mukta Mahee
+Myanmar Sangam MN
+Noteworthy
+Noto Nastaliq Urdu
+Noto Sans Kannada
+Noto Sans Myanmar
+Noto Sans Oriya
+Noto Sans Syriac
+Optima
+Palatino
+Papyrus
+Party LET
+PingFang HK
+PingFang MO
+PingFang SC
+PingFang TC
+Rockwell
+STIX Two Math
+STIX Two Text
+Savoye LET
+Sinhala Sangam MN
+Snell Roundhand
+Symbol
+Tamil Sangam MN
+Thonburi
+Times New Roman
+Trebuchet MS
+Verdana
+Zapf Dingbats
+Zapfino
+## 3. the match: keep each EffectCraft face whose (file, PostScript name) pair is one CoreText lists
+##    CoreText: 303 descriptors, 103 distinct files, 86 families (as CoreText names them); faces without a PostScript name: 0; duplicate (file, PostScript name) pairs: 0
+##    EffectCraft, DirectorySource over CoreText's folders: 633 faces from 263 files; faces without a PostScript name: 0; faces not read from a file: 0; duplicate (file, PostScript name) pairs: 0
+##    matched: 266 of 633 EffectCraft faces; CoreText's 303 faces: 266 matched an EffectCraft face, 23 matched a named instance of one, 14 matched neither; 367 EffectCraft faces matched nothing
+## CoreText faces no EffectCraft face in that file carries (named instances found are listed and counted as covered):
+  KefaIII-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KefaIII.ttf	Kefa III: no face, but a named instance of the face in that file (Kefa III / Regular (index 0, variable: true): instance style Bold)
+  KefaIII-ExtraBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KefaIII.ttf	Kefa III: no face, but a named instance of the face in that file (Kefa III / Regular (index 0, variable: true): instance style ExtraBold)
+  KefaIII-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/KefaIII.ttf	Kefa III: no face, but a named instance of the face in that file (Kefa III / Regular (index 0, variable: true): instance style Light)
+  NotoSansSyriac-Regular_Black	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  NotoSansSyriac-Regular_Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  NotoSansSyriac-Regular_ExtraBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  NotoSansSyriac-Regular_ExtraLight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  NotoSansSyriac-Regular_Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  NotoSansSyriac-Regular_Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  NotoSansSyriac-Regular_SemiBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  NotoSansSyriac-Regular_Thin	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  PingFangHK-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK: no face, but a named instance of the face in that file (PingFang HK / Medium (index 22, variable: true): instance style Light)
+  PingFangHK-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK: no face, but a named instance of the face in that file (PingFang HK / Medium (index 22, variable: true): instance style Regular)
+  PingFangHK-Semibold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK: no face, but a named instance of the face in that file (PingFang HK / Medium (index 22, variable: true): instance style Semibold)
+  PingFangHK-Thin	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK: no face, but a named instance of the face in that file (PingFang HK / Medium (index 22, variable: true): instance style Thin)
+  PingFangHK-Ultralight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK: no face, but a named instance of the face in that file (PingFang HK / Medium (index 22, variable: true): instance style Ultralight)
+  PingFangMO-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO: no face, but a named instance of the face in that file (PingFang MO / Medium (index 23, variable: true): instance style Light)
+  PingFangMO-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO: no face, but a named instance of the face in that file (PingFang MO / Medium (index 23, variable: true): instance style Regular)
+  PingFangMO-Semibold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO: no face, but a named instance of the face in that file (PingFang MO / Medium (index 23, variable: true): instance style Semibold)
+  PingFangMO-Thin	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO: no face, but a named instance of the face in that file (PingFang MO / Medium (index 23, variable: true): instance style Thin)
+  PingFangMO-Ultralight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO: no face, but a named instance of the face in that file (PingFang MO / Medium (index 23, variable: true): instance style Ultralight)
+  PingFangSC-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC: no face, but a named instance of the face in that file (PingFang SC / Medium (index 20, variable: true): instance style Light)
+  PingFangSC-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC: no face, but a named instance of the face in that file (PingFang SC / Medium (index 20, variable: true): instance style Regular)
+  PingFangSC-Semibold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC: no face, but a named instance of the face in that file (PingFang SC / Medium (index 20, variable: true): instance style Semibold)
+  PingFangSC-Thin	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC: no face, but a named instance of the face in that file (PingFang SC / Medium (index 20, variable: true): instance style Thin)
+  PingFangSC-Ultralight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC: no face, but a named instance of the face in that file (PingFang SC / Medium (index 20, variable: true): instance style Ultralight)
+  PingFangTC-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC: no face, but a named instance of the face in that file (PingFang TC / Medium (index 21, variable: true): instance style Light)
+  PingFangTC-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC: no face, but a named instance of the face in that file (PingFang TC / Medium (index 21, variable: true): instance style Regular)
+  PingFangTC-Semibold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC: no face, but a named instance of the face in that file (PingFang TC / Medium (index 21, variable: true): instance style Semibold)
+  PingFangTC-Thin	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC: no face, but a named instance of the face in that file (PingFang TC / Medium (index 21, variable: true): instance style Thin)
+  PingFangTC-Ultralight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC: no face, but a named instance of the face in that file (PingFang TC / Medium (index 21, variable: true): instance style Ultralight)
+  STIXTwoText-Italic_Bold-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoText-Italic.ttf	STIX Two Text: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  STIXTwoText-Italic_Medium-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoText-Italic.ttf	STIX Two Text: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  STIXTwoText-Italic_SemiBold-Italic	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoText-Italic.ttf	STIX Two Text: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  STIXTwoText_Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoText.ttf	STIX Two Text: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  STIXTwoText_Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoText.ttf	STIX Two Text: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  STIXTwoText_SemiBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoText.ttf	STIX Two Text: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+##    EffectCraft names the instances of /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf: Black=NotoSansSyriac-Black, Bold=NotoSansSyriac-Bold, ExtraBold=NotoSansSyriac-ExtraBold, ExtraLight=NotoSansSyriac-ExtraLight, Light=NotoSansSyriac-Light, Medium=NotoSansSyriac-Medium, Regular=NotoSansSyriac-Regular, SemiBold=NotoSansSyriac-SemiBold, Thin=NotoSansSyriac-Thin
+##    EffectCraft names the instances of /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoText-Italic.ttf: Bold Italic=STIXTwoTextItalic-BoldItalic, Italic=STIXTwoTextItalic-Italic, Medium Italic=STIXTwoTextItalic-MediumItalic, SemiBold Italic=STIXTwoTextItalic-SemiBoldItalic
+##    EffectCraft names the instances of /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/STIXTwoText.ttf: Bold=STIXTwoTextRoman-Bold, Medium=STIXTwoTextRoman-Medium, Regular=STIXTwoTextRoman-Regular, SemiBold=STIXTwoTextRoman-SemiBold
+## 4. the families a list_fonts filtered this way would show: 86
+Academy Engraved LET
+American Typewriter
+Apple Color Emoji
+Apple SD Gothic Neo
+Apple Symbols
+Arial
+Arial Hebrew
+Arial Rounded MT Bold
+Avenir
+Avenir Next
+Avenir Next Condensed
+Baskerville
+Bodoni 72
+Bodoni 72 Oldstyle
+Bodoni 72 Smallcaps
+Bodoni Ornaments
+Bradley Hand
+Chalkboard SE
+Chalkduster
+Charter
+Cochin
+Copperplate
+Courier New
+DIN Alternate
+DIN Condensed
+Devanagari Sangam MN
+Didot
+Euphemia UCAS
+Futura
+Galvji
+Georgia
+Gill Sans
+Grantha Sangam MN
+Helvetica
+Helvetica Neue
+Hiragino Maru Gothic ProN
+Hiragino Mincho ProN
+Hiragino Sans
+Hoefler Text
+Impact
+Kailasa
+Kefa III
+Khmer Sangam MN
+Kohinoor Bangla
+Kohinoor Devanagari
+Kohinoor Gujarati
+Kohinoor Telugu
+Lao Sangam MN
+Malayalam Sangam MN
+Marker Felt
+Menlo
+Mukta Mahee
+Myanmar Sangam MN
+Noteworthy
+Noto Nastaliq Urdu
+Noto Sans Kannada
+Noto Sans Myanmar
+Noto Sans Oriya
+Noto Sans Syriac
+Optima
+Palatino
+Papyrus
+Party LET
+PingFang HK
+PingFang MO
+PingFang SC
+PingFang TC
+Rockwell
+STIX Two Math
+STIX Two Text
+Savoye LET
+Sinhala Sangam MN
+Snell Roundhand
+Symbol
+Tamil Sangam MN
+Thonburi
+Times New Roman
+Trebuchet MS
+Verdana
+Zapf Dingbats
+Zapfino
+النيل
+فرح
+مِصحفي
+ڈیمسکس
+گیزا پرو
+##    against UIFont.familyNames (86): 5 only in the filtered list, 5 only in UIFont.familyNames
+##    faces whose EffectCraft family differs from CoreText's family name for the same face:
+##      CoreText "Al Nile" is EffectCraft "النيل"
+##      CoreText "Damascus" is EffectCraft "ڈیمسکس"
+##      CoreText "Farah" is EffectCraft "فرح"
+##      CoreText "Geeza Pro" is EffectCraft "گیزا پرو"
+##      CoreText "Mishafi" is EffectCraft "مِصحفي"
+##    of that difference, the 5 renames above explain 10 family names; unexplained: 0
+## 5. why the unmatched EffectCraft faces matched nothing: 367 in all (0 without a PostScript name, 0 not from a file)
+##    in files CoreText lists but not this face (87):
+  .AlNilePUA	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AlNile.ttc	.Al Nile PUA/Regular (index 1): CoreText lists this file but not this PostScript name
+  .AlNilePUA-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AlNile.ttc	.Al Nile PUA/Bold (index 3): CoreText lists this file but not this PostScript name
+  .DamascusPUA	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Damascus.ttc	.Damascus PUA/Regular (index 1): CoreText lists this file but not this PostScript name
+  .DamascusPUALight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Damascus.ttc	.Damascus PUA/Light (index 3): CoreText lists this file but not this PostScript name
+  .DamascusPUAMedium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Damascus.ttc	.Damascus PUA/Medium (index 5): CoreText lists this file but not this PostScript name
+  .DamascusPUABold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Damascus.ttc	.Damascus PUA/Bold (index 7): CoreText lists this file but not this PostScript name
+  .DamascusPUASemiBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Damascus.ttc	.Damascus PUA/Semi Bold (index 9): CoreText lists this file but not this PostScript name
+  .FarahPUA	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Farah.ttc	.Farah PUA/Regular (index 1): CoreText lists this file but not this PostScript name
+  HiraMinPro-W3	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/HiraginoMincho.ttc	Hiragino Mincho Pro/W3 (index 1): CoreText lists this file but not this PostScript name
+  HiraMinPro-W6	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/HiraginoMincho.ttc	Hiragino Mincho Pro/W6 (index 3): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoI-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoI/Regular (index 1): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoW-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoW/Regular (index 2): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoI-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoI/Medium (index 4): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoW-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoW/Medium (index 5): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoI-SemiBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoI/SemiBold (index 7): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoW-SemiBold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoW/SemiBold (index 8): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoI-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoI/Bold (index 10): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoW-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoW/Bold (index 11): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoI-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoI/Light (index 13): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoW-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoW/Light (index 14): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoI-Thin	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoI/Thin (index 16): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoW-Thin	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoW/Thin (index 17): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoI-UltraLight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoI/UltraLight (index 19): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoW-UltraLight	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoW/UltraLight (index 20): CoreText lists this file but not this PostScript name
+  .GeezaProInterface	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/GeezaPro.ttc	.Geeza Pro Interface/Regular (index 2): CoreText lists this file but not this PostScript name
+  .GeezaProInterface-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/GeezaPro.ttc	.Geeza Pro Interface/Bold (index 3): CoreText lists this file but not this PostScript name
+  .GeezaProInterface-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/GeezaPro.ttc	.Geeza Pro Interface/Light (index 4): CoreText lists this file but not this PostScript name
+  .GeezaProPUA	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/GeezaPro.ttc	.Geeza Pro PUA/Regular (index 5): CoreText lists this file but not this PostScript name
+  .GeezaProPUA-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/GeezaPro.ttc	.Geeza Pro PUA/Bold (index 6): CoreText lists this file but not this PostScript name
+  .HiraKakuInterface-W1	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic Interface/W1 (index 0): CoreText lists this file but not this PostScript name
+  .HiraKakuInterfaceWatch-W1	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic InterfaceWatch/W1 (index 1): CoreText lists this file but not this PostScript name
+  .HiraKakuInterface-W2	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic Interface/W2 (index 2): CoreText lists this file but not this PostScript name
+  .HiraKakuInterfaceWatch-W2	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic InterfaceWatch/W2 (index 3): CoreText lists this file but not this PostScript name
+  .HiraKakuInterface-W3	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic Interface/W3 (index 5): CoreText lists this file but not this PostScript name
+  .HiraKakuInterfaceWatch-W3	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic InterfaceWatch/W3 (index 6): CoreText lists this file but not this PostScript name
+  HiraKakuProN-W3	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Kaku Gothic ProN/W3 (index 7): CoreText lists this file but not this PostScript name
+  HiraKakuPro-W3	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Kaku Gothic Pro/W3 (index 8): CoreText lists this file but not this PostScript name
+  .HiraKakuInterface-W4	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic Interface/W4 (index 10): CoreText lists this file but not this PostScript name
+  .HiraKakuInterfaceWatch-W4	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic InterfaceWatch/W4 (index 11): CoreText lists this file but not this PostScript name
+  .HiraKakuInterface-W5	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic Interface/W5 (index 13): CoreText lists this file but not this PostScript name
+  .HiraKakuInterfaceWatch-W5	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic InterfaceWatch/W5 (index 14): CoreText lists this file but not this PostScript name
+  .HiraKakuInterface-W6	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic Interface/W6 (index 16): CoreText lists this file but not this PostScript name
+  .HiraKakuInterfaceWatch-W6	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic InterfaceWatch/W6 (index 17): CoreText lists this file but not this PostScript name
+  HiraKakuProN-W6	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Kaku Gothic ProN/W6 (index 18): CoreText lists this file but not this PostScript name
+  HiraKakuPro-W6	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Kaku Gothic Pro/W6 (index 19): CoreText lists this file but not this PostScript name
+  .HiraKakuInterface-W7	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic Interface/W7 (index 21): CoreText lists this file but not this PostScript name
+  .HiraKakuInterfaceWatch-W7	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic InterfaceWatch/W7 (index 22): CoreText lists this file but not this PostScript name
+  .HiraKakuInterface-W8	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic Interface/W8 (index 24): CoreText lists this file but not this PostScript name
+  .HiraKakuInterfaceWatch-W8	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic InterfaceWatch/W8 (index 25): CoreText lists this file but not this PostScript name
+  HiraKakuStd-W8	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Kaku Gothic Std/W8 (index 26): CoreText lists this file but not this PostScript name
+  HiraKakuStdN-W8	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Kaku Gothic StdN/W8 (index 27): CoreText lists this file but not this PostScript name
+  .NotoNastaliqUrduUI	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NotoNastaliq.ttc	.Noto Nastaliq Urdu UI/Regular (index 1): CoreText lists this file but not this PostScript name
+  .NotoNastaliqUrduUI-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NotoNastaliq.ttc	.Noto Nastaliq Urdu UI/Bold (index 3): CoreText lists this file but not this PostScript name
+  NotoSansZawgyi-Bold	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NotoSansMyanmar.ttc	Noto Sans Zawgyi/Bold (index 3): CoreText lists this file but not this PostScript name
+  NotoSansZawgyi-Light	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NotoSansMyanmar.ttc	Noto Sans Zawgyi/Light (index 4): CoreText lists this file but not this PostScript name
+  NotoSansZawgyi-Regular	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NotoSansMyanmar.ttc	Noto Sans Zawgyi/Regular (index 5): CoreText lists this file but not this PostScript name
+  .AppleColorEmojiUI	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreAddition/AppleColorEmoji-160px.ttc	.Apple Color Emoji UI/Regular (index 1): CoreText lists this file but not this PostScript name
+  HiraMaruPro-W4	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/HiraginoMaruGothProN.ttc	Hiragino Maru Gothic Pro/W4 (index 0): CoreText lists this file but not this PostScript name
+  .SavoyeLetPlainCC	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Savoye.ttc	.Savoye LET CC./Plain (index 1): CoreText lists this file but not this PostScript name
+  .PingFangUITextSC-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI SC/DefaultText (index 0): CoreText lists this file but not this PostScript name
+  .PingFangUITextTC-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI TC/DefaultText (index 1): CoreText lists this file but not this PostScript name
+  .PingFangUITextHK-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI HK/DefaultText (index 2): CoreText lists this file but not this PostScript name
+  .PingFangUITextMO-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI MO/DefaultText (index 3): CoreText lists this file but not this PostScript name
+  .PingFangUITextJA-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI JA/DefaultText (index 4): CoreText lists this file but not this PostScript name
+  .PingFangUIDisplaySC-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI SC/DefaultDisplay (index 5): CoreText lists this file but not this PostScript name
+  .PingFangUIDisplayTC-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI TC/DefaultDisplay (index 6): CoreText lists this file but not this PostScript name
+  .PingFangUIDisplayHK-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI HK/DefaultDisplay (index 7): CoreText lists this file but not this PostScript name
+  .PingFangUIDisplayMO-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI MO/DefaultDisplay (index 8): CoreText lists this file but not this PostScript name
+  .PingFangUIDisplayJA-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI JA/DefaultDisplay (index 9): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchTextSC-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch SC/DefaultText (index 10): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchTextTC-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch TC/DefaultText (index 11): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchTextHK-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch HK/DefaultText (index 12): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchTextMO-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch MO/DefaultText (index 13): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchTextJA-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch JA/DefaultText (index 14): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchDisplaySC-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch SC/DefaultDisplay (index 15): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchDisplayTC-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch TC/DefaultDisplay (index 16): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchDisplayHK-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch HK/DefaultDisplay (index 17): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchDisplayMO-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch MO/DefaultDisplay (index 18): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchDisplayJA-Default	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch JA/DefaultDisplay (index 19): CoreText lists this file but not this PostScript name
+  .PingFangSC-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang SC/Medium (index 24): CoreText lists this file but not this PostScript name
+  .PingFangTC-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang TC/Medium (index 25): CoreText lists this file but not this PostScript name
+  .PingFangHK-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang HK/Medium (index 26): CoreText lists this file but not this PostScript name
+  .PingFangMO-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang MO/Medium (index 27): CoreText lists this file but not this PostScript name
+  .PingFangWatchSC-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang Watch SC/Medium (index 28): CoreText lists this file but not this PostScript name
+  .PingFangWatchTC-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang Watch TC/Medium (index 29): CoreText lists this file but not this PostScript name
+  .PingFangWatchHK-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang Watch HK/Medium (index 30): CoreText lists this file but not this PostScript name
+  .PingFangWatchMO-Medium	/Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang Watch MO/Medium (index 31): CoreText lists this file but not this PostScript name
+##    in files CoreText does not list (280 faces in 160 files):
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/AppleGothic.otf
+##    4 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Athelas.ttc
+##    4 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Carlito.ttc
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/DB_LCD_Temp-Black.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/LockClock.ttf
+##    3 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Marion.ttc
+##    10 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/Seravek.ttc
+##    8 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/AppFonts/SuperClarendon.ttc
+##    13 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/ADTNumeric.ttc
+##    10 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/CJKSymbolsFallback.ttc
+##    4 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Courier.ttc
+##    2 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/DecoTypeNastaleeqUrdu.ttc
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Fallback.ttf
+##    2 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeueInterface.ttc
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/LastResort.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NewYork.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NewYorkItalic.ttf
+##    3 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/NotoSansArmenian.ttc
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/PhonepadTwo.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFArabic.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFArabicRounded.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFArmenian.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFArmenianRounded.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFCamera.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFCompact.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFCompactItalic.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFCompactRounded.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFGeorgian.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFGeorgianRounded.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFHebrew.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFHebrewRounded.ttf
+##    9 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFIndia.ttc
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFUI.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFUIItalic.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFUIMono.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFUIMonoItalic.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/SFUISymbols-Regular.otf
+##    2 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/ThonburiUI.ttc
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreAddition/STIXGeneral.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreAddition/STIXGeneralBol.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreAddition/STIXGeneralBolIta.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreAddition/STIXGeneralItalic.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/AsphaltMedium.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/BalegaRegular.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/BebasNeue.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/DearJoe-small-semibold.ttf
+##    13 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Druk.ttc
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/FaktSlabStencilPro-medium.otf
+##    4 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/IowanOldStyle.ttc
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/JournalSansInline.otf
+##    4 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/Keycaps.ttc
+##    2 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/KeycapsPad.ttc
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/PhoneKeyCaps.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/SFUIRounded.ttf
+##    41 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/SFUISoft.ttc
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/SchemeBold.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/SignPainter-Semibold.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreUI/TheHandSerif-semibold.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansAdlam-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansAvestan-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansBamum-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansBassaVah-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansBatak-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansBhaiksuki-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansBrahmi-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansBuginese-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansBuhid-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansCanadianAboriginal-Regular.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansCarian-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansCaucasianAlbanian-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansChakma-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansCham-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansCoptic-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansCuneiform-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansCypriot-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansDuployan-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansEgyptianHieroglyphs-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansElbasan-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansGlagolitic-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansGothic-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansGunjalaGondi-Regular.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansHanifiRohingya-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansHanunoo-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansHatran-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansImperialAramaic-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansInscriptionalPahlavi-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansInscriptionalParthian-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansJavanese-Regular.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansKaithi-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansKayahLi-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansKharoshthi-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansKhojki-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansKhudawadi-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansLepcha-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansLimbu-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansLinearA-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansLinearB-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansLisu-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansLycian-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansLydian-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansMahajani-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansMandaic-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansManichaean-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansMarchen-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansMasaramGondi-Regular.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansMeeteiMayek-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansMendeKikakui-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansMeroitic-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansMiao-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansModi-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansMongolian-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansMro-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansMultani-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansNKo-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansNabataean-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansNagMundari-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansNewTaiLue-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansNewa-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansOlChiki-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansOldHungarian-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansOldItalic-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansOldNorthArabian-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansOldPermic-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansOldPersian-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansOldSouthArabian-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansOldTurkic-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansOsage-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansOsmanya-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansPahawhHmong-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansPalmyrene-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansPauCinHau-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansPhagsPa-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansPhoenician-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansPsalterPahlavi-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansRejang-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSamaritan-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSaurashtra-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSharada-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSiddham-Regular.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSoraSompeng-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSundanese-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansSylotiNagri-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansTagalog-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansTagbanwa-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansTaiLe-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansTaiTham-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansTaiViet-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansTakri-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansThaana-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansTifinagh-Regular.otf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansTirhuta-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansUgaritic-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansVai-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansWancho-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansWarangCiti-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSansYi-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSerifAhom-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSerifBalinese-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSerifNyiakengPuachueHmong-Regular.ttf
+##    1 in /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/UnicodeSupport/NotoSerifYezidi-Regular.otf

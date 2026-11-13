@@ -1,0 +1,25 @@
+790a791,814
+>       name          : 'onTimeout'
+>       type          : '(I)V'
+>       access        :  (PUBLIC)
+>       code          -
+> com.example.fgslab.ExportService.onTimeout:(I)V
+> new-instance v0, Ljava/lang/StringBuilder;
+> invoke-direct {v0}, Ljava/lang/StringBuilder;.<init>:()V
+> const-string v1, "FGS_ON_TIMEOUT_1ARG startId="
+> invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+> move-result-object v0
+> invoke-virtual {v0, v3}, Ljava/lang/StringBuilder;.append:(I)Ljava/lang/StringBuilder;
+> move-result-object v0
+> const-string v1, " (shortService timeout, API 34 callback)"
+> invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+> move-result-object v0
+> invoke-virtual {v0}, Ljava/lang/StringBuilder;.toString:()Ljava/lang/String;
+> move-result-object v0
+> const-string v1, "CraftFGS"
+> invoke-static {v1, v0}, Landroid/util/Log;.e:(Ljava/lang/String;Ljava/lang/String;)I
+> invoke-virtual {v2}, Lcom/example/fgslab/ExportService;.stopSelf:()V
+> return-void
+>          -  reg=2 this Lcom/example/fgslab/ExportService;
+>          -  reg=3 startId I
+>     #5              : (in Lcom/example/fgslab/ExportService;)

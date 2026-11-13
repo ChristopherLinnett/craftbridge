@@ -9,20 +9,24 @@
 //! directory nothing owns would hold code every other rule skips and nothing compares.
 //!
 //! A header exists only where the format allows a comment, so every format is read for one except those
-//! that cannot hold a comment at all — JSON, which the rule itself names, lock files and plain text —
-//! and binary files, which are not source. A format nobody listed is read rather than skipped, because
-//! a list of what can hold a comment would quietly skip the next format to arrive. Markdown counts only
-//! its HTML comment, `<!--`, so a `# heading` that names the marker is not taken for a header. Two kinds of
-//! written-for-you file sit outside this rule, as §6 says: what a build tool writes for itself
-//! (`Cargo.lock`, `Package.resolved`, the Gradle wrapper), which the tool owns, so their files are not
-//! read here, bar the wrapper's properties file, which carries no marker; and the plan's views in
-//! `plan/`, which are not in the trees below at all — the plan kit builds them from their sources and
-//! its own `plan check --final` owns them. What `tools/update-upstream.sh` writes into `rust/Cargo.toml`
-//! is a table in a hand-written file, which this rule does not read either.
+//! that cannot hold a comment at all — JSON and its line-per-record kin, CSV and TSV, Apple's string
+//! catalogs, lock files and plain text — and binary files. A format nobody listed is read rather than
+//! skipped, because a list of what can hold a comment would quietly skip the next format to arrive; it is
+//! read with every opener, so a marker in it counts however its comments are written. A listed format
+//! counts only its own comments: `#` is an attribute or a directive in Rust and Swift, not a comment, and
+//! Markdown's only comment is HTML's, so a `# heading` that names the marker is no header. The head is
+//! read as bytes, and as UTF-16 when it opens with that encoding's byte-order mark, so no byte and no
+//! encoding hides a marker. The root's own files are read too, without the folders below them, which the
+//! trees cover. Two kinds of written-for-you file sit outside this rule, as §6 says: what a build tool
+//! writes for itself (`Cargo.lock`, `Package.resolved`, the Gradle wrapper), which the tool owns, so their
+//! files are not read here, bar the wrapper's properties file, which carries no marker; and the plan's
+//! views in `plan/`, which are not read at all — the plan kit builds them from their sources and its own
+//! `plan check --final` owns them. What `tools/update-upstream.sh` writes into `rust/Cargo.toml` is a table
+//! in a hand-written file, which this rule does not read either.
 
 use crate::scan::{self, FoundFile};
 use std::collections::BTreeSet;
-use std::io::{BufRead, BufReader};
+use std::io::Read;
 use std::path::Path;
 
 /// The marker every generated file carries in its header.
@@ -33,40 +37,55 @@ pub(crate) const MARKER: &str = "@generated";
 /// and a licence line without letting a marker sink out of sight, not a fit to any tool's output.
 const HEADER_LINES: usize = 5;
 
-/// The comment openers a header can start with: `#` (shell, TOML, YAML, ProGuard, properties), `//`
-/// (Rust, Swift, Kotlin, C, Objective-C, JS, module maps), `/*` (the same languages' block comments,
-/// CSS) and `<!--` (XML, SVG, HTML, Markdown). The marker counts only inside a comment that opens a
-/// line, or inside a block comment opened that way, which is what a *header* means.
-const COMMENT_OPENERS: &[&str] = &["#", "//", "/*", "<!--"];
+/// Every comment opener a header can start with, which a format nobody listed is read with: `#` (shell,
+/// TOML, YAML, ProGuard, properties), `//` and `/*` (the C family), `<!--` (markup), `--` (SQL, Lua) and
+/// `;` (INI). The marker counts only inside a comment that opens a line, or inside a block comment opened
+/// that way, which is what a *header* means.
+const ALL_OPENERS: &[&str] = &["#", "//", "/*", "<!--", "--", ";"];
+
+/// The formats whose comments are known, each read with its own openers alone.
+const OPENERS_BY_EXTENSION: &[(&[&str], &[&str])] = &[
+    (&["rs", "swift", "kt", "kts", "c", "h", "m", "mm", "cpp", "hpp", "java", "js", "mjs", "ts", "gradle", "modulemap", "xcconfig", "css"], &["//", "/*"]),
+    (&["md", "markdown", "html", "xml", "svg", "plist", "xib", "storyboard"], &["<!--"]),
+    (&["sh", "toml", "yml", "yaml", "properties", "pro", "py", "rb", "cmake"], &["#"]),
+    (&["sql", "lua"], &["--"]),
+    (&["ini"], &[";", "#"]),
+];
 
 /// The block comments a header may spread over lines, with what closes each.
 const BLOCK_COMMENTS: &[(&str, &str)] = &[("/*", "*/"), ("<!--", "-->")];
 
 /// Formats that hold no comment, so neither need nor can carry a header: a marker quoted in one (a
-/// Cargo.lock line, a JSON string) is data, not this repository claiming a file.
-const NO_COMMENT_EXTENSIONS: &[&str] = &[".json", ".lock", ".resolved", ".txt", ".jar"];
+/// Cargo.lock line, a JSON string, a CSV row) is data, not this repository claiming a file.
+const NO_COMMENT_EXTENSIONS: &[&str] = &["json", "jsonl", "ndjson", "geojson", "csv", "tsv", "xcstrings", "lock", "resolved", "txt", "jar"];
 
-/// Formats whose only comment is the HTML one.
-const HTML_COMMENT_ONLY: &[&str] = &[".md", ".markdown"];
+/// Files of a comment-less extension whose format has comments all the same.
+const COMMENTED_NAMES: &[(&str, &[&str])] = &[("CMakeLists.txt", &["#"])];
 
 /// The files a build tool writes for itself, which §6 leaves to that tool.
 const BUILD_TOOL_FILES: &[&str] = &["Cargo.lock", "Package.resolved", "gradlew", "gradlew.bat"];
 
-/// The trees that hold code or data a generator could write.
-pub(crate) const TREES: &[&str] = &["rust", "ios", "android", "docs", "conformance", "tools", ".github"];
+/// A file's name and extension, as the format questions below ask them.
+fn name_and_extension(path: &str) -> (&str, &str) {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    (name, name.rsplit_once('.').map(|(_, extension)| extension).unwrap_or_default())
+}
 
-/// Can this file hold a header comment at all? Every format can but those in [`NO_COMMENT_EXTENSIONS`]
-/// and the build tools' own files.
+/// Can this file's format hold a header comment at all? Every format can but those in
+/// [`NO_COMMENT_EXTENSIONS`] and the build tools' own files.
 fn can_carry_header(path: &Path) -> bool {
     let stored = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-    let name = stored.to_lowercase();
-    !BUILD_TOOL_FILES.contains(&stored.as_str()) && !NO_COMMENT_EXTENSIONS.iter().any(|extension| name.ends_with(extension))
+    let (name, extension) = name_and_extension(&stored);
+    !BUILD_TOOL_FILES.contains(&name) && (COMMENTED_NAMES.iter().any(|(commented, _)| *commented == name) || !NO_COMMENT_EXTENSIONS.contains(&extension))
 }
 
 /// The comment openers a file's format has.
 fn openers_for(path: &str) -> &'static [&'static str] {
-    let name = path.to_lowercase();
-    if HTML_COMMENT_ONLY.iter().any(|extension| name.ends_with(extension)) { &["<!--"] } else { COMMENT_OPENERS }
+    let (name, extension) = name_and_extension(path);
+    if let Some((_, openers)) = COMMENTED_NAMES.iter().find(|(commented, _)| *commented == name) {
+        return openers;
+    }
+    OPENERS_BY_EXTENSION.iter().find(|(extensions, _)| extensions.contains(&extension)).map_or(ALL_OPENERS, |(_, openers)| *openers)
 }
 
 /// A file's head, split into lines, with the marker question already answered.
@@ -80,6 +99,9 @@ pub(crate) struct Head {
     pub(crate) in_generated_dir: bool,
     /// Whether the format can hold a comment at all.
     pub(crate) can_carry_header: bool,
+    /// Whether the head holds a NUL byte outside UTF-16: a binary file, which cannot be asked to carry a
+    /// header, though a marker found in one is still a claim.
+    pub(crate) binary: bool,
 }
 
 /// Check one head against where the file sits.
@@ -91,6 +113,7 @@ pub(crate) fn check_head(head: &Head) -> Vec<String> {
         return Vec::new();
     }
     match (head.in_generated_dir, has_header(head)) {
+        (true, false) if head.binary => Vec::new(),
         (true, false) => vec![format!("{}: a file in a generated directory must carry {MARKER} in a comment in its first {HEADER_LINES} lines", head.path)],
         (false, true) => vec![format!("{}: generated file outside a generated directory", head.path)],
         _ => Vec::new(),
@@ -128,14 +151,26 @@ fn has_header(head: &Head) -> bool {
     false
 }
 
-/// Read the first `HEADER_LINES` lines without reading the rest: a marker is always near the top, and a
-/// large committed file is nobody's business here. A line that is not UTF-8 ends the head, and a leading
-/// byte-order mark is not part of the first line.
-fn head_lines(path: &Path) -> Vec<String> {
-    match std::fs::File::open(path) {
-        Ok(file) => BufReader::new(file).lines().take(HEADER_LINES).map_while(Result::ok).map(|line| scan::without_bom(&line).to_string()).collect(),
-        Err(_) => Vec::new(),
+/// The first `HEADER_LINES` lines, and whether the file is binary, from its first bytes alone: a marker is
+/// always near the top, and a large committed file is nobody's business here. A head that opens with a
+/// UTF-16 byte-order mark is decoded as UTF-16; any other is read byte for byte, so a byte that is not
+/// UTF-8 hides nothing after it. A NUL byte anywhere else marks a binary file, which cannot hold a header
+/// but is still searched for one.
+fn head_lines(path: &Path) -> (Vec<String>, bool) {
+    let mut head = Vec::new();
+    if let Ok(file) = std::fs::File::open(path) {
+        let _ = file.take(64 * 1024).read_to_end(&mut head);
     }
+    let utf16 = |bytes: &[u8], big: bool| -> String {
+        let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|pair| if big { u16::from_be_bytes(*pair) } else { u16::from_le_bytes(*pair) }).collect();
+        String::from_utf16_lossy(&units)
+    };
+    let (text, binary) = match head.as_slice() {
+        [0xFF, 0xFE, rest @ ..] => (utf16(rest, false), false),
+        [0xFE, 0xFF, rest @ ..] => (utf16(rest, true), false),
+        bytes => (String::from_utf8_lossy(bytes).into_owned(), bytes.contains(&0)),
+    };
+    (text.lines().take(HEADER_LINES).map(|line| scan::without_bom(line).to_string()).collect(), binary)
 }
 
 /// Is any directory component a generated directory?
@@ -150,14 +185,10 @@ fn outermost_generated_dir(tree: &str, file: &FoundFile) -> String {
     std::iter::once(tree).chain(file.components.iter().take(depth + 1).map(String::as_str)).collect::<Vec<_>>().join("/")
 }
 
-/// Reduce a walked file to what this rule reads.
-fn head_of(root: &Path, file: &FoundFile) -> Head {
-    Head {
-        path: crate::report::shown(root, &file.path),
-        lines: head_lines(&file.path),
-        in_generated_dir: in_generated(&file.components),
-        can_carry_header: can_carry_header(&file.path),
-    }
+/// Reduce a file to what this rule reads.
+fn head_of(root: &Path, path: &Path, in_generated_dir: bool) -> Head {
+    let (lines, binary) = head_lines(path);
+    Head { path: crate::report::shown(root, path), lines, in_generated_dir, can_carry_header: can_carry_header(path), binary }
 }
 
 /// Run the check over every tree that holds code, against the generators `cargo xtask generate` runs.
@@ -170,12 +201,17 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
 /// The check, with the generators' output directories (relative to the root) given.
 fn check_against(root: &Path, outputs: &[&str]) -> Result<Vec<String>, String> {
     let mut errors = Vec::new();
+    for entry in std::fs::read_dir(root).map_err(|error| format!("{}: {error}", root.display()))? {
+        let path = entry.map_err(|error| format!("{}: {error}", root.display()))?.path();
+        let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+        if path.is_file() && name != ".git" && !crate::layout::IGNORED_NAMES.contains(&name.as_str()) {
+            errors.extend(check_head(&head_of(root, &path, false)));
+        }
+    }
     let mut unowned = BTreeSet::new();
-    for tree in TREES {
+    for tree in crate::files::CODE_TREES {
         for file in scan::walk(&root.join(tree), "")? {
-            if !scan::looks_binary(&file.path) {
-                errors.extend(check_head(&head_of(root, &file)));
-            }
+            errors.extend(check_head(&head_of(root, &file.path, in_generated(&file.components))));
             let path = format!("{tree}/{}", file.relative);
             if in_generated(&file.components) && !outputs.iter().any(|output| path.starts_with(&format!("{}/", output.trim_end_matches('/')))) {
                 unowned.insert(outermost_generated_dir(tree, &file));
@@ -194,7 +230,7 @@ mod tests {
     use crate::scratch::Scratch;
 
     fn head(path: &str, lines: &[&str], in_generated_dir: bool) -> Head {
-        Head { path: path.to_string(), lines: lines.iter().map(|line| line.to_string()).collect(), in_generated_dir, can_carry_header: true }
+        Head { path: path.to_string(), lines: lines.iter().map(|line| line.to_string()).collect(), in_generated_dir, can_carry_header: true, binary: false }
     }
 
     #[test]
@@ -232,6 +268,7 @@ mod tests {
             lines: vec!["{".to_string(), "  \"name\": \"x\"".to_string()],
             in_generated_dir: true,
             can_carry_header: can_carry_header(Path::new("corpus.json")),
+            binary: false,
         };
         assert!(check_head(&json).is_empty(), "{json:?}");
         let swift = Head { can_carry_header: can_carry_header(Path::new("Api.swift")), ..json };
@@ -302,6 +339,47 @@ mod tests {
         assert!(check_head(&closed).is_empty(), "past a closed block comment the marker is code again");
         let bom = head("rust/core/x/src/plant_bom.rs", &[&format!("{}// {MARKER}", '\u{FEFF}')], false);
         assert!(!check_head(&bom).is_empty(), "a byte-order mark is not the line's first character");
+    }
+
+    #[test]
+    fn each_known_format_counts_its_own_comments_and_the_comment_less_ones_need_none() {
+        let stray = |path: &str, line: &str| check_head(&Head { can_carry_header: can_carry_header(Path::new(path)), ..head(path, &[line], false) });
+        assert_eq!(stray("tools/plant.sql", &format!("-- {MARKER} by a tool")).len(), 1, "SQL's comment");
+        assert_eq!(stray("tools/plant.ini", &format!("; {MARKER} by a tool")).len(), 1, "INI's comment");
+        assert_eq!(stray("tools/CMakeLists.txt", &format!("# {MARKER} by a tool")).len(), 1, "CMake's comment, in a .txt");
+        assert!(stray("rust/core/x/src/lib.rs", &format!("#![doc = \"{MARKER}\"]")).is_empty(), "an attribute is no comment in Rust");
+        assert!(stray("ios/sdk/Sources/X/A.swift", &format!("#if {MARKER}")).is_empty(), "a directive is no comment in Swift");
+        let owned = |path: &str, line: &str| check_head(&Head { can_carry_header: can_carry_header(Path::new(path)), ..head(path, &[line], true) });
+        assert!(owned("conformance/generated/schema.sql", &format!("-- {MARKER} by the generator")).is_empty());
+        for data in ["table.csv", "rows.tsv", "corpus.jsonl", "events.ndjson", "shape.geojson", "Localizable.xcstrings"] {
+            assert!(owned(&format!("conformance/generated/{data}"), "a,b").is_empty(), "{data} holds no comment");
+        }
+        assert!(!owned("conformance/generated/notes.unknownformat", "x").is_empty(), "a format nobody listed is read");
+    }
+
+    #[test]
+    fn a_marker_in_utf16_or_beside_a_nul_or_a_stray_byte_is_still_read() {
+        let scratch = Scratch::new("generated-bytes");
+        let utf16: Vec<u8> =
+            [0xFF, 0xFE].into_iter().chain(format!("/* {MARKER} by a tool */\n\"a\" = \"b\";\n").encode_utf16().flat_map(u16::to_le_bytes)).collect();
+        scratch.write("ios/sdk/Sources/CraftBridge/Plant.strings", utf16);
+        scratch.write("rust/core/x/src/nul.rs", [format!("// {MARKER}\n").as_bytes(), b"\0".as_slice()].concat());
+        scratch.write("tools/latin1.sh", [b"# caf\xe9\n".as_slice(), format!("# {MARKER}\n").as_bytes()].concat());
+        scratch.write("rust/core/x/src/generated/blob.bin", [0u8, 1, 2]);
+        let errors = check_against(&scratch.0, &["rust/core/x/src/generated"]).unwrap();
+        assert_eq!(errors.len(), 3, "{errors:?}");
+        for path in ["ios/sdk/Sources/CraftBridge/Plant.strings", "rust/core/x/src/nul.rs", "tools/latin1.sh"] {
+            assert!(errors.contains(&format!("{path}: generated file outside a generated directory")), "{path}: {errors:?}");
+        }
+    }
+
+    #[test]
+    fn a_marker_in_a_file_at_the_root_is_read() {
+        let scratch = Scratch::new("generated-root");
+        scratch.write("ATTRIBUTION.md", format!("<!-- {MARKER} by a tool -->\n# Attribution\n"));
+        scratch.write("README.md", "# CraftBridge\n");
+        scratch.write(".git", "gitdir: elsewhere\n");
+        assert_eq!(check_against(&scratch.0, &[]).unwrap(), ["ATTRIBUTION.md: generated file outside a generated directory"]);
     }
 
     #[test]

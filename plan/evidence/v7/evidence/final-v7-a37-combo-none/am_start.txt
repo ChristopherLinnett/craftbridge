@@ -1,0 +1,7 @@
+Starting: Intent { cmp=com.example.fgslab/.MainActivity (has extras) }
+Status: ok
+LaunchState: COLD
+Activity: com.example.fgslab/.MainActivity
+TotalTime: 914
+WaitTime: 918
+Complete

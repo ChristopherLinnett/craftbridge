@@ -4,10 +4,10 @@
 //! only writer, and the gate has to prove nobody hand-edited one. Both come from one registry: each
 //! generator names the output directory it owns and writes its files there. `generate` runs each into a
 //! scratch folder and replaces the real directory only when it succeeded; `generate --check` runs them
-//! into a scratch copy and compares byte for byte, so a hand edit or a generator that depends on the date
-//! fails the gate with the file named, and asks git whether every file there is committed, because a
-//! comparison with the working tree alone would pass files that were never committed or that a
-//! `.gitignore` hides.
+//! into a scratch copy and compares it byte for byte with the working tree, so a hand edit or a generator
+//! that depends on the date fails the gate with the file named, and asks git whether every file there is
+//! tracked, because a comparison with the working tree alone would pass files that were never added or
+//! that a `.gitignore` hides.
 //!
 //! The registry is empty today; the first generator (the codegen's API surface and its Swift and Kotlin
 //! facades) registers itself here in the change that adds it.
@@ -68,12 +68,12 @@ fn registry_problems(registry: &[Generator]) -> Vec<String> {
         if !stays_inside || !generated {
             problems.push(format!("{}: output `{}` must be a generated or Generated directory inside the repository", generator.name, generator.output_dir));
         }
-        if !crate::generated::TREES.iter().any(|tree| output.starts_with(tree)) {
+        if !crate::files::CODE_TREES.iter().any(|tree| output.starts_with(tree)) {
             problems.push(format!(
                 "{}: output `{}` lies outside the trees `rules: generated` reads ({})",
                 generator.name,
                 generator.output_dir,
-                crate::generated::TREES.join(", ")
+                crate::files::CODE_TREES.join(", ")
             ));
         }
         if registry.iter().take(index).any(|earlier| earlier.name == generator.name) {
@@ -171,9 +171,17 @@ fn check_in(root: &Path, registry: &[Generator], scratch: &Path) -> ExitCode {
                 }
             },
         }
-        for file in uncommitted(root, generator.output_dir) {
-            failed = true;
-            println!("generate: {file}: not committed: git does not track it, so the gate compared a file no branch holds");
+        match uncommitted(root, generator.output_dir) {
+            Ok(files) => {
+                for file in files {
+                    failed = true;
+                    println!("generate: {file}: git does not track it, so no commit holds the file the gate compared");
+                }
+            }
+            Err(error) => {
+                failed = true;
+                println!("generate: {}: cannot ask git which files it tracks: {error}", generator.output_dir);
+            }
         }
     }
     if let Err(error) = fs::remove_dir_all(scratch) {
@@ -183,15 +191,17 @@ fn check_in(root: &Path, registry: &[Generator], scratch: &Path) -> ExitCode {
     if failed { ExitCode::from(1) } else { ExitCode::SUCCESS }
 }
 
-/// The files under `output_dir` git does not track, ignored ones included (`git ls-files --others`
-/// applies no ignore rules unless asked to), as paths from the root. Outside a git checkout there is no
-/// commit to compare with, so there is nothing to report.
-fn uncommitted(root: &Path, output_dir: &str) -> Vec<String> {
-    let output = std::process::Command::new("git").arg("-C").arg(root).args(["ls-files", "--others", "--"]).arg(output_dir).output();
-    match output {
-        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout).lines().map(str::to_string).collect(),
-        _ => Vec::new(),
+/// The files under `output_dir` git does not track, ignored ones included (`git ls-files --others` applies
+/// no ignore rules unless asked to), as paths from the root, bar the names no rule counts: Finder's
+/// `.DS_Store`, which the comparison skips too. Outside a git checkout there is no commit to compare with,
+/// so there is nothing to report; inside one, a git that cannot answer is an error, never an empty answer,
+/// or the check would pass files nobody looked at.
+fn uncommitted(root: &Path, output_dir: &str) -> Result<Vec<String>, String> {
+    if !crate::git::is_checkout(root) {
+        return Ok(Vec::new());
     }
+    let files = crate::git::listed(root, &["ls-files", "-z", "--others", "--", output_dir])?;
+    Ok(files.into_iter().filter(|file| !file.rsplit('/').next().is_some_and(|name| crate::layout::IGNORED_NAMES.contains(&name))).collect())
 }
 
 /// A generator's own output, so a generator that left a file from a previous run in place cannot hide it
@@ -206,7 +216,7 @@ fn generate_into(generator: &Generator, out_dir: &Path) -> Result<(), String> {
 
 /// Compare two directory trees byte for byte, listing every file that was added, removed or changed,
 /// one line per file. A tree that does not exist is empty, so a generator whose output was never
-/// committed shows every file as added.
+/// written shows every file as added.
 pub(crate) fn tree_differences(regenerated: &Path, committed: &Path) -> Result<Vec<String>, String> {
     let fresh = collect_tree(regenerated)?;
     let existing = collect_tree(committed)?;
@@ -218,8 +228,8 @@ pub(crate) fn tree_differences(regenerated: &Path, committed: &Path) -> Result<V
         match (fresh.get(name), existing.get(name)) {
             (Some(bytes), Some(old)) if bytes == old => {}
             (Some(_), Some(_)) => differences.push(format!("{name}: changed")),
-            (Some(_), None) => differences.push(format!("{name}: the generator writes it, and it is not committed")),
-            (None, Some(_)) => differences.push(format!("{name}: committed, but not written by the generator")),
+            (Some(_), None) => differences.push(format!("{name}: the generator writes it, and the working tree does not hold it")),
+            (None, Some(_)) => differences.push(format!("{name}: in the working tree, but not written by the generator")),
             (None, None) => {}
         }
     }
@@ -305,9 +315,9 @@ mod tests {
         assert_eq!(
             differences,
             vec![
-                "nested/second.txt: the generator writes it, and it is not committed",
-                "stale.txt: committed, but not written by the generator",
-                "surprise.txt: the generator writes it, and it is not committed"
+                "nested/second.txt: the generator writes it, and the working tree does not hold it",
+                "stale.txt: in the working tree, but not written by the generator",
+                "surprise.txt: the generator writes it, and the working tree does not hold it"
             ]
         );
     }
@@ -320,7 +330,7 @@ mod tests {
         fs::remove_dir_all(fresh.0.join("nested")).unwrap();
         fake_generator(&committed.0).unwrap();
         let differences = tree_differences(&fresh.0, &committed.0).unwrap();
-        assert_eq!(differences, vec!["nested/second.txt: committed, but not written by the generator"]);
+        assert_eq!(differences, vec!["nested/second.txt: in the working tree, but not written by the generator"]);
     }
 
     #[test]
@@ -444,19 +454,38 @@ mod tests {
     #[test]
     fn generated_files_git_does_not_track_fail_the_check() {
         let root = Scratch::new("check-untracked");
-        let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(&root.0).args(args).output().unwrap();
-        assert!(git(&["init", "-q"]).status.success());
+        let git = |args: &[&str]| crate::git::output(&root.0, args).unwrap();
+        git(&["init", "-q"]);
         fake_generator(&root.0.join("conformance/generated")).unwrap();
         let registry = vec![Generator { name: "fake", output_dir: "conformance/generated", generate: fake_generator }];
-        assert_eq!(uncommitted(&root.0, "conformance/generated"), ["conformance/generated/first.txt", "conformance/generated/nested/second.txt"]);
-        assert_eq!(code(check_against_registry(&root.0, &registry)), 1, "the files match but no branch holds them");
+        assert_eq!(uncommitted(&root.0, "conformance/generated").unwrap(), ["conformance/generated/first.txt", "conformance/generated/nested/second.txt"]);
+        assert_eq!(code(check_against_registry(&root.0, &registry)), 1, "the files match but no commit holds them");
         // An ignored file is no more committed than an untracked one.
         root.write(".gitignore", "conformance/generated/\n");
-        assert_eq!(uncommitted(&root.0, "conformance/generated").len(), 2);
+        assert_eq!(uncommitted(&root.0, "conformance/generated").unwrap().len(), 2);
         fs::remove_file(root.0.join(".gitignore")).unwrap();
-        assert!(git(&["add", "conformance"]).status.success());
-        assert!(uncommitted(&root.0, "conformance/generated").is_empty());
+        git(&["add", "conformance"]);
+        assert!(uncommitted(&root.0, "conformance/generated").unwrap().is_empty());
         assert_eq!(code(check_against_registry(&root.0, &registry)), 0);
+        // Finder's file in a tracked output is no difference and nothing git should hold.
+        root.write("conformance/generated/.DS_Store", [0u8, 1]);
+        root.write("conformance/generated/nested/.DS_Store", [0u8, 1]);
+        assert!(uncommitted(&root.0, "conformance/generated").unwrap().is_empty());
+        assert_eq!(code(check_against_registry(&root.0, &registry)), 0);
+    }
+
+    #[test]
+    fn a_git_that_cannot_answer_in_a_checkout_fails_the_check() {
+        let root = Scratch::new("check-git-broken");
+        root.write(".git", "not a gitdir line\n");
+        fake_generator(&root.0.join("conformance/generated")).unwrap();
+        assert!(uncommitted(&root.0, "conformance/generated").is_err(), "a checkout whose git fails is not a tree with nothing untracked");
+        let registry = vec![Generator { name: "fake", output_dir: "conformance/generated", generate: fake_generator }];
+        assert_eq!(code(check_against_registry(&root.0, &registry)), 1);
+        // A scratch tree with no `.git` at all has no commit to compare with.
+        let scratch = Scratch::new("check-no-git");
+        fake_generator(&scratch.0.join("conformance/generated")).unwrap();
+        assert!(uncommitted(&scratch.0, "conformance/generated").unwrap().is_empty());
     }
 
     #[test]

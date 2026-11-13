@@ -10,21 +10,23 @@
 //! Other crates duplicate all the time in a graph this size and are cargo-deny's business (it warns);
 //! only these prefixes are the ownership boundary this rule protects.
 
-use crate::layers::{CRAFT_APPS, CRAFT_LIBRARY_PREFIX};
+use crate::layers::{CRAFT_APPS, CRAFT_LIBRARY_PREFIX, CRAFT_LIBRARY_REPOSITORY};
 use crate::meta::Crate;
 use std::path::Path;
 
-/// Is `name` a crate of one of the families that must appear once: a Craft app's (the layer table's
-/// list) or a shared Craft library?
-fn owned(name: &str) -> bool {
-    name.starts_with(CRAFT_LIBRARY_PREFIX) || CRAFT_APPS.iter().any(|app| app.owns(name))
+/// Is the package `name` from `source` a crate of one of the families that must appear once: a Craft
+/// app's (the layer table's list, by name or repository) or a shared Craft library?
+fn owned(name: &str, source: Option<&str>) -> bool {
+    name.starts_with(CRAFT_LIBRARY_PREFIX)
+        || source.is_some_and(|source| crate::layers::from_repository(source, CRAFT_LIBRARY_REPOSITORY))
+        || CRAFT_APPS.iter().any(|app| app.owns(name, source))
 }
 
 /// Group packages by name and return every owned name that has more than one copy, with their ids and
 /// what asks for each: a manifest in the repository by its path from `root`, any other package by its id,
 /// so the message points at the line to change.
 pub(crate) fn duplicate_ids(crates: &[Crate], root: &Path) -> Vec<String> {
-    let mut names: Vec<&str> = crates.iter().map(|package| package.name.as_str()).filter(|name| owned(name)).collect();
+    let mut names: Vec<&str> = crates.iter().filter(|package| owned(&package.name, package.source.as_deref())).map(|package| package.name.as_str()).collect();
     names.sort_unstable();
     names.dedup();
     let mut errors = Vec::new();
@@ -63,12 +65,14 @@ fn package(name: &str, id: &str, source: Option<&str>) -> Crate {
         library_targets: Vec::new(),
         build_script: None,
         depends_on: Vec::new(),
+        member: false,
+        binary_targets: Vec::new(),
     }
 }
 
 /// Run the check against the resolved graph: `cargo metadata` with dependencies.
 pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
-    let crates = crate::meta::read(&root.join("rust"), false)?;
+    let crates = crate::meta::read(&root.join("rust"), crate::meta::Graph::Resolved)?;
     Ok(duplicate_ids(&crates, root))
 }
 
@@ -140,5 +144,30 @@ mod tests {
             duplicate_ids(&crates, Path::new("/repo")).is_empty(),
             "an unowned duplicate and a crate that merely starts like an owned prefix are both left alone"
         );
+    }
+
+    /// The whole path on a copy of the real tree: a second copy of a Craft crate that only a feature brings
+    /// in is in the graph the check reads, because it reads every feature's dependencies.
+    #[test]
+    fn a_second_copy_behind_a_feature_is_in_the_graph_read() {
+        let copy = crate::scratch::rust_tree_copy("duplicates-feature");
+        for (folder, version) in [("a", "0.1.0"), ("b", "0.2.0")] {
+            copy.write(&format!("fixtures/{folder}/Cargo.toml"), format!("[package]\nname = \"craft-plant\"\nversion = \"{version}\"\nedition = \"2024\"\n"));
+            copy.write(&format!("fixtures/{folder}/src/lib.rs"), "\n");
+        }
+        let manifest = copy.0.join("rust/core/craftbridge-core/Cargo.toml");
+        let text = std::fs::read_to_string(&manifest).unwrap().replace(
+            "[dependencies]\n",
+            "[dependencies]\nplant-a = { package = \"craft-plant\", path = \"../../../fixtures/a\", optional = true }\nplant-b = { package = \"craft-plant\", path = \"../../../fixtures/b\", optional = true }\n",
+        );
+        std::fs::write(&manifest, format!("{text}\n[features]\npinned = [\"dep:plant-a\", \"dep:plant-b\"]\n")).unwrap();
+        let locked = std::process::Command::new(env!("CARGO"))
+            .current_dir(copy.0.join("rust"))
+            .args(["metadata", "--offline", "--format-version", "1"])
+            .output()
+            .unwrap();
+        assert!(locked.status.success(), "{}", String::from_utf8_lossy(&locked.stderr));
+        let errors = check(&copy.0).unwrap();
+        assert!(errors.len() == 1 && errors[0].starts_with("craft-plant is in the graph 2 times"), "{errors:?}");
     }
 }

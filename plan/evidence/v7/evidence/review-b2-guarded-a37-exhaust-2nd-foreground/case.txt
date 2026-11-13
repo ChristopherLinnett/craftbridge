@@ -1,0 +1,12 @@
+case=review-b2-guarded-a37-exhaust-2nd-foreground
+apk=/tmp/craftbridge-v7/apk2/fgslab-combo-ts37.apk
+apk_md5=0cea776e2569a7e153abb28b42a2a29d
+serial=emulator-5556 device_sdk=37
+type=dataSync duration_s=150
+start=2026-11-13T14:03:03+08:00
+install_rc=0
+pid=5911
+home_sent_device=14:03:13.066
+home_sent=2026-11-13T14:03:13+08:00
+result=FGS_ON_TIMEOUT end=2026-11-13T14:04:43+08:00
+target_sdk=37

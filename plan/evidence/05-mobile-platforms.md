@@ -46,7 +46,7 @@ All read 2026-11-12 from the URLs given. "Inference" marks a conclusion not stat
 ### Long-running work
 
 19. **iOS:** `BGContinuedProcessingTask` (iOS 26) continues user-started work in the background with a system progress UI; GPU use in the background needs the `com.apple.developer.background-tasks.continued-processing.gpu` entitlement and device support, and without it Metal rejects background command buffers (https://developer.apple.com/documentation/backgroundtasks/performing-long-running-tasks-on-ios-and-ipados, https://developer.apple.com/documentation/metal/preparing-your-metal-app-to-run-in-the-background). `com.apple.developer.kernel.increased-memory-limit` exists for some models; Apple publishes no memory limits.
-20. **Android:** a `mediaProcessing` foreground service (API 35, usable earlier) with the `FOREGROUND_SERVICE_MEDIA_PROCESSING` permission gets 6 hours per 24 hours (https://developer.android.com/develop/background-work/services/fgs/service-types).
+20. **Android:** a `mediaProcessing` foreground service (API 35) with the `FOREGROUND_SERVICE_MEDIA_PROCESSING` permission gets 6 hours per 24 hours (https://developer.android.com/develop/background-work/services/fgs/service-types). *(Superseded by V7, `99-verification.md` findings 15–19: the reference's "usable earlier" does not hold on Android 14, which rejects the type for apps targeting 34 and later, so Android 10–14 use `dataSync`.)*
 
 ### Precedent
 

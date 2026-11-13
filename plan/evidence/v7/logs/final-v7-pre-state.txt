@@ -1,0 +1,13 @@
+# final-v7 pre-run state 21:11:47
+== emulator-5554 sdk=31 fingerprint=google/sdk_gphone64_arm64/emulator64_arm64:12/SE1A.220630.001.A1/9056438:userdebug/dev-keys
+pm list packages com.example.fgslab: []
+data_sync_fgs_timeout_duration=null
+media_processing_fgs_timeout_duration=null
+short_fgs_timeout_duration=null
+sync: Invalid command: get_sync_disabled_for_tests
+== emulator-5556 sdk=37 fingerprint=google/sdk_gphone16k_arm64/emu64a16k:17/CP41.260828.004.A7/16296984:user/dev-keys
+pm list packages com.example.fgslab: []
+data_sync_fgs_timeout_duration=null
+media_processing_fgs_timeout_duration=null
+short_fgs_timeout_duration=null
+sync: none

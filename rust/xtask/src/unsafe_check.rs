@@ -26,8 +26,9 @@ pub(crate) struct RustFile<'a> {
     pub(crate) path: &'a str,
     /// The crate it belongs to, by the name of its folder under `rust/`.
     pub(crate) crate_name: &'a str,
-    /// Directory components between `rust/` and the file, so `src/platform` is a pair of components
-    /// rather than a substring someone could fake with `src/platformkit`.
+    /// Directory components between the crate's own folder and the file, so the platform module is the
+    /// crate's own `src/platform/`, matched as components rather than a substring someone could fake with
+    /// `src/platformkit`, and not a `src/platform` pair found deeper (`tests/src/platform/`).
     pub(crate) components: Vec<&'a str>,
     /// Whether this is the crate's own `src/lib.rs`, the only place a crate-wide attribute belongs.
     pub(crate) is_lib_root: bool,
@@ -40,7 +41,7 @@ pub(crate) fn check_file(file: &RustFile<'_>) -> Vec<String> {
     let entry = layers::entry(file.crate_name);
     let platform_crate = entry.is_some_and(|entry| entry.platform);
     let ffi_crate = entry.is_some_and(|entry| entry.ffi);
-    let in_platform_module = file.components.windows(2).any(|pair| pair == ["src", PLATFORM_MODULE]);
+    let in_platform_module = file.components.starts_with(&["src", PLATFORM_MODULE]);
     let mut errors = Vec::new();
 
     for (index, line) in file.lines.iter().enumerate() {
@@ -65,8 +66,8 @@ pub(crate) fn check_file(file: &RustFile<'_>) -> Vec<String> {
             if !(ffi_crate && file.is_lib_root) {
                 errors.push(format!("{at} crate-wide belongs only to an -ffi crate's own src/lib.rs"));
             }
-        } else if !(platform_crate && module == Some(PLATFORM_MODULE)) {
-            errors.push(format!("{at} belongs only on a platform crate's `mod {PLATFORM_MODULE}` declaration"));
+        } else if !(platform_crate && module == Some(PLATFORM_MODULE) && file.is_lib_root) {
+            errors.push(format!("{at} belongs only on a platform crate's `mod {PLATFORM_MODULE}` declaration in its src/lib.rs"));
         }
     }
     errors
@@ -119,10 +120,16 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
             continue;
         };
         let shown = report::shown(root, &file.path);
+        let inside: Vec<String> = file
+            .path
+            .parent()
+            .and_then(|parent| parent.strip_prefix(&crate_dir).ok())
+            .map(|relative| relative.components().map(|part| part.as_os_str().to_string_lossy().into_owned()).collect())
+            .unwrap_or_default();
         let input = RustFile {
             path: &shown,
             crate_name: &crate_name,
-            components: file.components.iter().map(String::as_str).collect(),
+            components: inside.iter().map(String::as_str).collect(),
             is_lib_root: file.path == crate_dir.join("src").join("lib.rs"),
             lines: scan::strip_rust(&scan::read_text(&file.path)?),
         };
@@ -145,7 +152,7 @@ mod tests {
     /// The rule's verdict on `source` as the `src/lib.rs` of the crate `crate_name`.
     fn lib_of(crate_name: &str, source: &str) -> Vec<String> {
         let path = format!("{crate_name}/src/lib.rs");
-        check_file(&file(&path, crate_name, vec![crate_name, "src"], source))
+        check_file(&file(&path, crate_name, vec!["src"], source))
     }
 
     fn media_lib(source: &str) -> Vec<String> {
@@ -161,7 +168,7 @@ mod tests {
     #[test]
     fn unsafe_in_a_platform_module_of_a_platform_crate_passes() {
         let source = "pub fn read() -> u8 {\n    // SAFETY: the pointer comes from the caller.\n    unsafe { 0 }\n}\n";
-        let errors = check_file(&file("craftbridge-media/src/platform/decode.rs", "craftbridge-media", vec!["craftbridge-media", "src", "platform"], source));
+        let errors = check_file(&file("craftbridge-media/src/platform/decode.rs", "craftbridge-media", vec!["src", "platform"], source));
         assert!(errors.is_empty(), "{errors:?}");
     }
 
@@ -175,20 +182,19 @@ mod tests {
         // Even in a `src/platform/` folder, a crate the table does not mark as a platform crate may not
         // use unsafe.
         let wrong_crate = "unsafe { }\n";
-        let errors =
-            check_file(&file("craftbridge-effects/src/platform/x.rs", "craftbridge-effects", vec!["craftbridge-effects", "src", "platform"], wrong_crate));
+        let errors = check_file(&file("craftbridge-effects/src/platform/x.rs", "craftbridge-effects", vec!["src", "platform"], wrong_crate));
         assert!(errors.iter().any(|e| e.contains("unsafe outside a platform module")), "{errors:?}");
     }
 
     #[test]
     fn a_crate_wide_allow_only_suits_an_ffi_crate_root() {
         let source = format!("#![allow({UNSAFE_CODE})]\n\nfn f() {{}}\n");
-        let ffi = check_file(&file("craftbridge-core-ffi/src/lib.rs", "craftbridge-core-ffi", vec!["craftbridge-core-ffi", "src"], &source));
+        let ffi = check_file(&file("craftbridge-core-ffi/src/lib.rs", "craftbridge-core-ffi", vec!["src"], &source));
         assert!(ffi.is_empty(), "{ffi:?}");
 
         assert!(media_lib(&source).iter().any(|e| e.contains("-ffi crate's own src/lib.rs")));
 
-        let wrong_file = check_file(&file("craftbridge-core-ffi/src/main.rs", "craftbridge-core-ffi", vec!["craftbridge-core-ffi", "src"], &source));
+        let wrong_file = check_file(&file("craftbridge-core-ffi/src/main.rs", "craftbridge-core-ffi", vec!["src"], &source));
         assert!(!wrong_file.is_empty(), "{wrong_file:?}");
     }
 
@@ -221,6 +227,22 @@ mod tests {
         }
         let wrong_crate = plugin_lib("#[allow(unsafe_code)]\npub mod platform;\n");
         assert!(!wrong_crate.is_empty(), "{wrong_crate:?}");
+    }
+
+    #[test]
+    fn only_the_crate_s_own_platform_module_may_hold_unsafe() {
+        let source = "pub fn read() -> u8 {\n    // SAFETY: the pointer comes from the caller.\n    unsafe { 0 }\n}\n";
+        for deeper in [vec!["tests", "src", "platform"], vec!["src", "x", "src", "platform"]] {
+            let errors = check_file(&file("craftbridge-media/tests/src/platform/mod.rs", "craftbridge-media", deeper.clone(), source));
+            assert!(errors.iter().any(|e| e.ends_with("unsafe outside a platform module")), "{deeper:?}: {errors:?}");
+        }
+        let declared_deeper = check_file(&file(
+            "craftbridge-media/tests/src/mod.rs",
+            "craftbridge-media",
+            vec!["tests", "src"],
+            "#[allow(unsafe_code)]\npub(crate) mod platform;\n",
+        ));
+        assert!(declared_deeper.iter().any(|e| e.contains("in its src/lib.rs")), "{declared_deeper:?}");
     }
 
     #[test]
@@ -292,13 +314,7 @@ mod tests {
     fn the_core_is_a_platform_crate_for_its_memory_module() {
         // Plan §16 puts the core's memory-pressure code in `craftbridge-core/src/platform/`.
         assert!(
-            check_file(&file(
-                "craftbridge-core/src/platform/memory.rs",
-                "craftbridge-core",
-                vec!["craftbridge-core", "src", "platform"],
-                "// SAFETY: x\nunsafe {}\n"
-            ))
-            .is_empty()
+            check_file(&file("craftbridge-core/src/platform/memory.rs", "craftbridge-core", vec!["src", "platform"], "// SAFETY: x\nunsafe {}\n")).is_empty()
         );
         assert!(lib_of("craftbridge-core", "#[allow(unsafe_code)]\nmod platform;\n").is_empty());
     }

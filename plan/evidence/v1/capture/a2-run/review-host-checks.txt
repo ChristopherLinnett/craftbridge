@@ -1,0 +1,38 @@
+## runtime root: /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot
+## st_dev (Mac folder, runtime copy)
+16777232 /System/Library/Fonts
+16777239 /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts
+## app's sections 2+3 file list vs the Mac's /System/Library/Fonts (2 levels)
+identical: 372 files
+## app's sections 2+3 file list vs the runtime copy
+different: the app did not list the runtime copy
+## runtime copy: files per subfolder, by extension, depth
+  37 AppFonts
+  74 Core
+  5 CoreAddition
+  27 CoreUI
+  1 LanguageSupport
+  106 UnicodeSupport
+  2 Watch
+  14 WebFonts
+     2 (none)
+    23 otf
+    74 ttc
+   167 ttf
+  files deeper than one subfolder: 0
+## fonts outside /System/Library/Fonts in the runtime (FontServices)
+/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc
+## same-named fonts differ between the Mac and the runtime (SHA-256)
+  mac 25eceb458d4baf62 2369592 B  Helvetica.ttc
+  ios e5af39f85fa200eb 1195996 B  Core/Helvetica.ttc
+  mac 435ee0b75b26d671 192123488 B  Apple Color Emoji.ttc
+  ios 2acd048bf614c54d 139284540 B  CoreAddition/AppleColorEmoji-160px.ttc
+  mac 5b4309f8d596abee 979396 B  GeezaPro.ttc
+  ios 5b4309f8d596abee 979396 B  Core/GeezaPro.ttc
+## CoreText's files (section 8) exist at the same path on the Mac?
+  not on the Mac: /System/Library/Fonts/Core/SFUI.ttf
+  not on the Mac: /System/Library/Fonts/Core/Helvetica.ttc
+  not on the Mac: /System/Library/Fonts/WebFonts/Georgia.ttf
+  not on the Mac: /System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc
+  not on the Mac: /System/Library/Fonts/CoreAddition/AppleColorEmoji-160px.ttc
+  not on the Mac: /System/Library/Fonts/AppFonts/Noteworthy.ttc

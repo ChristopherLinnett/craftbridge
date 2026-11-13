@@ -152,29 +152,6 @@ fn levels_in(body: &str) -> Vec<(&'static str, Vec<String>)> {
     levels
 }
 
-/// The 1-based lines of every `path` attribute — `#[path = "…"]`, also inside `cfg_attr` — in stripped
-/// text. It points the compiler at a module file of any name and extension, which no rule that walks a
-/// crate's `.rs` files would ever read.
-pub(crate) fn path_attributes(text: &str) -> Vec<usize> {
-    attributes(text)
-        .into_iter()
-        .filter(|attribute| {
-            let body = text.get(attribute.open + 1..attribute.close).unwrap_or_default();
-            let bytes = body.as_bytes();
-            let mut at = 0usize;
-            while let Some(found) = scan::find(bytes, at, b"path") {
-                at = found + "path".len();
-                let whole = (found == 0 || !scan::ident_byte(body, found - 1)) && !scan::ident_byte(body, at);
-                if whole && bytes.get(skip_whitespace(bytes, at)) == Some(&b'=') {
-                    return true;
-                }
-            }
-            false
-        })
-        .map(|attribute| scan::line_of(text, attribute.hash))
-        .collect()
-}
-
 /// The name of the module the item starting at `from` declares, when that item is a `mod`. Further
 /// attributes (a `#[cfg(…)]` choosing the platform, say) and a visibility may sit between an attribute
 /// and its `mod`, on the same line or spread over several. An attribute on a module applies to the whole
@@ -312,14 +289,6 @@ mod tests {
         assert!(level.iter().any(|found| found.level == UNREADABLE_LEVEL && found.lints.contains(&"clippy::expect_used".to_string())), "{level:?}");
         let whole = read("macro_rules! attr { ($a:meta) => { #[$a] mod inner {} }; }\n");
         assert!(whole.iter().any(|found| found.level == MACRO_ATTRIBUTE && found.lints == [UNREADABLE]), "{whole:?}");
-    }
-
-    #[test]
-    fn a_path_attribute_is_found_however_it_is_wrapped() {
-        let text = scan::strip_rust("#[path = \"inner.txt\"]\nmod inner;\n#[cfg_attr(all(), path = \"other.rs\")]\nmod other;\n# [ path=\"x\" ] mod x;\n");
-        assert_eq!(path_attributes(&text.join("\n")), [1, 3, 5]);
-        let fine = scan::strip_rust("#[cfg(feature = \"path\")]\nfn path() {}\n#[doc = \"#[path = \\\"x\\\"]\"]\nfn f() {}\n");
-        assert!(path_attributes(&fine.join("\n")).is_empty(), "{fine:?}");
     }
 
     #[test]

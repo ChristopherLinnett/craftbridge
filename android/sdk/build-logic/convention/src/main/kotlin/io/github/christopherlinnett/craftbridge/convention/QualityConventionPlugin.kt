@@ -9,6 +9,9 @@ import org.gradle.api.Project
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.kotlin.dsl.configure
 
+/** The runtime classpaths whose modules the licence check reads: what ships, and what each kind of test runs with. */
+private val licenceClasspaths = listOf("releaseRuntimeClasspath", "debugUnitTestRuntimeClasspath", "debugAndroidTestRuntimeClasspath")
+
 /**
  * The formatting rules for every Kotlin file of the Android build: Spotless running ktlint. A module
  * checks its own written Kotlin and build script; the build's root project checks what no module owns,
@@ -28,6 +31,14 @@ class QualityConventionPlugin : Plugin<Project> {
             // the gate refuses every other copy (`cargo xtask rules`, machinery), which is what keeps the
             // style in this file alone. The build sits at android/sdk.
             val editorConfig = rootDir.resolve("../../.editorconfig")
+            // A copy that sat there while ktlint ran is no input of the task, so Gradle would replay that
+            // run's verdict, from this checkout or from the machine's build cache, after the copy is gone.
+            // Every Spotless task therefore runs every time and stores nothing: ktlint reads the tree as it
+            // is, whatever else it reads.
+            tasks.withType(SpotlessTask::class.java).configureEach {
+                outputs.upToDateWhen { false }
+                outputs.cacheIf { false }
+            }
 
             // Named apart from Spotless's own ktlint(), which a call inside its blocks would reach first.
             fun BaseKotlinExtension.repositoryKtlint() {
@@ -44,8 +55,8 @@ class QualityConventionPlugin : Plugin<Project> {
             // What this plugin formats, kept to itself so the read-back below can compare against it.
             // The build-logic trees exclude the included build's own output folders, which hold copies
             // of these scripts under `build`: each project's own, at the top of the included build and of
-            // its one project, never a source folder that happens to be called `build` (the plugins'
-            // own package is `…craftbridge.build`).
+            // its one project, never a source folder that happens to be called `build` (the convention
+            // build's group is `…craftbridge.build`, and a package of that name could sit in its sources).
             val writtenKotlin =
                 if (atRoot) {
                     fileTree("build-logic") {
@@ -126,7 +137,7 @@ class QualityConventionPlugin : Plugin<Project> {
                 // so `cargo xtask rules` pays only for the modules that really land on a classpath.
                 tasks.register("runtimeLicences") {
                     description =
-                        "Print every external module resolved onto a library module's release runtime classpath, one group:name per line."
+                        "Print every external module resolved onto a library module's release, unit-test and instrumented-test runtime classpaths, one group:name per line."
                     group = "verification"
                     // The live dependency graph is read when the task runs and is not a serialisable
                     // task input, exactly as it is for Gradle's own `dependencies` report task.
@@ -134,17 +145,19 @@ class QualityConventionPlugin : Plugin<Project> {
                     doLast {
                         val modules = sortedSetOf<String>()
                         rootProject.subprojects.filter { it.plugins.hasPlugin("com.android.library") }.forEach { library ->
-                            // A library without the classpath would add nothing and look clean, so its
+                            // What ships, and what the tests run with: AGENTS §8 holds every dependency to
+                            // the allowlist, as cargo-deny does a crate's dev-dependencies. A library
+                            // without one of these classpaths would add nothing and look clean, so its
                             // absence is an error rather than an empty answer.
-                            val classpath =
-                                library.configurations.findByName("releaseRuntimeClasspath")
-                                    ?: throw GradleException(
-                                        "${library.path} has no releaseRuntimeClasspath, so what it ships cannot be listed",
-                                    )
-                            classpath.incoming.resolutionResult.allComponents.forEach { component ->
-                                val identifier = component.id
-                                if (identifier is ModuleComponentIdentifier) {
-                                    modules += "${identifier.group}:${identifier.module}"
+                            for (name in licenceClasspaths) {
+                                val classpath =
+                                    library.configurations.findByName(name)
+                                        ?: throw GradleException("${library.path} has no $name, so what it uses cannot be listed")
+                                classpath.incoming.resolutionResult.allComponents.forEach { component ->
+                                    val identifier = component.id
+                                    if (identifier is ModuleComponentIdentifier) {
+                                        modules += "${identifier.group}:${identifier.module}"
+                                    }
                                 }
                             }
                         }

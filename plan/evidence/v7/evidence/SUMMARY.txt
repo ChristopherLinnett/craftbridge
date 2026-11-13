@@ -1,0 +1,539 @@
+===== a29-combo-auto-long =====
+apk=/tmp/craftbridge-v7/apk/fgslab-combo-ts37.apk
+type=auto duration_s=660
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:38:26+08:00
+[FGS]( 6332): SERVICE_CREATED sdk=29 targetSdk=37
+[FGS]( 6332): STARTFOREGROUND_OK requested=auto typeBit=1
+[FGS]( 6332): EXPORT_DONE type=auto elapsedS=660 fileKiB=415232
+11-13 01:27:32.988 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.Platform.setSocketWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):2)
+11-13 01:27:32.988 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.ConscryptFileDescriptorSocket.setSoWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):0)
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export pri=0 contentView=null vibrate=null sound=null defaults=0x0 flags=0x6a color=
+
+===== a29-combo-final =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-combo-ts37.apk
+type=auto duration_s=660
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T02:49:24+08:00
+[FGS]( 3189): SERVICE_CREATED sdk=29 targetSdk=37
+[FGS]( 3189): STARTFOREGROUND_OK requested=auto typeBit=1
+[FGS]( 3189): EXPORT_DONE type=auto elapsedS=660 fileKiB=417280
+11-13 02:38:20.712 W/Conscrypt( 1036): 	at com.google.android.gms.org.conscrypt.Platform.setSocketWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):2)
+11-13 02:38:20.712 W/Conscrypt( 1036): 	at com.google.android.gms.org.conscrypt.ConscryptFileDescriptorSocket.setSoWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):0)
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export pri=0 contentView=null vibrate=null sound=null defaults=0x0 flags=0x6a color=
+
+===== a29-full-datasync =====
+apk=/tmp/craftbridge-v7/apk/fgslab-full-ts37.apk
+type=dataSync duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:22:32+08:00
+[FGS]( 5299): SERVICE_CREATED sdk=29 targetSdk=37
+[FGS]( 5299): STARTFOREGROUND_OK requested=dataSync typeBit=1
+[FGS]( 5299): EXPORT_DONE type=dataSync elapsedS=45 fileKiB=28480
+11-13 01:21:52.483 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.Platform.setSocketWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):2)
+11-13 01:21:52.483 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.ConscryptFileDescriptorSocket.setSoWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):0)
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export pri=0 contentView=null vibrate=null sound=null defaults=0x0 flags=0x6a color=
+
+===== a29-full-mediaproc =====
+apk=/tmp/craftbridge-v7/apk/fgslab-full-ts37.apk
+type=mediaProcessing duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:23:21+08:00
+[FGS]( 5436): SERVICE_CREATED sdk=29 targetSdk=37
+[FGS]( 5436): STARTFOREGROUND_OK requested=mediaProcessing typeBit=8192
+[FGS]( 5436): EXPORT_DONE type=mediaProcessing elapsedS=45 fileKiB=28544
+11-13 01:22:41.162 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.Platform.setSocketWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):2)
+11-13 01:22:41.162 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.ConscryptFileDescriptorSocket.setSoWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):0)
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export pri=0 contentView=null vibrate=null sound=null defaults=0x0 flags=0x6a color=
+
+===== a29-full-none =====
+apk=/tmp/craftbridge-v7/apk/fgslab-full-ts37.apk
+type=none duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:21:44+08:00
+[FGS]( 5148): SERVICE_CREATED sdk=29 targetSdk=37
+[FGS]( 5148): STARTFOREGROUND_OK requested=none typeBit=0
+[FGS]( 5148): EXPORT_DONE type=none elapsedS=45 fileKiB=28416
+11-13 01:21:03.814 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.Platform.setSocketWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):2)
+11-13 01:21:03.814 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.ConscryptFileDescriptorSocket.setSoWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):0)
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export pri=0 contentView=null vibrate=null sound=null defaults=0x0 flags=0x6a color=
+
+===== a29-full-short =====
+apk=/tmp/craftbridge-v7/apk/fgslab-full-ts37.apk
+type=shortService duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:24:58+08:00
+[FGS]( 5745): SERVICE_CREATED sdk=29 targetSdk=37
+[FGS]( 5745): STARTFOREGROUND_OK requested=shortService typeBit=2048
+[FGS]( 5745): EXPORT_DONE type=shortService elapsedS=45 fileKiB=28416
+11-13 01:24:18.423 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.Platform.setSocketWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):2)
+11-13 01:24:18.423 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.ConscryptFileDescriptorSocket.setSoWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):0)
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export pri=0 contentView=null vibrate=null sound=null defaults=0x0 flags=0x6a color=
+
+===== a29-full-specialuse =====
+apk=/tmp/craftbridge-v7/apk/fgslab-full-ts37.apk
+type=specialUse duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:24:09+08:00
+[FGS]( 5604): SERVICE_CREATED sdk=29 targetSdk=37
+[FGS]( 5604): STARTFOREGROUND_OK requested=specialUse typeBit=1073741824
+[FGS]( 5604): EXPORT_DONE type=specialUse elapsedS=45 fileKiB=28544
+11-13 01:23:29.822 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.Platform.setSocketWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):2)
+11-13 01:23:29.822 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.ConscryptFileDescriptorSocket.setSoWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):0)
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export pri=0 contentView=null vibrate=null sound=null defaults=0x0 flags=0x6a color=
+
+===== a29-noneflavor-long =====
+apk=/tmp/craftbridge-v7/apk/fgslab-none-ts37.apk
+type=none duration_s=660
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:38:44+08:00
+[FGS]( 6332): EXPORT_DONE type=auto elapsedS=660 fileKiB=415232
+[FGS]( 6861): SERVICE_CREATED sdk=29 targetSdk=37
+[FGS]( 6861): STARTFOREGROUND_OK requested=none typeBit=0
+11-13 01:38:34.908 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.Platform.setSocketWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):2)
+11-13 01:38:34.908 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.ConscryptFileDescriptorSocket.setSoWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):0)
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export pri=0 contentView=null vibrate=null sound=null defaults=0x0 flags=0x6a color=
+
+===== a29-noneflavor-none =====
+apk=/tmp/craftbridge-v7/apk/fgslab-none-ts37.apk
+type=none duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:25:47+08:00
+[FGS]( 5883): SERVICE_CREATED sdk=29 targetSdk=37
+[FGS]( 5883): STARTFOREGROUND_OK requested=none typeBit=0
+[FGS]( 5883): EXPORT_DONE type=none elapsedS=45 fileKiB=28544
+11-13 01:25:07.092 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.Platform.setSocketWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):2)
+11-13 01:25:07.092 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.ConscryptFileDescriptorSocket.setSoWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):0)
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export pri=0 contentView=null vibrate=null sound=null defaults=0x0 flags=0x6a color=
+
+===== a29-noperm-datasync =====
+apk=/tmp/craftbridge-v7/apk/fgslab-noperm-ts37.apk
+type=dataSync duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:26:35+08:00
+[FGS]( 6024): SERVICE_CREATED sdk=29 targetSdk=37
+[FGS]( 6024): STARTFOREGROUND_OK requested=dataSync typeBit=1
+[FGS]( 6024): EXPORT_DONE type=dataSync elapsedS=45 fileKiB=28480
+11-13 01:25:55.770 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.Platform.setSocketWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):2)
+11-13 01:25:55.770 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.ConscryptFileDescriptorSocket.setSoWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):0)
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export pri=0 contentView=null vibrate=null sound=null defaults=0x0 flags=0x6a color=
+
+===== a29-noperm-mediaproc =====
+apk=/tmp/craftbridge-v7/apk/fgslab-noperm-ts37.apk
+type=mediaProcessing duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:27:24+08:00
+[FGS]( 6183): SERVICE_CREATED sdk=29 targetSdk=37
+[FGS]( 6183): STARTFOREGROUND_OK requested=mediaProcessing typeBit=8192
+[FGS]( 6183): EXPORT_DONE type=mediaProcessing elapsedS=45 fileKiB=28416
+11-13 01:26:44.389 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.Platform.setSocketWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):2)
+11-13 01:26:44.389 W/Conscrypt(  518): 	at com.google.android.gms.org.conscrypt.ConscryptFileDescriptorSocket.setSoWriteTimeout(:com.google.android.gms@202414019@20.24.14 (040400-319035315):0)
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export pri=0 contentView=null vibrate=null sound=null defaults=0x0 flags=0x6a color=
+
+===== a31-combo-auto-long =====
+apk=/tmp/craftbridge-v7/apk/fgslab-combo-ts37.apk
+type=auto duration_s=660
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:38:26+08:00
+[FGS]( 7615): SERVICE_CREATED sdk=31 targetSdk=37
+[FGS]( 7615): STARTFOREGROUND_OK requested=auto typeBit=1
+[FGS]( 7615): EXPORT_DONE type=auto elapsedS=660 fileKiB=413568
+11-13 01:35:29.311 E/cr_CronetUrlRequestContext( 1727): Caused by: java.util.concurrent.TimeoutException
+11-13 01:35:29.311 E/cr_CronetUrlRequestContext( 1727): Caused by: java.util.concurrent.TimeoutException
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defaults=0x0 flags=0x6
+
+===== a31-combo-final =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-combo-ts37.apk
+type=auto duration_s=660
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T02:49:25+08:00
+[FGS]( 3096): SERVICE_CREATED sdk=31 targetSdk=37
+[FGS]( 3096): STARTFOREGROUND_OK requested=auto typeBit=1
+[FGS]( 3096): EXPORT_DONE type=auto elapsedS=660 fileKiB=414528
+11-13 02:38:31.513 W/Conscrypt( 1420): 	at com.google.android.gms.org.conscrypt.Platform.setSocketWriteTimeout(:com.google.android.gms@214218053@21.42.18 (190400-410302452):2)
+11-13 02:38:31.513 W/Conscrypt( 1420): 	at com.google.android.gms.org.conscrypt.ConscryptFileDescriptorSocket.setSoWriteTimeout(:com.google.android.gms@214218053@21.42.18 (190400-410302452):0)
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defaults=0x0 flags=0x4
+
+===== a31-full-datasync =====
+apk=/tmp/craftbridge-v7/apk/fgslab-full-ts37.apk
+type=dataSync duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:22:33+08:00
+[FGS]( 6666): SERVICE_CREATED sdk=31 targetSdk=37
+[FGS]( 6666): STARTFOREGROUND_OK requested=dataSync typeBit=1
+[FGS]( 6666): EXPORT_DONE type=dataSync elapsedS=45 fileKiB=28288
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defaults=0x0 flags=0x6
+
+===== a31-full-mediaproc =====
+apk=/tmp/craftbridge-v7/apk/fgslab-full-ts37.apk
+type=mediaProcessing duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:23:21+08:00
+[FGS]( 6794): SERVICE_CREATED sdk=31 targetSdk=37
+[FGS]( 6794): STARTFOREGROUND_OK requested=mediaProcessing typeBit=8192
+[FGS]( 6794): EXPORT_DONE type=mediaProcessing elapsedS=45 fileKiB=28288
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defaults=0x0 flags=0x6
+
+===== a31-full-none =====
+apk=/tmp/craftbridge-v7/apk/fgslab-full-ts37.apk
+type=none duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:21:44+08:00
+[FGS]( 6504): SERVICE_CREATED sdk=31 targetSdk=37
+[FGS]( 6504): STARTFOREGROUND_OK requested=none typeBit=0
+[FGS]( 6504): EXPORT_DONE type=none elapsedS=45 fileKiB=28160
+11-13 01:21:29.184 E/cr_CronetUrlRequestContext( 1727): Caused by: java.util.concurrent.TimeoutException
+11-13 01:21:29.184 E/cr_CronetUrlRequestContext( 1727): Caused by: java.util.concurrent.TimeoutException
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defaults=0x0 flags=0x4
+
+===== a31-full-short =====
+apk=/tmp/craftbridge-v7/apk/fgslab-full-ts37.apk
+type=shortService duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:24:59+08:00
+[FGS]( 7060): SERVICE_CREATED sdk=31 targetSdk=37
+[FGS]( 7060): STARTFOREGROUND_OK requested=shortService typeBit=2048
+[FGS]( 7060): EXPORT_DONE type=shortService elapsedS=45 fileKiB=28096
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defaults=0x0 flags=0x6
+
+===== a31-full-specialuse =====
+apk=/tmp/craftbridge-v7/apk/fgslab-full-ts37.apk
+type=specialUse duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:24:10+08:00
+[FGS]( 6912): SERVICE_CREATED sdk=31 targetSdk=37
+[FGS]( 6912): STARTFOREGROUND_OK requested=specialUse typeBit=1073741824
+[FGS]( 6912): EXPORT_DONE type=specialUse elapsedS=45 fileKiB=28288
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defaults=0x0 flags=0x6
+
+===== a31-noneflavor-long =====
+apk=/tmp/craftbridge-v7/apk/fgslab-none-ts37.apk
+type=none duration_s=660
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:49:28+08:00
+[FGS]( 8154): SERVICE_CREATED sdk=31 targetSdk=37
+[FGS]( 8154): STARTFOREGROUND_OK requested=none typeBit=0
+[FGS]( 8154): EXPORT_DONE type=none elapsedS=660 fileKiB=413888
+11-13 01:39:09.280 W/Conscrypt( 5279): 	at com.google.android.gms.org.conscrypt.Platform.setSocketWriteTimeout(:com.google.android.gms@214218053@21.42.18 (190400-410302452):2)
+11-13 01:39:09.280 W/Conscrypt( 5279): 	at com.google.android.gms.org.conscrypt.ConscryptFileDescriptorSocket.setSoWriteTimeout(:com.google.android.gms@214218053@21.42.18 (190400-410302452):0)
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defaults=0x0 flags=0x4
+
+===== a31-noneflavor-none =====
+apk=/tmp/craftbridge-v7/apk/fgslab-none-ts37.apk
+type=none duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:25:47+08:00
+[FGS]( 7172): SERVICE_CREATED sdk=31 targetSdk=37
+[FGS]( 7172): STARTFOREGROUND_OK requested=none typeBit=0
+[FGS]( 7172): EXPORT_DONE type=none elapsedS=45 fileKiB=28352
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defaults=0x0 flags=0x6
+
+===== a31-noperm-datasync =====
+apk=/tmp/craftbridge-v7/apk/fgslab-noperm-ts37.apk
+type=dataSync duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:26:36+08:00
+[FGS]( 7316): SERVICE_CREATED sdk=31 targetSdk=37
+[FGS]( 7316): STARTFOREGROUND_OK requested=dataSync typeBit=1
+[FGS]( 7316): EXPORT_DONE type=dataSync elapsedS=45 fileKiB=28288
+11-13 01:26:05.105 E/cr_CronetUrlRequestContext( 1727): Caused by: java.util.concurrent.TimeoutException
+11-13 01:26:05.109 E/cr_CronetUrlRequestContext( 1727): Caused by: java.util.concurrent.TimeoutException
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defaults=0x0 flags=0x6
+
+===== a31-noperm-mediaproc =====
+apk=/tmp/craftbridge-v7/apk/fgslab-noperm-ts37.apk
+type=mediaProcessing duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:27:25+08:00
+[FGS]( 7457): SERVICE_CREATED sdk=31 targetSdk=37
+[FGS]( 7457): STARTFOREGROUND_OK requested=mediaProcessing typeBit=8192
+[FGS]( 7457): EXPORT_DONE type=mediaProcessing elapsedS=45 fileKiB=28288
+11-13 01:27:00.282 I/ActivityManager(  531): Process com.google.android.gm (pid 5890) has died: cch+45 CEM 
+11-13 01:27:09.738 W/Conscrypt( 5279): 	at com.google.android.gms.org.conscrypt.Platform.setSocketWriteTimeout(:com.google.android.gms@214218053@21.42.18 (190400-410302452):2)
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defaults=0x0 flags=0x6
+
+===== a34-combo-auto-long =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-combo-ts37.apk
+type=auto duration_s=660
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T02:12:50+08:00
+[FGS]( 7781): SERVICE_CREATED sdk=34 targetSdk=37
+[FGS]( 7781): STARTFOREGROUND_OK requested=auto typeBit=1
+[FGS]( 7781): EXPORT_DONE type=auto elapsedS=660 fileKiB=413632
+    isForeground=true foregroundId=4711 types=00000001 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null default
+
+===== a34-combo-short-notdeclared =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-combo-ts37.apk
+type=shortService duration_s=45
+install_rc=0
+result=STARTFOREGROUND_FAIL end=2026-11-13T01:59:11+08:00
+[FGS]( 6858): SERVICE_CREATED sdk=34 targetSdk=37
+[FGS]( 6858): STARTFOREGROUND_FAIL requested=shortService ex=java.lang.IllegalArgumentException msg=foregroundServiceType 0x00000800 is not a subset of foregroundServiceType attribute 0x00002001 in service element of manifest file
+11-13 01:58:50.891 E/CraftFGS( 6858): STARTFOREGROUND_FAIL requested=shortService ex=java.lang.IllegalArgumentException msg=foregroundServiceType 0x00000800 is not a subset of foregroundServiceType attribute 0x00002001 in service element of manifest file
+11-13 01:58:50.959 E/AndroidRuntime( 6858): FATAL EXCEPTION: main
+
+===== a34-full-datasync =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-full-ts37.apk
+type=dataSync duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:53:48+08:00
+[FGS]( 6020): SERVICE_CREATED sdk=34 targetSdk=37
+[FGS]( 6020): STARTFOREGROUND_OK requested=dataSync typeBit=1
+[FGS]( 6020): EXPORT_DONE type=dataSync elapsedS=45 fileKiB=28352
+    isForeground=true foregroundId=4711 types=00000001 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null default
+
+===== a34-full-mediaproc =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-full-ts37.apk
+type=mediaProcessing duration_s=45
+install_rc=0
+result=STARTFOREGROUND_FAIL end=2026-11-13T01:54:10+08:00
+[FGS]( 6189): SERVICE_CREATED sdk=34 targetSdk=37
+[FGS]( 6189): STARTFOREGROUND_FAIL requested=mediaProcessing ex=android.app.InvalidForegroundServiceTypeException msg=Starting FGS with type unknown callerApp=ProcessRecord{2ae94c8 6189:com.example.fgslab/u0a192} targetSDK=37 has been prohibited
+11-13 01:54:06.988 W/NamedFutures( 3891): (REDACTED) Timeout future task has been cancelled: %d milliseconds
+11-13 01:54:06.988 W/NamedFutures( 3891): (REDACTED) Timeout future task has been cancelled: %d milliseconds
+
+===== a34-full-none =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-full-ts37.apk
+type=none duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:52:59+08:00
+[FGS]( 4878): SERVICE_CREATED sdk=34 targetSdk=37
+[FGS]( 4878): STARTFOREGROUND_OK requested=none typeBit=0
+[FGS]( 4878): EXPORT_DONE type=none elapsedS=45 fileKiB=28544
+11-13 01:52:10.574 W/Conscrypt( 1543): 	at com.google.android.gms.org.conscrypt.Platform.setSocketWriteTimeout(:com.google.android.gms@231818044@23.18.18 (190400-535401451):2)
+11-13 01:52:10.574 W/Conscrypt( 1543): 	at com.google.android.gms.org.conscrypt.ConscryptFileDescriptorSocket.setSoWriteTimeout(:com.google.android.gms@231818044@23.18.18 (190400-535401451):0)
+    isForeground=true foregroundId=4711 types=40002001 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null default
+
+===== a34-full-short-timeout =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-full-ts37.apk
+type=shortService duration_s=600
+install_rc=0
+result=FGS_ON_TIMEOUT end=2026-11-13T01:58:28+08:00
+[FGS]( 6486): SERVICE_CREATED sdk=34 targetSdk=37
+[FGS]( 6486): STARTFOREGROUND_OK requested=shortService typeBit=2048
+[FGS]( 6486): FGS_ON_TIMEOUT_1ARG startId=1 (shortService timeout, API 34 callback)
+[FGS]( 6486): EXPORT_ABORTED elapsedS=180
+11-13 01:57:36.164 D/BtGatt.ScanManager( 1080): regularScanTimeout - client scan time was too long
+    isForeground=true foregroundId=4711 types=00000800 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null default
+
+===== a34-full-specialuse =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-full-ts37.apk
+type=specialUse duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:54:59+08:00
+[FGS]( 6361): SERVICE_CREATED sdk=34 targetSdk=37
+[FGS]( 6361): STARTFOREGROUND_OK requested=specialUse typeBit=1073741824
+[FGS]( 6361): EXPORT_DONE type=specialUse elapsedS=45 fileKiB=28224
+    isForeground=true foregroundId=4711 types=40000000 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null default
+
+===== a34-full-specialuse-long =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-full-ts37.apk
+type=specialUse duration_s=660
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T02:23:52+08:00
+[FGS]( 8455): SERVICE_CREATED sdk=34 targetSdk=37
+[FGS]( 8455): STARTFOREGROUND_OK requested=specialUse typeBit=1073741824
+[FGS]( 8455): EXPORT_DONE type=specialUse elapsedS=660 fileKiB=412480
+    isForeground=true foregroundId=4711 types=40000000 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null default
+
+===== a34-full-ts34-mediaproc =====
+apk=/tmp/craftbridge-v7/apk2-ts34/fgslab-full-ts34.apk
+type=mediaProcessing duration_s=45
+install_rc=0
+result=STARTFOREGROUND_FAIL end=2026-11-13T02:00:59+08:00
+[FGS]( 7491): SERVICE_CREATED sdk=34 targetSdk=34
+[FGS]( 7491): STARTFOREGROUND_FAIL requested=mediaProcessing ex=android.app.InvalidForegroundServiceTypeException msg=Starting FGS with type unknown callerApp=ProcessRecord{c5ee1ab 7491:com.example.fgslab/u0a192} targetSDK=34 has been prohibited
+
+===== a34-none-ts33-none =====
+apk=/tmp/craftbridge-v7/apk2-ts33/fgslab-none-ts33.apk
+type=none duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T02:01:48+08:00
+[FGS]( 7640): SERVICE_CREATED sdk=34 targetSdk=33
+[FGS]( 7640): STARTFOREGROUND_OK requested=none typeBit=0
+[FGS]( 7640): EXPORT_DONE type=none elapsedS=45 fileKiB=28096
+    isForeground=true foregroundId=4711 types=00000000 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null default
+
+===== a34-none-ts34-none =====
+apk=/tmp/craftbridge-v7/apk2-ts34/fgslab-none-ts34.apk
+type=none duration_s=45
+install_rc=0
+result=STARTFOREGROUND_FAIL end=2026-11-13T02:00:38+08:00
+[FGS]( 7355): SERVICE_CREATED sdk=34 targetSdk=34
+[FGS]( 7355): STARTFOREGROUND_FAIL requested=none ex=android.app.MissingForegroundServiceTypeException msg=Starting FGS without a type  callerApp=ProcessRecord{a14082b 7355:com.example.fgslab/u0a192} targetSDK=34
+11-13 02:00:17.262 E/CraftFGS( 7355): STARTFOREGROUND_FAIL requested=none ex=android.app.MissingForegroundServiceTypeException msg=Starting FGS without a type  callerApp=ProcessRecord{a14082b 7355:com.example.fgslab/u0a192} targetSDK=34
+11-13 02:00:26.230 I/ActivityManager(  537): Process com.google.android.apps.wellbeing (pid 1622) has died: prev LAST
+
+===== a34-noneflavor-none =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-none-ts37.apk
+type=none duration_s=45
+install_rc=0
+result=STARTFOREGROUND_FAIL end=2026-11-13T01:58:50+08:00
+[FGS]( 6744): SERVICE_CREATED sdk=34 targetSdk=37
+[FGS]( 6744): STARTFOREGROUND_FAIL requested=none ex=android.app.MissingForegroundServiceTypeException msg=Starting FGS without a type  callerApp=ProcessRecord{907eb4b 6744:com.example.fgslab/u0a192} targetSDK=37
+11-13 01:58:29.344 E/CraftFGS( 6744): STARTFOREGROUND_FAIL requested=none ex=android.app.MissingForegroundServiceTypeException msg=Starting FGS without a type  callerApp=ProcessRecord{907eb4b 6744:com.example.fgslab/u0a192} targetSDK=37
+
+===== a34-noperm-datasync =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-noperm-ts37.apk
+type=dataSync duration_s=45
+install_rc=0
+result=STARTFOREGROUND_FAIL end=2026-11-13T01:59:33+08:00
+[FGS]( 6989): SERVICE_CREATED sdk=34 targetSdk=37
+[FGS]( 6989): STARTFOREGROUND_FAIL requested=dataSync ex=java.lang.SecurityException msg=Starting FGS with type dataSync callerApp=ProcessRecord{e74925e 6989:com.example.fgslab/u0a192} targetSDK=37 requires permissions: all of the permissions allOf=true [android.permission.FOREGROUND_SERVICE_DATA_SYNC] 
+11-13 01:59:12.480 E/CraftFGS( 6989): STARTFOREGROUND_FAIL requested=dataSync ex=java.lang.SecurityException msg=Starting FGS with type dataSync callerApp=ProcessRecord{e74925e 6989:com.example.fgslab/u0a192} targetSDK=37 requires permissions: all of the permissions allOf=true [android.permission.FOREGROUND_SERVICE_DATA_SYNC] 
+
+===== a34-noperm-mediaproc =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-noperm-ts37.apk
+type=mediaProcessing duration_s=45
+install_rc=0
+result=STARTFOREGROUND_FAIL end=2026-11-13T01:59:55+08:00
+[FGS]( 7107): SERVICE_CREATED sdk=34 targetSdk=37
+[FGS]( 7107): STARTFOREGROUND_FAIL requested=mediaProcessing ex=android.app.InvalidForegroundServiceTypeException msg=Starting FGS with type unknown callerApp=ProcessRecord{507f434 7107:com.example.fgslab/u0a192} targetSDK=37 has been prohibited
+
+===== a34-noperm-specialuse =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-noperm-ts37.apk
+type=specialUse duration_s=45
+install_rc=0
+result=STARTFOREGROUND_FAIL end=2026-11-13T02:00:16+08:00
+[FGS]( 7238): SERVICE_CREATED sdk=34 targetSdk=37
+[FGS]( 7238): STARTFOREGROUND_FAIL requested=specialUse ex=java.lang.SecurityException msg=Starting FGS with type specialUse callerApp=ProcessRecord{a5c1a04 7238:com.example.fgslab/u0a192} targetSDK=37 requires permissions: all of the permissions allOf=true [android.permission.FOREGROUND_SERVICE_SPECIAL_USE] 
+11-13 01:59:55.739 E/CraftFGS( 7238): STARTFOREGROUND_FAIL requested=specialUse ex=java.lang.SecurityException msg=Starting FGS with type specialUse callerApp=ProcessRecord{a5c1a04 7238:com.example.fgslab/u0a192} targetSDK=37 requires permissions: all of the permissions allOf=true [android.permission.FOREGROUND_SERVICE_SPECIAL_USE] 
+
+===== a37-combo-auto-long =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-combo-ts37.apk
+type=auto duration_s=660
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T02:12:14+08:00
+[FGS](11886): SERVICE_CREATED sdk=37 targetSdk=37
+[FGS](11886): STARTFOREGROUND_OK requested=auto typeBit=8192
+[FGS](11886): EXPORT_DONE type=auto elapsedS=660 fileKiB=408256
+11-13 02:01:14.510 E/libnfc_nci(11817): Timeout waiting for NFC AIDL service (future).
+11-13 02:01:14.512 I/ActivityManager(  644): Process com.google.android.nfc (pid 11817) has died: pers PER 
+    isForeground=true foregroundId=4711 types=0x00002000 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defau
+
+===== a37-combo-short-notdeclared =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-combo-ts37.apk
+type=shortService duration_s=45
+install_rc=0
+result=STARTFOREGROUND_FAIL end=2026-11-13T01:59:40+08:00
+[FGS](10343): SERVICE_CREATED sdk=37 targetSdk=37
+[FGS](10343): STARTFOREGROUND_FAIL requested=shortService ex=java.lang.IllegalArgumentException msg=foregroundServiceType 0x00000800 is not a subset of foregroundServiceType attribute 0x00002001 in service element of manifest file
+11-13 01:59:19.409 E/CraftFGS(10343): STARTFOREGROUND_FAIL requested=shortService ex=java.lang.IllegalArgumentException msg=foregroundServiceType 0x00000800 is not a subset of foregroundServiceType attribute 0x00002001 in service element of manifest file
+11-13 01:59:19.464 E/AndroidRuntime(10343): FATAL EXCEPTION: main
+
+===== a37-full-datasync =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-full-ts37.apk
+type=dataSync duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:53:49+08:00
+[FGS]( 5787): SERVICE_CREATED sdk=37 targetSdk=37
+[FGS]( 5787): STARTFOREGROUND_OK requested=dataSync typeBit=1
+[FGS]( 5787): EXPORT_DONE type=dataSync elapsedS=45 fileKiB=27904
+11-13 01:53:01.471 E/libnfc_nci( 5694): Timeout waiting for NFC AIDL service (future).
+11-13 01:53:01.523 I/ActivityManager(  644): Process com.google.android.nfc (pid 5694) has died: pers PER 
+    isForeground=true foregroundId=4711 types=0x00000001 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defau
+
+===== a37-full-mediaproc =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-full-ts37.apk
+type=mediaProcessing duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:54:38+08:00
+[FGS]( 6461): SERVICE_CREATED sdk=37 targetSdk=37
+[FGS]( 6461): STARTFOREGROUND_OK requested=mediaProcessing typeBit=8192
+[FGS]( 6461): EXPORT_DONE type=mediaProcessing elapsedS=45 fileKiB=27968
+11-13 01:53:50.307 E/libnfc_nci( 6377): Timeout waiting for NFC AIDL service (future).
+11-13 01:53:50.324 I/ActivityManager(  644): Process com.google.android.nfc (pid 6377) has died: pers PER 
+    isForeground=true foregroundId=4711 types=0x00002000 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defau
+
+===== a37-full-none =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-full-ts37.apk
+type=none duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:53:00+08:00
+[FGS]( 5069): SERVICE_CREATED sdk=37 targetSdk=37
+[FGS]( 5069): STARTFOREGROUND_OK requested=none typeBit=0
+[FGS]( 5069): EXPORT_DONE type=none elapsedS=45 fileKiB=28096
+11-13 01:52:11.925 E/libnfc_nci( 4985): Timeout waiting for NFC AIDL service (future).
+11-13 01:52:12.059 I/ActivityManager(  644): Process com.google.android.nfc (pid 4985) has died: pers PER 
+    isForeground=true foregroundId=4711 types=0x40002001 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defau
+
+===== a37-full-short-timeout =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-full-ts37.apk
+type=shortService duration_s=600
+install_rc=0
+result=FGS_ON_TIMEOUT end=2026-11-13T01:58:57+08:00
+[FGS]( 7776): SERVICE_CREATED sdk=37 targetSdk=37
+[FGS]( 7776): STARTFOREGROUND_OK requested=shortService typeBit=2048
+[FGS]( 7776): FGS_ON_TIMEOUT_1ARG startId=1 (shortService timeout, API 34 callback)
+[FGS]( 7776): FGS_ON_TIMEOUT fgsType=1 timeoutSource=2048
+[FGS]( 7776): EXPORT_ABORTED elapsedS=180
+11-13 01:55:27.766 E/libnfc_nci( 7685): Timeout waiting for NFC AIDL service (future).
+11-13 01:55:27.768 I/ActivityManager(  644): Process com.google.android.nfc (pid 7685) has died: pers PER 
+    isForeground=true foregroundId=4711 types=0x00000800 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defau
+
+===== a37-full-specialuse =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-full-ts37.apk
+type=specialUse duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T01:55:27+08:00
+[FGS]( 7161): SERVICE_CREATED sdk=37 targetSdk=37
+[FGS]( 7161): STARTFOREGROUND_OK requested=specialUse typeBit=1073741824
+[FGS]( 7161): EXPORT_DONE type=specialUse elapsedS=45 fileKiB=28224
+11-13 01:54:39.067 E/libnfc_nci( 6999): Timeout waiting for NFC AIDL service (future).
+11-13 01:54:39.102 I/ActivityManager(  644): Process com.google.android.nfc (pid 6999) has died: pers PER 
+    isForeground=true foregroundId=4711 types=0x40000000 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defau
+
+===== a37-full-specialuse-long =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-full-ts37.apk
+type=specialUse duration_s=660
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T02:23:17+08:00
+[FGS](18548): SERVICE_CREATED sdk=37 targetSdk=37
+[FGS](18548): STARTFOREGROUND_OK requested=specialUse typeBit=1073741824
+[FGS](18548): EXPORT_DONE type=specialUse elapsedS=660 fileKiB=410624
+11-13 02:12:16.307 E/libnfc_nci(18459): Timeout waiting for NFC AIDL service (future).
+11-13 02:12:16.309 I/ActivityManager(  644): Process com.google.android.nfc (pid 18459) has died: pers PER 
+    isForeground=true foregroundId=4711 types=0x40000000 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defau
+
+===== a37-full-ts34-mediaproc =====
+apk=/tmp/craftbridge-v7/apk2-ts34/fgslab-full-ts34.apk
+type=mediaProcessing duration_s=45
+install_rc=0
+result=EXPORT_DONE end=2026-11-13T02:01:12+08:00
+[FGS](11270): SERVICE_CREATED sdk=37 targetSdk=34
+[FGS](11270): STARTFOREGROUND_OK requested=mediaProcessing typeBit=8192
+[FGS](11270): EXPORT_DONE type=mediaProcessing elapsedS=45 fileKiB=27840
+11-13 02:00:25.906 E/libnfc_nci(11196): Timeout waiting for NFC AIDL service (future).
+11-13 02:00:25.908 I/ActivityManager(  644): Process com.google.android.nfc (pid 11196) has died: pers PER 
+    isForeground=true foregroundId=4711 types=0x00002000 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defau
+
+===== a37-noneflavor-none =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-none-ts37.apk
+type=none duration_s=45
+install_rc=0
+result=STARTFOREGROUND_FAIL end=2026-11-13T01:59:18+08:00
+[FGS](10002): SERVICE_CREATED sdk=37 targetSdk=37
+[FGS](10002): STARTFOREGROUND_FAIL requested=none ex=android.app.MissingForegroundServiceTypeException msg=Starting FGS without a type  callerApp=ProcessRecord{50c39fb 10002:com.example.fgslab/u0a230} targetSDK=37
+11-13 01:58:57.496 E/libnfc_nci( 9907): Timeout waiting for NFC AIDL service (future).
+11-13 01:58:57.506 I/ActivityManager(  644): Process com.google.android.nfc (pid 9907) has died: pers PER 
+
+===== a37-noperm-datasync =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-noperm-ts37.apk
+type=dataSync duration_s=45
+install_rc=0
+result=STARTFOREGROUND_FAIL end=2026-11-13T02:00:02+08:00
+[FGS](10651): SERVICE_CREATED sdk=37 targetSdk=37
+[FGS](10651): STARTFOREGROUND_FAIL requested=dataSync ex=java.lang.SecurityException msg=Starting FGS with type dataSync callerApp=ProcessRecord{383b46 10651:com.example.fgslab/u0a230} targetSDK=37 requires permissions: all of the permissions [android.permission.FOREGROUND_SERVICE_DATA_SYNC] 
+11-13 01:59:41.044 E/CraftFGS(10651): STARTFOREGROUND_FAIL requested=dataSync ex=java.lang.SecurityException msg=Starting FGS with type dataSync callerApp=ProcessRecord{383b46 10651:com.example.fgslab/u0a230} targetSDK=37 requires permissions: all of the permissions [android.permission.FOREGROUND_SERVICE_DATA_SYNC] 
+11-13 01:59:43.197 E/libnfc_nci(10590): Timeout waiting for NFC AIDL service (future).
+
+===== a37-noperm-mediaproc =====
+apk=/tmp/craftbridge-v7/apk2/fgslab-noperm-ts37.apk
+type=mediaProcessing duration_s=45
+install_rc=0
+result=STARTFOREGROUND_FAIL end=2026-11-13T02:00:23+08:00
+[FGS](10949): SERVICE_CREATED sdk=37 targetSdk=37
+[FGS](10949): STARTFOREGROUND_FAIL requested=mediaProcessing ex=java.lang.SecurityException msg=Starting FGS with type mediaProcessing callerApp=ProcessRecord{42ffc22 10949:com.example.fgslab/u0a230} targetSDK=37 requires permissions: all of the permissions [android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING] 
+11-13 02:00:02.659 E/CraftFGS(10949): STARTFOREGROUND_FAIL requested=mediaProcessing ex=java.lang.SecurityException msg=Starting FGS with type mediaProcessing callerApp=ProcessRecord{42ffc22 10949:com.example.fgslab/u0a230} targetSDK=37 requires permissions: all of the permissions [android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING] 
+11-13 02:00:04.535 E/libnfc_nci(10897): Timeout waiting for NFC AIDL service (future).
+

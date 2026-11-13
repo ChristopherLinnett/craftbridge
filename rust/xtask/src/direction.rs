@@ -110,6 +110,18 @@ pub(crate) fn package_errors(package: &serde_json::Value) -> Vec<String> {
     errors
 }
 
+/// Run the check on the repository's Swift package: the direction of its targets' dependencies, and what
+/// SwiftPM builds that no check sees. A tree without one (a scratch tree) has nothing to ask.
+pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
+    let sdk = root.join("ios").join("sdk");
+    let mut errors = dump_package(&sdk, FILE)?.map(|package| package_errors(&package)).unwrap_or_default();
+    if let Some(targets) = describe_package(&sdk, FILE)? {
+        let read = crate::scan::walk(&sdk, "")?.into_iter().map(|file| file.relative).collect();
+        errors.extend(target_errors(&targets, &read));
+    }
+    Ok(errors)
+}
+
 /// SwiftPM's own reading of the `Package.swift` in `package_dir`, or `None` where there is none (a
 /// scratch tree). The one way every check asks a Swift package what it holds — its targets, their types
 /// and paths, and the packages it takes — so a manifest spelling SwiftPM still accepts (a deprecated
@@ -131,21 +143,109 @@ pub(crate) fn dump_package(package_dir: &Path, shown: &str) -> Result<Option<ser
     serde_json::from_slice(&output.stdout).map(Some).map_err(|error| format!("{shown}: dump-package is not JSON this check can read: {error}"))
 }
 
-/// The folders of a dumped package's test targets, relative to the package: a target's own `path`, or
-/// SwiftPM's default `Tests/<name>`. Only SwiftPM's `test` type makes a target a test, whatever its
-/// folder is called, so a shipping target moved under `Tests/` is still a shipping target.
-pub(crate) fn test_target_folders(package: &serde_json::Value) -> Vec<String> {
-    package
+/// A target as `swift package describe --type json` resolves it: its type, its folder and the files it
+/// compiles (`exclude` and `sources` applied, `./` spellings normalised), the products it ships in, and
+/// the targets it depends on. SwiftPM's own answer to what each target compiles, so no check guesses it
+/// from folder names.
+#[derive(Debug, Default)]
+pub(crate) struct SwiftTarget {
+    pub(crate) name: String,
+    /// SwiftPM's type: `library` for a regular target, `test`, `executable`, `binary`, `macro`, …
+    pub(crate) kind: String,
+    /// The files it compiles, relative to the package.
+    pub(crate) sources: Vec<String>,
+    pub(crate) products: Vec<String>,
+    pub(crate) dependencies: Vec<String>,
+}
+
+/// SwiftPM's resolved description of the package in `package_dir`, or `None` where there is none (a scratch
+/// tree). `shown` is how a message names the manifest.
+pub(crate) fn describe_package(package_dir: &Path, shown: &str) -> Result<Option<Vec<SwiftTarget>>, String> {
+    if !package_dir.join("Package.swift").is_file() {
+        return Ok(None);
+    }
+    let output = Command::new("xcrun")
+        .args(["swift", "package", "describe", "--type", "json"])
+        .current_dir(package_dir)
+        .output()
+        .map_err(|error| format!("{shown}: cannot ask SwiftPM for its targets: {error}"))?;
+    if !output.status.success() {
+        let text = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("{shown}: `swift package describe` failed: {}", text.trim()));
+    }
+    let described: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(|error| format!("{shown}: describe is not JSON this check can read: {error}"))?;
+    Ok(Some(swift_targets(&described)))
+}
+
+/// The targets of a described package.
+pub(crate) fn swift_targets(described: &serde_json::Value) -> Vec<SwiftTarget> {
+    let strings = |target: &serde_json::Value, key: &str| -> Vec<String> {
+        target
+            .get(key)
+            .and_then(serde_json::Value::as_array)
+            .map(|items| items.iter().filter_map(serde_json::Value::as_str).map(str::to_string).collect())
+            .unwrap_or_default()
+    };
+    described
         .get("targets")
         .and_then(serde_json::Value::as_array)
         .into_iter()
         .flatten()
-        .filter(|target| target.get("type").and_then(serde_json::Value::as_str) == Some("test"))
-        .filter_map(|target| {
-            let name = target.get("name").and_then(serde_json::Value::as_str)?;
-            Some(target.get("path").and_then(serde_json::Value::as_str).map_or_else(|| format!("Tests/{name}"), |path| path.trim_end_matches('/').to_string()))
+        .map(|target| {
+            let path = target.get("path").and_then(serde_json::Value::as_str).unwrap_or_default().trim_end_matches('/').to_string();
+            SwiftTarget {
+                name: target.get("name").and_then(serde_json::Value::as_str).unwrap_or_default().to_string(),
+                kind: target.get("type").and_then(serde_json::Value::as_str).unwrap_or_default().to_string(),
+                sources: strings(target, "sources").into_iter().map(|source| if path.is_empty() { source } else { format!("{path}/{source}") }).collect(),
+                products: strings(target, "product_memberships"),
+                dependencies: strings(target, "target_dependencies"),
+            }
         })
         .collect()
+}
+
+/// The files SwiftPM compiles into test targets, relative to the package: the only Swift that is test
+/// code, whatever folder it sits in and whatever folder a shipping target shares with it.
+pub(crate) fn test_sources(targets: &[SwiftTarget]) -> std::collections::BTreeSet<String> {
+    targets.iter().filter(|target| target.kind == "test").flat_map(|target| target.sources.iter().cloned()).collect()
+}
+
+/// What SwiftPM builds that no check sees: a file a target compiles that the rules' walk does not read
+/// (one inside build output, which every stage prunes), and a regular target that no product and no test
+/// or executable target uses, which the package scheme the `swift_build` stage builds never compiles.
+/// `read` are the walk's files, relative to the package.
+pub(crate) fn target_errors(targets: &[SwiftTarget], read: &std::collections::BTreeSet<String>) -> Vec<String> {
+    let mut errors = Vec::new();
+    for target in targets.iter().filter(|target| target.kind != "binary") {
+        for source in target.sources.iter().filter(|source| !read.contains(*source)) {
+            errors.push(format!(
+                "{FILE}: target `{}` compiles ios/sdk/{source}, which lies in build output no check reads: a target's sources sit where every check reads them",
+                target.name
+            ));
+        }
+    }
+    let mut built: Vec<&str> = targets
+        .iter()
+        .filter(|target| !target.products.is_empty() || target.kind == "test" || target.kind == "executable")
+        .map(|target| target.name.as_str())
+        .collect();
+    let mut next = 0;
+    while let Some(name) = built.get(next).copied() {
+        next += 1;
+        for dependency in targets.iter().filter(|target| target.name == name).flat_map(|target| &target.dependencies) {
+            if !built.contains(&dependency.as_str()) {
+                built.push(dependency);
+            }
+        }
+    }
+    for target in targets.iter().filter(|target| target.kind == "library" && !built.contains(&target.name.as_str())) {
+        errors.push(format!(
+            "{FILE}: target `{}` is in no product and no test or executable target depends on it, so the swift_build stage never compiles it",
+            target.name
+        ));
+    }
+    errors
 }
 
 /// The published packages a dumped package takes: each source-control dependency's URL and each
@@ -171,11 +271,6 @@ pub(crate) fn published_packages(package: &serde_json::Value) -> Vec<String> {
     packages.sort();
     packages.dedup();
     packages
-}
-
-/// Run the check on the repository's Swift package. A tree without one (a scratch tree) has nothing to ask.
-pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
-    Ok(dump_package(&root.join("ios").join("sdk"), FILE)?.map(|package| package_errors(&package)).unwrap_or_default())
 }
 
 #[cfg(test)]
@@ -296,10 +391,36 @@ mod tests {
         );
     }
 
+    /// The shape `swift package describe --type json` printed for a scratch package: a library, one under
+    /// the build-output `Frameworks/`, a shipping target nested in a test target's folder (which excludes
+    /// it), and a test target spelt `./Tests/ATests`.
+    const DESCRIBED: &str = r#"{"targets": [
+        {"name": "N", "type": "library", "path": "Tests/ATests/Nested", "sources": ["N.swift"]},
+        {"name": "B", "type": "library", "path": "Frameworks/B", "sources": ["B.swift"]},
+        {"name": "ATests", "type": "test", "path": "Tests/ATests", "sources": ["T.swift"], "target_dependencies": ["A", "N"]},
+        {"name": "A", "type": "library", "path": "Sources/A", "sources": ["A.swift"], "product_memberships": ["A"]},
+        {"name": "Extras", "type": "library", "path": "Sources/Extras", "sources": ["Extras.swift"]},
+        {"name": "FFIBinary", "type": "binary", "path": "Frameworks/X.xcframework"}
+    ]}"#;
+
     #[test]
-    fn only_a_target_of_the_test_type_is_a_test_folder() {
-        let package: serde_json::Value = serde_json::from_str(PROBED).unwrap();
-        assert_eq!(test_target_folders(&package), ["Tests/ATests", "Checks"], "a library moved under Tests/ is not a test");
+    fn only_the_files_swiftpm_compiles_into_a_test_target_are_test_code() {
+        let targets = swift_targets(&serde_json::from_str(DESCRIBED).unwrap());
+        assert_eq!(test_sources(&targets).into_iter().collect::<Vec<_>>(), ["Tests/ATests/T.swift"], "the nested shipping target is not a test");
+    }
+
+    #[test]
+    fn a_target_built_from_build_output_or_built_by_nothing_is_refused() {
+        let targets = swift_targets(&serde_json::from_str(DESCRIBED).unwrap());
+        let read = ["Sources/A/A.swift", "Tests/ATests/T.swift", "Tests/ATests/Nested/N.swift", "Sources/Extras/Extras.swift"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        let errors = target_errors(&targets, &read);
+        assert_eq!(errors.len(), 3, "{errors:?}");
+        assert!(errors.iter().any(|e| e.contains("target `B` compiles ios/sdk/Frameworks/B/B.swift, which lies in build output")), "{errors:?}");
+        assert!(errors.iter().any(|e| e.contains("target `B` is in no product")), "{errors:?}");
+        assert!(errors.iter().any(|e| e.contains("target `Extras` is in no product")), "{errors:?}");
     }
 
     #[test]

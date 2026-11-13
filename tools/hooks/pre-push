@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
-# Runs the gate on the checkout before every push (AGENTS.md): the working tree as it is, not the
-# commits being pushed, so commit or set aside unfinished edits first.
+# Runs the gate before every push (AGENTS.md), on the working tree the push comes from: the tree as it is,
+# not the commits being pushed, so commit or set aside unfinished edits first.
 # Installed by `tools/doctor.sh --install-hooks`.
 set -euo pipefail
+# Git gives the hook one line per ref: <local ref> <local sha> <remote ref> <remote sha>. A push that only
+# deletes branches carries no commit for the gate to judge, so it is not gated.
+carries_commits=0
+read_any=0
+while read -r _ local_sha _ _; do
+  read_any=1
+  if [ -n "${local_sha//0/}" ]; then carries_commits=1; fi
+done
+if [ "$read_any" = 1 ] && [ "$carries_commits" = 0 ]; then exit 0; fi
 exec "$(git rev-parse --show-toplevel)/tools/ci.sh"

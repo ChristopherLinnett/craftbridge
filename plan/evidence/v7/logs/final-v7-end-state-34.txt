@@ -1,0 +1,16 @@
+# final-v7 API 34 end state 21:28:13
+sdk=34
+$ adb uninstall com.example.fgslab
+Success
+pm list packages com.example.fgslab: []
+data_sync_fgs_timeout_duration=null
+media_processing_fgs_timeout_duration=null
+short_fgs_timeout_duration=null
+sync: none
+compat overrides for the two dataSync switches:
+ChangeId(255659651; name=FGS_TYPE_DATA_SYNC_DISABLED_CHANGE_ID; disabled; overridable)
+ChangeId(255039210; name=FGS_TYPE_DATA_SYNC_DEPRECATION_CHANGE_ID; disabled; overridable)
+any package override naming com.example.fgslab: 0
+$ adb -s emulator-5554 emu kill
+OK: killing emulator, bye bye
+OK

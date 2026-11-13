@@ -1,0 +1,131 @@
+distinct double-quoted passages: 63
+
+=== not found in ANY doc file: 8 ===
+  QUOTE: mediaProcessing|dataSync
+   MISS: mediaProcessing|dataSync
+  QUOTE: Unknown type, fallback to the defaultToType
+   MISS: Unknown type, fallback to the defaultToType
+  QUOTE: extra second
+   MISS: extra second
+  QUOTE: the app is currently in the TOP state or was in the TOP state after the time limit was exhausted previously
+   MISS: the app is currently in the TOP state or was in the TOP state after the time limit was exhausted previously
+  QUOTE: Log a WTF instead of crashing the app while the new behavior is gated
+   MISS: Log a WTF instead of crashing the app while the new behavior is gated
+  QUOTE: no type on old devices
+   MISS: no type on old devices
+  QUOTE: autostart
+   MISS: autostart
+  QUOTE: Swipe to dismiss from recents
+   MISS: Swipe to dismiss from recents
+
+=== found; quote -> docs files ===
+  finished
+     -> play-console-fgs.html, service-ref.html, service-ref.txt
+  Manifest
+     -> bgstart.html, docs_tmp.html, play-console-fgs.html, service-ref.html, service-ref.txt, service-types-live.html, service-types.html, serviceinfo-ref.txt, v14-required-live.html, v14-required.html
+  doesn't receive a timeout, nor does it ANR
+     -> service-types.txt, v14-required.txt
+  Can only run for a short period of time (about 3 minutes)
+     -> service-types-live.html, service-types-live.txt, service-types.html, service-types.txt, v14-required-live.html, v14-required-live.txt, v14-required.html, v14-required.txt
+  Added in API level 34
+     -> service-ref.txt, serviceinfo-ref.txt
+  doesn't finish even after it's timed out, the app will be declared an ANR after a short grace period of several seconds
+     -> service-ref.html, service-ref.txt
+  Added in API level 35
+     -> service-ref.txt, serviceinfo-ref.txt
+  will also be called when a foreground service of type ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE times out
+     -> service-ref.txt
+  The Service.onTimeout() callback doesn't exist on Android 13 and lower. If the same service runs on such devices, it doesn't recei
+     -> service-types.txt, v14-required.txt
+  has time limit of 6 hours starting from Android version Build.VERSION_CODES.VANILLA_ICE_CREAM
+     -> serviceinfo-ref.txt
+  it will never be called
+     -> docs_tmp.html, serviceinfo-ref.txt
+  If an app targets Android 15 or higher, the system places restrictions on how long certain foreground services are allowed to run 
+     -> fgs-timeout.txt
+  a total of 6 hours in a 24-hour period
+     -> fgs-timeout.html, fgs-timeout.txt
+  if the user brings the app to the foreground
+     -> fgs-timeout.html, fgs-timeout.txt
+  A foreground service of type [service type] did not stop within its timeout
+     -> fgs-timeout.html, fgs-timeout.txt
+  has the full six hours after the app goes to the background
+     -> fgs-timeout.html, fgs-timeout.txt
+  that time counter begins as soon as the foreground service starts
+     -> service-ref.html, service-ref.txt
+  Time limit already exhausted for foreground service type …
+     -> fgs-timeout.html, fgs-timeout.txt
+  6 hours
+     -> datasync-migration.html, datasync-migration.txt, docs_tmp.html, fgs-timeout.html, fgs-timeout.txt, service-ref.html, service-ref.txt, service-types-live.html, service-types-live.txt, service-types.html, service-types.txt, serviceinfo-ref.txt, v15-changes.html, v15-changes.txt
+  (The mediaProcessing foreground service type was added in Android 15.)
+     -> fgs-timeout.txt
+  can be also used on prior android versions (just like other new foreground service types can be used)
+     -> docs_tmp.html, serviceinfo-ref.txt
+  is available if your app targets Android 15 or higher
+     -> datasync-migration.html, datasync-migration.txt
+  Import or export operations
+     -> service-types-live.html, service-types-live.txt, service-types.html, service-types.txt, v14-required-live.html, v14-required-live.txt, v14-required.html, v14-required.txt
+  Local file processing
+     -> service-types-live.html, service-types-live.txt, service-types.html, service-types.txt, v14-required-live.html, v14-required-live.txt, v14-required.html, v14-required.txt
+  Encoding or decoding a media file
+     -> datasync-migration.html, datasync-migration.txt
+  android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE
+     -> docs_tmp.html, service-types-live.html, service-types-live.txt, service-types.html, service-types.txt, serviceinfo-ref.txt, v14-required-live.html, v14-required-live.txt, v14-required.html, v14-required.txt
+  These values and corresponding use cases are reviewed when you submit your app in the Google Play Console.
+     -> service-types-live.html, service-types-live.txt, service-types.html, service-types.txt, v14-required-live.html, v14-required-live.txt, v14-required.html, v14-required.txt
+  if it fails to do so, the app will crash
+     -> service-ref.html, service-ref.txt
+  do not need to implement both of the callbacks
+     -> service-ref.html, service-ref.txt
+  Apps that target Android 12 (API level 31) or higher can't start foreground services while the app is running in the background, e
+     -> bgstart.txt
+  When your apps target Android 14 and above, you'll need to declare any foreground service types that you use in a new declaration 
+     -> play-console-fgs.txt
+  Policy > App content
+     -> service-types.txt, v14-required.txt
+  For each foreground service type you declare, you'll need to do the following
+     -> play-console-fgs.html, play-console-fgs.txt
+  Provide a description of the app functionality that is using each foreground service type
+     -> play-console-fgs.html, play-console-fgs.txt
+  Describe the user impact if: the task is deferred by the system (does not start immediately); and/or the task is interrupted by th
+     -> play-console-fgs.txt
+  Include a link to a video demonstrating each foreground service feature
+     -> play-console-fgs.html, play-console-fgs.txt
+  Choose your specific use case for each foreground service type
+     -> play-console-fgs.html, play-console-fgs.txt
+  Local processing : Import or export
+     -> play-console-fgs.txt
+  Includes migration of files from SD card
+     -> play-console-fgs.html, play-console-fgs.txt
+  Show the user manually triggering an import or export of files locally
+     -> play-console-fgs.html, play-console-fgs.txt
+  Local processing : Other
+     -> play-console-fgs.txt
+  Use for specifically user-initiated work and not for regular system or server-initiated tasks. For example, encryption, resizing.
+     -> play-console-fgs.html, play-console-fgs.txt
+  we recommend using the user-initiated data transfer job instead of the dataSync foreground service type
+     -> play-console-fgs.html, play-console-fgs.txt
+  Media transcoding
+     -> play-console-fgs.html, play-console-fgs.txt
+  Performing time-consuming operations on media assets, like converting media to different formats
+     -> play-console-fgs.html, play-console-fgs.txt
+  Show the user initiating the app converting or transcoding a video or audio file to a different format
+     -> play-console-fgs.html, play-console-fgs.txt
+  Import or export
+     -> play-console-fgs.html, play-console-fgs.txt, service-types-live.html, service-types-live.txt, service-types.html, service-types.txt, v14-required-live.html, v14-required-live.txt, v14-required.html, v14-required.txt
+  Other
+     -> awake.html, awake.txt, bgstart.html, bgstart.txt, datasync-migration.html, datasync-migration.txt, docs_tmp.html, fgs-guide.txt, fgs-timeout.html, fgs-timeout.txt, play-console-fgs.html, play-console-fgs.txt, service-ref.html, service-ref.txt, service-types-live.html, service-types-live.txt, service-types.html, service-types.txt, serviceinfo-ref.txt, v12-changes.html, v14-required-live.html, v14-required-live.txt, v14-required.html, v14-required.txt, v15-changes.html, v15-changes.txt
+  Would it be detrimental to the user experience if the device suspends while the foreground service is running and the device scree
+     -> awake.html, awake.txt
+  If Yes, you might need to use a wake lock. However, you should still check to see if you're already using an API or doing an actio
+     -> awake.txt
+  If your app is doing any of the following, you don't need to set a wake lock yourself
+     -> awake.txt
+  If you're using task scheduling APIs or libraries such as WorkManager, JobScheduler, or DownloadManager, the system or library acq
+     -> awake.txt
+  If you're using Media3 ExoPlayer, you can use ExoPlayer.setWakeMode() to have the player set a wake lock for you
+     -> awake.txt
+  you cannot start another dataSync foreground service unless the user has brought your app to the foreground (which resets the time
+     -> fgs-timeout.txt
+  in addition to requesting the FOREGROUND_SERVICE permission
+     -> service-types-live.txt, service-types.txt

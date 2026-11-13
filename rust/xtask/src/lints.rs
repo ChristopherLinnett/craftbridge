@@ -16,7 +16,8 @@
 //! `cargo clippy` or `cargo xtask`, and whose `[env]` reaches clippy; not a build script, which runs
 //! before the compiler takes the table and can hand it flags and cfgs through `cargo::rustc-env` and
 //! `cargo::rustc-cfg`, so a crate has one only when the layer table marks it; and not a file the compiler
-//! reads that no rule does, which `#[path]` and `include!` would bring in. A profile that aborts is
+//! reads that no rule does, which the compiler's own dep-info decides (`cargo xtask compiled`, run by every
+//! cargo stage of `tools/ci.sh`). A profile that aborts is
 //! refused wherever it is set: the engine's last-resort guard catches a panic on a Craft thread, which
 //! needs unwinding to exist at all.
 //!
@@ -27,19 +28,28 @@
 use crate::{attributes, machinery, scan};
 use std::path::Path;
 
-/// The clippy lints that forbid panicking, plus the one that keeps every `unsafe` block documented.
-pub(crate) const DENIED_CLIPPY_LINTS: &[&str] = &["unwrap_used", "expect_used", "panic", "unimplemented", "todo", "unreachable", "undocumented_unsafe_blocks"];
+/// The clippy lints that forbid panicking, the two that name the same calls by path (and reach a macro's
+/// expansion and a method taken as a value), and the one that keeps every `unsafe` block documented.
+pub(crate) const DENIED_CLIPPY_LINTS: &[&str] =
+    &["unwrap_used", "expect_used", "panic", "unimplemented", "todo", "unreachable", "disallowed_methods", "disallowed_macros", "undocumented_unsafe_blocks"];
 
 /// The denied lints with no exception at all, which the table sets to `forbid`: the compiler then refuses
 /// every `allow` of them in any file it reads, which no reading of the source can promise. Tests keep
 /// `unwrap`, `expect` and `panic!` through clippy's own `allow-*-in-tests`, which a `forbid` does not touch.
 const FORBIDDEN_CLIPPY_LINTS: &[&str] = &["unwrap_used", "panic", "unimplemented", "todo", "unreachable"];
 
-/// The one denied lint an item may allow, on a provably infallible literal (AGENTS.md §3).
+/// The one denied lint an item may allow, on a provably infallible literal (AGENTS.md §3), and the lint
+/// that names the same `.expect` by path, which the item allows beside it and never alone.
 const ITEM_EXCEPTION: &str = "expect_used";
+const ITEM_EXCEPTION_BY_PATH: &str = "disallowed_methods";
 
-/// The clippy group every lint above belongs to, so switching the group off switches them all off.
-const DENIED_CLIPPY_GROUP: &str = "restriction";
+/// The clippy groups that hold the lints above, so switching a group off switches them off: `restriction`
+/// holds the never-crash lints, `style` (and `all`, which holds it) the two by path.
+const DENIED_CLIPPY_GROUPS: &[&str] = &["restriction", "style", "all"];
+
+/// The groups of lints on by default, which `-D warnings` makes errors: a table entry that allows one
+/// switches off every lint in it at once.
+const DEFAULT_CLIPPY_GROUPS: &[&str] = &["all", "correctness", "suspicious", "style", "complexity", "perf"];
 
 /// Former names of the denied lints, and the lint each now is. The compiler still applies a former name
 /// to the lint it became, with only a warning, so an `allow` under the old name is an `allow` of the lint.
@@ -82,7 +92,10 @@ fn level_is_denied(value: Option<&toml::Value>) -> bool {
 /// a macro fills in might, so it does.
 fn reaches_denied_lint(item: &str) -> bool {
     item == attributes::UNREADABLE
-        || item.strip_prefix("clippy::").map(canonical_lint).is_some_and(|name| name == DENIED_CLIPPY_GROUP || DENIED_CLIPPY_LINTS.contains(&name.as_str()))
+        || item
+            .strip_prefix("clippy::")
+            .map(canonical_lint)
+            .is_some_and(|name| DENIED_CLIPPY_GROUPS.contains(&name.as_str()) || DENIED_CLIPPY_LINTS.contains(&name.as_str()))
 }
 
 /// Parse a TOML file, turning a parse failure into a named error rather than a panic or an `unwrap`.
@@ -119,8 +132,14 @@ pub(crate) fn workspace_manifest_violations(source: &str, name: &str) -> Vec<Str
             }
         }
     }
-    for (key, _) in entries_reaching(clippy_lints, DENIED_CLIPPY_GROUP).iter().filter(|(_, level)| !level_is_denied(Some(level))) {
+    for (key, _) in entries_reaching(clippy_lints, "restriction").iter().filter(|(_, level)| !level_is_denied(Some(level))) {
         errors.push(format!("{name}: [workspace.lints.clippy].{key} below deny switches off every denied lint the group holds"));
+    }
+    let defaults = DEFAULT_CLIPPY_GROUPS.iter().map(|group| ("clippy", clippy_lints, *group)).chain(std::iter::once(("rust", rust_lints, "warnings")));
+    for (tool, table, group) in defaults {
+        for (key, _) in entries_reaching(table, group).iter().filter(|(_, level)| level_of(Some(level)) == Some("allow")) {
+            errors.push(format!("{name}: [workspace.lints.{tool}].{key} = allow switches off every lint the group holds, which `-D warnings` makes errors"));
+        }
     }
     errors.extend(panic_violations(&document, name));
     errors
@@ -296,8 +315,10 @@ pub(crate) fn weakened_crate_attributes(stripped_lines: &[String], name: &str) -
             (false, None) if allowance.level == attributes::MACRO_ATTRIBUTE => continue,
             (false, None) => ("#", " on one item".to_string(), true),
         };
+        let names: Vec<String> = allowance.lints.iter().filter_map(|lint| lint.strip_prefix("clippy::").map(canonical_lint)).collect();
+        let excepted = |name: &str| item && (name == ITEM_EXCEPTION || (name == ITEM_EXCEPTION_BY_PATH && names.iter().any(|other| other == ITEM_EXCEPTION)));
         for lint in allowance.lints.iter().filter(|lint| reaches_denied_lint(lint)) {
-            if item && lint.strip_prefix("clippy::").map(canonical_lint).as_deref() == Some(ITEM_EXCEPTION) {
+            if lint.strip_prefix("clippy::").map(canonical_lint).is_some_and(|name| excepted(&name)) {
                 continue;
             }
             let why = if item {
@@ -306,30 +327,6 @@ pub(crate) fn weakened_crate_attributes(stripped_lines: &[String], name: &str) -
                 "weakens a lint the workspace denies, and a crate may not switch it off"
             };
             errors.push(format!("{name}:{}: {hash}[{}({lint})]{place} {why}", allowance.line, allowance.level));
-        }
-    }
-    errors
-}
-
-/// The ways a Rust file makes the compiler read code from a file no rule walks: `#[path = …]` names a
-/// module file of any name and extension, and `include!` pastes a file's text in. Every rule here reads a
-/// crate's `.rs` files, so either would hide code from all of them. `include_str!` and `include_bytes!`
-/// read data, not code, and stay legal.
-pub(crate) fn hidden_source_violations(stripped_lines: &[String], name: &str) -> Vec<String> {
-    let text = stripped_lines.join("\n");
-    let mut errors: Vec<String> = attributes::path_attributes(&text)
-        .into_iter()
-        .map(|line| format!("{name}:{line}: #[path] points the compiler at a file no rule reads: a module lives in the file its name gives it"))
-        .collect();
-    for (index, line) in stripped_lines.iter().enumerate() {
-        let bytes = line.as_bytes();
-        let mut from = 0usize;
-        while let Some(at) = scan::find(bytes, from, b"include") {
-            from = at + "include".len();
-            let whole = (at == 0 || !scan::ident_byte(line, at - 1)) && !scan::ident_byte(line, from);
-            if whole && bytes.get(attributes::skip_whitespace(bytes, from)) == Some(&b'!') {
-                errors.push(format!("{name}:{}: include! pastes in code from a file no rule reads: write it as a module", index + 1));
-            }
         }
     }
     errors
@@ -363,7 +360,7 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
         errors.extend(clippy_config_violations(&scan::read_text(&clippy_config)?, machinery::CLIPPY_CONFIGURATION));
     }
 
-    for package in crate::meta::read(&rust_dir, true)? {
+    for package in crate::meta::read(&rust_dir, crate::meta::Graph::Workspace)? {
         let manifest = Path::new(&package.manifest_path);
         let shown = crate::report::shown(root, manifest);
         errors.extend(package_lints_violations(&scan::read_text(manifest)?, &shown));
@@ -377,7 +374,6 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
         let shown = crate::report::shown(root, &file.path);
         let stripped = scan::strip_rust(&scan::read_text(&file.path)?);
         errors.extend(weakened_crate_attributes(&stripped, &shown));
-        errors.extend(hidden_source_violations(&stripped, &shown));
     }
     Ok(errors)
 }
@@ -400,6 +396,8 @@ panic = "forbid"
 unimplemented = "forbid"
 todo = "forbid"
 unreachable = "forbid"
+disallowed_methods = "deny"
+disallowed_macros = "deny"
 undocumented_unsafe_blocks = "deny"
 
 [profile.release]
@@ -680,15 +678,27 @@ panic = "unwind"
     }
 
     #[test]
-    fn a_file_the_compiler_reads_but_no_rule_walks_is_refused() {
-        let hidden = |source: &str| hidden_source_violations(&scan::strip_rust(source), "x.rs");
-        assert_eq!(
-            hidden("#[path = \"inner.txt\"]\npub mod inner;\n"),
-            ["x.rs:1: #[path] points the compiler at a file no rule reads: a module lives in the file its name gives it"]
-        );
-        assert_eq!(hidden("#[cfg_attr(all(), path = \"other.rs\")]\nmod other;\n").len(), 1, "inside cfg_attr");
-        assert_eq!(hidden("include!(\"inner.txt\");\nstd::include! (\"x.rs\");\n").len(), 2);
-        assert!(hidden("const DATA: &str = include_str!(\"data.txt\");\nconst BYTES: &[u8] = include_bytes!(\"a.bin\");\n// include!(\"no\")\n").is_empty());
+    fn a_default_group_switched_off_in_the_table_is_refused() {
+        for (table, key) in [("clippy", "all"), ("clippy", "style"), ("clippy", "correctness"), ("clippy", "perf"), ("rust", "warnings")] {
+            let weakened = GOOD_MANIFEST
+                .replace(&format!("[workspace.lints.{table}]\n"), &format!("[workspace.lints.{table}]\n{key} = {{ level = \"allow\", priority = 1 }}\n"));
+            let errors = workspace_manifest_violations(&weakened, "rust/Cargo.toml");
+            assert!(errors.iter().any(|e| e.contains(&format!("[workspace.lints.{table}].{key} = allow switches off"))), "{key}: {errors:?}");
+        }
+        let warned = GOOD_MANIFEST.replace("[workspace.lints.clippy]\n", "[workspace.lints.clippy]\npedantic = \"warn\"\nstyle = \"warn\"\n");
+        assert!(workspace_manifest_violations(&warned, "rust/Cargo.toml").is_empty());
+        let without = GOOD_MANIFEST.replace("disallowed_methods = \"deny\"\n", "");
+        assert!(workspace_manifest_violations(&without, "rust/Cargo.toml").iter().any(|e| e.contains("disallowed_methods must be deny or forbid")));
+    }
+
+    #[test]
+    fn the_calls_by_path_are_allowed_on_an_item_only_beside_the_expect_exception() {
+        assert!(weakened("#[allow(clippy::expect_used, clippy::disallowed_methods)]\nfn f() {}\n").is_empty());
+        let alone = weakened("#[allow(clippy::disallowed_methods)]\nfn f() {}\n");
+        assert!(alone.len() == 1 && alone[0].contains("disallowed_methods"), "{alone:?}");
+        assert_eq!(weakened("#![allow(clippy::disallowed_macros)]\n").len(), 1);
+        assert_eq!(weakened("#![allow(clippy::all)]\n").len(), 1, "all holds style, which holds the calls by path");
+        assert!(weakened("#![cfg_attr(test, allow(clippy::disallowed_methods))]\n").is_empty());
     }
 
     #[test]

@@ -1,8 +1,9 @@
 //! The one reader of `cargo metadata`, shared by every check that needs the package graph.
 //!
-//! Three checks need the graph and they need it with different breadth: the layer rules and the lint
-//! table only want the workspace's own packages, the duplicate check wants the whole resolved graph. The
-//! flags differ, but the reading, the error text and the shape of a package are defined once here.
+//! The checks need the graph with different breadth: the layer rules and the lint table read the
+//! workspace's own packages and what each declares, the layer rules and the duplicate check read the whole
+//! resolved graph as well. The flags differ, but the reading, the error text and the shape of a package are
+//! defined once here.
 
 use std::path::Path;
 use std::process::Command;
@@ -27,20 +28,28 @@ pub(crate) struct Crate {
     pub(crate) build_script: Option<String>,
     /// The package ids this package's resolved dependencies are, when the metadata was read with them.
     pub(crate) depends_on: Vec<String>,
+    /// A member of the workspace, as `cargo metadata`'s `workspace_members` lists them.
+    pub(crate) member: bool,
+    /// The names of the package's binary targets, which are the commands it builds.
+    pub(crate) binary_targets: Vec<String>,
 }
 
 pub(crate) struct CrateDependency {
     pub(crate) name: String,
     /// Absolute path for a workspace/path dependency, `None` for an external one.
     pub(crate) path: Option<String>,
+    /// Where an external dependency comes from (`git+https://github.com/storytold/effectcraft?rev=…`, a
+    /// registry), as the manifest declares it.
+    pub(crate) source: Option<String>,
     /// A dev-dependency, built only for the crate's own tests, examples and benchmarks.
     pub(crate) dev: bool,
 }
 
 /// Every target kind a library can be built as. A crate whose only library type is `staticlib` reports
 /// its target as kind `staticlib`, not `lib`, so filtering on `lib` alone would hide exactly the native
-/// library the layer rules look for.
-const LIBRARY_KINDS: &[&str] = &["lib", "rlib", "dylib", "staticlib", "cdylib"];
+/// library the layer rules look for; a proc-macro library reports `proc-macro`, and its `[lib] name` is
+/// the name code imports as surely as any other library's.
+const LIBRARY_KINDS: &[&str] = &["lib", "rlib", "dylib", "staticlib", "cdylib", "proc-macro"];
 
 pub(crate) struct CrateTarget {
     /// The target's name, which is the crate name code imports it by and the file name of what it builds.
@@ -60,6 +69,7 @@ fn parse(stdout: &[u8]) -> Result<Metadata, String> {
 /// Turn the `packages` array into the small shape the rules use.
 fn packages(metadata: &Metadata) -> Result<Vec<Crate>, String> {
     let list = metadata.get("packages").and_then(Metadata::as_array).ok_or("cargo metadata has no `packages` array")?;
+    let members = metadata.get("workspace_members").and_then(Metadata::as_array).map(Vec::as_slice).unwrap_or_default();
     let mut crates = Vec::with_capacity(list.len());
     for package in list {
         let text = |key: &str| package.get(key).and_then(Metadata::as_str).unwrap_or_default().to_string();
@@ -72,6 +82,7 @@ fn packages(metadata: &Metadata) -> Result<Vec<Crate>, String> {
                     .map(|dep| CrateDependency {
                         name: dep.get("name").and_then(Metadata::as_str).unwrap_or_default().to_string(),
                         path: dep.get("path").and_then(Metadata::as_str).map(str::to_string),
+                        source: dep.get("source").and_then(Metadata::as_str).map(str::to_string),
                         dev: dep.get("kind").and_then(Metadata::as_str) == Some("dev"),
                     })
                     .collect()
@@ -99,9 +110,27 @@ fn packages(metadata: &Metadata) -> Result<Vec<Crate>, String> {
                     .unwrap_or_default(),
             })
             .collect();
+        let binary_targets = targets
+            .into_iter()
+            .flatten()
+            .filter(|target| has_kind(target, &|kind| kind == "bin"))
+            .map(|target| target.get("name").and_then(Metadata::as_str).unwrap_or_default().to_string())
+            .collect();
         let id = text("id");
         let depends_on = resolved_dependencies(metadata, &id);
-        crates.push(Crate { name: text("name"), id, source, manifest_path: text("manifest_path"), dependencies, library_targets, build_script, depends_on });
+        let member = members.iter().any(|member| member.as_str() == Some(id.as_str()));
+        crates.push(Crate {
+            name: text("name"),
+            id,
+            source,
+            manifest_path: text("manifest_path"),
+            dependencies,
+            library_targets,
+            build_script,
+            depends_on,
+            member,
+            binary_targets,
+        });
     }
     Ok(crates)
 }
@@ -118,16 +147,27 @@ fn resolved_dependencies(metadata: &Metadata, id: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Run cargo metadata and read it. `no_deps` asks only for the workspace's own packages, which is all
-/// the layer rules need and far less for cargo to resolve. `--locked` because the gate reads the graph
-/// `Cargo.lock` pins and never writes it: a lock file that needs updating fails here instead of
-/// changing under the change being checked.
-pub(crate) fn read(rust_dir: &Path, no_deps: bool) -> Result<Vec<Crate>, String> {
+/// Which graph a check reads.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Graph {
+    /// The workspace's own packages and what each declares (`--no-deps`): far less for cargo to resolve.
+    Workspace,
+    /// The whole graph Cargo resolves with every feature of every member turned on (`--all-features`), so
+    /// a package a feature, a `[patch]` or a `[replace]` brings in is in it: code behind a feature is code
+    /// that ships to whoever turns the feature on, as clippy and cargo-deny read it too.
+    Resolved,
+}
+
+/// Run cargo metadata and read it. `--locked` because the gate reads the graph `Cargo.lock` pins and never
+/// writes it: a lock file that needs updating fails here instead of changing under the change being
+/// checked.
+pub(crate) fn read(rust_dir: &Path, graph: Graph) -> Result<Vec<Crate>, String> {
     let mut command = Command::new(env!("CARGO"));
     command.current_dir(rust_dir).arg("metadata").arg("--format-version").arg("1").arg("--locked");
-    if no_deps {
-        command.arg("--no-deps");
-    }
+    command.arg(match graph {
+        Graph::Workspace => "--no-deps",
+        Graph::Resolved => "--all-features",
+    });
     let output = command.output().map_err(|error| format!("could not run `{}`: {error}", env!("CARGO")))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -153,10 +193,10 @@ mod tests {
             ],
             "targets": [
                 {"kind": ["lib"], "name": "craftbridge_core", "crate_types": ["lib", "cdylib"]},
-                {"kind": ["bin"], "crate_types": ["bin"]}
+                {"kind": ["bin"], "name": "core-tool", "crate_types": ["bin"]}
             ]
         }],
-        "workspace_members": [], "resolve": null, "target_directory": "", "version": 1, "workspace_root": "/x"
+        "workspace_members": ["path+file:///x/craftbridge-core#0.1.0"], "resolve": null, "target_directory": "", "version": 1, "workspace_root": "/x"
     }"#;
 
     #[test]
@@ -173,6 +213,20 @@ mod tests {
         assert_eq!(package.library_targets[0].crate_types, ["lib".to_string(), "cdylib".to_string()]);
         assert_eq!(package.library_targets[0].name, "craftbridge_core");
         assert_eq!(package.build_script, None);
+        assert!(package.member);
+        assert_eq!(package.binary_targets, ["core-tool"]);
+    }
+
+    #[test]
+    fn a_proc_macro_library_is_a_library_target_and_a_declared_source_is_kept() {
+        let json = r#"{"packages": [{"name": "a", "id": "a#1", "version": "1", "manifest_path": "/a/Cargo.toml",
+            "dependencies": [{"name": "posterize-bands", "kind": null, "source": "git+https://github.com/storytold/effectcraft?rev=1#1"}],
+            "targets": [{"kind": ["proc-macro"], "name": "film_x", "crate_types": ["proc-macro"]}]}], "workspace_members": []}"#;
+        let parsed = packages(&serde_json::from_str::<Metadata>(json).unwrap()).unwrap();
+        assert_eq!(parsed[0].library_targets.len(), 1);
+        assert_eq!(parsed[0].library_targets[0].name, "film_x");
+        assert_eq!(parsed[0].dependencies[0].source.as_deref(), Some("git+https://github.com/storytold/effectcraft?rev=1#1"));
+        assert!(!parsed[0].member);
     }
 
     #[test]

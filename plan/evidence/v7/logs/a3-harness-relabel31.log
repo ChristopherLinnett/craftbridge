@@ -1,0 +1,12 @@
+review-a3-harness-a31-relabel-b2 EXPORT_DONE
+after run 1 (b2): am_start.txt case.txt dumpsys_bg.txt dumpsys_early.txt dumpsys_late.txt install.txt logcat_full.txt processes_bg.txt resumed_bg.txt 
+review-a3-harness-a31-relabel-b2 PROCESS_GONE_AT_LAUNCH
+after run 2 (b2): am_start.txt case.txt dumpsys_early.txt dumpsys_late.txt install.txt logcat_full.txt  :: result=PROCESS_GONE_AT_LAUNCH :: dumpsys_early=1
+review-a3-harness-a31-relabel-fixed EXPORT_DONE
+after run 1 (fixed): am_start.txt case.txt dumpsys_bg.txt dumpsys_early.txt dumpsys_late.txt install.txt logcat_full.txt processes_bg.txt resumed_bg.txt 
+review-a3-harness-a31-relabel-fixed STARTFOREGROUND_FAIL
+after run 2 (fixed): am_start.txt case.txt dumpsys_early.txt dumpsys_late.txt install.txt logcat_full.txt  :: result=STARTFOREGROUND_FAIL :: dumpsys_early=0
+absent
+review-a3-harness-a31-relabel-fixed2 EXPORT_DONE
+review-a3-harness-a31-relabel-fixed2 PROCESS_GONE_AT_LAUNCH
+attempt 2: result=PROCESS_GONE_AT_LAUNCH files: am_start.txt case.txt install.txt logcat_full.txt 

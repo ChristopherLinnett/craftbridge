@@ -1,0 +1,13 @@
+adb: device 'emulator-5554' not found
+29 booted sdk=
+adb: device 'emulator-5554' not found
+./logs/b1-run29.sh: line 6: 35008 Terminated: 15          ./run_case.sh emulator-5554 apk-b1/fgslab-combo-ts37.apk review-b1-a29-combo-none none 45
+adb: device 'emulator-5554' not found
+./run_case.sh: line 21: /tmp/craftbridge-v7/evidence/review-b1-a29-combo-short-notdeclared/install.txt: No such file or directory
+./run_case.sh: line 23: /tmp/craftbridge-v7/evidence/review-b1-a29-combo-short-notdeclared/case.txt: No such file or directory
+./run_case.sh: line 25: /tmp/craftbridge-v7/evidence/review-b1-a29-combo-short-notdeclared/case.txt: No such file or directory
+./run_case.sh: line 26: /tmp/craftbridge-v7/evidence/review-b1-a29-combo-short-notdeclared/logcat_full.txt: No such file or directory
+review-b1-a29-combo-short-notdeclared INSTALL_FAILED
+review-b1-a29-combo-mediaproc INSTALL_FAILED
+review-b1-a29-noperm-datasync INSTALL_FAILED
+RUN29 DONE

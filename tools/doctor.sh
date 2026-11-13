@@ -48,7 +48,9 @@ if [ "$xcode" = "$CRAFTBRIDGE_XCODE" ]; then
   ok "Xcode $xcode"
 elif [ -z "$xcode" ] && [ -d "$selected" ] && [ "${selected%/Contents/Developer}" != "$selected" ]; then
   # An Xcode is selected but will not run: its licence is not accepted or its first launch is pending.
-  gap "Xcode $CRAFTBRIDGE_XCODE (the selected ${selected%/Contents/Developer} does not run)" "sudo xcodebuild -license accept && xcodebuild -runFirstLaunch"
+  # -runFirstLaunch installs Xcode's system components and agrees to the licence (`man xcodebuild`); both
+  # need an administrator.
+  gap "Xcode $CRAFTBRIDGE_XCODE (the selected ${selected%/Contents/Developer} does not run)" "sudo xcodebuild -runFirstLaunch"
 else
   gap "Xcode $CRAFTBRIDGE_XCODE (found: ${xcode:-none})" "install Xcode $CRAFTBRIDGE_XCODE from https://developer.apple.com/download/applications/ and select it: sudo xcode-select -s /Applications/Xcode.app"
 fi
@@ -70,7 +72,19 @@ sdk_fix() {
 }
 if [ -d "$ANDROID_HOME/platforms" ]; then
   ok "Android SDK at $ANDROID_HOME"
-  if compgen -G "$ANDROID_HOME/platforms/android-$CRAFTBRIDGE_ANDROID_API*" >/dev/null; then ok "Android platform $CRAFTBRIDGE_ANDROID_API"; else gap "Android platform $CRAFTBRIDGE_ANDROID_API" "$(sdk_fix "platforms;android-$CRAFTBRIDGE_ANDROID_API.0")"; fi
+  # A platform is the pinned API level exactly, as its own source.properties gives it: the SDK names a
+  # minor-versioned platform `android-37.0` and an older one `android-36`, and a prefix of either
+  # (`android-370`, `android-37.1`) is another platform. The fix names the package the SDK's way: from API
+  # 37 on, with its minor version. With no platform installed the pattern stays unexpanded, and reading that
+  # missing path would end the script, so it is skipped.
+  platform_found=""
+  for properties in "$ANDROID_HOME"/platforms/*/source.properties; do
+    [ -f "$properties" ] || continue
+    level="$(sed -n 's/^AndroidVersion.ApiLevel=//p' "$properties" | tr -d '[:space:]')"
+    if [ "$level" = "$CRAFTBRIDGE_ANDROID_API" ] || [ "$level" = "$CRAFTBRIDGE_ANDROID_API.0" ]; then platform_found=1; fi
+  done
+  if [ "$CRAFTBRIDGE_ANDROID_API" -ge 37 ] 2>/dev/null; then platform_package="platforms;android-$CRAFTBRIDGE_ANDROID_API.0"; else platform_package="platforms;android-$CRAFTBRIDGE_ANDROID_API"; fi
+  if [ -n "$platform_found" ]; then ok "Android platform $CRAFTBRIDGE_ANDROID_API"; else gap "Android platform $CRAFTBRIDGE_ANDROID_API" "$(sdk_fix "$platform_package")"; fi
   if [ -d "$ANDROID_HOME/build-tools/$CRAFTBRIDGE_ANDROID_BUILD_TOOLS" ]; then ok "Android build tools $CRAFTBRIDGE_ANDROID_BUILD_TOOLS"; else gap "Android build tools $CRAFTBRIDGE_ANDROID_BUILD_TOOLS" "$(sdk_fix "build-tools;$CRAFTBRIDGE_ANDROID_BUILD_TOOLS")"; fi
 else
   gap "Android SDK (looked in $ANDROID_HOME)" "install Android Studio, or set ANDROID_HOME to an Android SDK"
@@ -78,8 +92,23 @@ fi
 if [ -n "${CRAFTBRIDGE_JDK:-}" ]; then
   ok "JDK $CRAFTBRIDGE_JDK_MAJOR at $CRAFTBRIDGE_JDK"
 else
-  gap "JDK $CRAFTBRIDGE_JDK_MAJOR for Gradle" "brew install openjdk@$CRAFTBRIDGE_JDK_MAJOR (tools/env.sh finds Homebrew's keg), or install Android Studio (it bundles JDK $CRAFTBRIDGE_JDK_MAJOR), or point JAVA_HOME at a JDK $CRAFTBRIDGE_JDK_MAJOR"
+  gap "JDK $CRAFTBRIDGE_JDK_MAJOR for Gradle" "brew install openjdk@$CRAFTBRIDGE_JDK_MAJOR (tools/env.sh finds Homebrew's keg), or point JAVA_HOME at a JDK $CRAFTBRIDGE_JDK_MAJOR (tools/env.sh also takes Android Studio's bundled JDK when it is that major)"
 fi
+
+# Cargo merges a .cargo/config.toml (or .cargo/config) from every folder above the one it runs in, up to
+# the file system's root, and then $CARGO_HOME's. One above the repository is this machine's, not the
+# tree's, so no rule sees it, yet its `runner` would stand in for every test binary of the gate.
+dir="$(dirname "$CRAFTBRIDGE_ROOT")"
+cargo_home="$(cd "${CARGO_HOME:-$HOME/.cargo}" 2>/dev/null && pwd -P || true)"
+while :; do
+  if [ -d "$dir/.cargo" ] && [ "$(cd "$dir/.cargo" && pwd -P)" != "$cargo_home" ]; then
+    for config in "$dir/.cargo/config.toml" "$dir/.cargo/config"; do
+      if [ -f "$config" ]; then gap "no Cargo configuration above the repository (found $config)" "move it away: Cargo merges it into every cargo stage of the gate"; fi
+    done
+  fi
+  if [ "$dir" = "/" ]; then break; fi
+  dir="$(dirname "$dir")"
+done
 
 # The gate's other tools.
 if has shellcheck; then ok "shellcheck $(shellcheck --version | sed -n 's/^version: //p')"; else gap "shellcheck" "brew install shellcheck"; fi
@@ -127,7 +156,7 @@ if [ "$install_hooks" = 1 ]; then
   # Written to the repository's shared configuration, so every worktree of it gets the setting at once;
   # the path is relative, so each runs its own tools/hooks/pre-push.
   git -C "$CRAFTBRIDGE_ROOT" config core.hooksPath tools/hooks
-  ok "git hooks: tools/hooks, for every worktree of this repository (the gate runs on the checkout before every push)"
+  ok "git hooks: tools/hooks, for every worktree of this repository (the gate runs on the working tree a push comes from)"
 elif [ "$(git -C "$CRAFTBRIDGE_ROOT" config --get core.hooksPath 2>/dev/null || true)" = "tools/hooks" ]; then
   ok "git hooks: tools/hooks"
 else

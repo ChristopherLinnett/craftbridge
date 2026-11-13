@@ -1,0 +1,6 @@
+Harness artefact, supports no claim about the platform (review A2). The 60 s
+data_sync_fgs_timeout_duration override was removed mid-run by a Play-services flag
+sync (SettingsToPropertiesMapper storm in logcat_full.txt about 7 minutes after
+boot); timeout_knob.txt shows "Failed to delete" afterwards. On 34 that changes nothing (Android 14 has no such key), but the run
+cannot show the knob was in force. Re-run with config sync suspended:
+evidence/review-a2-guarded-a34-combo-datasync-knob60.

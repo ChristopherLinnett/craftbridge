@@ -1,0 +1,331 @@
+Timestamp               Ty Process[PID:TID]
+2026-11-12 23:59:44.345 Df FontProbe[47502:ab2a98c] (Foundation) FontProbe report begin
+=== CraftBridge FontProbe report (issue craftbridge#28, seam S3) ===
+Timestamp : 2026-11-12T15:59:44Z
+OS        : Version 26.5 (Build 23F77)
+Process   : FontProbe (pid 47502)
+App bundle: /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Bundle/Application/C5CD98C5-10A4-4781-B7A4-097AEA576163/FontProbe.app
+Target path: /System/Library/Fonts
+
+--- 1. Path provenance ---
+  realpath(/System/Library/Fonts) = /System/Library/Fonts
+  lstat   : directory, st_dev=16777232
+  Environment of this process (all, values truncated to 160 chars):
+    CFFIXED_USER_HOME = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-
+    DYLD_FALLBACK_FRAMEWORK_PATH = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/L
+    DYL<…>
+2026-11-12 23:59:44.351 Df FontProbe[47502:ab2a98c] (libMobileGestalt.dylib) No persisted cache on this platform.
+2026-11-12 23:59:44.351 Df FontProbe[47502:ab2a99c] [com.apple.xpc:connection] [0x1049be8a0] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon
+2026-11-12 23:59:44.352 Df FontProbe[47502:ab2a99e] [com.apple.BoardServices:XPCErrors] [C:1] Alloc com.apple.frontboard.systemappservices
+2026-11-12 23:59:44.352 Df FontProbe[47502:ab2a99e] [com.apple.xpc:connection] [0x1049c32d0] activating connection: mach=false listener=false peer=false name=(anonymous)
+2026-11-12 23:59:44.353 A  FontProbe[47502:ab2a99d] (CoreFoundation) Loading Preferences From User Session CFPrefsD
+2026-11-12 23:59:44.356 Df FontProbe[47502:ab2a99c] [com.apple.UIKit:BackgroundTask] Creating new assertion because there is no existing background assertion.
+2026-11-12 23:59:44.356 Df FontProbe[47502:ab2a99c] [com.apple.UIKit:BackgroundTask] Creating new background assertion
+2026-11-12 23:59:44.356 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:Application] Deactivation reason added: 10; deactivation reasons: 0 -> 1024; animating application lifecycle event: 0
+2026-11-12 23:59:44.356 Df FontProbe[47502:ab2a99c] [com.apple.UIKit:BackgroundTask] Created new background assertion <BKSProcessAssertion: 0x1049bdfe0>
+2026-11-12 23:59:44.356 Df FontProbe[47502:ab2a99c] [com.apple.runningboard:connection] Initializing connection
+2026-11-12 23:59:44.356 Df FontProbe[47502:ab2a99c] [com.apple.runningboard:process] Removing all cached process handles
+2026-11-12 23:59:44.356 Df FontProbe[47502:ab2a99e] [com.apple.runningboard:connection] Sending handshake request attempt #1 to server
+2026-11-12 23:59:44.356 Df FontProbe[47502:ab2a98c] [com.apple.BoardServices:Injection] activating monitor for service com.apple.frontboard.open
+2026-11-12 23:59:44.356 Df FontProbe[47502:ab2a99e] [com.apple.runningboard:connection] Creating connection to com.apple.runningboard
+2026-11-12 23:59:44.356 Df FontProbe[47502:ab2a99e] [com.apple.xpc:connection] [0x105200280] activating connection: mach=true listener=false peer=false name=com.apple.runningboard
+2026-11-12 23:59:44.356 Df FontProbe[47502:ab2a98c] [com.apple.BoardServices:Injection] activating monitor for service com.apple.frontboard.workspace-service
+2026-11-12 23:59:44.356 Df FontProbe[47502:ab2a98c] [com.apple.FrontBoard:Common] FBSWorkspace registering source: com.apple.frontboard.systemappservices
+2026-11-12 23:59:44.357 A  FontProbe[47502:ab2a99d] (RunningBoardServices) didChangeInheritances
+2026-11-12 23:59:44.357 Df FontProbe[47502:ab2a99e] [com.apple.runningboard:connection] Handshake succeeded
+2026-11-12 23:59:44.357 Df FontProbe[47502:ab2a98c] [com.apple.FrontBoard:Common] FBSWorkspace connected to endpoint : <BSServiceConnectionEndpoint: 0x10511b420; target: com.apple.frontboard.systemappservices; service: com.apple.frontboard.workspace-service>
+2026-11-12 23:59:44.357 Df FontProbe[47502:ab2a99e] [com.apple.runningboard:connection] Identity resolved as app<com.craftbridge.FontProbe((null))>
+2026-11-12 23:59:44.357 Df FontProbe[47502:ab2a98c] [com.apple.FrontBoard:Common] <FBSWorkspaceScenesClient:0x105194b40 com.apple.frontboard.systemappservices> attempting immediate handshake from activate
+2026-11-12 23:59:44.357 Df FontProbe[47502:ab2a98c] [com.apple.FrontBoard:Common] <FBSWorkspaceScenesClient:0x105194b40 com.apple.frontboard.systemappservices> sent handshake
+2026-11-12 23:59:44.357 Df FontProbe[47502:ab2a98c] [com.apple.runningboard:general] Added observer for process assertions expiration warning: <_RBSExpirationWarningClient: 0x10511b9a0>
+2026-11-12 23:59:44.357 Df FontProbe[47502:ab2a99c] [com.apple.UIKit:BackgroundTask] Incrementing reference count for background assertion <BKSProcessAssertion: 0x1049bdfe0>
+2026-11-12 23:59:44.358 Df FontProbe[47502:ab2a99c] [com.apple.UIKit:BackgroundTask] Created background task <_UIBackgroundTaskInfo: 0x1050e1080>: taskID = 1, taskName = Launch Background Task for Coalescing, creationTime = 1948054 (elapsed = 0).
+2026-11-12 23:59:44.358 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UIApplicationSceneKeyboardSettings on FBSSceneSettings
+2026-11-12 23:59:44.358 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneOcclusionSettings> on FBSSceneSettings
+2026-11-12 23:59:44.358 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneInterfaceProtectionSettings> on FBSSceneSettings
+2026-11-12 23:59:44.359 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISceneLayoutPreferencesHostSettingsExtension on FBSSceneSettings
+2026-11-12 23:59:44.359 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISceneSafeAreaSettingsExtension on FBSSceneSettings
+2026-11-12 23:59:44.359 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISceneLayoutPreferenceClientSettingsExtension on FBSSceneClientSettings
+2026-11-12 23:59:44.359 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UIHomeAffordanceHostSceneSettings> on FBSSceneSettings
+2026-11-12 23:59:44.360 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISystemShellSceneHostingEnvironmentSettings on FBSSceneSettings
+2026-11-12 23:59:44.360 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:UIScreen] Evaluated capturing state as 0 on <UIScreen: 0x105200500> for initial
+2026-11-12 23:59:44.360 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISceneRenderingEnvironmentSettings on FBSSceneSettings
+2026-11-12 23:59:44.360 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:UIScreen] Evaluated capturing state as 0 on <UIScreen: 0x105200500> for CADisplay KVO
+2026-11-12 23:59:44.360 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneRenderingEnvironmentClientSettings> on FBSSceneClientSettings
+2026-11-12 23:59:44.360 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneTransitioningHostSettings> on FBSSceneSettings
+2026-11-12 23:59:44.360 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneFocusSystemSettings> on FBSSceneSettings
+2026-11-12 23:59:44.360 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISceneOrientationSettingsExtension on FBSSceneSettings
+2026-11-12 23:59:44.360 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISceneOrientationClientSettingsExtension on FBSSceneClientSettings
+2026-11-12 23:59:44.360 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISceneWindowingControlClientSettings on FBSSceneClientSettings
+2026-11-12 23:59:44.361 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneHostingContentSizePreferenceClientSettings> on FBSSceneClientSettings
+2026-11-12 23:59:44.361 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISceneHostingTraitCollectionPropagationSettings on FBSSceneSettings
+2026-11-12 23:59:44.361 Df FontProbe[47502:ab2a98c] [com.apple.Accessibility:AXSupportCommon] Read CategoryName: per-app = 1, category name = (null)
+2026-11-12 23:59:44.361 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneHostingSheetPresentationSettings> on FBSSceneSettings
+2026-11-12 23:59:44.361 Df FontProbe[47502:ab2a98c] [com.apple.Accessibility:AXSupportCommon] Read CategoryName: per-app = 0, category name = (null)
+2026-11-12 23:59:44.361 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneHostingSheetPresentationClientSettings> on FBSSceneClientSettings
+2026-11-12 23:59:44.361 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneHostingEventDeferringSettings> on FBSSceneSettings
+2026-11-12 23:59:44.361 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <UIKit__UITypedKeyValueSceneSettings> on FBSSceneSettings
+2026-11-12 23:59:44.361 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <UIKit__UITypedKeyValueSceneSettings> on FBSSceneClientSettings
+2026-11-12 23:59:44.361 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneHostingViewControllerPreferencePropagationClientSettings> on FBSSceneClientSettings
+2026-11-12 23:59:44.362 Df FontProbe[47502:ab2a99c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneZoomTransitionSettings> on FBSSceneSettings
+2026-11-12 23:59:44.362 Df FontProbe[47502:ab2a99f] [com.apple.FrontBoard:SceneExtension] Realizing settings extension FBSSceneSettingsCore on FBSSceneSettings
+2026-11-12 23:59:44.362 Df FontProbe[47502:ab2a99f] [com.apple.FrontBoard:SceneExtension] Realizing settings extension FBSSceneClientSettingsCore on FBSSceneClientSettings
+2026-11-12 23:59:44.363 Df FontProbe[47502:ab2a99f] [com.apple.FrontBoard:SceneExtension] UIMutableApplicationSceneSettings setting counterpart class: UIApplicationSceneSettings
+2026-11-12 23:59:44.364 Df FontProbe[47502:ab2a98c] [com.apple.dt.xctest:Default] Registering for test daemon availability notify post.
+2026-11-12 23:59:44.364 Df FontProbe[47502:ab2a99f] [com.apple.FrontBoard:SceneExtension] UIMutableApplicationSceneClientSettings setting counterpart class: UIApplicationSceneClientSettings
+2026-11-12 23:59:44.364 Df FontProbe[47502:ab2a99f] [com.apple.FrontBoard:SceneExtension] Realizing settings extension FBSSceneTransitionContextCore on FBSSceneTransitionContext
+2026-11-12 23:59:44.364 Df FontProbe[47502:ab2a98c] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-11-12 23:59:44.364 Df FontProbe[47502:ab2a98c] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-11-12 23:59:44.364 Df FontProbe[47502:ab2a98c] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-11-12 23:59:44.368 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:Application] Deactivation reason added: 11; deactivation reasons: 1024 -> 3072; animating application lifecycle event: 0
+2026-11-12 23:59:44.369 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:Application] Deactivation reason removed: 10; deactivation reasons: 3072 -> 2048; animating application lifecycle event: 0
+2026-11-12 23:59:44.370 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:EventBus] Event Timing Profile for Touch: not found, path="/System/Library/EventTimingProfiles/Sim.Touch.plist"
+2026-11-12 23:59:44.370 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:EventBus] Event Timing Profile for Pencil: not found, path="/System/Library/EventTimingProfiles/Sim.Pencil.plist"
+2026-11-12 23:59:44.370 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:UpdateScheduler] Selected display: name=LCD (PurpleMain), id=1
+2026-11-12 23:59:44.372 Df FontProbe[47502:ab2a98c] [com.apple.xpc:connection] [0x105200a00] activating connection: mach=true listener=false peer=false name=com.apple.lsd.mapdb
+2026-11-12 23:59:44.390 Df FontProbe[47502:ab2a98c] [com.apple.BoardServices:XPCErrors] [C:2] Alloc com.apple.backboard.hid-services.xpc
+2026-11-12 23:59:44.390 Df FontProbe[47502:ab2a98c] [com.apple.xpc:connection] [0x105200c80] activating connection: mach=false listener=false peer=false name=(anonymous)
+2026-11-12 23:59:44.391 Df FontProbe[47502:ab2a9a4] [com.apple.BackBoard:EventDelivery] BKSHIDEventDeliveryManager - connection activation
+2026-11-12 23:59:44.391 Df FontProbe[47502:ab2a98c] [com.apple.app_launch_measurement:ApplicationLaunch] alm_acquire_pageins_recording_assertion: acquired pageins recording assertion!
+2026-11-12 23:59:44.393 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:BackgroundTask] Will add backgroundTask with taskName: Persistent SceneSession Map Update, expirationHandler: <__NSGlobalBlock__: 0x1e78c84e8>
+2026-11-12 23:59:44.393 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:BackgroundTask] Reusing background assertion <BKSProcessAssertion: 0x1049bdfe0>
+2026-11-12 23:59:44.393 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:BackgroundTask] Incrementing reference count for background assertion <BKSProcessAssertion: 0x1049bdfe0>
+2026-11-12 23:59:44.393 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:BackgroundTask] Created background task <_UIBackgroundTaskInfo: 0x1052e1840>: taskID = 2, taskName = Persistent SceneSession Map Update, creationTime = 1948054 (elapsed = 0).
+2026-11-12 23:59:44.393 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:Application] Deactivation reason added: 5; deactivation reasons: 2048 -> 2080; animating application lifecycle event: 1
+2026-11-12 23:59:44.393 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:InterfaceStyle] Should send trait collection or coordinate space update, interface style 1 -> 1, <UIWindowScene: 0x1049b4810> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-12 23:59:44.394 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x1049b4810> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-12 23:59:44.394 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:HomeAffordanceObservation] Initializing: <_UIHomeAffordanceSceneNotifier: 0x1052c9490>; with scene: <UIWindowScene: 0x1049b4810>
+2026-11-12 23:59:44.394 Df FontProbe[47502:ab2a98c] [com.apple.BacklightServices:scenes] 0x1050269d0 setDelegate:<0x105026940 _UIBacklightEnvironment> hasDelegate:YES for environment:sceneID:com.craftbridge.FontProbe-default
+2026-11-12 23:59:44.394 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x1049b4810> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-12 23:59:44.394 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:EventDeferring] [0x1052c8c40] Initialized with scene: <UIWindowScene: 0x1049b4810>; behavior: <_UIEventDeferringBehavior_iOS: 0x10528f0a0>; availableForProcess: 1, systemShellManagesKeyboardFocus: 1
+2026-11-12 23:59:44.395 Df FontProbe[47502:ab2a9a4] [com.apple.BackBoard:EventDelivery] BKSHIDEventObserver - connection activation
+2026-11-12 23:59:44.395 Df FontProbe[47502:ab2a98c] [com.apple.BackBoard:EventDelivery] policyStatus:<BKSHIDEventDeliveryPolicyObserver: 0x105044ea0; process scope; status: target> was:none
+2026-11-12 23:59:44.395 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:KeyWindow] Setting default evaluation strategy for UIUserInterfaceIdiomPhone to LastOneWins
+2026-11-12 23:59:44.395 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:KeyWindow] Scene target of keyboard event deferring environment did change: 1; scene: UIWindowScene: 0x1049b4810; scene identity: com.apple.frontboard.systemappservices/FBSceneManager:sceneID%3Acom.craftbridge.FontProbe-default
+2026-11-12 23:59:44.395 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:EventDeferring] [0x1052c8c40] Scene target of event deferring environments did update: scene: 0x1049b4810; current systemShellManagesKeyboardFocus: 1; systemShellManagesKeyboardFocusForScene: 1; eligibleForRecordRemoval: 1;
+2026-11-12 23:59:44.395 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:KeyWindow] Scene became target of keyboard event deferring environment: UIWindowScene: 0x1049b4810; scene identity: com.apple.frontboard.systemappservices/FBSceneManager:sceneID%3Acom.craftbridge.FontProbe-default
+2026-11-12 23:59:44.395 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:KeyWindow] Stack[KeyWindow] 0x1050265b0: Taking no further action for migration from LastOneWins -> SystemShellManaged as there are no scenes
+2026-11-12 23:59:44.395 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:KeyWindow] Setting default evaluation strategy for UIUserInterfaceIdiomPhone to SystemShellManaged
+2026-11-12 23:59:44.395 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:KeyWindow] Key window needs update: 0; currentKeyWindowScene: 0x0; evaluatedKeyWindowScene: 0x1049b4810; currentApplicationKeyWindow: 0x0; evaluatedApplicationKeyWindow: 0x0; reason: UIWindowScene: 0x1049b4810: Window scene became target of keyboard environment
+2026-11-12 23:59:44.395 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x1049b4810> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-12 23:59:44.395 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x1049b4810> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-12 23:59:44.396 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x1049b4810> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-12 23:59:44.412 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:Orientation] <UIWindowScene: 0x1049b4810> (46C579CB-B471-426C-91E8-A1BDA3F06B90) Scene updated orientation preferences: none -> ( Pu )
+2026-11-12 23:59:44.414 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:KeyWindow] Key window API is scene-level: YES
+2026-11-12 23:59:44.414 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:KeyWindow] UIWindowScene: 0x1049b4810: Window became key in scene: UIWindow: 0x105258400; contextId: 0xD94CC77F: reason: UIWindowScene: 0x1049b4810: Window requested to become key in scene: 0x105258400
+2026-11-12 23:59:44.414 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:KeyWindow] Key window needs update: 1; currentKeyWindowScene: 0x0; evaluatedKeyWindowScene: 0x1049b4810; currentApplicationKeyWindow: 0x0; evaluatedApplicationKeyWindow: 0x105258400; reason: UIWindowScene: 0x1049b4810: Window requested to become key in scene: 0x105258400
+2026-11-12 23:59:44.414 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:KeyWindow] Window did become application key: UIWindow: 0x105258400; contextId: 0xD94CC77F; scene identity: com.apple.frontboard.systemappservices/FBSceneManager:sceneID%3Acom.craftbridge.FontProbe-default
+2026-11-12 23:59:44.414 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:EventDeferring] [0x1052c8c40] Begin local event deferring requested for token: 0x105045380; environments: 1; reason: UIWindowScene: 0x1049b4810: Begin event deferring in keyboardFocus for window: 0x105258400
+2026-11-12 23:59:44.415 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x1049b4810> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-12 23:59:44.415 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:AppLifecycle] sceneOfRecord: sceneID: sceneID:com.craftbridge.FontProbe-default  persistentID: 46C579CB-B471-426C-91E8-A1BDA3F06B90
+2026-11-12 23:59:44.416 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:Application] Ignoring already applied deactivation reason: 5; deactivation reasons: 2080
+2026-11-12 23:59:44.416 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:Application] Deactivation reason added: 12; deactivation reasons: 2080 -> 6176; animating application lifecycle event: 1
+2026-11-12 23:59:44.416 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:Application] Deactivation reason removed: 11; deactivation reasons: 6176 -> 4128; animating application lifecycle event: 1
+2026-11-12 23:59:44.416 Df FontProbe[47502:ab2a98c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneIntelligenceSupportSettings> on FBSSceneSettings
+2026-11-12 23:59:44.416 Df FontProbe[47502:ab2a9a2] [com.apple.UIIntelligenceSupport:xpc] establishing connection to agent
+2026-11-12 23:59:44.416 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x1049b4810> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-12 23:59:44.416 Df FontProbe[47502:ab2a9a2] [com.apple.xpc:session] [0x10525cfa0] Session created.
+2026-11-12 23:59:44.416 Df FontProbe[47502:ab2a9a2] [com.apple.xpc:session] [0x10525cfa0] Session created from connection [0x10800ae40]
+2026-11-12 23:59:44.417 Df FontProbe[47502:ab2a9a2] [com.apple.xpc:connection] [0x10800ae40] activating connection: mach=true listener=false peer=false name=com.apple.uiintelligencesupport.agent
+2026-11-12 23:59:44.417 Df FontProbe[47502:ab2a9a2] [com.apple.xpc:session] [0x10525cfa0] Session activated
+2026-11-12 23:59:44.418 Df FontProbe[47502:ab2a9a2] [com.apple.BackBoard:EventDelivery] policyStatus:<BKSHIDEventDeliveryPolicyObserver: 0x105044ea0; token: com.apple.frontboard.systemappservices/FBSceneManager:sceneID%3Acom.craftbridge.FontProbe-default; status: ancestor> was:target
+2026-11-12 23:59:44.419 A  FontProbe[47502:ab2a98c] (CoreFoundation) Updating Key-Value Observers Of Preferences
+2026-11-12 23:59:44.439 Df FontProbe[47502:ab2a99c] [com.apple.xpc:connection] [0x1080092c0] activating connection: mach=true listener=false peer=false name=com.apple.fontservicesd
+2026-11-12 23:59:44.455 Df FontProbe[47502:ab2a98c] [PrototypeTools:domain] Not observing PTDefaults on customer install.
+2026-11-12 23:59:44.904 Df FontProbe[47502:ab2a98c] [com.apple.network:activity] Create activity from XPC object <nw_activity 50:1 [39D4166F-9D33-4347-9912-A58B37C5E599] (reporting strategy default)>
+2026-11-12 23:59:44.904 Df FontProbe[47502:ab2a99c] [com.apple.UIKit:BackgroundTask] Ending background task with UIBackgroundTaskIdentifier: 2
+2026-11-12 23:59:44.904 Df FontProbe[47502:ab2a98c] [com.apple.network:activity] Create activity from XPC object <nw_activity 50:2 [F94AD926-2E37-4042-83F6-E348A60EDFE3] (reporting strategy default)>
+2026-11-12 23:59:44.904 Df FontProbe[47502:ab2a98c] [com.apple.network:activity] Set activity <nw_activity 50:1 [39D4166F-9D33-4347-9912-A58B37C5E599] (reporting strategy default)> as the global parent
+2026-11-12 23:59:44.904 Df FontProbe[47502:ab2a99c] [com.apple.UIKit:BackgroundTask] Ending task with identifier 2 and description: <_UIBackgroundTaskInfo: 0x1052e1840>: taskID = 2, taskName = Persistent SceneSession Map Update, creationTime = 1948054 (elapsed = 1), _expireHandler: <__NSGlobalBlock__: 0x1e78c84e8>
+2026-11-12 23:59:44.904 Df FontProbe[47502:ab2a99c] [com.apple.UIKit:BackgroundTask] Decrementing reference count for assertion <BKSProcessAssertion: 0x1049bdfe0> (used by background task with identifier 2: <_UIBackgroundTaskInfo: 0x1052e1840>: taskID = 2, taskName = Persistent SceneSession Map Update, creationTime = 1948054 (elapsed = 1))
+2026-11-12 23:59:44.904 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:BackgroundTask] Ending background task with UIBackgroundTaskIdentifier: 1
+2026-11-12 23:59:44.904 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:BackgroundTask] Ending task with identifier 1 and description: <_UIBackgroundTaskInfo: 0x1050e1080>: taskID = 1, taskName = Launch Background Task for Coalescing, creationTime = 1948054 (elapsed = 1), _expireHandler: (null)
+2026-11-12 23:59:44.904 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:BackgroundTask] Decrementing reference count for assertion <BKSProcessAssertion: 0x1049bdfe0> (used by background task with identifier 1: <_UIBackgroundTaskInfo: 0x1050e1080>: taskID = 1, taskName = Launch Background Task for Coalescing, creationTime = 1948054 (elapsed = 1))
+2026-11-12 23:59:44.904 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:BackgroundTask] Will invalidate assertion: <BKSProcessAssertion: 0x1049bdfe0> for task identifier: 1
+2026-11-12 23:59:44.905 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:UpdateScheduler] Target list changed: <CADisplay:LCD PurpleMain>
+2026-11-12 23:59:44.905 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:AppLifecycle] sceneOfRecord: sceneID: sceneID:com.craftbridge.FontProbe-default  persistentID: 46C579CB-B471-426C-91E8-A1BDA3F06B90
+2026-11-12 23:59:44.905 A  FontProbe[47502:ab2a99c] (RunningBoardServices) didChangeInheritances
+2026-11-12 23:59:44.905 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x1049b4810> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-12 23:59:44.907 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:EventDeferring] [0x1052c8c40] Scene target of event deferring environments did update: scene: 0x1049b4810; current systemShellManagesKeyboardFocus: 1; systemShellManagesKeyboardFocusForScene: 1; eligibleForRecordRemoval: 1;
+2026-11-12 23:59:44.907 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:KeyWindow] Scene became target of keyboard event deferring environment: UIWindowScene: 0x1049b4810; scene identity: com.apple.frontboard.systemappservices/FBSceneManager:sceneID%3Acom.craftbridge.FontProbe-default
+2026-11-12 23:59:44.907 Df FontProbe[47502:ab2a98c] [com.apple.Accessibility:AXCommon] Read Per-App on Init: Smart invert = (null)
+2026-11-12 23:59:44.908 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x1049b4810> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-12 23:59:44.908 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:AppLifecycle] sceneOfRecord: sceneID: sceneID:com.craftbridge.FontProbe-default  persistentID: 46C579CB-B471-426C-91E8-A1BDA3F06B90
+2026-11-12 23:59:44.908 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:Application] Deactivation reason removed: 12; deactivation reasons: 4128 -> 32; animating application lifecycle event: 1
+2026-11-12 23:59:44.908 Df FontProbe[47502:ab2a98c] [com.apple.KeyboardArbiter:Client] Send setDeactivating: N (-DeactivationReason:SuspendedEventsOnly)
+2026-11-12 23:59:44.909 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:Application] Deactivation reason removed: 5; deactivation reasons: 32 -> 0; animating application lifecycle event: 0
+2026-11-12 23:59:44.909 Df FontProbe[47502:ab2a98c] [com.apple.KeyboardArbiter:Client] startConnection
+2026-11-12 23:59:44.909 Df FontProbe[47502:ab2a98c] [com.apple.xpc:connection] [0x1082d92c0] activating connection: mach=true listener=false peer=false name=com.apple.UIKit.KeyboardManagement.hosted
+2026-11-12 23:59:44.912 Df FontProbe[47502:ab2a98c] [com.apple.KeyboardArbiter:Client] handleKeyboardChange: set currentKeyboard:N (wasKeyboard:N)
+2026-11-12 23:59:44.915 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:KeyboardSceneDelegate] forceReloadInputViews
+2026-11-12 23:59:44.915 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:KeyboardSceneDelegate] Reloading input views for key-window scene responder: <(null): 0x0; > force:Y
+2026-11-12 23:59:44.916 Df FontProbe[47502:ab2a98c] [com.apple.UIKit:KeyboardArbiterClientLog] isWritingToolsHandlingKeyboardTracking:Y (WT ready:Y, Arbiter ready:Y)
+2026-11-12 23:59:44.949 Df FontProbe[47502:ab2a98c] [com.apple.network:activity] <nw_activity 50:1 [39D4166F-9D33-4347-9912-A58B37C5E599] (global parent) (reporting strategy default) complete (reason success)> complete with reason 2 (success), duration 776ms
+2026-11-12 23:59:44.950 Df FontProbe[47502:ab2a98c] [com.apple.network:activity] <nw_activity 50:2 [F94AD926-2E37-4042-83F6-E348A60EDFE3] (reporting strategy default) complete (reason success)> complete with reason 2 (success), duration 776ms
+2026-11-12 23:59:44.950 Df FontProbe[47502:ab2a98c] [com.apple.network:activity] Unsetting the global parent activity <nw_activity 50:1 [39D4166F-9D33-4347-9912-A58B37C5E599] (global parent) (reporting strategy default) complete (reason success)>
+2026-11-12 23:59:44.950 Df FontProbe[47502:ab2a98c] [com.apple.network:activity] Unset the global parent activity
+2026-11-12 23:59:44.950 Df FontProbe[47502:ab2a98c] [com.apple.app_launch_measurement:ApplicationLaunch] alm_release_pageins_recording_assertion: releasing pageins recording assertion
+2026-11-12 23:59:45.513 A  FontProbe[47502:ab2a9a2] (RunningBoardServices) didChangeInheritances
+2026-11-13 00:05:46.873 Df FontProbe[61946:ab32e48] (Foundation) FontProbe report begin
+=== CraftBridge FontProbe report (issue craftbridge#28, seam S3) ===
+Timestamp : 2026-11-12T16:05:46Z
+OS        : Version 26.5 (Build 23F77)
+Process   : FontProbe (pid 61946)
+App bundle: /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Bundle/Application/5F97F27C-058D-4237-BA3B-4E3BDD88F2FE/FontProbe.app
+Target path: /System/Library/Fonts
+
+--- 1. Path provenance ---
+  realpath(/System/Library/Fonts) = /System/Library/Fonts
+  lstat   : directory, st_dev=16777232
+  Environment of this process (all, values truncated to 160 chars):
+    CFFIXED_USER_HOME = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/A7E7289A-26CA-49B0-9F18-
+    DYLD_FALLBACK_FRAMEWORK_PATH = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/L
+    DYL<…>
+2026-11-13 00:05:46.876 Df FontProbe[61946:ab32e48] (libMobileGestalt.dylib) No persisted cache on this platform.
+2026-11-13 00:05:46.877 Df FontProbe[61946:ab32e4c] [com.apple.xpc:connection] [0x100c6f6a0] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon
+2026-11-13 00:05:46.877 Df FontProbe[61946:ab32e4d] [com.apple.BoardServices:XPCErrors] [C:1] Alloc com.apple.frontboard.systemappservices
+2026-11-13 00:05:46.877 Df FontProbe[61946:ab32e4d] [com.apple.xpc:connection] [0x100c82f60] activating connection: mach=false listener=false peer=false name=(anonymous)
+2026-11-13 00:05:46.878 A  FontProbe[61946:ab32e4c] (CoreFoundation) Loading Preferences From User Session CFPrefsD
+2026-11-13 00:05:46.881 Df FontProbe[61946:ab32e4b] [com.apple.UIKit:BackgroundTask] Creating new assertion because there is no existing background assertion.
+2026-11-13 00:05:46.881 Df FontProbe[61946:ab32e4b] [com.apple.UIKit:BackgroundTask] Creating new background assertion
+2026-11-13 00:05:46.881 Df FontProbe[61946:ab32e48] [com.apple.UIKit:Application] Deactivation reason added: 10; deactivation reasons: 0 -> 1024; animating application lifecycle event: 0
+2026-11-13 00:05:46.881 Df FontProbe[61946:ab32e4b] [com.apple.UIKit:BackgroundTask] Created new background assertion <BKSProcessAssertion: 0x100c72d70>
+2026-11-13 00:05:46.881 Df FontProbe[61946:ab32e4b] [com.apple.runningboard:connection] Initializing connection
+2026-11-13 00:05:46.881 Df FontProbe[61946:ab32e4b] [com.apple.runningboard:process] Removing all cached process handles
+2026-11-13 00:05:46.881 Df FontProbe[61946:ab32e4c] [com.apple.runningboard:connection] Sending handshake request attempt #1 to server
+2026-11-13 00:05:46.881 Df FontProbe[61946:ab32e48] [com.apple.BoardServices:Injection] activating monitor for service com.apple.frontboard.open
+2026-11-13 00:05:46.881 Df FontProbe[61946:ab32e4c] [com.apple.runningboard:connection] Creating connection to com.apple.runningboard
+2026-11-13 00:05:46.881 Df FontProbe[61946:ab32e4c] [com.apple.xpc:connection] [0x101624280] activating connection: mach=true listener=false peer=false name=com.apple.runningboard
+2026-11-13 00:05:46.881 Df FontProbe[61946:ab32e48] [com.apple.BoardServices:Injection] activating monitor for service com.apple.frontboard.workspace-service
+2026-11-13 00:05:46.881 Df FontProbe[61946:ab32e48] [com.apple.FrontBoard:Common] FBSWorkspace registering source: com.apple.frontboard.systemappservices
+2026-11-13 00:05:46.881 A  FontProbe[61946:ab32e4d] (RunningBoardServices) didChangeInheritances
+2026-11-13 00:05:46.882 Df FontProbe[61946:ab32e48] [com.apple.FrontBoard:Common] FBSWorkspace connected to endpoint : <BSServiceConnectionEndpoint: 0x101523660; target: com.apple.frontboard.systemappservices; service: com.apple.frontboard.workspace-service>
+2026-11-13 00:05:46.882 Df FontProbe[61946:ab32e4c] [com.apple.runningboard:connection] Handshake succeeded
+2026-11-13 00:05:46.882 Df FontProbe[61946:ab32e4c] [com.apple.runningboard:connection] Identity resolved as app<com.craftbridge.FontProbe((null))>
+2026-11-13 00:05:46.882 Df FontProbe[61946:ab32e48] [com.apple.FrontBoard:Common] <FBSWorkspaceScenesClient:0x1015c4b40 com.apple.frontboard.systemappservices> attempting immediate handshake from activate
+2026-11-13 00:05:46.882 Df FontProbe[61946:ab32e48] [com.apple.FrontBoard:Common] <FBSWorkspaceScenesClient:0x1015c4b40 com.apple.frontboard.systemappservices> sent handshake
+2026-11-13 00:05:46.882 Df FontProbe[61946:ab32e48] [com.apple.runningboard:general] Added observer for process assertions expiration warning: <_RBSExpirationWarningClient: 0x1015239a0>
+2026-11-13 00:05:46.882 Df FontProbe[61946:ab32e4b] [com.apple.UIKit:BackgroundTask] Incrementing reference count for background assertion <BKSProcessAssertion: 0x100c72d70>
+2026-11-13 00:05:46.882 Df FontProbe[61946:ab32e4b] [com.apple.UIKit:BackgroundTask] Created background task <_UIBackgroundTaskInfo: 0x1014f0ac0>: taskID = 1, taskName = Launch Background Task for Coalescing, creationTime = 1948417 (elapsed = 0).
+2026-11-13 00:05:46.882 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UIApplicationSceneKeyboardSettings on FBSSceneSettings
+2026-11-13 00:05:46.882 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneOcclusionSettings> on FBSSceneSettings
+2026-11-13 00:05:46.883 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneInterfaceProtectionSettings> on FBSSceneSettings
+2026-11-13 00:05:46.883 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISceneLayoutPreferencesHostSettingsExtension on FBSSceneSettings
+2026-11-13 00:05:46.883 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISceneSafeAreaSettingsExtension on FBSSceneSettings
+2026-11-13 00:05:46.883 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISceneLayoutPreferenceClientSettingsExtension on FBSSceneClientSettings
+2026-11-13 00:05:46.883 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UIHomeAffordanceHostSceneSettings> on FBSSceneSettings
+2026-11-13 00:05:46.883 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISystemShellSceneHostingEnvironmentSettings on FBSSceneSettings
+2026-11-13 00:05:46.883 Df FontProbe[61946:ab32e48] [com.apple.UIKit:UIScreen] Evaluated capturing state as 0 on <UIScreen: 0x101624500> for initial
+2026-11-13 00:05:46.884 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISceneRenderingEnvironmentSettings on FBSSceneSettings
+2026-11-13 00:05:46.884 Df FontProbe[61946:ab32e48] [com.apple.UIKit:UIScreen] Evaluated capturing state as 0 on <UIScreen: 0x101624500> for CADisplay KVO
+2026-11-13 00:05:46.884 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneRenderingEnvironmentClientSettings> on FBSSceneClientSettings
+2026-11-13 00:05:46.884 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneTransitioningHostSettings> on FBSSceneSettings
+2026-11-13 00:05:46.884 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneFocusSystemSettings> on FBSSceneSettings
+2026-11-13 00:05:46.884 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISceneOrientationSettingsExtension on FBSSceneSettings
+2026-11-13 00:05:46.884 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISceneOrientationClientSettingsExtension on FBSSceneClientSettings
+2026-11-13 00:05:46.884 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISceneWindowingControlClientSettings on FBSSceneClientSettings
+2026-11-13 00:05:46.884 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneHostingContentSizePreferenceClientSettings> on FBSSceneClientSettings
+2026-11-13 00:05:46.885 Df FontProbe[61946:ab32e48] [com.apple.Accessibility:AXSupportCommon] Read CategoryName: per-app = 1, category name = (null)
+2026-11-13 00:05:46.885 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension _UISceneHostingTraitCollectionPropagationSettings on FBSSceneSettings
+2026-11-13 00:05:46.885 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneHostingSheetPresentationSettings> on FBSSceneSettings
+2026-11-13 00:05:46.885 Df FontProbe[61946:ab32e48] [com.apple.Accessibility:AXSupportCommon] Read CategoryName: per-app = 0, category name = (null)
+2026-11-13 00:05:46.885 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneHostingSheetPresentationClientSettings> on FBSSceneClientSettings
+2026-11-13 00:05:46.885 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneHostingEventDeferringSettings> on FBSSceneSettings
+2026-11-13 00:05:46.885 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <UIKit__UITypedKeyValueSceneSettings> on FBSSceneSettings
+2026-11-13 00:05:46.885 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <UIKit__UITypedKeyValueSceneSettings> on FBSSceneClientSettings
+2026-11-13 00:05:46.885 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneHostingViewControllerPreferencePropagationClientSettings> on FBSSceneClientSettings
+2026-11-13 00:05:46.885 Df FontProbe[61946:ab32e4b] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneZoomTransitionSettings> on FBSSceneSettings
+2026-11-13 00:05:46.886 Df FontProbe[61946:ab32e4c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension FBSSceneSettingsCore on FBSSceneSettings
+2026-11-13 00:05:46.887 Df FontProbe[61946:ab32e4c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension FBSSceneClientSettingsCore on FBSSceneClientSettings
+2026-11-13 00:05:46.887 Df FontProbe[61946:ab32e48] [com.apple.dt.xctest:Default] Registering for test daemon availability notify post.
+2026-11-13 00:05:46.887 Df FontProbe[61946:ab32e48] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-11-13 00:05:46.890 Df FontProbe[61946:ab32e4c] [com.apple.FrontBoard:SceneExtension] UIMutableApplicationSceneSettings setting counterpart class: UIApplicationSceneSettings
+2026-11-13 00:05:46.890 Df FontProbe[61946:ab32e48] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-11-13 00:05:46.890 Df FontProbe[61946:ab32e4c] [com.apple.FrontBoard:SceneExtension] UIMutableApplicationSceneClientSettings setting counterpart class: UIApplicationSceneClientSettings
+2026-11-13 00:05:46.890 Df FontProbe[61946:ab32e48] [com.apple.dt.xctest:Default] notify_get_state check indicated test daemon not ready.
+2026-11-13 00:05:46.891 Df FontProbe[61946:ab32e4c] [com.apple.FrontBoard:SceneExtension] Realizing settings extension FBSSceneTransitionContextCore on FBSSceneTransitionContext
+2026-11-13 00:05:46.891 Df FontProbe[61946:ab32e48] [com.apple.UIKit:Application] Deactivation reason added: 11; deactivation reasons: 1024 -> 3072; animating application lifecycle event: 0
+2026-11-13 00:05:46.892 Df FontProbe[61946:ab32e48] [com.apple.UIKit:Application] Deactivation reason removed: 10; deactivation reasons: 3072 -> 2048; animating application lifecycle event: 0
+2026-11-13 00:05:46.892 Df FontProbe[61946:ab32e48] [com.apple.UIKit:EventBus] Event Timing Profile for Touch: not found, path="/System/Library/EventTimingProfiles/Sim.Touch.plist"
+2026-11-13 00:05:46.892 Df FontProbe[61946:ab32e48] [com.apple.UIKit:EventBus] Event Timing Profile for Pencil: not found, path="/System/Library/EventTimingProfiles/Sim.Pencil.plist"
+2026-11-13 00:05:46.892 Df FontProbe[61946:ab32e48] [com.apple.UIKit:UpdateScheduler] Selected display: name=LCD (PurpleMain), id=1
+2026-11-13 00:05:46.893 Df FontProbe[61946:ab32e48] [com.apple.xpc:connection] [0x101624a00] activating connection: mach=true listener=false peer=false name=com.apple.lsd.mapdb
+2026-11-13 00:05:46.903 Df FontProbe[61946:ab32e48] [com.apple.BoardServices:XPCErrors] [C:2] Alloc com.apple.backboard.hid-services.xpc
+2026-11-13 00:05:46.903 Df FontProbe[61946:ab32e48] [com.apple.xpc:connection] [0x101624c80] activating connection: mach=false listener=false peer=false name=(anonymous)
+2026-11-13 00:05:46.904 Df FontProbe[61946:ab32e48] [com.apple.app_launch_measurement:ApplicationLaunch] alm_acquire_pageins_recording_assertion: acquired pageins recording assertion!
+2026-11-13 00:05:46.904 Df FontProbe[61946:ab32e50] [com.apple.BackBoard:EventDelivery] BKSHIDEventDeliveryManager - connection activation
+2026-11-13 00:05:46.905 Df FontProbe[61946:ab32e48] [com.apple.UIKit:Application] Deactivation reason added: 5; deactivation reasons: 2048 -> 2080; animating application lifecycle event: 1
+2026-11-13 00:05:46.905 Df FontProbe[61946:ab32e48] [com.apple.UIKit:InterfaceStyle] Should send trait collection or coordinate space update, interface style 1 -> 1, <UIWindowScene: 0x100c83600> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-13 00:05:46.905 Df FontProbe[61946:ab32e48] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x100c83600> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-13 00:05:46.905 Df FontProbe[61946:ab32e48] [com.apple.UIKit:HomeAffordanceObservation] Initializing: <_UIHomeAffordanceSceneNotifier: 0x1016ccc40>; with scene: <UIWindowScene: 0x100c83600>
+2026-11-13 00:05:46.905 Df FontProbe[61946:ab32e48] [com.apple.BacklightServices:scenes] 0x101426a60 setDelegate:<0x1014269d0 _UIBacklightEnvironment> hasDelegate:YES for environment:sceneID:com.craftbridge.FontProbe-default
+2026-11-13 00:05:46.905 Df FontProbe[61946:ab32e48] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x100c83600> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-13 00:05:46.905 Df FontProbe[61946:ab32e48] [com.apple.UIKit:EventDeferring] [0x1016cd420] Initialized with scene: <UIWindowScene: 0x100c83600>; behavior: <_UIEventDeferringBehavior_iOS: 0x101697080>; availableForProcess: 1, systemShellManagesKeyboardFocus: 1
+2026-11-13 00:05:46.906 Df FontProbe[61946:ab32e50] [com.apple.BackBoard:EventDelivery] BKSHIDEventObserver - connection activation
+2026-11-13 00:05:46.906 Df FontProbe[61946:ab32e48] [com.apple.BackBoard:EventDelivery] policyStatus:<BKSHIDEventDeliveryPolicyObserver: 0x10168abe0; process scope; status: target> was:none
+2026-11-13 00:05:46.906 Df FontProbe[61946:ab32e48] [com.apple.UIKit:KeyWindow] Setting default evaluation strategy for UIUserInterfaceIdiomPhone to LastOneWins
+2026-11-13 00:05:46.906 Df FontProbe[61946:ab32e48] [com.apple.UIKit:KeyWindow] Scene target of keyboard event deferring environment did change: 1; scene: UIWindowScene: 0x100c83600; scene identity: com.apple.frontboard.systemappservices/FBSceneManager:sceneID%3Acom.craftbridge.FontProbe-default
+2026-11-13 00:05:46.906 Df FontProbe[61946:ab32e48] [com.apple.UIKit:EventDeferring] [0x1016cd420] Scene target of event deferring environments did update: scene: 0x100c83600; current systemShellManagesKeyboardFocus: 1; systemShellManagesKeyboardFocusForScene: 1; eligibleForRecordRemoval: 1;
+2026-11-13 00:05:46.906 Df FontProbe[61946:ab32e48] [com.apple.UIKit:KeyWindow] Scene became target of keyboard event deferring environment: UIWindowScene: 0x100c83600; scene identity: com.apple.frontboard.systemappservices/FBSceneManager:sceneID%3Acom.craftbridge.FontProbe-default
+2026-11-13 00:05:46.906 Df FontProbe[61946:ab32e48] [com.apple.UIKit:KeyWindow] Stack[KeyWindow] 0x101426670: Taking no further action for migration from LastOneWins -> SystemShellManaged as there are no scenes
+2026-11-13 00:05:46.906 Df FontProbe[61946:ab32e48] [com.apple.UIKit:KeyWindow] Setting default evaluation strategy for UIUserInterfaceIdiomPhone to SystemShellManaged
+2026-11-13 00:05:46.906 Df FontProbe[61946:ab32e48] [com.apple.UIKit:KeyWindow] Key window needs update: 0; currentKeyWindowScene: 0x0; evaluatedKeyWindowScene: 0x100c83600; currentApplicationKeyWindow: 0x0; evaluatedApplicationKeyWindow: 0x0; reason: UIWindowScene: 0x100c83600: Window scene became target of keyboard environment
+2026-11-13 00:05:46.906 Df FontProbe[61946:ab32e48] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x100c83600> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-13 00:05:46.906 Df FontProbe[61946:ab32e48] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x100c83600> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-13 00:05:46.907 Df FontProbe[61946:ab32e48] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x100c83600> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-13 00:05:46.919 Df FontProbe[61946:ab32e48] [com.apple.UIKit:Orientation] <UIWindowScene: 0x100c83600> (46C579CB-B471-426C-91E8-A1BDA3F06B90) Scene updated orientation preferences: none -> ( Pu )
+2026-11-13 00:05:46.921 Df FontProbe[61946:ab32e48] [com.apple.UIKit:KeyWindow] Key window API is scene-level: YES
+2026-11-13 00:05:46.921 Df FontProbe[61946:ab32e48] [com.apple.UIKit:KeyWindow] UIWindowScene: 0x100c83600: Window became key in scene: UIWindow: 0x101664400; contextId: 0x3C02716A: reason: UIWindowScene: 0x100c83600: Window requested to become key in scene: 0x101664400
+2026-11-13 00:05:46.921 Df FontProbe[61946:ab32e48] [com.apple.UIKit:KeyWindow] Key window needs update: 1; currentKeyWindowScene: 0x0; evaluatedKeyWindowScene: 0x100c83600; currentApplicationKeyWindow: 0x0; evaluatedApplicationKeyWindow: 0x101664400; reason: UIWindowScene: 0x100c83600: Window requested to become key in scene: 0x101664400
+2026-11-13 00:05:46.921 Df FontProbe[61946:ab32e48] [com.apple.UIKit:KeyWindow] Window did become application key: UIWindow: 0x101664400; contextId: 0x3C02716A; scene identity: com.apple.frontboard.systemappservices/FBSceneManager:sceneID%3Acom.craftbridge.FontProbe-default
+2026-11-13 00:05:46.921 Df FontProbe[61946:ab32e48] [com.apple.UIKit:EventDeferring] [0x1016cd420] Begin local event deferring requested for token: 0x10168a4c0; environments: 1; reason: UIWindowScene: 0x100c83600: Begin event deferring in keyboardFocus for window: 0x101664400
+2026-11-13 00:05:46.922 Df FontProbe[61946:ab32e48] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x100c83600> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-13 00:05:46.922 Df FontProbe[61946:ab32e50] [com.apple.BackBoard:EventDelivery] policyStatus:<BKSHIDEventDeliveryPolicyObserver: 0x10168abe0; token: com.apple.frontboard.systemappservices/FBSceneManager:sceneID%3Acom.craftbridge.FontProbe-default; status: ancestor> was:target
+2026-11-13 00:05:46.922 Df FontProbe[61946:ab32e48] [com.apple.UIKit:AppLifecycle] sceneOfRecord: sceneID: sceneID:com.craftbridge.FontProbe-default  persistentID: 46C579CB-B471-426C-91E8-A1BDA3F06B90
+2026-11-13 00:05:46.922 Df FontProbe[61946:ab32e48] [com.apple.UIKit:Application] Ignoring already applied deactivation reason: 5; deactivation reasons: 2080
+2026-11-13 00:05:46.922 Df FontProbe[61946:ab32e48] [com.apple.UIKit:Application] Deactivation reason added: 12; deactivation reasons: 2080 -> 6176; animating application lifecycle event: 1
+2026-11-13 00:05:46.922 Df FontProbe[61946:ab32e48] [com.apple.UIKit:Application] Deactivation reason removed: 11; deactivation reasons: 6176 -> 4128; animating application lifecycle event: 1
+2026-11-13 00:05:46.922 Df FontProbe[61946:ab32e48] [com.apple.FrontBoard:SceneExtension] Realizing settings extension <_UISceneIntelligenceSupportSettings> on FBSSceneSettings
+2026-11-13 00:05:46.922 Df FontProbe[61946:ab32e4e] [com.apple.UIIntelligenceSupport:xpc] establishing connection to agent
+2026-11-13 00:05:46.922 Df FontProbe[61946:ab32e4e] [com.apple.xpc:session] [0x10166a0d0] Session created.
+2026-11-13 00:05:46.922 Df FontProbe[61946:ab32e4e] [com.apple.xpc:session] [0x10166a0d0] Session created from connection [0x104406800]
+2026-11-13 00:05:46.922 Df FontProbe[61946:ab32e4e] [com.apple.xpc:connection] [0x104406800] activating connection: mach=true listener=false peer=false name=com.apple.uiintelligencesupport.agent
+2026-11-13 00:05:46.922 Df FontProbe[61946:ab32e48] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x100c83600> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-13 00:05:46.923 Df FontProbe[61946:ab32e4e] [com.apple.xpc:session] [0x10166a0d0] Session activated
+2026-11-13 00:05:46.924 A  FontProbe[61946:ab32e48] (CoreFoundation) Updating Key-Value Observers Of Preferences
+2026-11-13 00:05:46.934 Df FontProbe[61946:ab32e50] [com.apple.xpc:connection] [0x104405400] activating connection: mach=true listener=false peer=false name=com.apple.fontservicesd
+2026-11-13 00:05:46.943 Df FontProbe[61946:ab32e48] [PrototypeTools:domain] Not observing PTDefaults on customer install.
+2026-11-13 00:05:47.330 Df FontProbe[61946:ab32e48] [com.apple.network:activity] Create activity from XPC object <nw_activity 50:1 [5E88A676-8291-4E5F-842C-4453BC50FA9D] (reporting strategy default)>
+2026-11-13 00:05:47.330 Df FontProbe[61946:ab32e48] [com.apple.network:activity] Create activity from XPC object <nw_activity 50:2 [A95D1CA6-A7C6-428B-9244-CD5381AB29BA] (reporting strategy default)>
+2026-11-13 00:05:47.330 Df FontProbe[61946:ab32e48] [com.apple.network:activity] Set activity <nw_activity 50:1 [5E88A676-8291-4E5F-842C-4453BC50FA9D] (reporting strategy default)> as the global parent
+2026-11-13 00:05:47.330 Df FontProbe[61946:ab32e48] [com.apple.UIKit:BackgroundTask] Ending background task with UIBackgroundTaskIdentifier: 1
+2026-11-13 00:05:47.330 Df FontProbe[61946:ab32e48] [com.apple.UIKit:BackgroundTask] Ending task with identifier 1 and description: <_UIBackgroundTaskInfo: 0x1014f0ac0>: taskID = 1, taskName = Launch Background Task for Coalescing, creationTime = 1948417 (elapsed = 0), _expireHandler: (null)
+2026-11-13 00:05:47.330 Df FontProbe[61946:ab32e48] [com.apple.UIKit:BackgroundTask] Decrementing reference count for assertion <BKSProcessAssertion: 0x100c72d70> (used by background task with identifier 1: <_UIBackgroundTaskInfo: 0x1014f0ac0>: taskID = 1, taskName = Launch Background Task for Coalescing, creationTime = 1948417 (elapsed = 0))
+2026-11-13 00:05:47.330 Df FontProbe[61946:ab32e48] [com.apple.UIKit:BackgroundTask] Will invalidate assertion: <BKSProcessAssertion: 0x100c72d70> for task identifier: 1
+2026-11-13 00:05:47.331 A  FontProbe[61946:ab32e4e] (RunningBoardServices) didChangeInheritances
+2026-11-13 00:05:47.331 Df FontProbe[61946:ab32e48] [com.apple.UIKit:UpdateScheduler] Target list changed: <CADisplay:LCD PurpleMain>
+2026-11-13 00:05:47.331 Df FontProbe[61946:ab32e48] [com.apple.UIKit:AppLifecycle] sceneOfRecord: sceneID: sceneID:com.craftbridge.FontProbe-default  persistentID: 46C579CB-B471-426C-91E8-A1BDA3F06B90
+2026-11-13 00:05:47.331 Df FontProbe[61946:ab32e48] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x100c83600> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-13 00:05:47.332 Df FontProbe[61946:ab32e48] [com.apple.UIKit:EventDeferring] [0x1016cd420] Scene target of event deferring environments did update: scene: 0x100c83600; current systemShellManagesKeyboardFocus: 1; systemShellManagesKeyboardFocusForScene: 1; eligibleForRecordRemoval: 1;
+2026-11-13 00:05:47.332 Df FontProbe[61946:ab32e48] [com.apple.UIKit:KeyWindow] Scene became target of keyboard event deferring environment: UIWindowScene: 0x100c83600; scene identity: com.apple.frontboard.systemappservices/FBSceneManager:sceneID%3Acom.craftbridge.FontProbe-default
+2026-11-13 00:05:47.332 Df FontProbe[61946:ab32e48] [com.apple.UIKit:InterfaceStyle] Not push traits update to screen for new style 1, <UIWindowScene: 0x100c83600> (46C579CB-B471-426C-91E8-A1BDA3F06B90)
+2026-11-13 00:05:47.332 Df FontProbe[61946:ab32e48] [com.apple.UIKit:AppLifecycle] sceneOfRecord: sceneID: sceneID:com.craftbridge.FontProbe-default  persistentID: 46C579CB-B471-426C-91E8-A1BDA3F06B90
+2026-11-13 00:05:47.332 Df FontProbe[61946:ab32e48] [com.apple.UIKit:Application] Deactivation reason removed: 12; deactivation reasons: 4128 -> 32; animating application lifecycle event: 1
+2026-11-13 00:05:47.333 Df FontProbe[61946:ab32e48] [com.apple.KeyboardArbiter:Client] Send setDeactivating: N (-DeactivationReason:SuspendedEventsOnly)
+2026-11-13 00:05:47.333 Df FontProbe[61946:ab32e48] [com.apple.UIKit:Application] Deactivation reason removed: 5; deactivation reasons: 32 -> 0; animating application lifecycle event: 0
+2026-11-13 00:05:47.333 Df FontProbe[61946:ab32e48] [com.apple.KeyboardArbiter:Client] startConnection
+2026-11-13 00:05:47.333 Df FontProbe[61946:ab32e48] [com.apple.xpc:connection] [0x1047112c0] activating connection: mach=true listener=false peer=false name=com.apple.UIKit.KeyboardManagement.hosted
+2026-11-13 00:05:47.335 Df FontProbe[61946:ab32e48] [com.apple.KeyboardArbiter:Client] handleKeyboardChange: set currentKeyboard:N (wasKeyboard:N)
+2026-11-13 00:05:47.337 Df FontProbe[61946:ab32e48] [com.apple.UIKit:KeyboardSceneDelegate] forceReloadInputViews
+2026-11-13 00:05:47.337 Df FontProbe[61946:ab32e48] [com.apple.UIKit:KeyboardSceneDelegate] Reloading input views for key-window scene responder: <(null): 0x0; > force:Y
+2026-11-13 00:05:47.338 Df FontProbe[61946:ab32e48] [com.apple.UIKit:KeyboardArbiterClientLog] isWritingToolsHandlingKeyboardTracking:Y (WT ready:Y, Arbiter ready:Y)
+2026-11-13 00:05:47.371 Df FontProbe[61946:ab32e48] [com.apple.network:activity] <nw_activity 50:1 [5E88A676-8291-4E5F-842C-4453BC50FA9D] (global parent) (reporting strategy default) complete (reason success)> complete with reason 2 (success), duration 655ms
+2026-11-13 00:05:47.371 Df FontProbe[61946:ab32e48] [com.apple.network:activity] <nw_activity 50:2 [A95D1CA6-A7C6-428B-9244-CD5381AB29BA] (reporting strategy default) complete (reason success)> complete with reason 2 (success), duration 655ms
+2026-11-13 00:05:47.371 Df FontProbe[61946:ab32e48] [com.apple.network:activity] Unsetting the global parent activity <nw_activity 50:1 [5E88A676-8291-4E5F-842C-4453BC50FA9D] (global parent) (reporting strategy default) complete (reason success)>
+2026-11-13 00:05:47.371 Df FontProbe[61946:ab32e48] [com.apple.network:activity] Unset the global parent activity
+2026-11-13 00:05:47.371 Df FontProbe[61946:ab32e48] [com.apple.app_launch_measurement:ApplicationLaunch] alm_release_pageins_recording_assertion: releasing pageins recording assertion
+2026-11-13 00:05:47.372 Df FontProbe[61946:ab32e48] [com.apple.runningboard:connection] Creating side-channel connection to com.apple.runningboard
+2026-11-13 00:05:47.372 Df FontProbe[61946:ab32e48] [com.apple.xpc:connection] [0x1047126c0] activating connection: mach=true listener=false peer=false name=com.apple.runningboard
+2026-11-13 00:05:47.372 Df FontProbe[61946:ab32e48] [com.apple.runningboard:process] Hit the server for a process handle 8d25e50000f1fa that resolved to: [app<com.craftbridge.FontProbe((null))>:61946]
+2026-11-13 00:05:47.391 Df FontProbe[61946:ab32e48] [com.apple.Accessibility:AXCommon] Read Per-App on Init: Smart invert = (null)
+2026-11-13 00:05:48.038 A  FontProbe[61946:ab32e4c] (RunningBoardServices) didChangeInheritances

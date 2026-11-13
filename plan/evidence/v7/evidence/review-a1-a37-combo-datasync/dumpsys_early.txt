@@ -1,0 +1,37 @@
+ACTIVITY MANAGER SERVICES (dumpsys activity services)
+  User 0 active services:
+  * ServiceRecord{edcfba3 u0 com.example.fgslab/.ExportService c:com.example.fgslab}
+    intent={cmp=com.example.fgslab/.ExportService}
+    packageName=com.example.fgslab
+    processName=com.example.fgslab
+    targetSdkVersion=37
+    baseDir=/data/app/~~dOTsS0zunPQ5ZcDWTtV62w==/com.example.fgslab-NEo98sXo9xs04_2DiRhkYA==/base.apk
+    dataDir=/data/user/0/com.example.fgslab
+    app=ProcessRecord{9c689f8 6925:com.example.fgslab/u0a230}
+    useNewWiuLogic_forCapabilities()=true
+    useNewWiuLogic_forStart()=true
+    useNewBfslLogic()=true
+    mAllowWiu_noBinding=PROC_STATE_TOP
+    mAllowWiu_inBindService=DENIED
+    mAllowWiu_byBindings=DENIED
+    getFgsAllowWiu_legacy=PROC_STATE_TOP
+    getFgsAllowWiu_new=PROC_STATE_TOP
+    getFgsAllowWiu_forStart=PROC_STATE_TOP
+    getFgsAllowWiu_forCapabilities=PROC_STATE_TOP
+    allowUiJobScheduling=true
+    recentCallingPackage=com.example.fgslab
+    recentCallingUid=10230
+    mAllowStart_noBinding=PROC_STATE_TOP
+    mAllowStart_inBindService=DENIED
+    mAllowStart_byBindings=DENIED
+    getFgsAllowStart_legacy=PROC_STATE_TOP
+    getFgsAllowStart_new=PROC_STATE_TOP
+    getFgsAllowStart=PROC_STATE_TOP
+    startForegroundCount=1
+    infoAllowStartForeground=[callingPackage: com.example.fgslab; callingUid: 10230; uidState: TOP ; uidBFSL: [BFSL]; BFGS denied: false; intent: Intent { cmp=com.example.fgslab/.ExportService }; code:PROC_STATE_TOP; tempAllowListReason:<null>; allowWiu:12; targetSdkVersion:37; callerTargetSdkVersion:37; startForegroundCount:0; bindFromPackage:null; isBindService:false]
+    isNativeIsolated=false
+    isForeground=true foregroundId=4711 types=0x00000001 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defaults=0 flags=ONGOING_EVENT|ONLY_ALERT_ONCE|NO_CLEAR|FOREGROUND_SERVICE color=0x00000000 vis=PRIVATE template=null)
+    createTime=-8s188ms startingBgTimeout=--
+    lastActivity=-8s187ms restartTime=-8s187ms createdFromFg=true
+    startRequested=true delayedStop=false stopIfKilled=true callStart=true lastStartId=1
+ startCommandResult=2

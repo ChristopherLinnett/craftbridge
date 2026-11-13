@@ -1,0 +1,3 @@
+Name           Hostname                        Identifier                             State                Model                     
+------------   -----------------------------   ------------------------------------   ------------------   --------------------------
+SeaEl iPhone   SeaEl-iPhone.coredevice.local   08452DF6-1739-55D5-8C38-622DEDB24E5E   available (paired)   iPhone 12 Pro (iPhone13,3)

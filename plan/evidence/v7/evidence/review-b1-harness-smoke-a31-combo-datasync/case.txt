@@ -1,0 +1,11 @@
+case=review-b1-harness-smoke-a31-combo-datasync
+apk=apk-b1/fgslab-combo-ts37.apk
+apk_md5=3d45b867f8c088c64cd874303ccad7bc
+serial=emulator-5556 device_sdk=31
+type=dataSync duration_s=15
+start=2026-11-13T11:39:10+08:00
+install_rc=0
+pid=5767
+home_sent=2026-11-13T11:39:19+08:00
+result=EXPORT_DONE end=2026-11-13T11:39:30+08:00
+target_sdk=37

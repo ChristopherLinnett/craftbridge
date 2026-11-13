@@ -21,7 +21,14 @@ pub(crate) fn skipped_tasks(log: &str) -> Vec<String> {
         .collect()
 }
 
-/// `cargo xtask skipped-tasks <log>`: fail, naming each, when the log reports a skipped task.
+/// Does the log report any task at all? A log with none (empty, cut short, or written in a format this
+/// reader does not know) would show no skipped task and pass, having been read for nothing.
+pub(crate) fn reports_tasks(log: &str) -> bool {
+    log.lines().any(|line| line.trim_end_matches('\r').starts_with("> Task :"))
+}
+
+/// `cargo xtask skipped-tasks <log>`: fail, naming each, when the log reports a skipped task, and fail
+/// when it reports no task at all.
 pub(crate) fn run(log_path: &str) -> ExitCode {
     let log = match std::fs::read_to_string(log_path) {
         Ok(log) => log,
@@ -30,6 +37,10 @@ pub(crate) fn run(log_path: &str) -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    if !reports_tasks(&log) {
+        println!("ci: the Gradle log {log_path} reports no `> Task :` line, so no task outcome could be read from it");
+        return ExitCode::from(1);
+    }
     let skipped = skipped_tasks(&log);
     if skipped.is_empty() {
         return ExitCode::SUCCESS;
@@ -44,6 +55,13 @@ pub(crate) fn run(log_path: &str) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_log_that_reports_no_task_is_read_for_nothing() {
+        assert!(!reports_tasks(""));
+        assert!(!reports_tasks("Task :core:lintRelease skipped\nBUILD SUCCESSFUL\n"), "another format reports nothing this reader knows");
+        assert!(reports_tasks("> Task :core:preBuild UP-TO-DATE\r\n"));
+    }
 
     #[test]
     fn a_skipped_task_of_the_sdk_is_reported_and_the_machinery_s_is_not() {

@@ -1,0 +1,188 @@
+.ADT Slab Numeric
+.ADT Slab Soft Numeric
+.CJK Symbols Fallback HK
+.CJK Symbols Fallback JA
+.CJK Symbols Fallback MO
+.CJK Symbols Fallback SC
+.CJK Symbols Fallback TC
+.CJK Symbols Fallback Watch HK
+.CJK Symbols Fallback Watch JA
+.CJK Symbols Fallback Watch MO
+.CJK Symbols Fallback Watch SC
+.CJK Symbols Fallback Watch TC
+.DecoType Nastaleeq Urdu UI
+.Helvetica Neue Interface
+.Keycaps
+.Keycaps A
+.Keycaps B
+.Keycaps Pad
+.Keycaps Pad A
+.LastResort
+.Lock Clock
+.New York
+.New York Numeric
+.New York Soft Numeric
+.PhoneFallback
+.PhoneKeyCaps
+.PhonepadTwo
+.SF Adaptive Numeric
+.SF Adaptive Soft Numeric
+.SF Arabic
+.SF Arabic Rounded
+.SF Armenian
+.SF Armenian Rounded
+.SF Bangla
+.SF Camera
+.SF Compact
+.SF Compact Rounded
+.SF Compact Soft
+.SF Devanagari
+.SF Georgian
+.SF Georgian Rounded
+.SF Gujarati
+.SF Gurmukhi
+.SF Hebrew
+.SF Hebrew Rounded
+.SF Kannada
+.SF Malayalam
+.SF Numeric
+.SF Odia
+.SF Rail Numeric
+.SF Rail Rounded Numeric
+.SF Rounded Numeric
+.SF Soft Numeric
+.SF Stencil Numeric
+.SF Tamil
+.SF Telugu
+.SF UI Mono
+.SF UI Rounded
+.SF UI Soft
+.SF UI Symbols
+.ThonburiUI
+.ThonburiUIWatch
+AppleGothic
+Asphalt
+Athelas
+Balega
+Bebas Neue
+Carlito
+Courier
+DB LCD Temp
+Dear Joe Four
+Druk
+Druk Text
+Druk Wide
+Fakt Slab Stencil Pro
+Iowan Old Style
+Journal Sans New
+Marion
+Noto Sans Adlam
+Noto Sans Armenian
+Noto Sans Avestan
+Noto Sans Bamum
+Noto Sans Bassa Vah
+Noto Sans Batak
+Noto Sans Bhaiksuki
+Noto Sans Brahmi
+Noto Sans Buginese
+Noto Sans Buhid
+Noto Sans Canadian Aboriginal
+Noto Sans Carian
+Noto Sans Caucasian Albanian
+Noto Sans Chakma
+Noto Sans Cham
+Noto Sans Coptic
+Noto Sans Cuneiform
+Noto Sans Cypriot
+Noto Sans Duployan
+Noto Sans Egyptian Hieroglyphs
+Noto Sans Elbasan
+Noto Sans Glagolitic
+Noto Sans Gothic
+Noto Sans Gunjala Gondi
+Noto Sans Hanifi Rohingya
+Noto Sans Hanunoo
+Noto Sans Hatran
+Noto Sans Imperial Aramaic
+Noto Sans Inscriptional Pahlavi
+Noto Sans Inscriptional Parthian
+Noto Sans Javanese
+Noto Sans Kaithi
+Noto Sans Kayah Li
+Noto Sans Kharoshthi
+Noto Sans Khojki
+Noto Sans Khudawadi
+Noto Sans Lepcha
+Noto Sans Limbu
+Noto Sans Linear A
+Noto Sans Linear B
+Noto Sans Lisu
+Noto Sans Lycian
+Noto Sans Lydian
+Noto Sans Mahajani
+Noto Sans Mandaic
+Noto Sans Manichaean
+Noto Sans Marchen
+Noto Sans Masaram Gondi
+Noto Sans Meetei Mayek
+Noto Sans Mende Kikakui
+Noto Sans Meroitic
+Noto Sans Miao
+Noto Sans Modi
+Noto Sans Mongolian
+Noto Sans Mro
+Noto Sans Multani
+Noto Sans NKo
+Noto Sans Nabataean
+Noto Sans Nag Mundari
+Noto Sans New Tai Lue
+Noto Sans Newa
+Noto Sans Ol Chiki
+Noto Sans Old Hungarian
+Noto Sans Old Italic
+Noto Sans Old North Arabian
+Noto Sans Old Permic
+Noto Sans Old Persian
+Noto Sans Old South Arabian
+Noto Sans Old Turkic
+Noto Sans Osage
+Noto Sans Osmanya
+Noto Sans Pahawh Hmong
+Noto Sans Palmyrene
+Noto Sans Pau Cin Hau
+Noto Sans PhagsPa
+Noto Sans Phoenician
+Noto Sans Psalter Pahlavi
+Noto Sans Rejang
+Noto Sans Samaritan
+Noto Sans Saurashtra
+Noto Sans Sharada
+Noto Sans Siddham
+Noto Sans Sora Sompeng
+Noto Sans Sundanese
+Noto Sans Syloti Nagri
+Noto Sans Tagalog
+Noto Sans Tagbanwa
+Noto Sans Tai Le
+Noto Sans Tai Tham
+Noto Sans Tai Viet
+Noto Sans Takri
+Noto Sans Thaana
+Noto Sans Tifinagh
+Noto Sans Tirhuta
+Noto Sans Ugaritic
+Noto Sans Vai
+Noto Sans Wancho
+Noto Sans Warang Citi
+Noto Sans Yi
+Noto Serif Ahom
+Noto Serif Balinese
+Noto Serif Hmong Nyiakeng
+Noto Serif Yezidi
+STIXGeneral
+Scheme
+Seravek
+SignPainter
+Superclarendon
+System Font
+The Hand Serif

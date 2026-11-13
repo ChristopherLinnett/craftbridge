@@ -1,0 +1,10 @@
+case=review-a1-fixed-a34-combo-mediaproc
+apk=/tmp/craftbridge-v7/apk-a1/fgslab-combo-ts37.apk
+apk_md5=3d45b867f8c088c64cd874303ccad7bc
+serial=emulator-5554 device_sdk=34
+type=mediaProcessing duration_s=45
+start=2026-11-13T09:39:05+08:00
+install_rc=0
+pid=6742
+home_sent=2026-11-13T09:39:14+08:00
+result=STARTFOREGROUND_FAIL end=2026-11-13T09:39:27+08:00

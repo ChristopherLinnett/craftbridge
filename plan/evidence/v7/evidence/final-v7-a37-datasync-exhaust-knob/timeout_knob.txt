@@ -1,0 +1,15 @@
+$ adb shell device_config set_sync_disabled_for_tests until_reboot
+$ adb shell device_config put activity_manager data_sync_fgs_timeout_duration 60000
+$ adb shell device_config get activity_manager data_sync_fgs_timeout_duration
+60000
+$ adb shell dumpsys platform_compat | grep FGS_INTRODUCE_TIME_LIMITS
+ChangeId(317799821; name=FGS_INTRODUCE_TIME_LIMITS; enableSinceTargetSdk=35)
+$ adb shell device_config get activity_manager data_sync_fgs_timeout_duration   # still in force?
+60000
+$ adb shell device_config delete activity_manager data_sync_fgs_timeout_duration
+Successfully deleted data_sync_fgs_timeout_duration from activity_manager
+$ adb shell device_config get activity_manager data_sync_fgs_timeout_duration
+null
+$ adb shell device_config set_sync_disabled_for_tests none
+$ adb shell device_config get_sync_disabled_for_tests
+none

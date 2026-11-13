@@ -1,0 +1,19 @@
+ACTIVITY MANAGER SERVICES (dumpsys activity services)
+  User 0 active services:
+  * ServiceRecord{10a9b43 u0 com.example.fgslab/.ExportService}
+    intent={cmp=com.example.fgslab/.ExportService}
+    packageName=com.example.fgslab
+    processName=com.example.fgslab
+    baseDir=/data/app/~~EYjaBT1PAxftCYyEFK9y-A==/com.example.fgslab-Gt2BXUZv68PyssF7N3LHsw==/base.apk
+    dataDir=/data/user/0/com.example.fgslab
+    app=ProcessRecord{6bcc10f 6666:com.example.fgslab/u0a146}
+    allowWhileInUsePermissionInFgs=true
+    recentCallingPackage=com.example.fgslab
+    recentCallingUid=10146
+    allowStartForeground=12
+    startForegroundCount=1
+    infoAllowStartForeground=[callingPackage: com.example.fgslab; callingUid: 10146; uidState: TOP ; intent: Intent { cmp=com.example.fgslab/.ExportService (has extras) }; code:PROC_STATE_TOP; tempAllowListReason:<null>; targetSdkVersion:37; callerTargetSdkVersion:37; startForegroundCount:0; bindFromPackage:null]
+    isForeground=true foregroundId=4711 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defaults=0x0 flags=0x6a color=0x00000000 vis=PRIVATE)
+    createTime=-8s131ms startingBgTimeout=--
+    lastActivity=-8s130ms restartTime=-8s130ms createdFromFg=true
+    startRequested=true delayedStop=false stopIfKilled=true callStart=true lastStartId=1

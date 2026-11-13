@@ -1,0 +1,7 @@
+case=a37-full-short-timeout
+apk=/tmp/craftbridge-v7/apk2/fgslab-full-ts37.apk
+type=shortService duration_s=600
+start=2026-11-13T01:55:27+08:00
+install_rc=0
+home_sent=2026-11-13T01:55:36+08:00
+result=FGS_ON_TIMEOUT end=2026-11-13T01:58:57+08:00

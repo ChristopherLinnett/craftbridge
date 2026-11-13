@@ -15,6 +15,9 @@ kotlin {
         jvmTarget =
             org.jetbrains.kotlin.gradle.dsl.JvmTarget
                 .fromTarget(libs.versions.jdk.get())
+        // The convention plugins are the gate's own code: a warning in them fails their build as one in a
+        // module does.
+        allWarningsAsErrors.set(true)
     }
 }
 

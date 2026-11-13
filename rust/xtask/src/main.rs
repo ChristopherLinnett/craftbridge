@@ -1,5 +1,6 @@
-//! CraftBridge's rule checks and regeneration: `cargo xtask rules` and `cargo xtask generate`, and the
-//! one judgement `tools/ci.sh` hands over from a stage it runs, `cargo xtask skipped-tasks <gradle log>`.
+//! CraftBridge's rule checks and regeneration: `cargo xtask rules` and `cargo xtask generate`; the
+//! judgements `tools/ci.sh` hands over from the stages it runs, `cargo xtask skipped-tasks <gradle log>`
+//! and `cargo xtask compiled`; and the file lists its stages read, `cargo xtask files <kind>`.
 //!
 //! The rules in `AGENTS.md` that no compiler, formatter or linter already enforces are checked here,
 //! behind one command, so a change cannot merge with one broken. Each check lives in its own module: a
@@ -11,11 +12,15 @@
 
 mod attributes;
 mod buildfiles;
+mod compiled;
 mod direction;
 mod duplicates;
+mod files;
 mod generate;
 mod generated;
+mod git;
 mod gradle_log;
+mod hygiene;
 mod layers;
 mod layout;
 mod licences;
@@ -50,6 +55,8 @@ fn main() -> ExitCode {
         ["generate"] => generate::run(&root, false),
         ["generate", "--check"] => generate::run(&root, true),
         ["skipped-tasks", log] => gradle_log::run(log),
+        ["files", kind] => files::run(&root, kind),
+        ["compiled"] => compiled::run(&root),
         _ => {
             usage();
             ExitCode::from(2)
@@ -61,6 +68,8 @@ fn usage() {
     eprintln!("usage: cargo xtask rules");
     eprintln!("       cargo xtask generate [--check]");
     eprintln!("       cargo xtask skipped-tasks <gradle log>");
+    eprintln!("       cargo xtask files <swift|shell|duplicates>");
+    eprintln!("       cargo <check|clippy|test> --message-format=json … | cargo xtask compiled");
 }
 
 /// Run every check, print one line per failure and `ok` per clean check, and fail if any failed.
@@ -73,7 +82,8 @@ mod rules {
     type Check = (&'static str, fn(&Path) -> Result<Vec<String>, String>);
 
     pub(super) fn run(root: &Path) -> ExitCode {
-        let checks: [Check; 11] = [
+        let checks: [Check; 12] = [
+            ("hygiene", crate::hygiene::check),
             ("layout", crate::layout::check),
             ("machinery", crate::machinery::check),
             ("buildfiles", crate::buildfiles::check),

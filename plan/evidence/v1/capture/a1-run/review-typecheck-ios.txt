@@ -1,0 +1,15 @@
+avail.swift:5:9: error: 'CTFontManagerCopyAvailableFontURLs()' is unavailable in iOS
+ 3 | // Each line is one candidate API; the compiler reports the ones iOS does not have.
+ 4 | func check() {
+ 5 |     _ = CTFontManagerCopyAvailableFontURLs()
+   |         `- error: 'CTFontManagerCopyAvailableFontURLs()' is unavailable in iOS
+ 6 |     _ = CTFontManagerCopyAvailablePostScriptNames()
+ 7 |     _ = CTFontManagerCopyAvailableFontFamilyNames()
+
+/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/System/Library/Frameworks/CoreText.framework/Headers/CTFontManager.h:57:12: note: 'CTFontManagerCopyAvailableFontURLs()' has been explicitly marked unavailable here
+ 55 | */
+ 56 | CT_EXPORT
+ 57 | CFArrayRef CTFontManagerCopyAvailableFontURLs( void ) CT_AVAILABLE(macos(10.6)) CT_UNAVAILABLE(ios, watchos, tvos);
+    |            `- note: 'CTFontManagerCopyAvailableFontURLs()' has been explicitly marked unavailable here
+ 58 | 
+ 59 | /*!

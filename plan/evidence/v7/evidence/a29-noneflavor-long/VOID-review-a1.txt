@@ -1,0 +1,5 @@
+Void (review A1). result=EXPORT_DONE in case.txt is false: the case lasted 18 s
+(01:38:26 -> 01:38:44). The EXPORT_DONE the old run_case.sh matched is the previous
+case's line (pid 6332, a29-combo-auto-long, type=auto) left in the buffer by
+`logcat -c`; this case's own process (pid 6861) logged only STARTFOREGROUND_OK and
+one TICK before force-stop. Superseded by evidence/review-a1-a29-noneflavor-long.

@@ -1,0 +1,6 @@
+faces scanned: 645
+files with hvgl faces: ['/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc']
+files with faces lacking glyf/CFF/CFF2/VARC/sbix/CBDT/EBDT/COLR: ['/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc']
+faces with hvgl: 32
+faces lacking every drawable table: 32
+faces with hvgl AND lacking every drawable table: 32

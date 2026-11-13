@@ -1,0 +1,34 @@
+.CJK Symbols Fallback HK
+.CJK Symbols Fallback JA
+.CJK Symbols Fallback MO
+.CJK Symbols Fallback SC
+.CJK Symbols Fallback TC
+.CJK Symbols Fallback Watch HK
+.CJK Symbols Fallback Watch JA
+.CJK Symbols Fallback Watch MO
+.CJK Symbols Fallback Watch SC
+.CJK Symbols Fallback Watch TC
+.DecoType Nastaleeq Urdu UI
+.PhoneFallback
+.PhoneKeyCaps
+.SF Arabic
+.SF Arabic Rounded
+.SF Armenian
+.SF Armenian Rounded
+.SF Compact
+.SF Compact Rounded
+.SF Compact Soft
+.SF Devanagari
+.SF Gujarati
+.SF Kannada
+.SF Malayalam
+.SF Numeric
+.SF Odia
+.SF Soft Numeric
+.SF Stencil Numeric
+.SF Telugu
+.SF UI Rounded
+Carlito
+Courier
+Noto Sans Armenian
+System Font

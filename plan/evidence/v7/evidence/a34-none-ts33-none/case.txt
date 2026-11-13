@@ -1,0 +1,7 @@
+case=a34-none-ts33-none
+apk=/tmp/craftbridge-v7/apk2-ts33/fgslab-none-ts33.apk
+type=none duration_s=45
+start=2026-11-13T02:00:59+08:00
+install_rc=0
+home_sent=2026-11-13T02:01:08+08:00
+result=EXPORT_DONE end=2026-11-13T02:01:48+08:00

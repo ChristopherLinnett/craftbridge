@@ -1,0 +1,867 @@
+=== CraftBridge FontProbe report (issue craftbridge#28, V1 / AD2) ===
+Timestamp : 2026-11-13T04:03:37Z
+OS        : Version 26.5 (Build 23F77)
+Process   : FontProbe (pid 96896)
+App bundle: /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Bundle/Application/AAA980BE-A288-4A1E-8E44-DF008B075EB7/FontProbe.app
+Simulator : yes, runtime root /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot
+
+--- 1. Path provenance ---
+  realpath(/System/Library/Fonts) = /System/Library/Fonts
+  lstat app's /System/Library/Fonts: directory, st_dev=16777232
+  lstat runtime root's copy: directory, st_dev=16777239
+  same volume as the runtime root's copy: NO
+  Environment of this process (all, values truncated to 160 chars):
+    CFFIXED_USER_HOME = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/FF97E923-8B86-4B2E-B7D8-
+    DYLD_FALLBACK_FRAMEWORK_PATH = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/L
+    DYLD_FALLBACK_LIBRARY_PATH = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/usr/lib
+    DYLD_ROOT_PATH = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot
+    DYLD_SHARED_CACHE_DIR = /Library/Developer/CoreSimulator/Caches/dyld/25F71/com.apple.CoreSimulator.SimRuntime.iOS-26-5.23F77/
+    HOME = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/FF97E923-8B86-4B2E-B7D8-
+    IOS_SIMULATOR_SYSLOG_SOCKET = /private/var/tmp/com.apple.CoreSimulator.SimDevice.E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/syslogsock
+    IPHONE_SHARED_RESOURCES_DIRECTORY = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data
+    IPHONE_SIMULATOR_ROOT = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot
+    IPHONE_TVOUT_EXTENDED_PROPERTIES = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Library/Application Support/Simulator/extended_displ
+    LS_ENABLE_BUNDLE_LOCALIZATION_CACHING = 1
+    PATH = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/usr/bin:
+    RWI_LISTEN_SOCKET = /private/var/tmp/com.apple.launchd.rh19CS4mwF/com.apple.webinspectord_sim.socket
+    SIMULATOR_ARCHS = arm64
+    SIMULATOR_AUDIO_DEVICES_PLIST_PATH = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/var/run/com.apple.coresimulator.audio.plist
+    SIMULATOR_AUDIO_SETTINGS_PATH = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/var/run/simulatoraudio/audiosettings.plist
+    SIMULATOR_BOOT_TIME = 1794470293
+    SIMULATOR_CAPABILITIES = /Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 17 Pro.simdevicetype/Contents/Resources/capabilities.plist
+    SIMULATOR_DEVICE_NAME = iPhone 17 Pro
+    SIMULATOR_EXTENDED_DISPLAY_PROPERTIES = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Library/Application Support/Simulator/extended_displ
+    SIMULATOR_FRAMEBUFFER_FRAMEWORK = /Library/Developer/PrivateFrameworks/CoreSimulator.framework/Resources/Platforms/iphoneos/Library/PrivateFrameworks/SimFramebuffer.framework/SimFramebuffer
+    SIMULATOR_HID_SYSTEM_MANAGER = /Library/Developer/PrivateFrameworks/CoreSimulator.framework/Resources/Platforms/iphoneos/Library/Frameworks/SimulatorHID.framework
+    SIMULATOR_HOST_HOME = /Users/christopherlinnett
+    SIMULATOR_LEGACY_ASSET_SUFFIX = iphone
+    SIMULATOR_LOG_ROOT = /Users/christopherlinnett/Library/Logs/CoreSimulator/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D
+    SIMULATOR_MAINSCREEN_HEIGHT = 2622
+    SIMULATOR_MAINSCREEN_PITCH = 460.000000
+    SIMULATOR_MAINSCREEN_SCALE = 3.000000
+    SIMULATOR_MAINSCREEN_WIDTH = 1206
+    SIMULATOR_MEMORY_WARNINGS = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/var/run/memory_warning_simulation
+    SIMULATOR_MODEL_IDENTIFIER = iPhone18,1
+    SIMULATOR_PRODUCT_CLASS = V53
+    SIMULATOR_ROOT = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot
+    SIMULATOR_RUNTIME_BUILD_VERSION = 23F77
+    SIMULATOR_RUNTIME_VERSION = 26.5
+    SIMULATOR_SHARED_RESOURCES_DIRECTORY = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data
+    SIMULATOR_UDID = E33474EA-1897-4EF8-9DFB-DD3FFA178C8D
+    SIMULATOR_VERSION_INFO = CoreSimulator 1051.55 - Device: iPhone 17 Pro (E33474EA-1897-4EF8-9DFB-DD3FFA178C8D) - Runtime: iOS 26.5 (23F77) - DeviceType: iPhone 17 Pro
+    TESTMANAGERD_REMOTE_AUTOMATION_SIM_SOCK = /private/var/tmp/com.apple.launchd.li2d9HPYyv/com.apple.testmanagerd.remote-automation.uds
+    TESTMANAGERD_SIM_SOCK = /private/var/tmp/com.apple.launchd.RyndgMMKXY/com.apple.testmanagerd.unix-domain.socket
+    TMPDIR = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/FF97E923-8B86-4B2E-B7D8-
+    XPC_FLAGS = 0x0
+    XPC_SERVICE_NAME = UIKitApplication:com.craftbridge.FontProbe[6709][rb-legacy]
+    XPC_SIMULATOR_LAUNCHD_NAME = com.apple.CoreSimulator.SimDevice.E33474EA-1897-4EF8-9DFB-DD3FFA178C8D
+    __CF_USER_TEXT_ENCODING = 0x1F5:0:0
+
+--- 2. List /System/Library/Fonts (top level) ---
+  OK: 83 entries = 82 files + 1 subfolders
+    file     /System/Library/Fonts/ADTNumeric.ttc
+    file     /System/Library/Fonts/Apple Braille Outline 6 Dot.ttf
+    file     /System/Library/Fonts/Apple Braille Outline 8 Dot.ttf
+    file     /System/Library/Fonts/Apple Braille Pinpoint 6 Dot.ttf
+    file     /System/Library/Fonts/Apple Braille Pinpoint 8 Dot.ttf
+    file     /System/Library/Fonts/Apple Braille.ttf
+    file     /System/Library/Fonts/Apple Color Emoji.ttc
+    file     /System/Library/Fonts/Apple Symbols.ttf
+    file     /System/Library/Fonts/AppleSDGothicNeo.ttc
+    file     /System/Library/Fonts/AquaKana.ttc
+    file     /System/Library/Fonts/ArialHB.ttc
+    file     /System/Library/Fonts/Avenir Next Condensed.ttc
+    file     /System/Library/Fonts/Avenir Next.ttc
+    file     /System/Library/Fonts/Avenir.ttc
+    file     /System/Library/Fonts/CJKSymbolsFallback.ttc
+    file     /System/Library/Fonts/Courier.ttc
+    file     /System/Library/Fonts/DecoTypeNastaleeqUrdu.ttc
+    file     /System/Library/Fonts/GeezaPro.ttc
+    file     /System/Library/Fonts/Geneva.ttf
+    file     /System/Library/Fonts/HelveLTMM
+    file     /System/Library/Fonts/Helvetica.ttc
+    file     /System/Library/Fonts/HelveticaNeue.ttc
+    file     /System/Library/Fonts/Hiragino Sans GB.ttc
+    file     /System/Library/Fonts/Keyboard.ttf
+    file     /System/Library/Fonts/Kohinoor.ttc
+    file     /System/Library/Fonts/KohinoorBangla.ttc
+    file     /System/Library/Fonts/KohinoorGujarati.ttc
+    file     /System/Library/Fonts/KohinoorTelugu.ttc
+    file     /System/Library/Fonts/LastResort.otf
+    file     /System/Library/Fonts/LucidaGrande.ttc
+    file     /System/Library/Fonts/MarkerFelt.ttc
+    file     /System/Library/Fonts/Menlo.ttc
+    file     /System/Library/Fonts/Monaco.ttf
+    file     /System/Library/Fonts/MuktaMahee.ttc
+    file     /System/Library/Fonts/NewYork.ttf
+    file     /System/Library/Fonts/NewYorkItalic.ttf
+    file     /System/Library/Fonts/Noteworthy.ttc
+    file     /System/Library/Fonts/NotoNastaliq.ttc
+    file     /System/Library/Fonts/NotoSansArmenian.ttc
+    file     /System/Library/Fonts/NotoSansKannada.ttc
+    file     /System/Library/Fonts/NotoSansMyanmar.ttc
+    file     /System/Library/Fonts/NotoSansOriya.ttc
+    file     /System/Library/Fonts/NotoSerifMyanmar.ttc
+    file     /System/Library/Fonts/Optima.ttc
+    file     /System/Library/Fonts/Palatino.ttc
+    file     /System/Library/Fonts/SFArabic.ttf
+    file     /System/Library/Fonts/SFArabicRounded.ttf
+    file     /System/Library/Fonts/SFArmenian.ttf
+    file     /System/Library/Fonts/SFArmenianRounded.ttf
+    file     /System/Library/Fonts/SFCamera.ttf
+    file     /System/Library/Fonts/SFCompact.ttf
+    file     /System/Library/Fonts/SFCompactItalic.ttf
+    file     /System/Library/Fonts/SFCompactRounded.ttf
+    file     /System/Library/Fonts/SFGeorgian.ttf
+    file     /System/Library/Fonts/SFGeorgianRounded.ttf
+    file     /System/Library/Fonts/SFHebrew.ttf
+    file     /System/Library/Fonts/SFHebrewRounded.ttf
+    file     /System/Library/Fonts/SFIndia.ttc
+    file     /System/Library/Fonts/SFNS.ttf
+    file     /System/Library/Fonts/SFNSItalic.ttf
+    file     /System/Library/Fonts/SFNSMono.ttf
+    file     /System/Library/Fonts/SFNSMonoItalic.ttf
+    file     /System/Library/Fonts/SFNSRounded.ttf
+    file     /System/Library/Fonts/STHeiti Light.ttc
+    file     /System/Library/Fonts/STHeiti Medium.ttc
+    file     /System/Library/Fonts/Symbol.ttf
+    file     /System/Library/Fonts/ThonburiUI.ttc
+    file     /System/Library/Fonts/Times.ttc
+    file     /System/Library/Fonts/TimesLTMM
+    file     /System/Library/Fonts/ZapfDingbats.ttf
+    file     /System/Library/Fonts/ヒラギノ丸ゴ ProN W4.ttc
+    file     /System/Library/Fonts/ヒラギノ明朝 ProN.ttc
+    file     /System/Library/Fonts/ヒラギノ角ゴシック W0.ttc
+    file     /System/Library/Fonts/ヒラギノ角ゴシック W1.ttc
+    file     /System/Library/Fonts/ヒラギノ角ゴシック W2.ttc
+    file     /System/Library/Fonts/ヒラギノ角ゴシック W3.ttc
+    file     /System/Library/Fonts/ヒラギノ角ゴシック W4.ttc
+    file     /System/Library/Fonts/ヒラギノ角ゴシック W5.ttc
+    file     /System/Library/Fonts/ヒラギノ角ゴシック W6.ttc
+    file     /System/Library/Fonts/ヒラギノ角ゴシック W7.ttc
+    file     /System/Library/Fonts/ヒラギノ角ゴシック W8.ttc
+    file     /System/Library/Fonts/ヒラギノ角ゴシック W9.ttc
+    subfolder /System/Library/Fonts/Supplemental
+
+--- 3. Subfolders of /System/Library/Fonts, one level deep ---
+  OK: /System/Library/Fonts/Supplemental -> 290 entries
+    file /System/Library/Fonts/Supplemental/Academy Engraved LET Fonts.ttf
+    file /System/Library/Fonts/Supplemental/Al Nile.ttc
+    file /System/Library/Fonts/Supplemental/Al Tarikh.ttc
+    file /System/Library/Fonts/Supplemental/AlBayan.ttc
+    file /System/Library/Fonts/Supplemental/AmericanTypewriter.ttc
+    file /System/Library/Fonts/Supplemental/Andale Mono.ttf
+    file /System/Library/Fonts/Supplemental/Apple Chancery.ttf
+    file /System/Library/Fonts/Supplemental/AppleGothic.ttf
+    file /System/Library/Fonts/Supplemental/AppleMyungjo.ttf
+    file /System/Library/Fonts/Supplemental/Arial Black.ttf
+    file /System/Library/Fonts/Supplemental/Arial Bold Italic.ttf
+    file /System/Library/Fonts/Supplemental/Arial Bold.ttf
+    file /System/Library/Fonts/Supplemental/Arial Italic.ttf
+    file /System/Library/Fonts/Supplemental/Arial Narrow Bold Italic.ttf
+    file /System/Library/Fonts/Supplemental/Arial Narrow Bold.ttf
+    file /System/Library/Fonts/Supplemental/Arial Narrow Italic.ttf
+    file /System/Library/Fonts/Supplemental/Arial Narrow.ttf
+    file /System/Library/Fonts/Supplemental/Arial Rounded Bold.ttf
+    file /System/Library/Fonts/Supplemental/Arial Unicode.ttf
+    file /System/Library/Fonts/Supplemental/Arial.ttf
+    file /System/Library/Fonts/Supplemental/Athelas.ttc
+    file /System/Library/Fonts/Supplemental/Ayuthaya.ttf
+    file /System/Library/Fonts/Supplemental/Baghdad.ttc
+    file /System/Library/Fonts/Supplemental/Bangla MN.ttc
+    file /System/Library/Fonts/Supplemental/Bangla Sangam MN.ttc
+    file /System/Library/Fonts/Supplemental/Baskerville.ttc
+    file /System/Library/Fonts/Supplemental/Beirut.ttc
+    file /System/Library/Fonts/Supplemental/BigCaslon.ttf
+    file /System/Library/Fonts/Supplemental/Bodoni 72 OS.ttc
+    file /System/Library/Fonts/Supplemental/Bodoni 72 Smallcaps Book.ttf
+    file /System/Library/Fonts/Supplemental/Bodoni 72.ttc
+    file /System/Library/Fonts/Supplemental/Bodoni Ornaments.ttf
+    file /System/Library/Fonts/Supplemental/Bradley Hand Bold.ttf
+    file /System/Library/Fonts/Supplemental/Brush Script.ttf
+    file /System/Library/Fonts/Supplemental/Chalkboard.ttc
+    file /System/Library/Fonts/Supplemental/ChalkboardSE.ttc
+    file /System/Library/Fonts/Supplemental/Chalkduster.ttf
+    file /System/Library/Fonts/Supplemental/Charter.ttc
+    file /System/Library/Fonts/Supplemental/Cochin.ttc
+    file /System/Library/Fonts/Supplemental/Comic Sans MS Bold.ttf
+    file /System/Library/Fonts/Supplemental/Comic Sans MS.ttf
+    file /System/Library/Fonts/Supplemental/Copperplate.ttc
+    file /System/Library/Fonts/Supplemental/Corsiva.ttc
+    file /System/Library/Fonts/Supplemental/Courier New Bold Italic.ttf
+    file /System/Library/Fonts/Supplemental/Courier New Bold.ttf
+    file /System/Library/Fonts/Supplemental/Courier New Italic.ttf
+    file /System/Library/Fonts/Supplemental/Courier New.ttf
+    file /System/Library/Fonts/Supplemental/DIN Alternate Bold.ttf
+    file /System/Library/Fonts/Supplemental/DIN Condensed Bold.ttf
+    file /System/Library/Fonts/Supplemental/Damascus.ttc
+    file /System/Library/Fonts/Supplemental/DecoTypeNaskh.ttc
+    file /System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc
+    file /System/Library/Fonts/Supplemental/DevanagariMT.ttc
+    file /System/Library/Fonts/Supplemental/Didot.ttc
+    file /System/Library/Fonts/Supplemental/Diwan Kufi.ttc
+    file /System/Library/Fonts/Supplemental/Diwan Thuluth.ttf
+    file /System/Library/Fonts/Supplemental/EuphemiaCAS.ttc
+    file /System/Library/Fonts/Supplemental/Farah.ttc
+    file /System/Library/Fonts/Supplemental/Farisi.ttf
+    file /System/Library/Fonts/Supplemental/Futura.ttc
+    file /System/Library/Fonts/Supplemental/Galvji.ttc
+    file /System/Library/Fonts/Supplemental/Georgia Bold Italic.ttf
+    file /System/Library/Fonts/Supplemental/Georgia Bold.ttf
+    file /System/Library/Fonts/Supplemental/Georgia Italic.ttf
+    file /System/Library/Fonts/Supplemental/Georgia.ttf
+    file /System/Library/Fonts/Supplemental/GillSans.ttc
+    file /System/Library/Fonts/Supplemental/Gujarati Sangam MN.ttc
+    file /System/Library/Fonts/Supplemental/GujaratiMT.ttc
+    file /System/Library/Fonts/Supplemental/Gurmukhi MN.ttc
+    file /System/Library/Fonts/Supplemental/Gurmukhi Sangam MN.ttc
+    file /System/Library/Fonts/Supplemental/Gurmukhi.ttf
+    file /System/Library/Fonts/Supplemental/Herculanum.ttf
+    file /System/Library/Fonts/Supplemental/Hoefler Text Ornaments.ttf
+    file /System/Library/Fonts/Supplemental/Hoefler Text.ttc
+    file /System/Library/Fonts/Supplemental/ITFDevanagari.ttc
+    file /System/Library/Fonts/Supplemental/Impact.ttf
+    file /System/Library/Fonts/Supplemental/InaiMathi-MN.ttc
+    file /System/Library/Fonts/Supplemental/Iowan Old Style.ttc
+    file /System/Library/Fonts/Supplemental/Kailasa.ttc
+    file /System/Library/Fonts/Supplemental/Kannada MN.ttc
+    file /System/Library/Fonts/Supplemental/Kannada Sangam MN.ttc
+    file /System/Library/Fonts/Supplemental/KefaIII.ttf
+    file /System/Library/Fonts/Supplemental/Khmer MN.ttc
+    file /System/Library/Fonts/Supplemental/Khmer Sangam MN.ttf
+    file /System/Library/Fonts/Supplemental/Kokonor.ttf
+    file /System/Library/Fonts/Supplemental/Krungthep.ttf
+    file /System/Library/Fonts/Supplemental/KufiStandardGK.ttc
+    file /System/Library/Fonts/Supplemental/Lao MN.ttc
+    file /System/Library/Fonts/Supplemental/Lao Sangam MN.ttf
+    file /System/Library/Fonts/Supplemental/Luminari.ttf
+    file /System/Library/Fonts/Supplemental/Malayalam MN.ttc
+    file /System/Library/Fonts/Supplemental/Malayalam Sangam MN.ttc
+    file /System/Library/Fonts/Supplemental/Marion.ttc
+    file /System/Library/Fonts/Supplemental/Microsoft Sans Serif.ttf
+    file /System/Library/Fonts/Supplemental/Mishafi Gold.ttf
+    file /System/Library/Fonts/Supplemental/Mishafi.ttf
+    file /System/Library/Fonts/Supplemental/Mshtakan.ttc
+    file /System/Library/Fonts/Supplemental/Muna.ttc
+    file /System/Library/Fonts/Supplemental/Myanmar MN.ttc
+    file /System/Library/Fonts/Supplemental/Myanmar Sangam MN.ttc
+    file /System/Library/Fonts/Supplemental/NISC18030.ttf
+    file /System/Library/Fonts/Supplemental/Nadeem.ttc
+    file /System/Library/Fonts/Supplemental/NewPeninimMT.ttc
+    file /System/Library/Fonts/Supplemental/NotoSansAdlam-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansAvestan-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansBamum-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansBassaVah-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansBatak-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansBhaiksuki-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansBrahmi-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansBuginese-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansBuhid-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansCanadianAboriginal-Regular.otf
+    file /System/Library/Fonts/Supplemental/NotoSansCarian-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansCaucasianAlbanian-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansChakma-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansCham-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansCoptic-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansCuneiform-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansCypriot-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansDuployan-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansEgyptianHieroglyphs-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansElbasan-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansGlagolitic-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansGothic-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansGunjalaGondi-Regular.otf
+    file /System/Library/Fonts/Supplemental/NotoSansHanifiRohingya-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansHanunoo-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansHatran-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansImperialAramaic-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansInscriptionalPahlavi-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansInscriptionalParthian-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansJavanese-Regular.otf
+    file /System/Library/Fonts/Supplemental/NotoSansKaithi-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansKayahLi-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansKharoshthi-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansKhojki-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansKhudawadi-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansLepcha-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansLimbu-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansLinearA-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansLinearB-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansLisu-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansLycian-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansLydian-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansMahajani-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansMandaic-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansManichaean-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansMarchen-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansMasaramGondi-Regular.otf
+    file /System/Library/Fonts/Supplemental/NotoSansMeeteiMayek-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansMendeKikakui-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansMeroitic-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansMiao-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansModi-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansMongolian-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansMro-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansMultani-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansNKo-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansNabataean-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansNagMundari-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansNewTaiLue-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansNewa-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansOlChiki-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansOldHungarian-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansOldItalic-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansOldNorthArabian-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansOldPermic-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansOldPersian-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansOldSouthArabian-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansOldTurkic-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansOsage-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansOsmanya-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansPahawhHmong-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansPalmyrene-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansPauCinHau-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansPhagsPa-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansPhoenician-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansPsalterPahlavi-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansRejang-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansSamaritan-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansSaurashtra-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansSharada-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansSiddham-Regular.otf
+    file /System/Library/Fonts/Supplemental/NotoSansSoraSompeng-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansSundanese-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansSylotiNagri-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansSyriac-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansTagalog-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansTagbanwa-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansTaiLe-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansTaiTham-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansTaiViet-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansTakri-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansThaana-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansTifinagh-Regular.otf
+    file /System/Library/Fonts/Supplemental/NotoSansTirhuta-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansUgaritic-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansVai-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansWancho-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansWarangCiti-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSansYi-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSerifAhom-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSerifBalinese-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSerifNyiakengPuachueHmong-Regular.ttf
+    file /System/Library/Fonts/Supplemental/NotoSerifYezidi-Regular.otf
+    file /System/Library/Fonts/Supplemental/Oriya MN.ttc
+    file /System/Library/Fonts/Supplemental/Oriya Sangam MN.ttc
+    file /System/Library/Fonts/Supplemental/PTMono.ttc
+    file /System/Library/Fonts/Supplemental/PTSans.ttc
+    file /System/Library/Fonts/Supplemental/PTSerif.ttc
+    file /System/Library/Fonts/Supplemental/PTSerifCaption.ttc
+    file /System/Library/Fonts/Supplemental/Papyrus.ttc
+    file /System/Library/Fonts/Supplemental/PartyLET-plain.ttf
+    file /System/Library/Fonts/Supplemental/Phosphate.ttc
+    file /System/Library/Fonts/Supplemental/PlantagenetCherokee.ttf
+    file /System/Library/Fonts/Supplemental/Raanana.ttc
+    file /System/Library/Fonts/Supplemental/Rockwell.ttc
+    file /System/Library/Fonts/Supplemental/STIXGeneral.otf
+    file /System/Library/Fonts/Supplemental/STIXGeneralBol.otf
+    file /System/Library/Fonts/Supplemental/STIXGeneralBolIta.otf
+    file /System/Library/Fonts/Supplemental/STIXGeneralItalic.otf
+    file /System/Library/Fonts/Supplemental/STIXIntDBol.otf
+    file /System/Library/Fonts/Supplemental/STIXIntDReg.otf
+    file /System/Library/Fonts/Supplemental/STIXIntSmBol.otf
+    file /System/Library/Fonts/Supplemental/STIXIntSmReg.otf
+    file /System/Library/Fonts/Supplemental/STIXIntUpBol.otf
+    file /System/Library/Fonts/Supplemental/STIXIntUpDBol.otf
+    file /System/Library/Fonts/Supplemental/STIXIntUpDReg.otf
+    file /System/Library/Fonts/Supplemental/STIXIntUpReg.otf
+    file /System/Library/Fonts/Supplemental/STIXIntUpSmBol.otf
+    file /System/Library/Fonts/Supplemental/STIXIntUpSmReg.otf
+    file /System/Library/Fonts/Supplemental/STIXNonUni.otf
+    file /System/Library/Fonts/Supplemental/STIXNonUniBol.otf
+    file /System/Library/Fonts/Supplemental/STIXNonUniBolIta.otf
+    file /System/Library/Fonts/Supplemental/STIXNonUniIta.otf
+    file /System/Library/Fonts/Supplemental/STIXSizFiveSymReg.otf
+    file /System/Library/Fonts/Supplemental/STIXSizFourSymBol.otf
+    file /System/Library/Fonts/Supplemental/STIXSizFourSymReg.otf
+    file /System/Library/Fonts/Supplemental/STIXSizOneSymBol.otf
+    file /System/Library/Fonts/Supplemental/STIXSizOneSymReg.otf
+    file /System/Library/Fonts/Supplemental/STIXSizThreeSymBol.otf
+    file /System/Library/Fonts/Supplemental/STIXSizThreeSymReg.otf
+    file /System/Library/Fonts/Supplemental/STIXSizTwoSymBol.otf
+    file /System/Library/Fonts/Supplemental/STIXSizTwoSymReg.otf
+    file /System/Library/Fonts/Supplemental/STIXTwoMath.otf
+    file /System/Library/Fonts/Supplemental/STIXTwoText-Italic.ttf
+    file /System/Library/Fonts/Supplemental/STIXTwoText.ttf
+    file /System/Library/Fonts/Supplemental/STIXVar.otf
+    file /System/Library/Fonts/Supplemental/STIXVarBol.otf
+    file /System/Library/Fonts/Supplemental/Sana.ttc
+    file /System/Library/Fonts/Supplemental/Sathu.ttf
+    file /System/Library/Fonts/Supplemental/Savoye LET.ttc
+    file /System/Library/Fonts/Supplemental/Seravek.ttc
+    file /System/Library/Fonts/Supplemental/Shree714.ttc
+    file /System/Library/Fonts/Supplemental/SignPainter.ttc
+    file /System/Library/Fonts/Supplemental/Silom.ttf
+    file /System/Library/Fonts/Supplemental/Sinhala MN.ttc
+    file /System/Library/Fonts/Supplemental/Sinhala Sangam MN.ttc
+    file /System/Library/Fonts/Supplemental/Skia.ttf
+    file /System/Library/Fonts/Supplemental/SnellRoundhand.ttc
+    file /System/Library/Fonts/Supplemental/Songti.ttc
+    file /System/Library/Fonts/Supplemental/SukhumvitSet.ttc
+    file /System/Library/Fonts/Supplemental/SuperClarendon.ttc
+    file /System/Library/Fonts/Supplemental/Tahoma Bold.ttf
+    file /System/Library/Fonts/Supplemental/Tahoma.ttf
+    file /System/Library/Fonts/Supplemental/Tamil MN.ttc
+    file /System/Library/Fonts/Supplemental/Tamil Sangam MN.ttc
+    file /System/Library/Fonts/Supplemental/Telugu MN.ttc
+    file /System/Library/Fonts/Supplemental/Telugu Sangam MN.ttc
+    file /System/Library/Fonts/Supplemental/Thonburi.ttc
+    file /System/Library/Fonts/Supplemental/Times New Roman Bold Italic.ttf
+    file /System/Library/Fonts/Supplemental/Times New Roman Bold.ttf
+    file /System/Library/Fonts/Supplemental/Times New Roman Italic.ttf
+    file /System/Library/Fonts/Supplemental/Times New Roman.ttf
+    file /System/Library/Fonts/Supplemental/Trattatello.ttf
+    file /System/Library/Fonts/Supplemental/Trebuchet MS Bold Italic.ttf
+    file /System/Library/Fonts/Supplemental/Trebuchet MS Bold.ttf
+    file /System/Library/Fonts/Supplemental/Trebuchet MS Italic.ttf
+    file /System/Library/Fonts/Supplemental/Trebuchet MS.ttf
+    file /System/Library/Fonts/Supplemental/Verdana Bold Italic.ttf
+    file /System/Library/Fonts/Supplemental/Verdana Bold.ttf
+    file /System/Library/Fonts/Supplemental/Verdana Italic.ttf
+    file /System/Library/Fonts/Supplemental/Verdana.ttf
+    file /System/Library/Fonts/Supplemental/Waseem.ttc
+    file /System/Library/Fonts/Supplemental/Webdings.ttf
+    file /System/Library/Fonts/Supplemental/Wingdings 2.ttf
+    file /System/Library/Fonts/Supplemental/Wingdings 3.ttf
+    file /System/Library/Fonts/Supplemental/Wingdings.ttf
+    file /System/Library/Fonts/Supplemental/Zapfino.ttf
+
+--- 4. File counts by extension (top level + one level deep) ---
+  .ttf : 204
+  .ttc : 128
+  .otf : 38
+  (no extension) : 2
+  TOTAL files: 372
+
+--- 5. Font reads: first 4 bytes, one per kind (.ttc/.ttf/.otf, first match by name) ---
+  [TTC] OK: /System/Library/Fonts/ADTNumeric.ttc
+        read 4 bytes: hex [74 74 63 66] ascii "ttcf"
+  [TTF] OK: /System/Library/Fonts/Apple Braille Outline 6 Dot.ttf
+        read 4 bytes: hex [00 01 00 00] ascii "...."
+  [OTF] OK: /System/Library/Fonts/LastResort.otf
+        read 4 bytes: hex [4F 54 54 4F] ascii "OTTO"
+
+--- 6. /System/Library/Fonts/Core (exists in the iOS font layout, not in the macOS one) ---
+  FAIL: NSCocoaErrorDomain code 260: The folder “Core” doesn’t exist. [underlying NSPOSIXErrorDomain code 2]
+
+--- 7. Sandbox canary (a Mac file outside every app container) ---
+  READ /tmp/craftbridge-v1/capture/sandbox-canary.txt: OK "sandbox canary: a Mac file outside every app container (written by the review capture)"
+  -> this process reads arbitrary Mac files: no iOS sandbox confines its file access
+
+--- 8. CoreText: CTFontCollectionCreateFromAvailableFonts + kCTFontURLAttribute ---
+  (CTFontManagerCopyAvailableFontURLs is macOS-only: the iOS SDK marks it CT_UNAVAILABLE(ios))
+  descriptors: 303; with a URL: 303; without: 0
+  distinct font files: 103, in 8 folders:
+    29 in <RuntimeRoot>/System/Library/Fonts/AppFonts: AcademyEngraved.ttf, AlNile.ttc, AvenirNextCondensed.ttc, Bodoni-Ornaments.ttf, Bodoni72-Book-SmallCaps.ttf, Bodoni72-OldStyle.ttc, Bodoni72.ttc, BradleyHand-Bold.ttf, ChalkboardSE.ttc, Chalkduster.ttf, Charter.ttc, Cochin.ttc, Damascus.ttc, DevanagariSangamMN.ttc, Didot.ttc, Farah.ttc, GillSans.ttc, HiraginoMincho.ttc, HoeflerText.ttc, MarkerFeltThin.ttf, MarkerFeltWide.ttf, Mishafi.ttf, Noteworthy.ttc, Optima.ttc, Palatino.ttc, Papyrus.ttc, PartyLET.ttf, SnellRoundhand.ttc, Zapfino.ttf
+    42 in <RuntimeRoot>/System/Library/Fonts/Core: AppleSDGothicNeo.ttc, AppleSymbols.ttf, ArialHB.ttc, Avenir.ttc, AvenirNext.ttc, CourierNew.ttf, CourierNewBold.ttf, CourierNewBoldItalic.ttf, CourierNewItalic.ttf, DINAlternate-bold.ttf, DINCondensed-bold.ttf, EuphemiaCAS.ttc, Futura.ttc, Galvji.ttc, GeezaPro.ttc, Helvetica.ttc, HelveticaNeue.ttc, HelveticaNeueExtras.ttc, HiraginoKakuGothic.ttc, Kailasa.ttc, KefaIII.ttf, KhmerSangamMN.ttf, KohinoorBangla.ttc, KohinoorGujarati.ttc, KohinoorTelugu.ttc, LaoSangamMN.ttf, MalayalamSangamMN.ttc, MuktaMahee.ttc, MyanmarSangamMN.ttc, NotoNastaliq.ttc, NotoSansKannada.ttc, NotoSansMyanmar.ttc, NotoSansOriya.ttc, SinhalaSangamMN.ttc, Symbol.ttf, TamilSangamMN.ttc, Thonburi.ttc, TimesNewRoman.ttf, TimesNewRomanBold.ttf, TimesNewRomanBoldItalic.ttf, TimesNewRomanItalic.ttf, ZapfDingbats.ttf
+    1 in <RuntimeRoot>/System/Library/Fonts/CoreAddition: AppleColorEmoji-160px.ttc
+    11 in <RuntimeRoot>/System/Library/Fonts/CoreUI: AmericanTypewriter.ttc, Baskerville.ttc, Copperplate.ttc, HiraginoMaruGothProN.ttc, Menlo.ttc, Rockwell.ttc, Savoye.ttc, TrebuchetMS.ttf, TrebuchetMSBold.ttf, TrebuchetMSBoldItalic.ttf, TrebuchetMSItalic.ttf
+    1 in <RuntimeRoot>/System/Library/Fonts/LanguageSupport: Kohinoor.ttc
+    4 in <RuntimeRoot>/System/Library/Fonts/UnicodeSupport: NotoSansSyriac-Regular.ttf, STIXTwoMath.otf, STIXTwoText-Italic.ttf, STIXTwoText.ttf
+    14 in <RuntimeRoot>/System/Library/Fonts/WebFonts: Arial.ttf, ArialBold.ttf, ArialBoldItalic.ttf, ArialItalic.ttf, ArialRoundedMTBold.ttf, Georgia.ttf, GeorgiaBold.ttf, GeorgiaBoldItalic.ttf, GeorgiaItalic.ttf, Impact.ttf, Verdana.ttf, VerdanaBold.ttf, VerdanaBoldItalic.ttf, VerdanaItalic.ttf
+    1 in <RuntimeRoot>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate: PingFangUI.ttc
+  under the runtime root: 103; under the Mac's /System/Library/Fonts: 0; elsewhere: 0
+  read first 4 bytes of every file: OK 103, FAIL 0; total size of the readable files 352 MiB
+    55 x hex [74 74 63 66] ascii "ttcf"
+    47 x hex [00 01 00 00] ascii "...."
+    1 x hex [4F 54 54 4F] ascii "OTTO"
+  UIFont.familyNames: 86; CTFontManagerCopyAvailableFontFamilyNames: 86; families in the collection: 86 (0 hidden, named with a leading dot)
+  UIFont.familyNames and the collection's families differ in: 0
+  CTFontManagerCopyAvailableFontFamilyNames and the collection's families differ in: 0
+  font files behind named fonts (CTFontCopyAttribute kCTFontURLAttribute):
+    system UI font -> .SFUI-Regular at <RuntimeRoot>/System/Library/Fonts/Core/SFUI.ttf
+    Helvetica -> Helvetica at <RuntimeRoot>/System/Library/Fonts/Core/Helvetica.ttc
+    Georgia -> Georgia at <RuntimeRoot>/System/Library/Fonts/WebFonts/Georgia.ttf
+    PingFangSC-Regular -> PingFangSC-Regular at <RuntimeRoot>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc
+    AppleColorEmoji -> AppleColorEmoji at <RuntimeRoot>/System/Library/Fonts/CoreAddition/AppleColorEmoji-160px.ttc
+    Noteworthy-Light -> Noteworthy-Light at <RuntimeRoot>/System/Library/Fonts/AppFonts/Noteworthy.ttc
+
+--- 9. EffectCraft DirectorySource (effectcraft-text 10376058, linked into this app) ---
+  DirectorySource::system() folders on this target (what scan_system() walks):
+    /usr/share/fonts (exists: false)
+    /usr/local/share/fonts (exists: false)
+    /run/host/fonts (exists: false)
+    /run/host/local-fonts (exists: false)
+    /run/host/user-fonts (exists: false)
+    /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/FF97E923-8B86-4B2E-B7D8-296E1D9C4301/.local/share/fonts (exists: false)
+    /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/FF97E923-8B86-4B2E-B7D8-296E1D9C4301/.fonts (exists: false)
+  DirectorySource { dirs }.faces() (lists, registers nothing):
+    dirs = [/System/Library/Fonts]: 787 faces, 370 files, 378 families (103 ms)
+    dirs = [<RuntimeRoot>/System/Library/Fonts] (the iOS copy; no font files at its top level): 613 faces, 264 files, 296 families (107 ms)
+    dirs = CoreText's 8 font folders: 633 faces, 263 files, 311 families (14 ms)
+    dirs = [one font file, <RuntimeRoot>/System/Library/Fonts/AppFonts/AcademyEngraved.ttf]: 0 faces, 0 files, 0 families (0 ms)
+    (their common parent <RuntimeRoot>/System/Library not walked: it is not inside a Fonts folder)
+  per CoreText folder: files CoreText lists | what DirectorySource { dirs: [folder] }.faces() finds:
+    <RuntimeRoot>/System/Library/Fonts/AppFonts: 29 | 127 faces, 37 files, 40 families (1 ms)
+    <RuntimeRoot>/System/Library/Fonts/Core: 42 | 238 faces, 72 files, 104 families (6 ms)
+    <RuntimeRoot>/System/Library/Fonts/CoreAddition: 1 | 6 faces, 5 files, 3 families (0 ms)
+    <RuntimeRoot>/System/Library/Fonts/CoreUI: 11 | 107 faces, 27 files, 31 families (1 ms)
+    <RuntimeRoot>/System/Library/Fonts/LanguageSupport: 1 | 3 faces, 1 files, 1 families (0 ms)
+    <RuntimeRoot>/System/Library/Fonts/UnicodeSupport: 4 | 106 faces, 106 files, 105 families (3 ms)
+    <RuntimeRoot>/System/Library/Fonts/WebFonts: 14 | 14 faces, 14 files, 5 families (0 ms)
+    <RuntimeRoot>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate: 1 | 32 faces, 1 files, 22 families (0 ms)
+  add_source(CoreText's folders) + families() (16 ms): faces before 7; add_source added 633; families() now 314
+  fallback for characters the default face lacks: EffectCraft fallback_for_locale | CoreText CTFontCreateForStringWithLanguage from the system UI font:
+    汉 (zh-Hans): Inter/Regular | .PingFangUITextSC-Regular at <RuntimeRoot>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc
+    漢 (zh-Hant): Hiragino Sans/W4 | .PingFangUITextTC-Regular at <RuntimeRoot>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc
+    漢 (ja): Hiragino Sans/W4 | .HiraKakuInterface-W4 at <RuntimeRoot>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc
+    한 (ko): Apple SD Gothic Neo/Regular | .AppleSDGothicNeoI-Regular at <RuntimeRoot>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc
+  UIFont.familyNames found in families() (case-insensitive): 81/86
+  families() not dot-named and not in UIFont.familyNames (bundled and Arabic-named ones included): 141: AppleGothic, Asphalt, Athelas, Balega, Bebas Neue, Carlito, Courier, DB LCD Temp, Dear Joe Four, Druk, Druk Text, Druk Wide, Fakt Slab Stencil Pro, Hiragino Kaku Gothic Pro, Hiragino Kaku Gothic ProN, Hiragino Kaku Gothic Std, Hiragino Kaku Gothic StdN, Hiragino Maru Gothic Pro, Hiragino Mincho Pro, Inter, Iowan Old Style, JetBrains Mono, Journal Sans New, Marion, Noto Sans Adlam, Noto Sans Armenian, Noto Sans Avestan, Noto Sans Bamum, Noto Sans Bassa Vah, Noto Sans Batak, Noto Sans Bhaiksuki, Noto Sans Brahmi, Noto Sans Buginese, Noto Sans Buhid, Noto Sans Canadian Aboriginal, Noto Sans Carian, Noto Sans Caucasian Albanian, Noto Sans Chakma, Noto Sans Cham, Noto Sans Coptic, Noto Sans Cuneiform, Noto Sans Cypriot, Noto Sans Duployan, Noto Sans Egyptian Hieroglyphs, Noto Sans Elbasan, Noto Sans Glagolitic, Noto Sans Gothic, Noto Sans Gunjala Gondi, Noto Sans Hanifi Rohingya, Noto Sans Hanunoo, Noto Sans Hatran, Noto Sans Imperial Aramaic, Noto Sans Inscriptional Pahlavi, Noto Sans Inscriptional Parthian, Noto Sans Javanese, Noto Sans Kaithi, Noto Sans Kayah Li, Noto Sans Kharoshthi, Noto Sans Khojki, Noto Sans Khudawadi, Noto Sans Lepcha, Noto Sans Limbu, Noto Sans Linear A, Noto Sans Linear B, Noto Sans Lisu, Noto Sans Lycian, Noto Sans Lydian, Noto Sans Mahajani, Noto Sans Mandaic, Noto Sans Manichaean, Noto Sans Marchen, Noto Sans Masaram Gondi, Noto Sans Meetei Mayek, Noto Sans Mende Kikakui, Noto Sans Meroitic, Noto Sans Miao, Noto Sans Modi, Noto Sans Mongolian, Noto Sans Mro, Noto Sans Multani, Noto Sans NKo, Noto Sans Nabataean, Noto Sans Nag Mundari, Noto Sans New Tai Lue, Noto Sans Newa, Noto Sans Ol Chiki, Noto Sans Old Hungarian, Noto Sans Old Italic, Noto Sans Old North Arabian, Noto Sans Old Permic, Noto Sans Old Persian, Noto Sans Old South Arabian, Noto Sans Old Turkic, Noto Sans Osage, Noto Sans Osmanya, Noto Sans Pahawh Hmong, Noto Sans Palmyrene, Noto Sans Pau Cin Hau, Noto Sans PhagsPa, Noto Sans Phoenician, Noto Sans Psalter Pahlavi, Noto Sans Rejang, Noto Sans Samaritan, Noto Sans Saurashtra, Noto Sans Sharada, Noto Sans Siddham, Noto Sans Sora Sompeng, Noto Sans Sundanese, Noto Sans Syloti Nagri, Noto Sans Tagalog, Noto Sans Tagbanwa, Noto Sans Tai Le, Noto Sans Tai Tham, Noto Sans Tai Viet, Noto Sans Takri, Noto Sans Thaana, Noto Sans Tifinagh, Noto Sans Tirhuta, Noto Sans Ugaritic, Noto Sans Vai, Noto Sans Wancho, Noto Sans Warang Citi, Noto Sans Yi, Noto Sans Zawgyi, Noto Serif, Noto Serif Ahom, Noto Serif Balinese, Noto Serif Hmong Nyiakeng, Noto Serif Yezidi, STIXGeneral, Scheme, Seravek, SignPainter, Superclarendon, System Font, The Hand Serif, النيل, فرح, مِصحفي, ڈیمسکس, گیزا پرو
+  UIFont families not in families() under their English name: 5: Al Nile, Damascus, Farah, Geeza Pro, Mishafi
+    Al Nile is <RuntimeRoot>/System/Library/Fonts/AppFonts/AlNile.ttc; EffectCraft reads it as 4 faces: النيل/عادي, .Al Nile PUA/Regular, النيل/عريض, .Al Nile PUA/Bold
+    Damascus is <RuntimeRoot>/System/Library/Fonts/AppFonts/Damascus.ttc; EffectCraft reads it as 10 faces: ڈیمسکس/ریگولر, .Damascus PUA/Regular, ڈیمسکس/لائٹ, .Damascus PUA/Light, ڈیمسکس/میڈیم, .Damascus PUA/Medium, ڈیمسکس/بولڈ, .Damascus PUA/Bold, ڈیمسکس/سیمی بولڈ, .Damascus PUA/Semi Bold
+    Farah is <RuntimeRoot>/System/Library/Fonts/AppFonts/Farah.ttc; EffectCraft reads it as 2 faces: فرح/عادي, .Farah PUA/Regular
+    Geeza Pro is <RuntimeRoot>/System/Library/Fonts/Core/GeezaPro.ttc; EffectCraft reads it as 7 faces: گیزا پرو/Regular, گیزا پرو/Bold, .Geeza Pro Interface/Regular, .Geeza Pro Interface/Bold, .Geeza Pro Interface/Light, .Geeza Pro PUA/Regular, .Geeza Pro PUA/Bold
+    Mishafi is <RuntimeRoot>/System/Library/Fonts/AppFonts/Mishafi.ttf; EffectCraft reads it as 1 faces: مِصحفي/عادي
+  families() (314, with style counts):
+    .ADT Slab Numeric [31]
+    .ADT Slab Soft Numeric [7]
+    .Al Nile PUA [2]
+    .Apple Color Emoji UI [1]
+    .Apple SD Gothic NeoI [7]
+    .Apple SD Gothic NeoW [7]
+    .CJK Symbols Fallback HK [7]
+    .CJK Symbols Fallback JA [7]
+    .CJK Symbols Fallback MO [7]
+    .CJK Symbols Fallback SC [7]
+    .CJK Symbols Fallback TC [7]
+    .CJK Symbols Fallback Watch HK [7]
+    .CJK Symbols Fallback Watch JA [7]
+    .CJK Symbols Fallback Watch MO [7]
+    .CJK Symbols Fallback Watch SC [7]
+    .CJK Symbols Fallback Watch TC [7]
+    .Damascus PUA [5]
+    .DecoType Nastaleeq Urdu UI [2]
+    .Farah PUA [1]
+    .Geeza Pro Interface [3]
+    .Geeza Pro PUA [2]
+    .Helvetica Neue Interface [2]
+    .Hiragino Kaku Gothic Interface [8]
+    .Hiragino Kaku Gothic InterfaceWatch [8]
+    .Keycaps [2]
+    .Keycaps A [1]
+    .Keycaps B [1]
+    .Keycaps Pad [1]
+    .Keycaps Pad A [1]
+    .LastResort [1]
+    .Lock Clock [1]
+    .New York [28]
+    .New York Numeric [42]
+    .New York Soft Numeric [42]
+    .Noto Nastaliq Urdu UI [2]
+    .PhoneFallback [1]
+    .PhoneKeyCaps [1]
+    .PhonepadTwo [1]
+    .PingFang HK [8]
+    .PingFang MO [8]
+    .PingFang SC [8]
+    .PingFang TC [8]
+    .PingFang UI HK [18]
+    .PingFang UI JA [18]
+    .PingFang UI MO [18]
+    .PingFang UI SC [18]
+    .PingFang UI TC [18]
+    .PingFang UI Watch HK [18]
+    .PingFang UI Watch JA [18]
+    .PingFang UI Watch MO [18]
+    .PingFang UI Watch SC [18]
+    .PingFang UI Watch TC [18]
+    .PingFang Watch HK [8]
+    .PingFang Watch MO [8]
+    .PingFang Watch SC [8]
+    .PingFang Watch TC [8]
+    .SF Adaptive Numeric [82]
+    .SF Adaptive Soft Numeric [18]
+    .SF Arabic [9]
+    .SF Arabic Rounded [9]
+    .SF Armenian [9]
+    .SF Armenian Rounded [9]
+    .SF Bangla [9]
+    .SF Camera [8]
+    .SF Compact [82]
+    .SF Compact Rounded [9]
+    .SF Compact Soft [18]
+    .SF Devanagari [9]
+    .SF Georgian [9]
+    .SF Georgian Rounded [9]
+    .SF Gujarati [9]
+    .SF Gurmukhi [9]
+    .SF Hebrew [9]
+    .SF Hebrew Rounded [9]
+    .SF Kannada [9]
+    .SF Malayalam [9]
+    .SF Numeric [369]
+    .SF Odia [9]
+    .SF Rail Numeric [10]
+    .SF Rail Rounded Numeric [10]
+    .SF Rounded Numeric [27]
+    .SF Soft Numeric [369]
+    .SF Stencil Numeric [46]
+    .SF Tamil [9]
+    .SF Telugu [9]
+    .SF UI Mono [12]
+    .SF UI Rounded [46]
+    .SF UI Soft [41]
+    .SF UI Symbols [1]
+    .Savoye LET CC. [1]
+    .ThonburiUI [3]
+    .ThonburiUIWatch [3]
+    Academy Engraved LET [1]
+    American Typewriter [7]
+    Apple Color Emoji [1]
+    Apple SD Gothic Neo [7]
+    Apple Symbols [1]
+    AppleGothic [1]
+    Arial [4]
+    Arial Hebrew [3]
+    Arial Rounded MT Bold [1]
+    Asphalt [1]
+    Athelas [4]
+    Avenir [12]
+    Avenir Next [12]
+    Avenir Next Condensed [12]
+    Balega [1]
+    Baskerville [6]
+    Bebas Neue [1]
+    Bodoni 72 [3]
+    Bodoni 72 Oldstyle [3]
+    Bodoni 72 Smallcaps [1]
+    Bodoni Ornaments [1]
+    Bradley Hand [1]
+    Carlito [4]
+    Chalkboard SE [3]
+    Chalkduster [1]
+    Charter [6]
+    Cochin [4]
+    Copperplate [3]
+    Courier [4]
+    Courier New [4]
+    DB LCD Temp [1]
+    DIN Alternate [1]
+    DIN Condensed [1]
+    Dear Joe Four [1]
+    Devanagari Sangam MN [2]
+    Didot [3]
+    Druk [8]
+    Druk Text [1]
+    Druk Wide [4]
+    Euphemia UCAS [3]
+    Fakt Slab Stencil Pro [1]
+    Futura [5]
+    Galvji [2]
+    Georgia [4]
+    Gill Sans [9]
+    Grantha Sangam MN [2]
+    Helvetica [6]
+    Helvetica Neue [14]
+    Hiragino Kaku Gothic Pro [2]
+    Hiragino Kaku Gothic ProN [2]
+    Hiragino Kaku Gothic Std [1]
+    Hiragino Kaku Gothic StdN [1]
+    Hiragino Maru Gothic Pro [1]
+    Hiragino Maru Gothic ProN [1]
+    Hiragino Mincho Pro [2]
+    Hiragino Mincho ProN [2]
+    Hiragino Sans [6]
+    Hoefler Text [4]
+    Impact [1]
+    Inter [5]
+    Iowan Old Style [4]
+    JetBrains Mono [1]
+    Journal Sans New [1]
+    Kailasa [2]
+    Kefa III [4]
+    Khmer Sangam MN [1]
+    Kohinoor Bangla [3]
+    Kohinoor Devanagari [3]
+    Kohinoor Gujarati [3]
+    Kohinoor Telugu [3]
+    Lao Sangam MN [1]
+    Malayalam Sangam MN [2]
+    Marion [3]
+    Marker Felt [2]
+    Menlo [4]
+    Mukta Mahee [3]
+    Myanmar Sangam MN [2]
+    Noteworthy [2]
+    Noto Nastaliq Urdu [2]
+    Noto Sans Adlam [1]
+    Noto Sans Armenian [3]
+    Noto Sans Avestan [1]
+    Noto Sans Bamum [1]
+    Noto Sans Bassa Vah [1]
+    Noto Sans Batak [1]
+    Noto Sans Bhaiksuki [1]
+    Noto Sans Brahmi [1]
+    Noto Sans Buginese [1]
+    Noto Sans Buhid [1]
+    Noto Sans Canadian Aboriginal [1]
+    Noto Sans Carian [1]
+    Noto Sans Caucasian Albanian [1]
+    Noto Sans Chakma [1]
+    Noto Sans Cham [1]
+    Noto Sans Coptic [1]
+    Noto Sans Cuneiform [1]
+    Noto Sans Cypriot [1]
+    Noto Sans Duployan [1]
+    Noto Sans Egyptian Hieroglyphs [1]
+    Noto Sans Elbasan [1]
+    Noto Sans Glagolitic [1]
+    Noto Sans Gothic [1]
+    Noto Sans Gunjala Gondi [1]
+    Noto Sans Hanifi Rohingya [1]
+    Noto Sans Hanunoo [1]
+    Noto Sans Hatran [1]
+    Noto Sans Imperial Aramaic [1]
+    Noto Sans Inscriptional Pahlavi [1]
+    Noto Sans Inscriptional Parthian [1]
+    Noto Sans Javanese [1]
+    Noto Sans Kaithi [1]
+    Noto Sans Kannada [3]
+    Noto Sans Kayah Li [1]
+    Noto Sans Kharoshthi [1]
+    Noto Sans Khojki [1]
+    Noto Sans Khudawadi [1]
+    Noto Sans Lepcha [1]
+    Noto Sans Limbu [1]
+    Noto Sans Linear A [1]
+    Noto Sans Linear B [1]
+    Noto Sans Lisu [1]
+    Noto Sans Lycian [1]
+    Noto Sans Lydian [1]
+    Noto Sans Mahajani [1]
+    Noto Sans Mandaic [1]
+    Noto Sans Manichaean [1]
+    Noto Sans Marchen [1]
+    Noto Sans Masaram Gondi [1]
+    Noto Sans Meetei Mayek [1]
+    Noto Sans Mende Kikakui [1]
+    Noto Sans Meroitic [1]
+    Noto Sans Miao [1]
+    Noto Sans Modi [1]
+    Noto Sans Mongolian [1]
+    Noto Sans Mro [1]
+    Noto Sans Multani [1]
+    Noto Sans Myanmar [3]
+    Noto Sans NKo [1]
+    Noto Sans Nabataean [1]
+    Noto Sans Nag Mundari [4]
+    Noto Sans New Tai Lue [1]
+    Noto Sans Newa [1]
+    Noto Sans Ol Chiki [1]
+    Noto Sans Old Hungarian [1]
+    Noto Sans Old Italic [1]
+    Noto Sans Old North Arabian [1]
+    Noto Sans Old Permic [1]
+    Noto Sans Old Persian [1]
+    Noto Sans Old South Arabian [1]
+    Noto Sans Old Turkic [1]
+    Noto Sans Oriya [2]
+    Noto Sans Osage [1]
+    Noto Sans Osmanya [1]
+    Noto Sans Pahawh Hmong [1]
+    Noto Sans Palmyrene [1]
+    Noto Sans Pau Cin Hau [1]
+    Noto Sans PhagsPa [1]
+    Noto Sans Phoenician [1]
+    Noto Sans Psalter Pahlavi [1]
+    Noto Sans Rejang [1]
+    Noto Sans Samaritan [1]
+    Noto Sans Saurashtra [1]
+    Noto Sans Sharada [1]
+    Noto Sans Siddham [1]
+    Noto Sans Sora Sompeng [1]
+    Noto Sans Sundanese [1]
+    Noto Sans Syloti Nagri [1]
+    Noto Sans Syriac [9]
+    Noto Sans Tagalog [1]
+    Noto Sans Tagbanwa [1]
+    Noto Sans Tai Le [1]
+    Noto Sans Tai Tham [1]
+    Noto Sans Tai Viet [1]
+    Noto Sans Takri [1]
+    Noto Sans Thaana [1]
+    Noto Sans Tifinagh [1]
+    Noto Sans Tirhuta [1]
+    Noto Sans Ugaritic [1]
+    Noto Sans Vai [1]
+    Noto Sans Wancho [1]
+    Noto Sans Warang Citi [1]
+    Noto Sans Yi [1]
+    Noto Sans Zawgyi [3]
+    Noto Serif [1]
+    Noto Serif Ahom [1]
+    Noto Serif Balinese [1]
+    Noto Serif Hmong Nyiakeng [1]
+    Noto Serif Yezidi [1]
+    Optima [5]
+    Palatino [4]
+    Papyrus [2]
+    Party LET [1]
+    PingFang HK [6]
+    PingFang MO [6]
+    PingFang SC [6]
+    PingFang TC [6]
+    Rockwell [4]
+    STIX Two Math [1]
+    STIX Two Text [8]
+    STIXGeneral [4]
+    Savoye LET [1]
+    Scheme [1]
+    Seravek [10]
+    SignPainter [1]
+    Sinhala Sangam MN [2]
+    Snell Roundhand [3]
+    Superclarendon [8]
+    Symbol [1]
+    System Font [378]
+    Tamil Sangam MN [2]
+    The Hand Serif [1]
+    Thonburi [3]
+    Times New Roman [4]
+    Trebuchet MS [4]
+    Verdana [4]
+    Zapf Dingbats [1]
+    Zapfino [1]
+    النيل [2]
+    فرح [1]
+    مِصحفي [1]
+    ڈیمسکس [5]
+    گیزا پرو [2]
+
+--- 10. Font data from CoreText tables (no file access) ---
+  system UI font: 22 tables, 22 copied, 7921268 bytes rebuilt; CoreText reloads it as 369 face(s), family ".SF UI" (original ".AppleSystemUIFont")
+    file comparison: face 0 of 1 in SFUI.ttf (7921268 bytes): 22/22 tables byte-identical; missing from CoreText []; only in CoreText []
+    EffectCraft add_font_data(rebuilt): 1 faces: System Font/Regular
+  Helvetica: 16 tables, 16 copied, 279176 bytes rebuilt; CoreText reloads it as 1 face(s), family "Helvetica" (original "Helvetica")
+    file comparison: face 0 of 6 in Helvetica.ttc (1195996 bytes): 16/16 tables byte-identical; missing from CoreText []; only in CoreText []
+    EffectCraft add_font_data(rebuilt): 1 faces: Helvetica/Regular
+  Georgia: 20 tables, 20 copied, 379588 bytes rebuilt; CoreText reloads it as 1 face(s), family "Georgia" (original "Georgia")
+    file comparison: face 0 of 1 in Georgia.ttf (379588 bytes): 20/20 tables byte-identical; missing from CoreText []; only in CoreText []
+    EffectCraft add_font_data(rebuilt): 1 faces: Georgia/Regular
+  PingFangSC-Regular: 21 tables, 21 copied, 58965676 bytes rebuilt; CoreText reloads it as 0 face(s), family "<none>" (original "PingFang SC")
+    file comparison: face 20 of 32 in PingFangUI.ttc (61080840 bytes): 21/21 tables byte-identical; missing from CoreText []; only in CoreText []
+    EffectCraft add_font_data(rebuilt): 1 faces: PingFang SC/Medium
+  AppleColorEmoji: 21 tables, 21 copied, 139052436 bytes rebuilt; CoreText reloads it as 1 face(s), family "Apple Color Emoji" (original "Apple Color Emoji")
+    file comparison: face 0 of 2 in AppleColorEmoji-160px.ttc (139284540 bytes): 21/21 tables byte-identical; missing from CoreText []; only in CoreText []
+    EffectCraft add_font_data(rebuilt): 1 faces: Apple Color Emoji/Regular
+  Noteworthy-Light: 13 tables, 13 copied, 150076 bytes rebuilt; CoreText reloads it as 1 face(s), family "Noteworthy" (original "Noteworthy")
+    file comparison: face 0 of 2 in Noteworthy.ttc (286684 bytes): 13/13 tables byte-identical; missing from CoreText []; only in CoreText []
+    EffectCraft add_font_data(rebuilt): 1 faces: Noteworthy/Light
+
+--- 11. Report file in Documents ---
+  Documents dir: /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/FF97E923-8B86-4B2E-B7D8-296E1D9C4301/Documents
+  Report body (sections 1-10): 52027 bytes, SHA-256 54c5c8c7df9a11af9557155452dcf9e96b10ea327374ac3553acca2b89d4122c
+  WRITE: OK -> /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/FF97E923-8B86-4B2E-B7D8-296E1D9C4301/Documents/fontprobe_report.txt
+  READ-BACK: OK, file on disk matches this report (52600 bytes before this line)

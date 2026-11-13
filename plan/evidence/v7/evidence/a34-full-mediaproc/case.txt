@@ -1,0 +1,7 @@
+case=a34-full-mediaproc
+apk=/tmp/craftbridge-v7/apk2/fgslab-full-ts37.apk
+type=mediaProcessing duration_s=45
+start=2026-11-13T01:53:48+08:00
+install_rc=0
+home_sent=2026-11-13T01:53:57+08:00
+result=STARTFOREGROUND_FAIL end=2026-11-13T01:54:10+08:00

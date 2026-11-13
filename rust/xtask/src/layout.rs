@@ -7,7 +7,6 @@
 
 use crate::scan;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
 /// The only names allowed directly at the root, each as the folder or file it must be.
 const ALLOWED_ROOT: &[(&str, Entry)] = &[
@@ -49,26 +48,19 @@ enum Entry {
 pub(crate) const IGNORED_NAMES: &[&str] = &[".DS_Store"];
 
 /// The names in `dir` that hold nothing the repository can: neither a tracked file nor an untracked one
-/// git would add. Those are ignored names — an editor's settings folder a contributor ignores locally,
-/// a tool's cache, a folder whose every file is ignored (`.claude/` holding only an ignored
-/// `settings.local.json`) — so no rule about what the repository holds applies to them. A tracked file
-/// always counts, so a platform file forced past the ignore rules is still refused. Outside a git
-/// checkout (a scratch tree) nothing is ignored.
+/// git would add. Those are no part of the repository — an editor's settings folder a contributor
+/// ignores locally, a tool's cache, a folder whose every file is ignored (`.claude/` holding only an
+/// ignored `settings.local.json`), and an empty folder, which git cannot hold — so no rule about what the
+/// repository holds applies to them. A tracked file always counts, so a platform file forced past the
+/// ignore rules is still refused. Outside a git checkout (a scratch tree), or when git cannot answer,
+/// nothing is skipped.
 fn git_ignored(dir: &Path, names: &[String]) -> Vec<String> {
     let listed = |args: &[&str]| -> Option<Vec<String>> {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(args)
-            .arg("--")
-            .args(names)
-            .env("GIT_LITERAL_PATHSPECS", "1")
-            .stderr(Stdio::null())
-            .output()
-            .ok()
-            .filter(|output| output.status.success())?;
-        let text = String::from_utf8_lossy(&output.stdout).into_owned();
-        Some(text.split('\0').filter_map(|path| path.split('/').next()).filter(|name| !name.is_empty()).map(str::to_string).collect())
+        let mut args = args.to_vec();
+        args.push("--");
+        args.extend(names.iter().map(String::as_str));
+        let paths = crate::git::listed(dir, &args).ok()?;
+        Some(paths.iter().filter_map(|path| path.split('/').next()).filter(|name| !name.is_empty()).map(str::to_string).collect())
     };
     let (Some(tracked), Some(addable)) = (listed(&["ls-files", "-z"]), listed(&["ls-files", "-z", "--others", "--exclude-standard"])) else {
         return Vec::new();
@@ -110,7 +102,7 @@ fn entries_violations(root: &Path, dir: &Path, allowed: &[(&str, Entry)], hint: 
 /// code inside it would build while no rule, formatter or duplicate check read it.
 fn hidden_package_folders(root: &Path) -> Result<Vec<String>, String> {
     let mut errors = Vec::new();
-    for tree in CODE_TREES {
+    for tree in crate::files::CODE_TREES {
         let mut stack = vec![root.join(tree)];
         while let Some(dir) = stack.pop() {
             let Ok(entries) = std::fs::read_dir(&dir) else { continue };
@@ -133,9 +125,6 @@ fn hidden_package_folders(root: &Path) -> Result<Vec<String>, String> {
     errors.sort();
     Ok(errors)
 }
-
-/// The folders that hold the repository's code, which `hidden_package_folders` reads.
-const CODE_TREES: &[&str] = &["rust", "ios", "android", "conformance", "tools", "docs", ".github"];
 
 /// Run the layout check: the root, then `ios/` and `android/` when they exist, and the code trees for a
 /// folder every rule would skip.
@@ -179,7 +168,7 @@ mod tests {
     fn a_stray_directory_at_the_root_is_reported() {
         let scratch = Scratch::new("stray");
         scratch.mkdir("rust");
-        scratch.mkdir("somewhere-else");
+        scratch.write("somewhere-else/notes.md", "x\n");
         let errors = check(&scratch.0).unwrap();
         assert_eq!(errors.len(), 1);
         assert!(errors[0].contains("somewhere-else"), "{errors:?}");
@@ -204,7 +193,7 @@ mod tests {
     fn a_listed_name_of_the_wrong_kind_is_refused() {
         let scratch = Scratch::new("kinds");
         scratch.write("ios", "not a folder");
-        scratch.mkdir("README.md");
+        scratch.write("README.md/notes.md", "x\n");
         let errors = check(&scratch.0).unwrap();
         assert_eq!(errors.len(), 2, "{errors:?}");
         assert!(errors.iter().any(|e| e == "ios must be a folder, and here it is a file"), "{errors:?}");
@@ -214,15 +203,15 @@ mod tests {
     #[test]
     fn a_name_git_ignores_is_not_the_repository_s() {
         let scratch = Scratch::new("ignored");
-        let git = |args: &[&str]| Command::new("git").arg("-C").arg(&scratch.0).args(args).output().unwrap();
-        assert!(git(&["init", "-q"]).status.success());
+        let git = |args: &[&str]| crate::git::output(&scratch.0, args).unwrap();
+        git(&["init", "-q"]);
         scratch.write(".gitignore", "**/.claude/settings.local.json\n.vscode/\nPackage.swift\n");
         // A folder whose only file is ignored holds nothing the repository can, as git sees it.
         scratch.write(".claude/settings.local.json", "{}\n");
         scratch.write(".vscode/settings.json", "{}\n");
         scratch.write("android/.idea/workspace.xml", "<x/>\n");
         scratch.write("android/.gitignore", ".idea/\n");
-        assert!(git(&["add", "-f", "android/.gitignore"]).status.success());
+        git(&["add", "-f", "android/.gitignore"]);
         let errors = check(&scratch.0).unwrap();
         assert_eq!(
             errors,
@@ -231,8 +220,55 @@ mod tests {
         );
         // A file forced past the ignore rules is tracked, so it is the repository's and refused.
         scratch.write("Package.swift", "");
-        assert!(git(&["add", "-f", "Package.swift"]).status.success());
+        git(&["add", "-f", "Package.swift"]);
         assert!(check(&scratch.0).unwrap().iter().any(|e| e.starts_with("Package.swift is not allowed here")));
+    }
+
+    #[test]
+    fn an_empty_folder_holds_nothing_git_would_add_so_a_checkout_skips_it() {
+        let scratch = Scratch::new("empty-folder");
+        crate::git::output(&scratch.0, &["init", "-q"]).unwrap();
+        scratch.mkdir("ios/extra");
+        scratch.mkdir("swift");
+        assert!(check(&scratch.0).unwrap().is_empty(), "git cannot hold an empty folder, so it is no part of the repository");
+        scratch.write("ios/extra/notes.md", "x\n");
+        scratch.write("swift/notes.md", "x\n");
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 2, "a file git would add makes the folder the repository's: {errors:?}");
+    }
+
+    /// The child half of the test below: run only when the parent starts it with a hook's environment.
+    #[test]
+    #[ignore = "run by the_check_in_a_hook_s_environment_judges_its_own_tree, in a hook's environment"]
+    fn child_checks_its_own_tree() {
+        let Some(own) = std::env::var_os("XTASK_LAYOUT_OWN") else { return };
+        let errors = check(Path::new(&own)).unwrap();
+        assert_eq!(errors, ["android/stray is not allowed here: only `sdk` and `samples` belong in android/"]);
+    }
+
+    #[test]
+    fn the_check_in_a_hook_s_environment_judges_its_own_tree() {
+        let own = Scratch::new("layout-own");
+        let other = Scratch::new("layout-other");
+        crate::git::output(&own.0, &["init", "-q"]).unwrap();
+        crate::git::output(&other.0, &["init", "-q"]).unwrap();
+        own.write(".gitignore", "/android/.idea/\n");
+        own.write("android/.idea/workspace.xml", "<x/>\n");
+        own.write("android/stray/notes.md", "x\n");
+        let child = crate::scratch::rerun(
+            "layout::tests::child_checks_its_own_tree",
+            &[("GIT_DIR", other.0.join(".git").as_os_str()), ("XTASK_LAYOUT_OWN", own.0.as_os_str())],
+        );
+        assert!(child.status.success(), "{}", String::from_utf8_lossy(&child.stdout));
+    }
+
+    #[test]
+    fn a_name_stored_decomposed_is_the_repository_s_and_refused() {
+        let scratch = Scratch::new("layout-nfd");
+        crate::git::output(&scratch.0, &["init", "-q"]).unwrap();
+        scratch.write("ios/e\u{301}tude/notes.md", "x\n");
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors, ["ios/e\u{301}tude is not allowed here: only `sdk` and `samples` belong in ios/"]);
     }
 
     #[test]
@@ -254,8 +290,8 @@ mod tests {
         scratch.mkdir("ios/sdk");
         scratch.mkdir("ios/samples");
         scratch.write("ios/.DS_Store", "x");
-        scratch.mkdir("ios/extra");
-        scratch.mkdir("android/third_party");
+        scratch.write("ios/extra/notes.md", "x\n");
+        scratch.write("android/third_party/notes.md", "x\n");
         let errors = check(&scratch.0).unwrap();
         assert_eq!(errors.len(), 2, "{errors:?}");
         assert!(errors.iter().any(|e| e.contains("extra") && e.contains("only `sdk` and `samples` belong in ios/")), "{errors:?}");

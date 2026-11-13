@@ -341,11 +341,10 @@ pub(crate) fn check_kotlin(file: &PlatformFile<'_>, test: bool) -> Vec<String> {
     errors
 }
 
-/// Is this Swift file test code? Only inside a test target's folder, as SwiftPM reports it; `folders`
-/// are those folders relative to the platform root (`sdk/Tests/CraftBridgeTests`).
-fn is_swift_test(components: &[String], folders: &[String]) -> bool {
-    let path = components.join("/");
-    folders.iter().any(|folder| path == *folder || path.starts_with(&format!("{folder}/")))
+/// Is this Swift file test code? Only a file SwiftPM compiles into a test target; `tests` are those files
+/// relative to the platform root (`sdk/Tests/CraftBridgeTests/RenderTests.swift`).
+fn is_swift_test(relative: &str, tests: &std::collections::BTreeSet<String>) -> bool {
+    tests.contains(relative)
 }
 
 /// Does this Kotlin file ship? Every source set of a module ships (`main`, and the variant sets such as
@@ -366,7 +365,7 @@ fn check_tree(
     root: &Path,
     dir: &str,
     language: scan::Language,
-    test: &dyn Fn(&[String]) -> bool,
+    test: &dyn Fn(&scan::FoundFile) -> bool,
     rule: fn(&PlatformFile<'_>, bool) -> Vec<String>,
 ) -> Result<Vec<String>, String> {
     let extension = if language == scan::Language::Swift { ".swift" } else { ".kt" };
@@ -377,7 +376,7 @@ fn check_tree(
         }
         let shown = crate::report::shown(root, &file.path);
         let reduced = PlatformFile::read(&shown, file.components.iter().map(String::as_str).collect(), &scan::read_text(&file.path)?, language);
-        errors.extend(rule(&reduced, test(&file.components)));
+        errors.extend(rule(&reduced, test(&file)));
     }
     Ok(errors)
 }
@@ -393,10 +392,10 @@ const LINT_CONFIG: &str = "lint.xml";
 /// shortcuts allowed in tests, every swift-format configuration under `ios/`, and no Lint configuration
 /// file under `android/`.
 pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
-    let package = crate::direction::dump_package(&root.join("ios").join("sdk"), "ios/sdk/Package.swift")?;
-    let test_folders: Vec<String> = package.iter().flat_map(crate::direction::test_target_folders).map(|folder| format!("sdk/{folder}")).collect();
-    let mut errors = check_tree(root, "ios", scan::Language::Swift, &|components| is_swift_test(components, &test_folders), check_swift)?;
-    errors.extend(check_tree(root, "android", scan::Language::Kotlin, &|components| !is_kotlin_shipped(components), check_kotlin)?);
+    let targets = crate::direction::describe_package(&root.join("ios").join("sdk"), "ios/sdk/Package.swift")?.unwrap_or_default();
+    let tests = crate::direction::test_sources(&targets).into_iter().map(|source| format!("sdk/{source}")).collect();
+    let mut errors = check_tree(root, "ios", scan::Language::Swift, &|file| is_swift_test(&file.relative, &tests), check_swift)?;
+    errors.extend(check_tree(root, "android", scan::Language::Kotlin, &|file| !is_kotlin_shipped(&file.components), check_kotlin)?);
     for configuration in scan::walk(&root.join("ios"), ".swift-format")?.into_iter().filter(|file| file.path.ends_with(".swift-format")) {
         errors.extend(swift_format_violations(&scan::read_text(&configuration.path)?, &crate::report::shown(root, &configuration.path)));
     }
@@ -602,15 +601,15 @@ mod tests {
         assert!(!is_kotlin_shipped(&parts("sdk/core/src/testFixtures/kotlin")));
         // A folder a build file adds to a source set is not under `src/`, and it ships like any other.
         assert!(is_kotlin_shipped(&parts("sdk/core/lib")));
-        // Swift test code is whatever SwiftPM's test targets hold, and nothing else, whatever a folder
-        // is called.
-        let folders = ["sdk/Tests/CraftBridgeTests".to_string(), "sdk/Checks".to_string()];
-        assert!(is_swift_test(&parts("sdk/Tests/CraftBridgeTests"), &folders));
-        assert!(is_swift_test(&parts("sdk/Tests/CraftBridgeTests/Fixtures"), &folders));
-        assert!(is_swift_test(&parts("sdk/Checks"), &folders), "a test target with a path of its own");
-        assert!(!is_swift_test(&parts("sdk/Sources/CraftBridge"), &folders));
-        assert!(!is_swift_test(&parts("sdk/Tests/Support"), &folders), "a library target moved under Tests/ ships");
-        assert!(!is_swift_test(&parts("sdk/Tests/CraftBridgeTestsExtra"), &folders), "a folder is matched whole");
+        // Swift test code is what SwiftPM compiles into its test targets, and nothing else, whatever
+        // folder holds it: a shipping target nested in a test target's folder ships, and a test target
+        // at `path: "Sources"` excluding the library folders makes none of the library a test.
+        let tests: std::collections::BTreeSet<String> =
+            ["sdk/Tests/CraftBridgeTests/A.swift", "sdk/Sources/StopTests.swift"].into_iter().map(str::to_string).collect();
+        assert!(is_swift_test("sdk/Tests/CraftBridgeTests/A.swift", &tests));
+        assert!(is_swift_test("sdk/Sources/StopTests.swift", &tests));
+        assert!(!is_swift_test("sdk/Sources/CraftBridge/CraftBridge.swift", &tests), "a library beside a test target's file ships");
+        assert!(!is_swift_test("sdk/Tests/CraftBridgeTests/Effects/CraftBridgeEffects.swift", &tests), "a shipping target nested in a test folder ships");
     }
 
     #[test]

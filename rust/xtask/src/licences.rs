@@ -8,11 +8,12 @@
 //! allowlist refuses, and an entry nobody uses any more. A stale entry is an error because it is a licence
 //! that has been quietly widened without a decision issue behind it.
 //!
-//! What is read is what ships: each library of the version catalog, each package a `Package.swift`
-//! declares (as `swift package dump-package` reads it), each pin a `Package.resolved` records, and — asked
-//! of Gradle itself rather than read off the build files — every external module resolved onto each
-//! library module's release runtime classpath. That last part is the point: transitive modules arrive
-//! inside the AAR without any build file naming them. Build plugins never ship, so they stay checked by
+//! What is read is what the builds use: each library of the version catalog, each package a
+//! `Package.swift` declares (as `swift package dump-package` reads it), each pin a `Package.resolved`
+//! records, and — asked of Gradle itself rather than read off the build files — every external module
+//! resolved onto each library module's release, unit-test and instrumented-test runtime classpaths. That
+//! last part is the point: transitive modules arrive inside the AAR, and in the tests, without any build
+//! file naming them. Build plugins never ship, so they stay checked by
 //! name, from the catalog's `[plugins]`.
 
 use crate::scan;
@@ -271,14 +272,17 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
         }
     }
     for module in gradle_release_modules(root)? {
-        used.push(Used { key: module, source: "Gradle release runtime classpath".to_string(), kind: "module" });
+        used.push(Used { key: module, source: "Gradle runtime classpaths".to_string(), kind: "module" });
     }
     // SwiftPM's own reading of each manifest, so every spelling it accepts — the deprecated
     // `.package(name:url:…)` included — names its package here as it does to the build.
+    let mut errors = Vec::new();
     for manifest in package_manifests(&root.join("ios"))? {
         let shown = crate::report::shown(root, &manifest);
         let Some(folder) = manifest.parent() else { continue };
-        for key in crate::direction::dump_package(folder, &shown)?.iter().flat_map(crate::direction::published_packages) {
+        let published: Vec<String> = crate::direction::dump_package(folder, &shown)?.iter().flat_map(crate::direction::published_packages).collect();
+        errors.extend(unpinned(&shown, &published, folder.join("Package.resolved").is_file()));
+        for key in published {
             used.push(Used { key, source: shown.clone(), kind: "package" });
         }
     }
@@ -305,10 +309,23 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     used.sort_by(|a, b| a.key.cmp(&b.key).then_with(|| a.source.cmp(&b.source)));
     used.dedup_by(|a, b| a.key == b.key);
 
-    Ok(compare(&used, &declared, &allow))
+    errors.extend(compare(&used, &declared, &allow));
+    Ok(errors)
 }
 
-/// The external modules that land on the Android library modules' release runtime classpaths. Gradle
+/// A package that takes a published package needs its `Package.resolved` committed: SwiftPM writes the
+/// packages those take only there, so without it their licences go unread on a fresh checkout, where this
+/// stage runs before any build has resolved anything.
+fn unpinned(shown: &str, published: &[String], resolved: bool) -> Option<String> {
+    (!published.is_empty() && !resolved).then(|| {
+        format!(
+            "{shown}: takes {} but no Package.resolved sits beside it: the packages those take, and their licences, are written only there",
+            published.join(", ")
+        )
+    })
+}
+
+/// The external modules that land on the Android library modules' runtime classpaths. Gradle
 /// itself answers — `android/sdk`'s `runtimeLicences` task prints its resolved graph — because the
 /// transitive modules are the whole point and no build file lists them. A tree without the Gradle
 /// wrapper (a scratch tree) has no answer to ask for; a Gradle that fails is an error, because the
@@ -322,7 +339,7 @@ fn gradle_release_modules(root: &Path) -> Result<Vec<String>, String> {
         .current_dir(&sdk)
         .args(["--quiet", "--no-daemon", "--console=plain", "runtimeLicences"])
         .output()
-        .map_err(|error| format!("android/sdk: cannot ask Gradle for the release runtime classpath: {error}"))?;
+        .map_err(|error| format!("android/sdk: cannot ask Gradle for the runtime classpaths: {error}"))?;
     if !output.status.success() {
         let text = String::from_utf8_lossy(&output.stderr);
         // Gradle buries the reason under `What went wrong`; the tail of the log is help-links noise.
@@ -373,6 +390,14 @@ pub(crate) fn resolved_pins(source: &str, name: &str) -> Result<Vec<(String, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_package_taking_a_published_one_needs_its_pins_committed() {
+        let missing = unpinned("ios/sdk/Package.swift", &["https://github.com/apple/swift-collections".to_string()], false);
+        assert!(missing.is_some_and(|error| error.contains("no Package.resolved")));
+        assert!(unpinned("ios/sdk/Package.swift", &["https://github.com/apple/swift-collections".to_string()], true).is_none());
+        assert!(unpinned("ios/sdk/Package.swift", &[], false).is_none(), "a package that takes none has nothing to pin");
+    }
     use crate::scratch::Scratch;
 
     const ALLOW: &[&str] = &["MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-3-Clause", "MPL-2.0"];
@@ -435,6 +460,10 @@ mod tests {
             "[libraries]\njunit = \"junit:junit:4.13.2\"\n",
             UNIFFI_MANIFEST,
         );
+        repo.0.write(
+            "ios/sdk/Package.resolved",
+            r#"{ "version": 2, "pins": [{ "identity": "uniffi", "location": "https://github.com/mozilla/uniffi.git", "state": { "revision": "x" } }] }"#,
+        );
         assert!(repo.errors().is_empty(), "{:?}", repo.errors());
     }
 
@@ -450,7 +479,8 @@ mod tests {
     #[test]
     fn a_resolved_pin_needs_a_declaration_like_any_package() {
         let repo = ScratchRepo::new("pins", "[swiftpm]\n\"https://github.com/mozilla/uniffi.git\" = \"MPL-2.0\"\n", "", UNIFFI_MANIFEST);
-        assert!(repo.errors().is_empty(), "{:?}", repo.errors()); // no Package.resolved written yet
+        let unpinned = repo.errors();
+        assert!(unpinned.len() == 1 && unpinned[0].contains("no Package.resolved sits beside it"), "{unpinned:?}");
         repo.0.write(
             "ios/sdk/Package.resolved",
             r#"{ "version": 2, "pins": [

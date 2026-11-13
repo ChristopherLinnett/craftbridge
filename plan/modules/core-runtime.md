@@ -5,7 +5,7 @@
 
 ## 16. Core runtime design
 
-`craftbridge-core` is the universal runtime: it knows how to host a Craft app's session on a phone and nothing about EffectCraft (PD9). Lints: the workspace table every crate inherits, with `unsafe_code` denied (and, without a platform module, never allowed) and the never-crash `deny` list (`clippy::unwrap_used`, `expect_used`, `panic`, `unimplemented`, `todo`, `unreachable`), as in EffectCraft (`AGENTS.md`, "Never crash").
+`craftbridge-core` is the universal runtime: it knows how to host a Craft app's session on a phone and nothing about EffectCraft (PD9). Lints: the workspace table every crate inherits, with `unsafe_code` denied (and, without a platform module, never allowed) and the never-crash lints (`clippy::unwrap_used`, `panic`, `unimplemented`, `todo` and `unreachable` at `forbid`, `expect_used` at `deny`, and the same calls named by path in `rust/clippy.toml`), stricter than EffectCraft's (`AGENTS.md`, "Never crash").
 
 | File | Change | What |
 |---|---|---|

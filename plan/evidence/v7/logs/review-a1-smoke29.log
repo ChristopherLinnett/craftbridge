@@ -1,0 +1,9 @@
+review-a1-fixed-a29-combo-auto EXPORT_DONE
+review-a1-fixed-a29-combo-mediaproc EXPORT_DONE
+/tmp/craftbridge-v7/run_case.sh: line 37:  5274 Terminated: 15          $ADB -s $SER shell am start -W -n $PKG/.MainActivity --es fgs_type "$TYPE" --el fgs_duration_ms $((DUR*1000)) > "$OUT/am_start.txt" 2>&1
+review-a1-fixed-a29-combo-bad-type-name APP_CRASHED
+Success
+QUEUE_smoke_29 DONE
+review-a1-a29-noneflavor-long EXPORT_DONE
+Success
+A29_FINAL_DONE

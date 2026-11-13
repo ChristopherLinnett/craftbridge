@@ -1,0 +1,1 @@
+sandbox canary: a Mac file outside every app container (written by the review capture)

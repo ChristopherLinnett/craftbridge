@@ -21,6 +21,13 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
 private val dayDependentLintChecks = setOf("AndroidGradlePluginVersion")
 
 /**
+ * The compiler arguments AGP adds to a compilation itself: `-Xuse-inline-scopes-numbers` on the
+ * instrumented-test compilation (measured with AGP 9.5.1). None changes which warnings are reported. Any
+ * other free argument could (`-nowarn`, `-Xsuppress-warning`, a warning level), so it is refused.
+ */
+private val agpCompilerArgs = setOf("-Xuse-inline-scopes-numbers")
+
+/**
  * The Android library setup every CraftBridge module shares: SDK levels, Java and Kotlin rules,
  * Lint strictness, the consumer R8 rules and where generated bindings are compiled from. A
  * module's build file applies this plugin and names only its namespace and dependencies; the rules the
@@ -97,9 +104,9 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                 // AGENTS §2 keeps one module's code in its own folder: a source directory pointing
                 // elsewhere would compile another module's — or any outside — code into this one, or
                 // pack its resources, assets or native libraries into the AAR, with no dependency edge,
-                // no entry in the project graph and no licence trail. Both source-set DSLs are read
-                // back: Android's as the folder names it stores for every kind of source it packs,
-                // Kotlin's as the directories it resolved.
+                // no entry in the project graph and no licence trail. Android's source sets are read
+                // back, as the folder names it stores for every kind of source it packs: AGP 9 compiles
+                // Kotlin itself from them, and Kotlin's own source-set DSL is deprecated in their favour.
                 val roots =
                     android.sourceSets.flatMap { set ->
                         listOf(
@@ -116,7 +123,7 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                             set.shaders,
                             set.mlModels,
                         ).flatMap { kind -> kind.directories }
-                    } + kotlin.sourceSets.flatMap { set -> set.kotlin.srcDirs.map { file -> file.path } }
+                    }
                 val outside =
                     roots
                         // An absolute folder name is a path of its own; a relative one belongs to the
@@ -147,7 +154,7 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                     val task = this as KotlinCompilationTask<*>
                     val options = task.compilerOptions
                     if (!options.allWarningsAsErrors.get() || options.suppressWarnings.get() ||
-                        options.freeCompilerArgs.get().isNotEmpty()
+                        (options.freeCompilerArgs.get() - agpCompilerArgs).isNotEmpty()
                     ) {
                         throw GradleException(
                             "$module changes Kotlin's warnings as errors, which craftbridge.android.library sets for every module",

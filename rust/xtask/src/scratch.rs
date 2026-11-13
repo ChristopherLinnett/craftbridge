@@ -50,6 +50,20 @@ impl Drop for Scratch {
     }
 }
 
+/// Run one test of this binary again, in a child process with `env` added: the way a hook starts the gate
+/// with git's variables set. A test cannot set them on its own process while other tests run beside it,
+/// and a child is the only way the code under test meets them as it would in a hook. The child test is
+/// `#[ignore]`d, so it runs only when started this way.
+#[cfg(test)]
+pub(crate) fn rerun(test: &str, env: &[(&str, &std::ffi::OsStr)]) -> std::process::Output {
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+    child.args(["--exact", test, "--ignored", "--nocapture", "--test-threads=1"]);
+    for (name, value) in env {
+        child.env(name, value);
+    }
+    child.output().unwrap()
+}
+
 /// A copy of this repository's `rust/` tree in which a violation can be planted without touching the
 /// real one. A real tree is what proves a rule: a synthetic fixture cannot show that a file in a crate
 /// the table really marks, found by the walk that really runs, is reported. The scratch stands in for the

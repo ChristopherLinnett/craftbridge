@@ -1,0 +1,10 @@
+case=review-b1-a37-exhaust-1st-timeout
+apk=apk-b1/fgslab-combo-ts37.apk
+apk_md5=3d45b867f8c088c64cd874303ccad7bc
+serial=emulator-5556 device_sdk=37
+type=dataSync duration_s=300
+start=2026-11-13T11:00:07+08:00
+install_rc=0
+pid=20960
+home_sent=2026-11-13T11:00:17+08:00
+result=FGS_ON_TIMEOUT end=2026-11-13T11:01:48+08:00

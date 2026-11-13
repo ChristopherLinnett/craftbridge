@@ -1,0 +1,5 @@
+AlNile.ttc: 4 faces
+  النيل/عادي (index 0, full "النيل عادي")
+  .Al Nile PUA/Regular (index 1, full ".Al Nile PUA")
+  النيل/عريض (index 2, full "النيل عريض")
+  .Al Nile PUA/Bold (index 3, full ".Al Nile PUA Bold")

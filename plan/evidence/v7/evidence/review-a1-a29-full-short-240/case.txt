@@ -1,0 +1,10 @@
+case=review-a1-a29-full-short-240
+apk=/tmp/craftbridge-v7/apk2/fgslab-full-ts37.apk
+apk_md5=c84df81ad11a3fbf0fa4c1b69ede02e3
+serial=emulator-5554 device_sdk=29
+type=shortService duration_s=240
+start=2026-11-13T09:44:00+08:00
+install_rc=0
+pid=3263
+home_sent=2026-11-13T09:44:09+08:00
+result=EXPORT_DONE end=2026-11-13T09:48:10+08:00

@@ -1,0 +1,785 @@
+## Face-by-face identity of CoreText's faces and the faces EffectCraft registers from CoreText's folders,
+## the (file, PostScript name) pair: the rule FX-3's list_fonts follows (RESULT §4). Made by engine-checks.sh:
+## sections 1-2 are the face and uifamily lines of the app's report (section 8), sections 3-5 ecprobe's facematch
+## example over review-coretext-dirs.txt. A "-" in a first column means no PostScript name.
+## 1. CoreText's faces: PostScript name, file, family, one line per descriptor, sorted:
+AcademyEngravedLetPlain	<RT>/System/Library/Fonts/AppFonts/AcademyEngraved.ttf	Academy Engraved LET
+AlNile	<RT>/System/Library/Fonts/AppFonts/AlNile.ttc	Al Nile
+AlNile-Bold	<RT>/System/Library/Fonts/AppFonts/AlNile.ttc	Al Nile
+AmericanTypewriter	<RT>/System/Library/Fonts/CoreUI/AmericanTypewriter.ttc	American Typewriter
+AmericanTypewriter-Bold	<RT>/System/Library/Fonts/CoreUI/AmericanTypewriter.ttc	American Typewriter
+AmericanTypewriter-Condensed	<RT>/System/Library/Fonts/CoreUI/AmericanTypewriter.ttc	American Typewriter
+AmericanTypewriter-CondensedBold	<RT>/System/Library/Fonts/CoreUI/AmericanTypewriter.ttc	American Typewriter
+AmericanTypewriter-CondensedLight	<RT>/System/Library/Fonts/CoreUI/AmericanTypewriter.ttc	American Typewriter
+AmericanTypewriter-Light	<RT>/System/Library/Fonts/CoreUI/AmericanTypewriter.ttc	American Typewriter
+AmericanTypewriter-Semibold	<RT>/System/Library/Fonts/CoreUI/AmericanTypewriter.ttc	American Typewriter
+AppleColorEmoji	<RT>/System/Library/Fonts/CoreAddition/AppleColorEmoji-160px.ttc	Apple Color Emoji
+AppleSDGothicNeo-Bold	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	Apple SD Gothic Neo
+AppleSDGothicNeo-Light	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	Apple SD Gothic Neo
+AppleSDGothicNeo-Medium	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	Apple SD Gothic Neo
+AppleSDGothicNeo-Regular	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	Apple SD Gothic Neo
+AppleSDGothicNeo-SemiBold	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	Apple SD Gothic Neo
+AppleSDGothicNeo-Thin	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	Apple SD Gothic Neo
+AppleSDGothicNeo-UltraLight	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	Apple SD Gothic Neo
+AppleSymbols	<RT>/System/Library/Fonts/Core/AppleSymbols.ttf	Apple Symbols
+Arial-BoldItalicMT	<RT>/System/Library/Fonts/WebFonts/ArialBoldItalic.ttf	Arial
+Arial-BoldMT	<RT>/System/Library/Fonts/WebFonts/ArialBold.ttf	Arial
+Arial-ItalicMT	<RT>/System/Library/Fonts/WebFonts/ArialItalic.ttf	Arial
+ArialHebrew	<RT>/System/Library/Fonts/Core/ArialHB.ttc	Arial Hebrew
+ArialHebrew-Bold	<RT>/System/Library/Fonts/Core/ArialHB.ttc	Arial Hebrew
+ArialHebrew-Light	<RT>/System/Library/Fonts/Core/ArialHB.ttc	Arial Hebrew
+ArialMT	<RT>/System/Library/Fonts/WebFonts/Arial.ttf	Arial
+ArialRoundedMTBold	<RT>/System/Library/Fonts/WebFonts/ArialRoundedMTBold.ttf	Arial Rounded MT Bold
+Avenir-Black	<RT>/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-BlackOblique	<RT>/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-Book	<RT>/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-BookOblique	<RT>/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-Heavy	<RT>/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-HeavyOblique	<RT>/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-Light	<RT>/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-LightOblique	<RT>/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-Medium	<RT>/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-MediumOblique	<RT>/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-Oblique	<RT>/System/Library/Fonts/Core/Avenir.ttc	Avenir
+Avenir-Roman	<RT>/System/Library/Fonts/Core/Avenir.ttc	Avenir
+AvenirNext-Bold	<RT>/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-BoldItalic	<RT>/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-DemiBold	<RT>/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-DemiBoldItalic	<RT>/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-Heavy	<RT>/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-HeavyItalic	<RT>/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-Italic	<RT>/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-Medium	<RT>/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-MediumItalic	<RT>/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-Regular	<RT>/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-UltraLight	<RT>/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNext-UltraLightItalic	<RT>/System/Library/Fonts/Core/AvenirNext.ttc	Avenir Next
+AvenirNextCondensed-Bold	<RT>/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-BoldItalic	<RT>/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-DemiBold	<RT>/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-DemiBoldItalic	<RT>/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-Heavy	<RT>/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-HeavyItalic	<RT>/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-Italic	<RT>/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-Medium	<RT>/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-MediumItalic	<RT>/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-Regular	<RT>/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-UltraLight	<RT>/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+AvenirNextCondensed-UltraLightItalic	<RT>/System/Library/Fonts/AppFonts/AvenirNextCondensed.ttc	Avenir Next Condensed
+Baskerville	<RT>/System/Library/Fonts/CoreUI/Baskerville.ttc	Baskerville
+Baskerville-Bold	<RT>/System/Library/Fonts/CoreUI/Baskerville.ttc	Baskerville
+Baskerville-BoldItalic	<RT>/System/Library/Fonts/CoreUI/Baskerville.ttc	Baskerville
+Baskerville-Italic	<RT>/System/Library/Fonts/CoreUI/Baskerville.ttc	Baskerville
+Baskerville-SemiBold	<RT>/System/Library/Fonts/CoreUI/Baskerville.ttc	Baskerville
+Baskerville-SemiBoldItalic	<RT>/System/Library/Fonts/CoreUI/Baskerville.ttc	Baskerville
+BodoniOrnamentsITCTT	<RT>/System/Library/Fonts/AppFonts/Bodoni-Ornaments.ttf	Bodoni Ornaments
+BodoniSvtyTwoITCTT-Bold	<RT>/System/Library/Fonts/AppFonts/Bodoni72.ttc	Bodoni 72
+BodoniSvtyTwoITCTT-Book	<RT>/System/Library/Fonts/AppFonts/Bodoni72.ttc	Bodoni 72
+BodoniSvtyTwoITCTT-BookIta	<RT>/System/Library/Fonts/AppFonts/Bodoni72.ttc	Bodoni 72
+BodoniSvtyTwoOSITCTT-Bold	<RT>/System/Library/Fonts/AppFonts/Bodoni72-OldStyle.ttc	Bodoni 72 Oldstyle
+BodoniSvtyTwoOSITCTT-Book	<RT>/System/Library/Fonts/AppFonts/Bodoni72-OldStyle.ttc	Bodoni 72 Oldstyle
+BodoniSvtyTwoOSITCTT-BookIt	<RT>/System/Library/Fonts/AppFonts/Bodoni72-OldStyle.ttc	Bodoni 72 Oldstyle
+BodoniSvtyTwoSCITCTT-Book	<RT>/System/Library/Fonts/AppFonts/Bodoni72-Book-SmallCaps.ttf	Bodoni 72 Smallcaps
+BradleyHandITCTT-Bold	<RT>/System/Library/Fonts/AppFonts/BradleyHand-Bold.ttf	Bradley Hand
+ChalkboardSE-Bold	<RT>/System/Library/Fonts/AppFonts/ChalkboardSE.ttc	Chalkboard SE
+ChalkboardSE-Light	<RT>/System/Library/Fonts/AppFonts/ChalkboardSE.ttc	Chalkboard SE
+ChalkboardSE-Regular	<RT>/System/Library/Fonts/AppFonts/ChalkboardSE.ttc	Chalkboard SE
+Chalkduster	<RT>/System/Library/Fonts/AppFonts/Chalkduster.ttf	Chalkduster
+Charter-Black	<RT>/System/Library/Fonts/AppFonts/Charter.ttc	Charter
+Charter-BlackItalic	<RT>/System/Library/Fonts/AppFonts/Charter.ttc	Charter
+Charter-Bold	<RT>/System/Library/Fonts/AppFonts/Charter.ttc	Charter
+Charter-BoldItalic	<RT>/System/Library/Fonts/AppFonts/Charter.ttc	Charter
+Charter-Italic	<RT>/System/Library/Fonts/AppFonts/Charter.ttc	Charter
+Charter-Roman	<RT>/System/Library/Fonts/AppFonts/Charter.ttc	Charter
+Cochin	<RT>/System/Library/Fonts/AppFonts/Cochin.ttc	Cochin
+Cochin-Bold	<RT>/System/Library/Fonts/AppFonts/Cochin.ttc	Cochin
+Cochin-BoldItalic	<RT>/System/Library/Fonts/AppFonts/Cochin.ttc	Cochin
+Cochin-Italic	<RT>/System/Library/Fonts/AppFonts/Cochin.ttc	Cochin
+Copperplate	<RT>/System/Library/Fonts/CoreUI/Copperplate.ttc	Copperplate
+Copperplate-Bold	<RT>/System/Library/Fonts/CoreUI/Copperplate.ttc	Copperplate
+Copperplate-Light	<RT>/System/Library/Fonts/CoreUI/Copperplate.ttc	Copperplate
+CourierNewPS-BoldItalicMT	<RT>/System/Library/Fonts/Core/CourierNewBoldItalic.ttf	Courier New
+CourierNewPS-BoldMT	<RT>/System/Library/Fonts/Core/CourierNewBold.ttf	Courier New
+CourierNewPS-ItalicMT	<RT>/System/Library/Fonts/Core/CourierNewItalic.ttf	Courier New
+CourierNewPSMT	<RT>/System/Library/Fonts/Core/CourierNew.ttf	Courier New
+DINAlternate-Bold	<RT>/System/Library/Fonts/Core/DINAlternate-bold.ttf	DIN Alternate
+DINCondensed-Bold	<RT>/System/Library/Fonts/Core/DINCondensed-bold.ttf	DIN Condensed
+Damascus	<RT>/System/Library/Fonts/AppFonts/Damascus.ttc	Damascus
+DamascusBold	<RT>/System/Library/Fonts/AppFonts/Damascus.ttc	Damascus
+DamascusLight	<RT>/System/Library/Fonts/AppFonts/Damascus.ttc	Damascus
+DamascusMedium	<RT>/System/Library/Fonts/AppFonts/Damascus.ttc	Damascus
+DamascusSemiBold	<RT>/System/Library/Fonts/AppFonts/Damascus.ttc	Damascus
+DevanagariSangamMN	<RT>/System/Library/Fonts/AppFonts/DevanagariSangamMN.ttc	Devanagari Sangam MN
+DevanagariSangamMN-Bold	<RT>/System/Library/Fonts/AppFonts/DevanagariSangamMN.ttc	Devanagari Sangam MN
+Didot	<RT>/System/Library/Fonts/AppFonts/Didot.ttc	Didot
+Didot-Bold	<RT>/System/Library/Fonts/AppFonts/Didot.ttc	Didot
+Didot-Italic	<RT>/System/Library/Fonts/AppFonts/Didot.ttc	Didot
+DiwanMishafi	<RT>/System/Library/Fonts/AppFonts/Mishafi.ttf	Mishafi
+EuphemiaUCAS	<RT>/System/Library/Fonts/Core/EuphemiaCAS.ttc	Euphemia UCAS
+EuphemiaUCAS-Bold	<RT>/System/Library/Fonts/Core/EuphemiaCAS.ttc	Euphemia UCAS
+EuphemiaUCAS-Italic	<RT>/System/Library/Fonts/Core/EuphemiaCAS.ttc	Euphemia UCAS
+Farah	<RT>/System/Library/Fonts/AppFonts/Farah.ttc	Farah
+Futura-Bold	<RT>/System/Library/Fonts/Core/Futura.ttc	Futura
+Futura-CondensedExtraBold	<RT>/System/Library/Fonts/Core/Futura.ttc	Futura
+Futura-CondensedMedium	<RT>/System/Library/Fonts/Core/Futura.ttc	Futura
+Futura-Medium	<RT>/System/Library/Fonts/Core/Futura.ttc	Futura
+Futura-MediumItalic	<RT>/System/Library/Fonts/Core/Futura.ttc	Futura
+Galvji	<RT>/System/Library/Fonts/Core/Galvji.ttc	Galvji
+Galvji-Bold	<RT>/System/Library/Fonts/Core/Galvji.ttc	Galvji
+GeezaPro	<RT>/System/Library/Fonts/Core/GeezaPro.ttc	Geeza Pro
+GeezaPro-Bold	<RT>/System/Library/Fonts/Core/GeezaPro.ttc	Geeza Pro
+Georgia	<RT>/System/Library/Fonts/WebFonts/Georgia.ttf	Georgia
+Georgia-Bold	<RT>/System/Library/Fonts/WebFonts/GeorgiaBold.ttf	Georgia
+Georgia-BoldItalic	<RT>/System/Library/Fonts/WebFonts/GeorgiaBoldItalic.ttf	Georgia
+Georgia-Italic	<RT>/System/Library/Fonts/WebFonts/GeorgiaItalic.ttf	Georgia
+GillSans	<RT>/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GillSans-Bold	<RT>/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GillSans-BoldItalic	<RT>/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GillSans-Italic	<RT>/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GillSans-Light	<RT>/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GillSans-LightItalic	<RT>/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GillSans-SemiBold	<RT>/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GillSans-SemiBoldItalic	<RT>/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GillSans-UltraBold	<RT>/System/Library/Fonts/AppFonts/GillSans.ttc	Gill Sans
+GranthaSangamMN-Bold	<RT>/System/Library/Fonts/Core/TamilSangamMN.ttc	Grantha Sangam MN
+GranthaSangamMN-Regular	<RT>/System/Library/Fonts/Core/TamilSangamMN.ttc	Grantha Sangam MN
+Helvetica	<RT>/System/Library/Fonts/Core/Helvetica.ttc	Helvetica
+Helvetica-Bold	<RT>/System/Library/Fonts/Core/Helvetica.ttc	Helvetica
+Helvetica-BoldOblique	<RT>/System/Library/Fonts/Core/Helvetica.ttc	Helvetica
+Helvetica-Light	<RT>/System/Library/Fonts/Core/Helvetica.ttc	Helvetica
+Helvetica-LightOblique	<RT>/System/Library/Fonts/Core/Helvetica.ttc	Helvetica
+Helvetica-Oblique	<RT>/System/Library/Fonts/Core/Helvetica.ttc	Helvetica
+HelveticaNeue	<RT>/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-Bold	<RT>/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-BoldItalic	<RT>/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-CondensedBlack	<RT>/System/Library/Fonts/Core/HelveticaNeueExtras.ttc	Helvetica Neue
+HelveticaNeue-CondensedBold	<RT>/System/Library/Fonts/Core/HelveticaNeueExtras.ttc	Helvetica Neue
+HelveticaNeue-Italic	<RT>/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-Light	<RT>/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-LightItalic	<RT>/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-Medium	<RT>/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-MediumItalic	<RT>/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-Thin	<RT>/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-ThinItalic	<RT>/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-UltraLight	<RT>/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HelveticaNeue-UltraLightItalic	<RT>/System/Library/Fonts/Core/HelveticaNeue.ttc	Helvetica Neue
+HiraMaruProN-W4	<RT>/System/Library/Fonts/CoreUI/HiraginoMaruGothProN.ttc	Hiragino Maru Gothic ProN
+HiraMinProN-W3	<RT>/System/Library/Fonts/AppFonts/HiraginoMincho.ttc	Hiragino Mincho ProN
+HiraMinProN-W6	<RT>/System/Library/Fonts/AppFonts/HiraginoMincho.ttc	Hiragino Mincho ProN
+HiraginoSans-W3	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Sans
+HiraginoSans-W4	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Sans
+HiraginoSans-W5	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Sans
+HiraginoSans-W6	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Sans
+HiraginoSans-W7	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Sans
+HiraginoSans-W8	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Sans
+HoeflerText-Black	<RT>/System/Library/Fonts/AppFonts/HoeflerText.ttc	Hoefler Text
+HoeflerText-BlackItalic	<RT>/System/Library/Fonts/AppFonts/HoeflerText.ttc	Hoefler Text
+HoeflerText-Italic	<RT>/System/Library/Fonts/AppFonts/HoeflerText.ttc	Hoefler Text
+HoeflerText-Regular	<RT>/System/Library/Fonts/AppFonts/HoeflerText.ttc	Hoefler Text
+Impact	<RT>/System/Library/Fonts/WebFonts/Impact.ttf	Impact
+Kailasa	<RT>/System/Library/Fonts/Core/Kailasa.ttc	Kailasa
+Kailasa-Bold	<RT>/System/Library/Fonts/Core/Kailasa.ttc	Kailasa
+KefaIII-Bold	<RT>/System/Library/Fonts/Core/KefaIII.ttf	Kefa III
+KefaIII-ExtraBold	<RT>/System/Library/Fonts/Core/KefaIII.ttf	Kefa III
+KefaIII-Light	<RT>/System/Library/Fonts/Core/KefaIII.ttf	Kefa III
+KefaIII-Regular	<RT>/System/Library/Fonts/Core/KefaIII.ttf	Kefa III
+KhmerSangamMN	<RT>/System/Library/Fonts/Core/KhmerSangamMN.ttf	Khmer Sangam MN
+KohinoorBangla-Light	<RT>/System/Library/Fonts/Core/KohinoorBangla.ttc	Kohinoor Bangla
+KohinoorBangla-Regular	<RT>/System/Library/Fonts/Core/KohinoorBangla.ttc	Kohinoor Bangla
+KohinoorBangla-Semibold	<RT>/System/Library/Fonts/Core/KohinoorBangla.ttc	Kohinoor Bangla
+KohinoorDevanagari-Light	<RT>/System/Library/Fonts/LanguageSupport/Kohinoor.ttc	Kohinoor Devanagari
+KohinoorDevanagari-Regular	<RT>/System/Library/Fonts/LanguageSupport/Kohinoor.ttc	Kohinoor Devanagari
+KohinoorDevanagari-Semibold	<RT>/System/Library/Fonts/LanguageSupport/Kohinoor.ttc	Kohinoor Devanagari
+KohinoorGujarati-Bold	<RT>/System/Library/Fonts/Core/KohinoorGujarati.ttc	Kohinoor Gujarati
+KohinoorGujarati-Light	<RT>/System/Library/Fonts/Core/KohinoorGujarati.ttc	Kohinoor Gujarati
+KohinoorGujarati-Regular	<RT>/System/Library/Fonts/Core/KohinoorGujarati.ttc	Kohinoor Gujarati
+KohinoorTelugu-Light	<RT>/System/Library/Fonts/Core/KohinoorTelugu.ttc	Kohinoor Telugu
+KohinoorTelugu-Medium	<RT>/System/Library/Fonts/Core/KohinoorTelugu.ttc	Kohinoor Telugu
+KohinoorTelugu-Regular	<RT>/System/Library/Fonts/Core/KohinoorTelugu.ttc	Kohinoor Telugu
+LaoSangamMN	<RT>/System/Library/Fonts/Core/LaoSangamMN.ttf	Lao Sangam MN
+MalayalamSangamMN	<RT>/System/Library/Fonts/Core/MalayalamSangamMN.ttc	Malayalam Sangam MN
+MalayalamSangamMN-Bold	<RT>/System/Library/Fonts/Core/MalayalamSangamMN.ttc	Malayalam Sangam MN
+MarkerFelt-Thin	<RT>/System/Library/Fonts/AppFonts/MarkerFeltThin.ttf	Marker Felt
+MarkerFelt-Wide	<RT>/System/Library/Fonts/AppFonts/MarkerFeltWide.ttf	Marker Felt
+Menlo-Bold	<RT>/System/Library/Fonts/CoreUI/Menlo.ttc	Menlo
+Menlo-BoldItalic	<RT>/System/Library/Fonts/CoreUI/Menlo.ttc	Menlo
+Menlo-Italic	<RT>/System/Library/Fonts/CoreUI/Menlo.ttc	Menlo
+Menlo-Regular	<RT>/System/Library/Fonts/CoreUI/Menlo.ttc	Menlo
+MuktaMahee-Bold	<RT>/System/Library/Fonts/Core/MuktaMahee.ttc	Mukta Mahee
+MuktaMahee-Light	<RT>/System/Library/Fonts/Core/MuktaMahee.ttc	Mukta Mahee
+MuktaMahee-Regular	<RT>/System/Library/Fonts/Core/MuktaMahee.ttc	Mukta Mahee
+MyanmarSangamMN	<RT>/System/Library/Fonts/Core/MyanmarSangamMN.ttc	Myanmar Sangam MN
+MyanmarSangamMN-Bold	<RT>/System/Library/Fonts/Core/MyanmarSangamMN.ttc	Myanmar Sangam MN
+Noteworthy-Bold	<RT>/System/Library/Fonts/AppFonts/Noteworthy.ttc	Noteworthy
+Noteworthy-Light	<RT>/System/Library/Fonts/AppFonts/Noteworthy.ttc	Noteworthy
+NotoNastaliqUrdu	<RT>/System/Library/Fonts/Core/NotoNastaliq.ttc	Noto Nastaliq Urdu
+NotoNastaliqUrdu-Bold	<RT>/System/Library/Fonts/Core/NotoNastaliq.ttc	Noto Nastaliq Urdu
+NotoSansKannada-Bold	<RT>/System/Library/Fonts/Core/NotoSansKannada.ttc	Noto Sans Kannada
+NotoSansKannada-Light	<RT>/System/Library/Fonts/Core/NotoSansKannada.ttc	Noto Sans Kannada
+NotoSansKannada-Regular	<RT>/System/Library/Fonts/Core/NotoSansKannada.ttc	Noto Sans Kannada
+NotoSansMyanmar-Bold	<RT>/System/Library/Fonts/Core/NotoSansMyanmar.ttc	Noto Sans Myanmar
+NotoSansMyanmar-Light	<RT>/System/Library/Fonts/Core/NotoSansMyanmar.ttc	Noto Sans Myanmar
+NotoSansMyanmar-Regular	<RT>/System/Library/Fonts/Core/NotoSansMyanmar.ttc	Noto Sans Myanmar
+NotoSansOriya	<RT>/System/Library/Fonts/Core/NotoSansOriya.ttc	Noto Sans Oriya
+NotoSansOriya-Bold	<RT>/System/Library/Fonts/Core/NotoSansOriya.ttc	Noto Sans Oriya
+NotoSansSyriac-Regular	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+NotoSansSyriac-Regular_Black	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+NotoSansSyriac-Regular_Bold	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+NotoSansSyriac-Regular_ExtraBold	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+NotoSansSyriac-Regular_ExtraLight	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+NotoSansSyriac-Regular_Light	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+NotoSansSyriac-Regular_Medium	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+NotoSansSyriac-Regular_SemiBold	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+NotoSansSyriac-Regular_Thin	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac
+Optima-Bold	<RT>/System/Library/Fonts/AppFonts/Optima.ttc	Optima
+Optima-BoldItalic	<RT>/System/Library/Fonts/AppFonts/Optima.ttc	Optima
+Optima-ExtraBlack	<RT>/System/Library/Fonts/AppFonts/Optima.ttc	Optima
+Optima-Italic	<RT>/System/Library/Fonts/AppFonts/Optima.ttc	Optima
+Optima-Regular	<RT>/System/Library/Fonts/AppFonts/Optima.ttc	Optima
+Palatino-Bold	<RT>/System/Library/Fonts/AppFonts/Palatino.ttc	Palatino
+Palatino-BoldItalic	<RT>/System/Library/Fonts/AppFonts/Palatino.ttc	Palatino
+Palatino-Italic	<RT>/System/Library/Fonts/AppFonts/Palatino.ttc	Palatino
+Palatino-Roman	<RT>/System/Library/Fonts/AppFonts/Palatino.ttc	Palatino
+Papyrus	<RT>/System/Library/Fonts/AppFonts/Papyrus.ttc	Papyrus
+Papyrus-Condensed	<RT>/System/Library/Fonts/AppFonts/Papyrus.ttc	Papyrus
+PartyLetPlain	<RT>/System/Library/Fonts/AppFonts/PartyLET.ttf	Party LET
+PingFangHK-Light	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK
+PingFangHK-Medium	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK
+PingFangHK-Regular	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK
+PingFangHK-Semibold	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK
+PingFangHK-Thin	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK
+PingFangHK-Ultralight	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK
+PingFangMO-Light	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO
+PingFangMO-Medium	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO
+PingFangMO-Regular	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO
+PingFangMO-Semibold	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO
+PingFangMO-Thin	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO
+PingFangMO-Ultralight	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO
+PingFangSC-Light	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC
+PingFangSC-Medium	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC
+PingFangSC-Regular	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC
+PingFangSC-Semibold	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC
+PingFangSC-Thin	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC
+PingFangSC-Ultralight	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC
+PingFangTC-Light	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC
+PingFangTC-Medium	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC
+PingFangTC-Regular	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC
+PingFangTC-Semibold	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC
+PingFangTC-Thin	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC
+PingFangTC-Ultralight	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC
+Rockwell-Bold	<RT>/System/Library/Fonts/CoreUI/Rockwell.ttc	Rockwell
+Rockwell-BoldItalic	<RT>/System/Library/Fonts/CoreUI/Rockwell.ttc	Rockwell
+Rockwell-Italic	<RT>/System/Library/Fonts/CoreUI/Rockwell.ttc	Rockwell
+Rockwell-Regular	<RT>/System/Library/Fonts/CoreUI/Rockwell.ttc	Rockwell
+STIXTwoMath-Regular	<RT>/System/Library/Fonts/UnicodeSupport/STIXTwoMath.otf	STIX Two Math
+STIXTwoText	<RT>/System/Library/Fonts/UnicodeSupport/STIXTwoText.ttf	STIX Two Text
+STIXTwoText-Italic	<RT>/System/Library/Fonts/UnicodeSupport/STIXTwoText-Italic.ttf	STIX Two Text
+STIXTwoText-Italic_Bold-Italic	<RT>/System/Library/Fonts/UnicodeSupport/STIXTwoText-Italic.ttf	STIX Two Text
+STIXTwoText-Italic_Medium-Italic	<RT>/System/Library/Fonts/UnicodeSupport/STIXTwoText-Italic.ttf	STIX Two Text
+STIXTwoText-Italic_SemiBold-Italic	<RT>/System/Library/Fonts/UnicodeSupport/STIXTwoText-Italic.ttf	STIX Two Text
+STIXTwoText_Bold	<RT>/System/Library/Fonts/UnicodeSupport/STIXTwoText.ttf	STIX Two Text
+STIXTwoText_Medium	<RT>/System/Library/Fonts/UnicodeSupport/STIXTwoText.ttf	STIX Two Text
+STIXTwoText_SemiBold	<RT>/System/Library/Fonts/UnicodeSupport/STIXTwoText.ttf	STIX Two Text
+SavoyeLetPlain	<RT>/System/Library/Fonts/CoreUI/Savoye.ttc	Savoye LET
+SinhalaSangamMN	<RT>/System/Library/Fonts/Core/SinhalaSangamMN.ttc	Sinhala Sangam MN
+SinhalaSangamMN-Bold	<RT>/System/Library/Fonts/Core/SinhalaSangamMN.ttc	Sinhala Sangam MN
+SnellRoundhand	<RT>/System/Library/Fonts/AppFonts/SnellRoundhand.ttc	Snell Roundhand
+SnellRoundhand-Black	<RT>/System/Library/Fonts/AppFonts/SnellRoundhand.ttc	Snell Roundhand
+SnellRoundhand-Bold	<RT>/System/Library/Fonts/AppFonts/SnellRoundhand.ttc	Snell Roundhand
+Symbol	<RT>/System/Library/Fonts/Core/Symbol.ttf	Symbol
+TamilSangamMN	<RT>/System/Library/Fonts/Core/TamilSangamMN.ttc	Tamil Sangam MN
+TamilSangamMN-Bold	<RT>/System/Library/Fonts/Core/TamilSangamMN.ttc	Tamil Sangam MN
+Thonburi	<RT>/System/Library/Fonts/Core/Thonburi.ttc	Thonburi
+Thonburi-Bold	<RT>/System/Library/Fonts/Core/Thonburi.ttc	Thonburi
+Thonburi-Light	<RT>/System/Library/Fonts/Core/Thonburi.ttc	Thonburi
+TimesNewRomanPS-BoldItalicMT	<RT>/System/Library/Fonts/Core/TimesNewRomanBoldItalic.ttf	Times New Roman
+TimesNewRomanPS-BoldMT	<RT>/System/Library/Fonts/Core/TimesNewRomanBold.ttf	Times New Roman
+TimesNewRomanPS-ItalicMT	<RT>/System/Library/Fonts/Core/TimesNewRomanItalic.ttf	Times New Roman
+TimesNewRomanPSMT	<RT>/System/Library/Fonts/Core/TimesNewRoman.ttf	Times New Roman
+Trebuchet-BoldItalic	<RT>/System/Library/Fonts/CoreUI/TrebuchetMSBoldItalic.ttf	Trebuchet MS
+TrebuchetMS	<RT>/System/Library/Fonts/CoreUI/TrebuchetMS.ttf	Trebuchet MS
+TrebuchetMS-Bold	<RT>/System/Library/Fonts/CoreUI/TrebuchetMSBold.ttf	Trebuchet MS
+TrebuchetMS-Italic	<RT>/System/Library/Fonts/CoreUI/TrebuchetMSItalic.ttf	Trebuchet MS
+Verdana	<RT>/System/Library/Fonts/WebFonts/Verdana.ttf	Verdana
+Verdana-Bold	<RT>/System/Library/Fonts/WebFonts/VerdanaBold.ttf	Verdana
+Verdana-BoldItalic	<RT>/System/Library/Fonts/WebFonts/VerdanaBoldItalic.ttf	Verdana
+Verdana-Italic	<RT>/System/Library/Fonts/WebFonts/VerdanaItalic.ttf	Verdana
+ZapfDingbatsITC	<RT>/System/Library/Fonts/Core/ZapfDingbats.ttf	Zapf Dingbats
+Zapfino	<RT>/System/Library/Fonts/AppFonts/Zapfino.ttf	Zapfino
+## 2. UIFont.familyNames, sorted:
+Academy Engraved LET
+Al Nile
+American Typewriter
+Apple Color Emoji
+Apple SD Gothic Neo
+Apple Symbols
+Arial
+Arial Hebrew
+Arial Rounded MT Bold
+Avenir
+Avenir Next
+Avenir Next Condensed
+Baskerville
+Bodoni 72
+Bodoni 72 Oldstyle
+Bodoni 72 Smallcaps
+Bodoni Ornaments
+Bradley Hand
+Chalkboard SE
+Chalkduster
+Charter
+Cochin
+Copperplate
+Courier New
+DIN Alternate
+DIN Condensed
+Damascus
+Devanagari Sangam MN
+Didot
+Euphemia UCAS
+Farah
+Futura
+Galvji
+Geeza Pro
+Georgia
+Gill Sans
+Grantha Sangam MN
+Helvetica
+Helvetica Neue
+Hiragino Maru Gothic ProN
+Hiragino Mincho ProN
+Hiragino Sans
+Hoefler Text
+Impact
+Kailasa
+Kefa III
+Khmer Sangam MN
+Kohinoor Bangla
+Kohinoor Devanagari
+Kohinoor Gujarati
+Kohinoor Telugu
+Lao Sangam MN
+Malayalam Sangam MN
+Marker Felt
+Menlo
+Mishafi
+Mukta Mahee
+Myanmar Sangam MN
+Noteworthy
+Noto Nastaliq Urdu
+Noto Sans Kannada
+Noto Sans Myanmar
+Noto Sans Oriya
+Noto Sans Syriac
+Optima
+Palatino
+Papyrus
+Party LET
+PingFang HK
+PingFang MO
+PingFang SC
+PingFang TC
+Rockwell
+STIX Two Math
+STIX Two Text
+Savoye LET
+Sinhala Sangam MN
+Snell Roundhand
+Symbol
+Tamil Sangam MN
+Thonburi
+Times New Roman
+Trebuchet MS
+Verdana
+Zapf Dingbats
+Zapfino
+## 3. the match: keep each EffectCraft face whose (file, PostScript name) pair is one CoreText lists
+##    CoreText: 303 descriptors, 103 distinct files, 86 families (as CoreText names them); faces without a PostScript name: 0; duplicate (file, PostScript name) pairs: 0
+##    EffectCraft, DirectorySource over CoreText's folders: 633 faces from 263 files; faces without a PostScript name: 0; faces not read from a file: 0; duplicate (file, PostScript name) pairs: 0
+##    matched: 266 of 633 EffectCraft faces; CoreText's 303 faces: 266 matched an EffectCraft face, 23 matched a named instance of one, 14 matched neither; 367 EffectCraft faces matched nothing
+## CoreText faces no EffectCraft face in that file carries (named instances found are listed and counted as covered):
+  KefaIII-Bold	<RT>/System/Library/Fonts/Core/KefaIII.ttf	Kefa III: no face, but a named instance of the face in that file (Kefa III / Regular (index 0, variable: true): instance style Bold)
+  KefaIII-ExtraBold	<RT>/System/Library/Fonts/Core/KefaIII.ttf	Kefa III: no face, but a named instance of the face in that file (Kefa III / Regular (index 0, variable: true): instance style ExtraBold)
+  KefaIII-Light	<RT>/System/Library/Fonts/Core/KefaIII.ttf	Kefa III: no face, but a named instance of the face in that file (Kefa III / Regular (index 0, variable: true): instance style Light)
+  NotoSansSyriac-Regular_Black	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  NotoSansSyriac-Regular_Bold	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  NotoSansSyriac-Regular_ExtraBold	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  NotoSansSyriac-Regular_ExtraLight	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  NotoSansSyriac-Regular_Light	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  NotoSansSyriac-Regular_Medium	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  NotoSansSyriac-Regular_SemiBold	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  NotoSansSyriac-Regular_Thin	<RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf	Noto Sans Syriac: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  PingFangHK-Light	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK: no face, but a named instance of the face in that file (PingFang HK / Medium (index 22, variable: true): instance style Light)
+  PingFangHK-Regular	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK: no face, but a named instance of the face in that file (PingFang HK / Medium (index 22, variable: true): instance style Regular)
+  PingFangHK-Semibold	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK: no face, but a named instance of the face in that file (PingFang HK / Medium (index 22, variable: true): instance style Semibold)
+  PingFangHK-Thin	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK: no face, but a named instance of the face in that file (PingFang HK / Medium (index 22, variable: true): instance style Thin)
+  PingFangHK-Ultralight	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang HK: no face, but a named instance of the face in that file (PingFang HK / Medium (index 22, variable: true): instance style Ultralight)
+  PingFangMO-Light	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO: no face, but a named instance of the face in that file (PingFang MO / Medium (index 23, variable: true): instance style Light)
+  PingFangMO-Regular	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO: no face, but a named instance of the face in that file (PingFang MO / Medium (index 23, variable: true): instance style Regular)
+  PingFangMO-Semibold	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO: no face, but a named instance of the face in that file (PingFang MO / Medium (index 23, variable: true): instance style Semibold)
+  PingFangMO-Thin	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO: no face, but a named instance of the face in that file (PingFang MO / Medium (index 23, variable: true): instance style Thin)
+  PingFangMO-Ultralight	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang MO: no face, but a named instance of the face in that file (PingFang MO / Medium (index 23, variable: true): instance style Ultralight)
+  PingFangSC-Light	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC: no face, but a named instance of the face in that file (PingFang SC / Medium (index 20, variable: true): instance style Light)
+  PingFangSC-Regular	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC: no face, but a named instance of the face in that file (PingFang SC / Medium (index 20, variable: true): instance style Regular)
+  PingFangSC-Semibold	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC: no face, but a named instance of the face in that file (PingFang SC / Medium (index 20, variable: true): instance style Semibold)
+  PingFangSC-Thin	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC: no face, but a named instance of the face in that file (PingFang SC / Medium (index 20, variable: true): instance style Thin)
+  PingFangSC-Ultralight	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang SC: no face, but a named instance of the face in that file (PingFang SC / Medium (index 20, variable: true): instance style Ultralight)
+  PingFangTC-Light	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC: no face, but a named instance of the face in that file (PingFang TC / Medium (index 21, variable: true): instance style Light)
+  PingFangTC-Regular	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC: no face, but a named instance of the face in that file (PingFang TC / Medium (index 21, variable: true): instance style Regular)
+  PingFangTC-Semibold	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC: no face, but a named instance of the face in that file (PingFang TC / Medium (index 21, variable: true): instance style Semibold)
+  PingFangTC-Thin	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC: no face, but a named instance of the face in that file (PingFang TC / Medium (index 21, variable: true): instance style Thin)
+  PingFangTC-Ultralight	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	PingFang TC: no face, but a named instance of the face in that file (PingFang TC / Medium (index 21, variable: true): instance style Ultralight)
+  STIXTwoText-Italic_Bold-Italic	<RT>/System/Library/Fonts/UnicodeSupport/STIXTwoText-Italic.ttf	STIX Two Text: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  STIXTwoText-Italic_Medium-Italic	<RT>/System/Library/Fonts/UnicodeSupport/STIXTwoText-Italic.ttf	STIX Two Text: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  STIXTwoText-Italic_SemiBold-Italic	<RT>/System/Library/Fonts/UnicodeSupport/STIXTwoText-Italic.ttf	STIX Two Text: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  STIXTwoText_Bold	<RT>/System/Library/Fonts/UnicodeSupport/STIXTwoText.ttf	STIX Two Text: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  STIXTwoText_Medium	<RT>/System/Library/Fonts/UnicodeSupport/STIXTwoText.ttf	STIX Two Text: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+  STIXTwoText_SemiBold	<RT>/System/Library/Fonts/UnicodeSupport/STIXTwoText.ttf	STIX Two Text: CoreText lists this face once; EffectCraft has 0 of 1 in that file; the name is in: nowhere: no EffectCraft face or instance has this PostScript name
+##    EffectCraft names the instances of <RT>/System/Library/Fonts/UnicodeSupport/NotoSansSyriac-Regular.ttf: Black=NotoSansSyriac-Black, Bold=NotoSansSyriac-Bold, ExtraBold=NotoSansSyriac-ExtraBold, ExtraLight=NotoSansSyriac-ExtraLight, Light=NotoSansSyriac-Light, Medium=NotoSansSyriac-Medium, Regular=NotoSansSyriac-Regular, SemiBold=NotoSansSyriac-SemiBold, Thin=NotoSansSyriac-Thin
+##    EffectCraft names the instances of <RT>/System/Library/Fonts/UnicodeSupport/STIXTwoText-Italic.ttf: Bold Italic=STIXTwoTextItalic-BoldItalic, Italic=STIXTwoTextItalic-Italic, Medium Italic=STIXTwoTextItalic-MediumItalic, SemiBold Italic=STIXTwoTextItalic-SemiBoldItalic
+##    EffectCraft names the instances of <RT>/System/Library/Fonts/UnicodeSupport/STIXTwoText.ttf: Bold=STIXTwoTextRoman-Bold, Medium=STIXTwoTextRoman-Medium, Regular=STIXTwoTextRoman-Regular, SemiBold=STIXTwoTextRoman-SemiBold
+## 4. the families a list_fonts filtered this way would show: 86
+Academy Engraved LET
+American Typewriter
+Apple Color Emoji
+Apple SD Gothic Neo
+Apple Symbols
+Arial
+Arial Hebrew
+Arial Rounded MT Bold
+Avenir
+Avenir Next
+Avenir Next Condensed
+Baskerville
+Bodoni 72
+Bodoni 72 Oldstyle
+Bodoni 72 Smallcaps
+Bodoni Ornaments
+Bradley Hand
+Chalkboard SE
+Chalkduster
+Charter
+Cochin
+Copperplate
+Courier New
+DIN Alternate
+DIN Condensed
+Devanagari Sangam MN
+Didot
+Euphemia UCAS
+Futura
+Galvji
+Georgia
+Gill Sans
+Grantha Sangam MN
+Helvetica
+Helvetica Neue
+Hiragino Maru Gothic ProN
+Hiragino Mincho ProN
+Hiragino Sans
+Hoefler Text
+Impact
+Kailasa
+Kefa III
+Khmer Sangam MN
+Kohinoor Bangla
+Kohinoor Devanagari
+Kohinoor Gujarati
+Kohinoor Telugu
+Lao Sangam MN
+Malayalam Sangam MN
+Marker Felt
+Menlo
+Mukta Mahee
+Myanmar Sangam MN
+Noteworthy
+Noto Nastaliq Urdu
+Noto Sans Kannada
+Noto Sans Myanmar
+Noto Sans Oriya
+Noto Sans Syriac
+Optima
+Palatino
+Papyrus
+Party LET
+PingFang HK
+PingFang MO
+PingFang SC
+PingFang TC
+Rockwell
+STIX Two Math
+STIX Two Text
+Savoye LET
+Sinhala Sangam MN
+Snell Roundhand
+Symbol
+Tamil Sangam MN
+Thonburi
+Times New Roman
+Trebuchet MS
+Verdana
+Zapf Dingbats
+Zapfino
+النيل
+فرح
+مِصحفي
+ڈیمسکس
+گیزا پرو
+##    against UIFont.familyNames (86): 5 only in the filtered list, 5 only in UIFont.familyNames
+##    faces whose EffectCraft family differs from CoreText's family name for the same face:
+##      CoreText "Al Nile" is EffectCraft "النيل"
+##      CoreText "Damascus" is EffectCraft "ڈیمسکس"
+##      CoreText "Farah" is EffectCraft "فرح"
+##      CoreText "Geeza Pro" is EffectCraft "گیزا پرو"
+##      CoreText "Mishafi" is EffectCraft "مِصحفي"
+##    of that difference, the 5 renames above explain 10 family names; unexplained: 0
+## 5. why the unmatched EffectCraft faces matched nothing: 367 in all (0 without a PostScript name, 0 not from a file)
+##    in files CoreText lists but not this face (87):
+  .AlNilePUA	<RT>/System/Library/Fonts/AppFonts/AlNile.ttc	.Al Nile PUA/Regular (index 1): CoreText lists this file but not this PostScript name
+  .AlNilePUA-Bold	<RT>/System/Library/Fonts/AppFonts/AlNile.ttc	.Al Nile PUA/Bold (index 3): CoreText lists this file but not this PostScript name
+  .DamascusPUA	<RT>/System/Library/Fonts/AppFonts/Damascus.ttc	.Damascus PUA/Regular (index 1): CoreText lists this file but not this PostScript name
+  .DamascusPUALight	<RT>/System/Library/Fonts/AppFonts/Damascus.ttc	.Damascus PUA/Light (index 3): CoreText lists this file but not this PostScript name
+  .DamascusPUAMedium	<RT>/System/Library/Fonts/AppFonts/Damascus.ttc	.Damascus PUA/Medium (index 5): CoreText lists this file but not this PostScript name
+  .DamascusPUABold	<RT>/System/Library/Fonts/AppFonts/Damascus.ttc	.Damascus PUA/Bold (index 7): CoreText lists this file but not this PostScript name
+  .DamascusPUASemiBold	<RT>/System/Library/Fonts/AppFonts/Damascus.ttc	.Damascus PUA/Semi Bold (index 9): CoreText lists this file but not this PostScript name
+  .FarahPUA	<RT>/System/Library/Fonts/AppFonts/Farah.ttc	.Farah PUA/Regular (index 1): CoreText lists this file but not this PostScript name
+  HiraMinPro-W3	<RT>/System/Library/Fonts/AppFonts/HiraginoMincho.ttc	Hiragino Mincho Pro/W3 (index 1): CoreText lists this file but not this PostScript name
+  HiraMinPro-W6	<RT>/System/Library/Fonts/AppFonts/HiraginoMincho.ttc	Hiragino Mincho Pro/W6 (index 3): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoI-Regular	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoI/Regular (index 1): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoW-Regular	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoW/Regular (index 2): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoI-Medium	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoI/Medium (index 4): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoW-Medium	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoW/Medium (index 5): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoI-SemiBold	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoI/SemiBold (index 7): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoW-SemiBold	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoW/SemiBold (index 8): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoI-Bold	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoI/Bold (index 10): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoW-Bold	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoW/Bold (index 11): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoI-Light	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoI/Light (index 13): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoW-Light	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoW/Light (index 14): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoI-Thin	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoI/Thin (index 16): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoW-Thin	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoW/Thin (index 17): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoI-UltraLight	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoI/UltraLight (index 19): CoreText lists this file but not this PostScript name
+  .AppleSDGothicNeoW-UltraLight	<RT>/System/Library/Fonts/Core/AppleSDGothicNeo.ttc	.Apple SD Gothic NeoW/UltraLight (index 20): CoreText lists this file but not this PostScript name
+  .GeezaProInterface	<RT>/System/Library/Fonts/Core/GeezaPro.ttc	.Geeza Pro Interface/Regular (index 2): CoreText lists this file but not this PostScript name
+  .GeezaProInterface-Bold	<RT>/System/Library/Fonts/Core/GeezaPro.ttc	.Geeza Pro Interface/Bold (index 3): CoreText lists this file but not this PostScript name
+  .GeezaProInterface-Light	<RT>/System/Library/Fonts/Core/GeezaPro.ttc	.Geeza Pro Interface/Light (index 4): CoreText lists this file but not this PostScript name
+  .GeezaProPUA	<RT>/System/Library/Fonts/Core/GeezaPro.ttc	.Geeza Pro PUA/Regular (index 5): CoreText lists this file but not this PostScript name
+  .GeezaProPUA-Bold	<RT>/System/Library/Fonts/Core/GeezaPro.ttc	.Geeza Pro PUA/Bold (index 6): CoreText lists this file but not this PostScript name
+  .HiraKakuInterface-W1	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic Interface/W1 (index 0): CoreText lists this file but not this PostScript name
+  .HiraKakuInterfaceWatch-W1	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic InterfaceWatch/W1 (index 1): CoreText lists this file but not this PostScript name
+  .HiraKakuInterface-W2	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic Interface/W2 (index 2): CoreText lists this file but not this PostScript name
+  .HiraKakuInterfaceWatch-W2	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic InterfaceWatch/W2 (index 3): CoreText lists this file but not this PostScript name
+  .HiraKakuInterface-W3	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic Interface/W3 (index 5): CoreText lists this file but not this PostScript name
+  .HiraKakuInterfaceWatch-W3	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic InterfaceWatch/W3 (index 6): CoreText lists this file but not this PostScript name
+  HiraKakuProN-W3	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Kaku Gothic ProN/W3 (index 7): CoreText lists this file but not this PostScript name
+  HiraKakuPro-W3	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Kaku Gothic Pro/W3 (index 8): CoreText lists this file but not this PostScript name
+  .HiraKakuInterface-W4	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic Interface/W4 (index 10): CoreText lists this file but not this PostScript name
+  .HiraKakuInterfaceWatch-W4	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic InterfaceWatch/W4 (index 11): CoreText lists this file but not this PostScript name
+  .HiraKakuInterface-W5	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic Interface/W5 (index 13): CoreText lists this file but not this PostScript name
+  .HiraKakuInterfaceWatch-W5	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic InterfaceWatch/W5 (index 14): CoreText lists this file but not this PostScript name
+  .HiraKakuInterface-W6	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic Interface/W6 (index 16): CoreText lists this file but not this PostScript name
+  .HiraKakuInterfaceWatch-W6	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic InterfaceWatch/W6 (index 17): CoreText lists this file but not this PostScript name
+  HiraKakuProN-W6	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Kaku Gothic ProN/W6 (index 18): CoreText lists this file but not this PostScript name
+  HiraKakuPro-W6	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Kaku Gothic Pro/W6 (index 19): CoreText lists this file but not this PostScript name
+  .HiraKakuInterface-W7	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic Interface/W7 (index 21): CoreText lists this file but not this PostScript name
+  .HiraKakuInterfaceWatch-W7	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic InterfaceWatch/W7 (index 22): CoreText lists this file but not this PostScript name
+  .HiraKakuInterface-W8	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic Interface/W8 (index 24): CoreText lists this file but not this PostScript name
+  .HiraKakuInterfaceWatch-W8	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	.Hiragino Kaku Gothic InterfaceWatch/W8 (index 25): CoreText lists this file but not this PostScript name
+  HiraKakuStd-W8	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Kaku Gothic Std/W8 (index 26): CoreText lists this file but not this PostScript name
+  HiraKakuStdN-W8	<RT>/System/Library/Fonts/Core/HiraginoKakuGothic.ttc	Hiragino Kaku Gothic StdN/W8 (index 27): CoreText lists this file but not this PostScript name
+  .NotoNastaliqUrduUI	<RT>/System/Library/Fonts/Core/NotoNastaliq.ttc	.Noto Nastaliq Urdu UI/Regular (index 1): CoreText lists this file but not this PostScript name
+  .NotoNastaliqUrduUI-Bold	<RT>/System/Library/Fonts/Core/NotoNastaliq.ttc	.Noto Nastaliq Urdu UI/Bold (index 3): CoreText lists this file but not this PostScript name
+  NotoSansZawgyi-Bold	<RT>/System/Library/Fonts/Core/NotoSansMyanmar.ttc	Noto Sans Zawgyi/Bold (index 3): CoreText lists this file but not this PostScript name
+  NotoSansZawgyi-Light	<RT>/System/Library/Fonts/Core/NotoSansMyanmar.ttc	Noto Sans Zawgyi/Light (index 4): CoreText lists this file but not this PostScript name
+  NotoSansZawgyi-Regular	<RT>/System/Library/Fonts/Core/NotoSansMyanmar.ttc	Noto Sans Zawgyi/Regular (index 5): CoreText lists this file but not this PostScript name
+  .AppleColorEmojiUI	<RT>/System/Library/Fonts/CoreAddition/AppleColorEmoji-160px.ttc	.Apple Color Emoji UI/Regular (index 1): CoreText lists this file but not this PostScript name
+  HiraMaruPro-W4	<RT>/System/Library/Fonts/CoreUI/HiraginoMaruGothProN.ttc	Hiragino Maru Gothic Pro/W4 (index 0): CoreText lists this file but not this PostScript name
+  .SavoyeLetPlainCC	<RT>/System/Library/Fonts/CoreUI/Savoye.ttc	.Savoye LET CC./Plain (index 1): CoreText lists this file but not this PostScript name
+  .PingFangUITextSC-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI SC/DefaultText (index 0): CoreText lists this file but not this PostScript name
+  .PingFangUITextTC-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI TC/DefaultText (index 1): CoreText lists this file but not this PostScript name
+  .PingFangUITextHK-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI HK/DefaultText (index 2): CoreText lists this file but not this PostScript name
+  .PingFangUITextMO-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI MO/DefaultText (index 3): CoreText lists this file but not this PostScript name
+  .PingFangUITextJA-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI JA/DefaultText (index 4): CoreText lists this file but not this PostScript name
+  .PingFangUIDisplaySC-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI SC/DefaultDisplay (index 5): CoreText lists this file but not this PostScript name
+  .PingFangUIDisplayTC-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI TC/DefaultDisplay (index 6): CoreText lists this file but not this PostScript name
+  .PingFangUIDisplayHK-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI HK/DefaultDisplay (index 7): CoreText lists this file but not this PostScript name
+  .PingFangUIDisplayMO-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI MO/DefaultDisplay (index 8): CoreText lists this file but not this PostScript name
+  .PingFangUIDisplayJA-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI JA/DefaultDisplay (index 9): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchTextSC-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch SC/DefaultText (index 10): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchTextTC-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch TC/DefaultText (index 11): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchTextHK-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch HK/DefaultText (index 12): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchTextMO-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch MO/DefaultText (index 13): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchTextJA-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch JA/DefaultText (index 14): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchDisplaySC-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch SC/DefaultDisplay (index 15): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchDisplayTC-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch TC/DefaultDisplay (index 16): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchDisplayHK-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch HK/DefaultDisplay (index 17): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchDisplayMO-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch MO/DefaultDisplay (index 18): CoreText lists this file but not this PostScript name
+  .PingFangUIWatchDisplayJA-Default	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang UI Watch JA/DefaultDisplay (index 19): CoreText lists this file but not this PostScript name
+  .PingFangSC-Medium	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang SC/Medium (index 24): CoreText lists this file but not this PostScript name
+  .PingFangTC-Medium	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang TC/Medium (index 25): CoreText lists this file but not this PostScript name
+  .PingFangHK-Medium	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang HK/Medium (index 26): CoreText lists this file but not this PostScript name
+  .PingFangMO-Medium	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang MO/Medium (index 27): CoreText lists this file but not this PostScript name
+  .PingFangWatchSC-Medium	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang Watch SC/Medium (index 28): CoreText lists this file but not this PostScript name
+  .PingFangWatchTC-Medium	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang Watch TC/Medium (index 29): CoreText lists this file but not this PostScript name
+  .PingFangWatchHK-Medium	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang Watch HK/Medium (index 30): CoreText lists this file but not this PostScript name
+  .PingFangWatchMO-Medium	<RT>/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc	.PingFang Watch MO/Medium (index 31): CoreText lists this file but not this PostScript name
+##    in files CoreText does not list (280 faces in 160 files):
+##    1 in <RT>/System/Library/Fonts/AppFonts/AppleGothic.otf
+##    4 in <RT>/System/Library/Fonts/AppFonts/Athelas.ttc
+##    4 in <RT>/System/Library/Fonts/AppFonts/Carlito.ttc
+##    1 in <RT>/System/Library/Fonts/AppFonts/DB_LCD_Temp-Black.ttf
+##    1 in <RT>/System/Library/Fonts/AppFonts/LockClock.ttf
+##    3 in <RT>/System/Library/Fonts/AppFonts/Marion.ttc
+##    10 in <RT>/System/Library/Fonts/AppFonts/Seravek.ttc
+##    8 in <RT>/System/Library/Fonts/AppFonts/SuperClarendon.ttc
+##    13 in <RT>/System/Library/Fonts/Core/ADTNumeric.ttc
+##    10 in <RT>/System/Library/Fonts/Core/CJKSymbolsFallback.ttc
+##    4 in <RT>/System/Library/Fonts/Core/Courier.ttc
+##    2 in <RT>/System/Library/Fonts/Core/DecoTypeNastaleeqUrdu.ttc
+##    1 in <RT>/System/Library/Fonts/Core/Fallback.ttf
+##    2 in <RT>/System/Library/Fonts/Core/HelveticaNeueInterface.ttc
+##    1 in <RT>/System/Library/Fonts/Core/LastResort.otf
+##    1 in <RT>/System/Library/Fonts/Core/NewYork.ttf
+##    1 in <RT>/System/Library/Fonts/Core/NewYorkItalic.ttf
+##    3 in <RT>/System/Library/Fonts/Core/NotoSansArmenian.ttc
+##    1 in <RT>/System/Library/Fonts/Core/PhonepadTwo.ttf
+##    1 in <RT>/System/Library/Fonts/Core/SFArabic.ttf
+##    1 in <RT>/System/Library/Fonts/Core/SFArabicRounded.ttf
+##    1 in <RT>/System/Library/Fonts/Core/SFArmenian.ttf
+##    1 in <RT>/System/Library/Fonts/Core/SFArmenianRounded.ttf
+##    1 in <RT>/System/Library/Fonts/Core/SFCamera.ttf
+##    1 in <RT>/System/Library/Fonts/Core/SFCompact.ttf
+##    1 in <RT>/System/Library/Fonts/Core/SFCompactItalic.ttf
+##    1 in <RT>/System/Library/Fonts/Core/SFCompactRounded.ttf
+##    1 in <RT>/System/Library/Fonts/Core/SFGeorgian.ttf
+##    1 in <RT>/System/Library/Fonts/Core/SFGeorgianRounded.ttf
+##    1 in <RT>/System/Library/Fonts/Core/SFHebrew.ttf
+##    1 in <RT>/System/Library/Fonts/Core/SFHebrewRounded.ttf
+##    9 in <RT>/System/Library/Fonts/Core/SFIndia.ttc
+##    1 in <RT>/System/Library/Fonts/Core/SFUI.ttf
+##    1 in <RT>/System/Library/Fonts/Core/SFUIItalic.ttf
+##    1 in <RT>/System/Library/Fonts/Core/SFUIMono.ttf
+##    1 in <RT>/System/Library/Fonts/Core/SFUIMonoItalic.ttf
+##    1 in <RT>/System/Library/Fonts/Core/SFUISymbols-Regular.otf
+##    2 in <RT>/System/Library/Fonts/Core/ThonburiUI.ttc
+##    1 in <RT>/System/Library/Fonts/CoreAddition/STIXGeneral.otf
+##    1 in <RT>/System/Library/Fonts/CoreAddition/STIXGeneralBol.otf
+##    1 in <RT>/System/Library/Fonts/CoreAddition/STIXGeneralBolIta.otf
+##    1 in <RT>/System/Library/Fonts/CoreAddition/STIXGeneralItalic.otf
+##    1 in <RT>/System/Library/Fonts/CoreUI/AsphaltMedium.otf
+##    1 in <RT>/System/Library/Fonts/CoreUI/BalegaRegular.otf
+##    1 in <RT>/System/Library/Fonts/CoreUI/BebasNeue.otf
+##    1 in <RT>/System/Library/Fonts/CoreUI/DearJoe-small-semibold.ttf
+##    13 in <RT>/System/Library/Fonts/CoreUI/Druk.ttc
+##    1 in <RT>/System/Library/Fonts/CoreUI/FaktSlabStencilPro-medium.otf
+##    4 in <RT>/System/Library/Fonts/CoreUI/IowanOldStyle.ttc
+##    1 in <RT>/System/Library/Fonts/CoreUI/JournalSansInline.otf
+##    4 in <RT>/System/Library/Fonts/CoreUI/Keycaps.ttc
+##    2 in <RT>/System/Library/Fonts/CoreUI/KeycapsPad.ttc
+##    1 in <RT>/System/Library/Fonts/CoreUI/PhoneKeyCaps.ttf
+##    1 in <RT>/System/Library/Fonts/CoreUI/SFUIRounded.ttf
+##    41 in <RT>/System/Library/Fonts/CoreUI/SFUISoft.ttc
+##    1 in <RT>/System/Library/Fonts/CoreUI/SchemeBold.otf
+##    1 in <RT>/System/Library/Fonts/CoreUI/SignPainter-Semibold.otf
+##    1 in <RT>/System/Library/Fonts/CoreUI/TheHandSerif-semibold.otf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansAdlam-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansAvestan-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansBamum-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansBassaVah-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansBatak-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansBhaiksuki-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansBrahmi-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansBuginese-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansBuhid-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansCanadianAboriginal-Regular.otf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansCarian-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansCaucasianAlbanian-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansChakma-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansCham-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansCoptic-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansCuneiform-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansCypriot-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansDuployan-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansEgyptianHieroglyphs-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansElbasan-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansGlagolitic-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansGothic-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansGunjalaGondi-Regular.otf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansHanifiRohingya-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansHanunoo-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansHatran-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansImperialAramaic-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansInscriptionalPahlavi-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansInscriptionalParthian-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansJavanese-Regular.otf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansKaithi-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansKayahLi-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansKharoshthi-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansKhojki-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansKhudawadi-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansLepcha-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansLimbu-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansLinearA-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansLinearB-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansLisu-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansLycian-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansLydian-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansMahajani-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansMandaic-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansManichaean-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansMarchen-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansMasaramGondi-Regular.otf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansMeeteiMayek-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansMendeKikakui-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansMeroitic-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansMiao-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansModi-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansMongolian-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansMro-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansMultani-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansNKo-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansNabataean-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansNagMundari-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansNewTaiLue-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansNewa-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansOlChiki-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansOldHungarian-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansOldItalic-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansOldNorthArabian-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansOldPermic-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansOldPersian-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansOldSouthArabian-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansOldTurkic-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansOsage-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansOsmanya-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansPahawhHmong-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansPalmyrene-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansPauCinHau-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansPhagsPa-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansPhoenician-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansPsalterPahlavi-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansRejang-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansSamaritan-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansSaurashtra-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansSharada-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansSiddham-Regular.otf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansSoraSompeng-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansSundanese-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansSylotiNagri-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansTagalog-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansTagbanwa-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansTaiLe-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansTaiTham-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansTaiViet-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansTakri-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansThaana-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansTifinagh-Regular.otf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansTirhuta-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansUgaritic-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansVai-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansWancho-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansWarangCiti-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSansYi-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSerifAhom-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSerifBalinese-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSerifNyiakengPuachueHmong-Regular.ttf
+##    1 in <RT>/System/Library/Fonts/UnicodeSupport/NotoSerifYezidi-Regular.otf

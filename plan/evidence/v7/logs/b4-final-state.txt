@@ -1,0 +1,16 @@
+== emulator-5556 sdk=37 avd=Pixel_6_API_37
+Success
+pkg=[]
+data_sync_fgs_timeout_duration=null
+media_processing_fgs_timeout_duration=null
+short_fgs_timeout_duration=null
+sync_set=
+sync=[none]
+== emulator-5554 sdk=29 avd=Pixel_6_API_29
+Failure [DELETE_FAILED_INTERNAL_ERROR]
+pkg=[]
+data_sync_fgs_timeout_duration=null
+media_processing_fgs_timeout_duration=null
+short_fgs_timeout_duration=null
+sync_set=Invalid command: set_sync_disabled_for_tests
+sync=[Invalid command: get_sync_disabled_for_tests]

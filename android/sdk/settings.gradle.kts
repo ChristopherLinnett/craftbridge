@@ -64,6 +64,8 @@ val gateWorkers =
     mapOf(
         "spotlessCheck" to listOf("spotlessKotlin", "spotlessKotlinCheck", "spotlessKotlinGradle", "spotlessKotlinGradleCheck"),
         "lint" to listOf("lintAnalyzeDebug", "lintDebug"),
+        // Release-only sources ship in the release AAR, so Lint reads that variant too.
+        "lintRelease" to listOf("lintAnalyzeRelease"),
         "assembleRelease" to listOf("compileReleaseKotlin", "bundleReleaseAar"),
         // The tests' Kotlin compiles under the same rules, so a warning in a test fails too.
         "compileDebugUnitTestSources" to listOf("compileDebugUnitTestKotlin"),

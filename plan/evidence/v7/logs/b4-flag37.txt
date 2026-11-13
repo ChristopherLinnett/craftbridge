@@ -1,0 +1,121 @@
+# review B4 flag check on the API 37 image (re-runs A4's checks, adds non-root avenues)
+$ adb shell aflags 2>&1 | head -20   # does the tool exist, what can it do
+Tool for reading and writing flags.
+
+Rows in the table from the `list` command follow this format:
+
+  package flag_name value provenance permission container
+
+  * `package`: package set for this flag in its .aconfig definition.
+  * `flag_name`: flag name, also set in definition.
+  * `value`: the value read from the flag.
+  * `staged_value`: the value on next boot:
+    + `-`: same as current value
+    + `(->enabled) flipped to enabled on boot.
+    + `(->disabled) flipped to disabled on boot.
+  * `provenance`: one of:
+    + `default`: the flag value comes from its build-time default.
+    + `server`: the flag value comes from a server override.
+    + `local`: the flag value comes from local override.
+  * `permission`: read-write or read-only.
+  * `container`: the container for the flag, configured in its definition.
+
+
+Usage: aflags <COMMAND>
+
+Commands:
+  list     List all aconfig flags on this device
+  enable   Locally enable an aconfig flag on this device
+  disable  Locally disable an aconfig flag on this device
+  unset    Clear any local override value and re-allow server overrides
+  help     Print this message or the help of the given subcommand(s)
+
+
+$ adb shell aflags list 2>&1 | head -3
+Error: must be root
+
+rc=0
+
+$ adb shell aflags get android.app enable_fgs_timeout_crash_behavior
+error: unrecognized subcommand 'get'
+
+Usage: aflags <COMMAND>
+
+For more information, try '--help'.
+
+rc=2
+
+# control: the flag stores the image declares (file list first)
+-rw-r--r-- 1 root root      0 2026-09-09 14:37 /product/etc/aconfig_flags.pb
+-rw-r--r-- 1 root root 856365 2026-09-09 14:39 /system/etc/aconfig_flags.pb
+-rw-r--r-- 1 root root  63414 2026-09-09 14:39 /system_ext/etc/aconfig_flags.pb
+-rw-r--r-- 1 root root   1465 2026-09-09 14:39 /vendor/etc/aconfig_flags.pb
+
+total 152
+drwxr-xr-x  2 root root   4096 2026-09-09 14:44 .
+drwxr-xr-x 22 root root   4096 2026-09-09 14:44 ..
+-rw-r--r--  1 root root   2167 2026-09-09 14:39 flag.info
+-rw-r--r--  1 root root 123138 2026-09-09 14:39 flag.map
+-rw-r--r--  1 root root   2167 2026-09-09 14:39 flag.val
+-rw-r--r--  1 root root  10575 2026-09-09 14:39 package.map
+
+
+# grep every store for the flag + A4 control flags
+/system/etc/aconfig_flags.pb enable_fgs_timeout_crash_behavior=0 fgs_delegate_system_api=2
+/system_ext/etc/aconfig_flags.pb enable_fgs_timeout_crash_behavior=0 fgs_delegate_system_api=0
+/product/etc/aconfig_flags.pb enable_fgs_timeout_crash_behavior=0 fgs_delegate_system_api=0
+/vendor/etc/aconfig_flags.pb enable_fgs_timeout_crash_behavior=0 fgs_delegate_system_api=0
+/system/etc/aconfig/flag.info enable_fgs_timeout_crash_behavior=0 fgs_delegate_system_api=0
+/system/etc/aconfig/flag.map enable_fgs_timeout_crash_behavior=0 fgs_delegate_system_api=1
+/system/etc/aconfig/flag.val enable_fgs_timeout_crash_behavior=0 fgs_delegate_system_api=0
+/system/etc/aconfig/package.map enable_fgs_timeout_crash_behavior=0 fgs_delegate_system_api=0
+
+# device-managed aconfig flags surface in properties / device_config / settings
+$ getprop | grep -i 'fgs\|crash_behavior' | head
+rc=0
+$ device_config get android.app enable_fgs_timeout_crash_behavior
+null
+$ settings get global android.app_enable_fgs_timeout_crash_behavior
+null
+$ dumpsys device_config 2>&1 | grep -i -c fgs
+5
+
+# does the framework binary on this image still reference the flag at all?
+(exit 2)
+
+$ adb shell getprop ro.build.fingerprint
+google/sdk_gphone16k_arm64/emu64a16k:17/CP41.260828.004.A7/16296984:user/dev-keys
+
+# --- follow-ups (B4) ---
+$ dumpsys device_config 2>&1 | grep -i fgs
+activity_manager/bg_prompt_fgs_on_long_running=false
+backstage_power/com.android.server.am.always_revoke_audio_capability_above_bfgs=true
+backstage_power/com.android.server.am.fgs_delegate_system_api=true
+location/android.location.flags.asynchronous_fgs_logging_lms=true
+privacy/safety_center_refresh_fgs_allowlist_duration_millis=20000
+
+$ ls /system/framework/oat/arm64/ 2>/dev/null | head
+abx.odex
+abx.vdex
+am.odex
+am.vdex
+android.hidl.base-V1.0-java.odex
+android.hidl.base-V1.0-java.vdex
+android.hidl.manager-V1.0-java.odex
+android.hidl.manager-V1.0-java.vdex
+/system/framework/abx.jar
+/system/framework/am.jar
+/system/framework/android.hidl.base-V1.0-java.jar
+/system/framework/android.hidl.manager-V1.0-java.jar
+/system/framework/android.test.base.jar
+
+# flag-name strings in framework odex/vdex/jar (services.jar/odex carries ActiveServices)
+/system/framework/oat/arm64/services.vdex enable_fgs_timeout_crash_behavior=0
+/system/framework/oat/arm64/services.odex enable_fgs_timeout_crash_behavior=0
+/system/framework/services.jar enable_fgs_timeout_crash_behavior=0
+/system/framework/framework.jar enable_fgs_timeout_crash_behavior=0
+/system/framework/framework-graphics.jar enable_fgs_timeout_crash_behavior=0
+
+# control: a string the same flag-gated code region must contain if it survived unqualified
+/system/framework/oat/arm64/services.vdex did_not_stop_within=0 time_limit_already=0
+/system/framework/services.jar did_not_stop_within=1 time_limit_already=1
