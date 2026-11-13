@@ -5,17 +5,17 @@
 
 ## 24. Upstream update loop design
 
-`tools/update-upstream.sh <upstream-commit>` takes a new EffectCraft revision in one run (PD4, PD17, L9). GitHub calls use the ChristopherLinnett account per command (`GH_TOKEN=$(gh auth token --user ChristopherLinnett)`), never the machine's active login.
+`tools/update-upstream.sh <upstream-commit>` takes a new official EffectCraft revision in one run (PD4, PD17, L9). It need not be automatic, only quick to take: it does the mechanical steps and names what a person must recheck. UP-9 builds steps 1 and 2 and uses them to set the first pin, so the generated tables are never written by hand even once; OPS-4 adds steps 3 to 6. Any GitHub call it makes names the ChristopherLinnett account (`GH_TOKEN=$(gh auth token --user ChristopherLinnett)`), never the machine's active login.
 
 1. **Fetch** storytold/effectcraft and read the new revision's `Cargo.toml` and `Cargo.lock`.
-2. **Seams:** for each seam in `tools/seams.toml` (id, pull request, branch), drop it if its pull request has merged into the new revision; rebase the rest onto it in a scratch clone; merge them into `craftbridge/seams-<sha8>` and push it to `ChristopherLinnett/effectcraft`. A conflict stops the run and names the seam and files.
-3. **Pins:** write the `git`/`rev` pair (the seam branch, or storytold when no seam is open) and EffectCraft's FilmCraft revision into `[workspace.dependencies]` of `rust/Cargo.toml`; regenerate `[patch.crates-io]` and `[profile.release]` from upstream; start `Cargo.lock` from upstream's and resolve CraftBridge's own crates (D-21).
+2. **Pins:** write the new `rev` and EffectCraft's FilmCraft revision into `[workspace.dependencies]` of `rust/Cargo.toml`; regenerate `[patch.crates-io]` and `[profile.release]` from upstream; start `Cargo.lock` from upstream's and resolve CraftBridge's own crates (D-21).
+3. **Adaptations:** for each entry of `tools/adaptations.toml`, diff the EffectCraft files and items it lists between the old and the new revision, and name every adaptation whose items changed, with its diff, for a person to recheck against upstream's new code (§15).
 4. **Regenerate:** `cargo xtask generate` (the API surface and both facades); `craftbridge-effects-codegen diff` against the previous surface.
-5. **Gate:** `tools/ci.sh` (desktop conformance, mobile type-checks, duplicate-crate check).
-6. **Record:** append to `docs/upstream-updates.md`: from and to revisions, seams dropped or carried, commands added, changed and removed, the gate result.
+5. **Gate:** `tools/ci.sh` (desktop conformance against the new revision's CLI, mobile type-checks, duplicate-crate check).
+6. **Record:** append to `docs/upstream-updates.md`: from and to revisions, the adaptations named and how each was resolved, commands added, changed and removed, the gate result.
 
-**States.** Up to date · updated cleanly (commit ready) · seam conflict (stops; the seam is fixed on its branch) · breaking API change (exit 2; the next release is a major version) · gate failure (stops with the failing scenarios).
+**States.** Up to date · updated cleanly (commit ready) · adaptations to recheck (the run completes and lists them; the update merges once each is rechecked) · breaking API change (exit 2; the next release is a major version) · gate failure (stops with the failing scenarios).
 
-**Edge cases.** Upstream merged a seam in a different shape: CraftBridge's call sites adapt to upstream's version, which governs (§15). A FilmCraft revision change: taken from EffectCraft's `Cargo.toml`; the duplicate-crate check proves one copy of `filmcraft-codecs` (D-13).
+**Edge cases.** Upstream adds a public interface that does what an adaptation does: the adaptation moves onto it in that update (§15). Upstream adds a CLI flag or method: AD3 lists the CLI's flag code, so the script names it, and the corpus gains a scenario. A FilmCraft revision change: taken from EffectCraft's `Cargo.toml`; the duplicate-crate check proves one copy of `filmcraft-codecs` (D-13).
 
-**Tests.** A dry run against the current pin produces no changes; a fixture surface with a removed command makes `diff` exit 2.
+**Tests.** A dry run against the current pin produces no changes; a fixture surface with a removed command makes `diff` exit 2; a fixture revision that changes a file an adaptation lists names that adaptation.

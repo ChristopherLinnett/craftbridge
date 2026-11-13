@@ -1,0 +1,11 @@
+case=review-b2-a37-combo-short-notdeclared
+apk=/tmp/craftbridge-v7/apk2/fgslab-combo-ts37.apk
+apk_md5=0cea776e2569a7e153abb28b42a2a29d
+serial=emulator-5556 device_sdk=37
+type=shortService duration_s=45
+start=2026-11-13T13:25:17+08:00
+install_rc=0
+pid=
+result=PROCESS_GONE_AT_LAUNCH end=2026-11-13T13:25:18+08:00
+target_sdk=37
+fatal_exception_at_launch=android.app.RemoteServiceException$ForegroundServiceDidNotStartInTimeException;android.app.StackTrace

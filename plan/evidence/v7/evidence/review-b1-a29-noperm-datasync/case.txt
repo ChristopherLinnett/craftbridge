@@ -1,0 +1,8 @@
+case=review-b1-a29-noperm-datasync
+apk=apk-b1/fgslab-noperm-ts37.apk
+apk_md5=15b2745f2b375a3a020f5e40707f7612
+serial=emulator-5554 device_sdk=29
+type=dataSync duration_s=45
+start=2026-11-13T11:16:35+08:00
+install_rc=1
+result=INSTALL_FAILED end=2026-11-13T11:16:35+08:00

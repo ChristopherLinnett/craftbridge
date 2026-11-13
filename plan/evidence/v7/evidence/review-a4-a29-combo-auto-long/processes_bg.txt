@@ -1,0 +1,57 @@
+device_time=16:29:21.293
+ACTIVITY MANAGER RUNNING PROCESSES (dumpsys activity processes)
+  All known processes:
+  *APP* UID 10144 ProcessRecord{eaeaf28 4003:com.example.fgslab/u0a144}
+    user #0 uid=10144 gids={50144, 20144, 9997}
+    mRequiredAbi=arm64-v8a instructionSet=null
+    dir=/data/app/com.example.fgslab-8oCU-PJR8MHXsIClmBZzuw==/base.apk publicDir=/data/app/com.example.fgslab-8oCU-PJR8MHXsIClmBZzuw==/base.apk data=/data/user/0/com.example.fgslab
+    packageList={com.example.fgslab}
+    compat={420dpi}
+    thread=android.app.IApplicationThread$Stub$Proxy@76dd643
+    pid=4003 starting=false
+    lastActivityTime=-39s257ms lastPssTime=-15s934ms pssStatType=0 nextPssTime=+44s64ms
+    adjSeq=4299 lruSeq=786 lastPss=23MB lastSwapPss=0.00 lastCachedPss=0.00 lastCachedSwapPss=0.00
+    procStateMemTracker: best=1 (1=1 1.5x)
+    cached=false empty=true
+    oom: max=1001 curRaw=200 setRaw=200 cur=200 set=200
+    lastCompactTime=0 lastCompactAction=0    mCurSchedGroup=2 setSchedGroup=2 systemNoUi=false trimMemoryLevel=0
+    curProcState=5 mRepProcState=5 pssProcState=5 setProcState=5 lastStateTime=-39s257ms
+    hasShownUi=true pendingUiClean=true hasAboveClient=false treatLikeActivity=false
+    mHasForegroundServices=true forcingToImportant=null
+    reportedInteraction=false fgInteractionTime=-29s753ms
+    lastTopTime=-29s753ms
+    hasStartedServices=true
+    startSeq=66
+    mountMode=DEFAULT
+    lastRequestedGc=-39s261ms lastLowMemory=-39s261ms reportLowMemory=false
+    Activities:
+      - ActivityRecord{1e874ea u0 com.example.fgslab/.MainActivity t8}
+    Recent Tasks:
+      - TaskRecord{c9a76a7 #8 A=com.example.fgslab U=0 StackId=6 sz=1}
+     Configuration={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h842dp 420dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2274) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} s.6}
+     OverrideConfiguration={0.0 ?mcc?mnc ?localeList ?layoutDir ?swdp ?wdp ?hdp ?density ?lsize ?long ?ldr ?wideColorGamut ?orien ?uimode ?night ?touch ?keyb/?/? ?nav/? winConfig={ mBounds=Rect(0, 0 - 0, 0) mAppBounds=null mWindowingMode=undefined mDisplayWindowingMode=undefined mActivityType=undefined mAlwaysOnTop=undefined mRotation=undefined}}
+     mLastReportedConfiguration={0.0 ?mcc?mnc ?localeList ?layoutDir ?swdp ?wdp ?hdp ?density ?lsize ?long ?ldr ?wideColorGamut ?orien ?uimode ?night ?touch ?keyb/?/? ?nav/? winConfig={ mBounds=Rect(0, 0 - 0, 0) mAppBounds=null mWindowingMode=undefined mDisplayWindowingMode=undefined mActivityType=undefined mAlwaysOnTop=undefined mRotation=undefined}}
+    Services:
+      - ServiceRecord{f121baa u0 com.example.fgslab/.ExportService}
+    Connected Providers:
+      - 99057ba/com.android.providers.settings/.SettingsProvider->4003:com.example.fgslab/u0a144 s1/1 u0/0 +39s238ms
+
+  Process LRU list (sorted by oom_adj, 34 total, non-act at 3, non-svc at 3):
+    Proc # 2: prcp   F/S/FGS  trm: 0 4003:com.example.fgslab/u0a144 (fg-service)
+
+  PID mappings:
+    PID #4003: ProcessRecord{eaeaf28 4003:com.example.fgslab/u0a144}
+
+  mPreviousProcess: ProcessRecord{eaeaf28 4003:com.example.fgslab/u0a144}
+  mPreviousProcessVisibleTime: +3m36s995ms
+  mDeviceIdleWhitelist=[2000, 10060, 10061, 10108, 10120]
+  mDeviceIdleExceptIdleWhitelist=[2000, 10056, 10057, 10058, 10060, 10061, 10091, 10108, 10120]
+  mDeviceIdleTempWhitelist=[]
+  Mem watch processes:
+    com.google.android.apps.nexuslauncher/u0a104: 250MB, report to com.google.android.apps.nexuslauncher
+  mMemWatchDumpProcName=null
+  mMemWatchDumpFile=null
+  mMemWatchDumpPid=0
+  mMemWatchDumpUid=0
+  mMemWatchIsUserInitiated=false
+  mForceBackgroundCheck=false

@@ -1,0 +1,3 @@
+faces scanned: 645
+files with hvgl faces: ['/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc']
+files with faces lacking glyf/CFF/CFF2/sbix/CBDT/COLR/EBDT: ['/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc']

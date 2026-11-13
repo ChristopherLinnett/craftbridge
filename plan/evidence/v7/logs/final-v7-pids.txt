@@ -1,0 +1,4 @@
+# final-v7 emulators (started 2026-11-13 21:11:10 +0800)
+Pixel_6_API_31 pid=27136 port=5554
+Pixel_6_API_37 pid=27137 port=5556
+Pixel_6_API_34 pid=39156 port=5554 (started 21:26:08 after Pixel_6_API_31 pid 27136 stopped at 21:26)

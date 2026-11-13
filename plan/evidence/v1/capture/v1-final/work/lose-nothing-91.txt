@@ -1,0 +1,91 @@
+.ADT Slab Numeric
+.ADT Slab Soft Numeric
+.Al Nile PUA
+.Apple Color Emoji UI
+.Apple SD Gothic NeoI
+.Apple SD Gothic NeoW
+.Damascus PUA
+.Farah PUA
+.Geeza Pro Interface
+.Geeza Pro PUA
+.Helvetica Neue Interface
+.Hiragino Kaku Gothic Interface
+.Hiragino Kaku Gothic InterfaceWatch
+.Keycaps
+.Keycaps A
+.Keycaps B
+.Keycaps Pad
+.Keycaps Pad A
+.LastResort
+.Lock Clock
+.New York
+.New York Numeric
+.New York Soft Numeric
+.Noto Nastaliq Urdu UI
+.PhonepadTwo
+.PingFang HK
+.PingFang MO
+.PingFang SC
+.PingFang TC
+.PingFang UI HK
+.PingFang UI JA
+.PingFang UI MO
+.PingFang UI SC
+.PingFang UI TC
+.PingFang UI Watch HK
+.PingFang UI Watch JA
+.PingFang UI Watch MO
+.PingFang UI Watch SC
+.PingFang UI Watch TC
+.PingFang Watch HK
+.PingFang Watch MO
+.PingFang Watch SC
+.PingFang Watch TC
+.SF Adaptive Numeric
+.SF Adaptive Soft Numeric
+.SF Bangla
+.SF Camera
+.SF Georgian
+.SF Georgian Rounded
+.SF Gurmukhi
+.SF Hebrew
+.SF Hebrew Rounded
+.SF Rail Numeric
+.SF Rail Rounded Numeric
+.SF Rounded Numeric
+.SF Tamil
+.SF UI Mono
+.SF UI Soft
+.SF UI Symbols
+.Savoye LET CC.
+.ThonburiUI
+.ThonburiUIWatch
+AppleGothic
+Asphalt
+Athelas
+Balega
+Bebas Neue
+DB LCD Temp
+Dear Joe Four
+Druk
+Druk Text
+Druk Wide
+Fakt Slab Stencil Pro
+Hiragino Kaku Gothic Pro
+Hiragino Kaku Gothic ProN
+Hiragino Kaku Gothic Std
+Hiragino Kaku Gothic StdN
+Hiragino Maru Gothic Pro
+Hiragino Mincho Pro
+Iowan Old Style
+Journal Sans New
+Marion
+Noto Sans Brahmi
+Noto Sans Canadian Aboriginal
+Noto Sans Zawgyi
+STIXGeneral
+Scheme
+Seravek
+SignPainter
+Superclarendon
+The Hand Serif

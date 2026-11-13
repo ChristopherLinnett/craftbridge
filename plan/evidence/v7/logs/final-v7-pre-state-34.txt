@@ -1,0 +1,8 @@
+# final-v7 API 34 pre-run state 21:26:22
+pm list packages com.example.fgslab: []
+data_sync_fgs_timeout_duration=null
+media_processing_fgs_timeout_duration=null
+short_fgs_timeout_duration=null
+sync: none
+ChangeId(255659651; name=FGS_TYPE_DATA_SYNC_DISABLED_CHANGE_ID; disabled; overridable)
+ChangeId(255039210; name=FGS_TYPE_DATA_SYNC_DEPRECATION_CHANGE_ID; disabled; overridable)

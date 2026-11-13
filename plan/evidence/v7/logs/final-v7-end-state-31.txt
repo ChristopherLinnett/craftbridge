@@ -1,0 +1,10 @@
+# final-v7 API 31 end state 21:26:00
+sdk=31
+pm list packages com.example.fgslab: []
+data_sync_fgs_timeout_duration=null
+media_processing_fgs_timeout_duration=null
+short_fgs_timeout_duration=null
+sync: Invalid command: get_sync_disabled_for_tests
+$ adb -s emulator-5554 emu kill
+OK: killing emulator, bye bye
+OK

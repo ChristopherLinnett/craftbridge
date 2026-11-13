@@ -1,0 +1,2 @@
+    mResumedActivity: ActivityRecord{a8240d3 u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t8}
+  ResumedActivity: ActivityRecord{a8240d3 u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t8}

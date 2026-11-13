@@ -1,0 +1,9 @@
+case=review-b1-a31-combo-short-notdeclared
+apk=apk-b1/fgslab-combo-ts37.apk
+apk_md5=3d45b867f8c088c64cd874303ccad7bc
+serial=emulator-5556 device_sdk=31
+type=shortService duration_s=45
+start=2026-11-13T11:17:27+08:00
+install_rc=0
+pid=
+result=PROCESS_GONE_AT_LAUNCH end=2026-11-13T11:17:28+08:00

@@ -1,0 +1,296 @@
+.ADT Slab Numeric
+.ADT Slab Soft Numeric
+.ADT Slab Time
+.Al Nile PUA
+.Apple Color Emoji UI
+.Apple SD Gothic NeoI
+.Apple SD Gothic NeoW
+.CJK Symbols Fallback HK
+.CJK Symbols Fallback JA
+.CJK Symbols Fallback MO
+.CJK Symbols Fallback SC
+.CJK Symbols Fallback TC
+.CJK Symbols Fallback Watch HK
+.CJK Symbols Fallback Watch JA
+.CJK Symbols Fallback Watch MO
+.CJK Symbols Fallback Watch SC
+.CJK Symbols Fallback Watch TC
+.Damascus PUA
+.DecoType Nastaleeq Urdu UI
+.Farah PUA
+.Geeza Pro Interface
+.Geeza Pro PUA
+.Helvetica Neue Interface
+.Hiragino Kaku Gothic Interface
+.Hiragino Kaku Gothic InterfaceWatch
+.Keycaps
+.Keycaps A
+.Keycaps B
+.Keycaps Pad
+.Keycaps Pad A
+.LastResort
+.Lock Clock
+.New York
+.New York Numeric
+.New York Soft Numeric
+.New York Time
+.Noto Nastaliq Urdu UI
+.PhoneFallback
+.PhoneKeyCaps
+.PhonepadTwo
+.SF Adaptive Numeric
+.SF Adaptive Soft Numeric
+.SF Arabic
+.SF Arabic Rounded
+.SF Armenian
+.SF Armenian Rounded
+.SF Bangla
+.SF Camera
+.SF Compact
+.SF Compact Rounded
+.SF Compact Soft
+.SF Devanagari
+.SF Georgian
+.SF Georgian Rounded
+.SF Gujarati
+.SF Gurmukhi
+.SF Hebrew
+.SF Hebrew Rounded
+.SF Kannada
+.SF Malayalam
+.SF Numeric
+.SF Odia
+.SF Rail Numeric
+.SF Rail Rounded Numeric
+.SF Rail Time
+.SF Rounded Numeric
+.SF Rounded Time
+.SF Soft Numeric
+.SF Soft Time
+.SF Stencil Numeric
+.SF Stencil Time
+.SF Tamil
+.SF Telugu
+.SF UI Mono
+.SF UI Rounded
+.SF UI Soft
+.SF UI Symbols
+.Savoye LET CC.
+.ThonburiUI
+.ThonburiUIWatch
+Academy Engraved LET
+American Typewriter
+Apple Color Emoji
+Apple SD Gothic Neo
+Apple Symbols
+AppleGothic
+Arial
+Arial Hebrew
+Arial Rounded MT Bold
+Asphalt
+Athelas
+Avenir
+Avenir Next
+Avenir Next Condensed
+Balega
+Baskerville
+Bebas Neue
+Bodoni 72
+Bodoni 72 Oldstyle
+Bodoni 72 Smallcaps
+Bodoni Ornaments
+Bradley Hand
+Carlito
+Chalkboard SE
+Chalkduster
+Charter
+Cochin
+Copperplate
+Courier
+Courier New
+DB LCD Temp
+DIN Alternate
+DIN Condensed
+Dear Joe Four
+Devanagari Sangam MN
+Didot
+Druk
+Druk Text
+Druk Wide
+Euphemia UCAS
+Fakt Slab Stencil Pro
+Futura
+Galvji
+Georgia
+Gill Sans
+Grantha Sangam MN
+Helvetica
+Helvetica Neue
+Hiragino Kaku Gothic Pro
+Hiragino Kaku Gothic ProN
+Hiragino Kaku Gothic Std
+Hiragino Kaku Gothic StdN
+Hiragino Maru Gothic Pro
+Hiragino Maru Gothic ProN
+Hiragino Mincho Pro
+Hiragino Mincho ProN
+Hiragino Sans
+Hoefler Text
+Impact
+Iowan Old Style
+Journal Sans New
+Kailasa
+Kefa III
+Khmer Sangam MN
+Kohinoor Bangla
+Kohinoor Devanagari
+Kohinoor Gujarati
+Kohinoor Telugu
+Lao Sangam MN
+Malayalam Sangam MN
+Marion
+Marker Felt
+Menlo
+Mukta Mahee
+Myanmar Sangam MN
+Noteworthy
+Noto Nastaliq Urdu
+Noto Sans Adlam
+Noto Sans Armenian
+Noto Sans Avestan
+Noto Sans Bamum
+Noto Sans Bassa Vah
+Noto Sans Batak
+Noto Sans Bhaiksuki
+Noto Sans Brahmi
+Noto Sans Buginese
+Noto Sans Buhid
+Noto Sans Canadian Aboriginal
+Noto Sans Carian
+Noto Sans Caucasian Albanian
+Noto Sans Chakma
+Noto Sans Cham
+Noto Sans Coptic
+Noto Sans Cuneiform
+Noto Sans Cypriot
+Noto Sans Duployan
+Noto Sans Egyptian Hieroglyphs
+Noto Sans Elbasan
+Noto Sans Glagolitic
+Noto Sans Gothic
+Noto Sans Gunjala Gondi
+Noto Sans Hanifi Rohingya
+Noto Sans Hanunoo
+Noto Sans Hatran
+Noto Sans Imperial Aramaic
+Noto Sans Inscriptional Pahlavi
+Noto Sans Inscriptional Parthian
+Noto Sans Javanese
+Noto Sans Kaithi
+Noto Sans Kannada
+Noto Sans Kayah Li
+Noto Sans Kharoshthi
+Noto Sans Khojki
+Noto Sans Khudawadi
+Noto Sans Lepcha
+Noto Sans Limbu
+Noto Sans Linear A
+Noto Sans Linear B
+Noto Sans Lisu
+Noto Sans Lycian
+Noto Sans Lydian
+Noto Sans Mahajani
+Noto Sans Mandaic
+Noto Sans Manichaean
+Noto Sans Marchen
+Noto Sans Masaram Gondi
+Noto Sans Meetei Mayek
+Noto Sans Mende Kikakui
+Noto Sans Meroitic
+Noto Sans Miao
+Noto Sans Modi
+Noto Sans Mongolian
+Noto Sans Mro
+Noto Sans Multani
+Noto Sans Myanmar
+Noto Sans NKo
+Noto Sans Nabataean
+Noto Sans Nag Mundari
+Noto Sans New Tai Lue
+Noto Sans Newa
+Noto Sans Ol Chiki
+Noto Sans Old Hungarian
+Noto Sans Old Italic
+Noto Sans Old North Arabian
+Noto Sans Old Permic
+Noto Sans Old Persian
+Noto Sans Old South Arabian
+Noto Sans Old Turkic
+Noto Sans Oriya
+Noto Sans Osage
+Noto Sans Osmanya
+Noto Sans Pahawh Hmong
+Noto Sans Palmyrene
+Noto Sans Pau Cin Hau
+Noto Sans PhagsPa
+Noto Sans Phoenician
+Noto Sans Psalter Pahlavi
+Noto Sans Rejang
+Noto Sans Samaritan
+Noto Sans Saurashtra
+Noto Sans Sharada
+Noto Sans Siddham
+Noto Sans Sora Sompeng
+Noto Sans Sundanese
+Noto Sans Syloti Nagri
+Noto Sans Syriac
+Noto Sans Tagalog
+Noto Sans Tagbanwa
+Noto Sans Tai Le
+Noto Sans Tai Tham
+Noto Sans Tai Viet
+Noto Sans Takri
+Noto Sans Thaana
+Noto Sans Tifinagh
+Noto Sans Tirhuta
+Noto Sans Ugaritic
+Noto Sans Vai
+Noto Sans Wancho
+Noto Sans Warang Citi
+Noto Sans Yi
+Noto Sans Zawgyi
+Noto Serif Ahom
+Noto Serif Balinese
+Noto Serif Hmong Nyiakeng
+Noto Serif Yezidi
+Optima
+Palatino
+Papyrus
+Party LET
+Rockwell
+STIX Two Math
+STIX Two Text
+STIXGeneral
+Savoye LET
+Scheme
+Seravek
+SignPainter
+Sinhala Sangam MN
+Snell Roundhand
+Sukhumvit Set
+Superclarendon
+Symbol
+System Font
+Tamil Sangam MN
+The Hand Serif
+Thonburi
+Times New Roman
+Trebuchet MS
+Verdana
+Zapf Dingbats
+Zapfino
+النيل
+فرح
+مِصحفي
+ڈیمسکس
+گیزا پرو

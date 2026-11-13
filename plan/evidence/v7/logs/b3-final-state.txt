@@ -1,0 +1,14 @@
+== emulator-5554 sdk=29 ==
+Success
+pkg=[]
+data_sync_fgs_timeout_duration=null
+media_processing_fgs_timeout_duration=null
+short_fgs_timeout_duration=null
+sync=Invalid command: get_sync_disabled_for_tests
+== emulator-5556 sdk=31 ==
+Success
+pkg=[]
+data_sync_fgs_timeout_duration=null
+media_processing_fgs_timeout_duration=null
+short_fgs_timeout_duration=null
+sync=Invalid command: get_sync_disabled_for_tests

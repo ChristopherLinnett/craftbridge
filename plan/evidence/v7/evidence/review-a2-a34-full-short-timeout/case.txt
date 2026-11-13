@@ -1,0 +1,12 @@
+case=review-a2-a34-full-short-timeout
+apk=/tmp/craftbridge-v7/apk-b1/fgslab-full-ts37.apk
+apk_md5=8e76be90bf0ea2a6aaee830dd0873506
+serial=emulator-5554 device_sdk=34
+type=shortService duration_s=600
+start=2026-11-13T12:16:38+08:00
+install_rc=0
+pid=4911
+home_sent_device=12:16:48.066
+home_sent=2026-11-13T12:16:47+08:00
+result=FGS_ON_TIMEOUT end=2026-11-13T12:19:59+08:00
+target_sdk=37

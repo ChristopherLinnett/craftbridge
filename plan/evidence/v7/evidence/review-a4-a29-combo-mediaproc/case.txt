@@ -1,0 +1,12 @@
+case=review-a4-a29-combo-mediaproc
+apk=/tmp/craftbridge-v7/apk-b1/fgslab-combo-ts37.apk
+apk_md5=3d45b867f8c088c64cd874303ccad7bc
+serial=emulator-5554 device_sdk=29
+type=mediaProcessing duration_s=45
+start=2026-11-13T16:26:14+08:00
+install_rc=0
+pid=3506
+home_sent_device=16:26:23.128
+home_sent=2026-11-13T16:26:24+08:00
+result=EXPORT_DONE end=2026-11-13T16:27:04+08:00
+target_sdk=37

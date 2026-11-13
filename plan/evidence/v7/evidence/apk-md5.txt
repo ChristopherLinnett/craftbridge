@@ -1,0 +1,38 @@
+# First build (01:15): ran the a29-*/a31-* matrix except *-combo-final
+MD5 (apk/fgslab-combo-ts37.apk) = e953a37d72b5a06f93d3ed4415902e58
+MD5 (apk/fgslab-full-ts37.apk) = f5b23671cef661411f807bcd570b10f9
+MD5 (apk/fgslab-none-ts37.apk) = 116f014e902e65dd6f59d14e87c5a3ee
+MD5 (apk/fgslab-noperm-ts37.apk) = 979b69943066bf8edb1896ae6f15d6bf
+MD5 (apk-ts34/fgslab-combo-ts34.apk) = fe6455bac1d5e38a68acd11a9f116350
+MD5 (apk-ts34/fgslab-full-ts34.apk) = d3401363735e386a3c7d3b5d3156de71
+MD5 (apk-ts34/fgslab-none-ts34.apk) = f52b4b92c5f0f49201295a7c12d8ed89
+MD5 (apk-ts33/fgslab-none-ts33.apk) = 016fb69a17b32912d0deb8b2297d5ef1
+# Final build-side build (01:30): every a34-*/a37-* case, a29/a31-combo-final, and the review-a1-a* re-runs
+MD5 (apk2/fgslab-combo-ts37.apk) = 0cea776e2569a7e153abb28b42a2a29d
+MD5 (apk2/fgslab-full-ts37.apk) = c84df81ad11a3fbf0fa4c1b69ede02e3
+MD5 (apk2/fgslab-none-ts37.apk) = 2d6d8586c490a30d179d30fe0611fc59
+MD5 (apk2/fgslab-noperm-ts37.apk) = 6cceb5daaff8cdec69b4e021fbdfb1bc
+MD5 (apk2-ts34/fgslab-combo-ts34.apk) = d8b751df1eaa8b02d76fee047ff89bfb
+MD5 (apk2-ts34/fgslab-full-ts34.apk) = 41780eea59a2f96279fd418ccf1881f3
+MD5 (apk2-ts34/fgslab-none-ts34.apk) = b77d72f415fab26f5d3e57019895c7c6
+MD5 (apk2-ts33/fgslab-none-ts33.apk) = 8ef074396e9fe1291b72b0dfd99ad589
+# Review A1 rebuild of app/ after its fixes (review-a1-fixed-* cases)
+MD5 (apk-a1/fgslab-combo-ts37.apk) = 3d45b867f8c088c64cd874303ccad7bc
+MD5 (apk-a1/fgslab-full-ts37.apk) = 8e76be90bf0ea2a6aaee830dd0873506
+MD5 (apk-a1/fgslab-none-ts37.apk) = 16fad23e7bf3978c928a81eaac0df26b
+MD5 (apk-a1/fgslab-noperm-ts37.apk) = 15b2745f2b375a3a020f5e40707f7612
+MD5 (apk-a1-ts34/fgslab-combo-ts34.apk) = e108bc3aa7d474fbce5b2244203676f7
+MD5 (apk-a1-ts34/fgslab-full-ts34.apk) = 6e338efda3661268dbabaacd67d95d7a
+MD5 (apk-a1-ts34/fgslab-none-ts34.apk) = 2ef9b24b93a0edd3ff9e79a5f7b91fc8
+MD5 (apk-a1-ts33/fgslab-none-ts33.apk) = 1aa4bf202a6248bcf138d6f17943bdf2
+
+# review B1 rebuild of the unchanged app/ source (md5s identical to apk-a1*):
+MD5 (apk-b1/fgslab-combo-ts37.apk) = 3d45b867f8c088c64cd874303ccad7bc
+MD5 (apk-b1/fgslab-full-ts37.apk) = 8e76be90bf0ea2a6aaee830dd0873506
+MD5 (apk-b1/fgslab-none-ts37.apk) = 16fad23e7bf3978c928a81eaac0df26b
+MD5 (apk-b1/fgslab-noperm-ts37.apk) = 15b2745f2b375a3a020f5e40707f7612
+MD5 (apk-b1-ts34/fgslab-combo-ts34.apk) = e108bc3aa7d474fbce5b2244203676f7
+MD5 (apk-b1-ts34/fgslab-full-ts34.apk) = 6e338efda3661268dbabaacd67d95d7a
+MD5 (apk-b1-ts34/fgslab-none-ts34.apk) = 2ef9b24b93a0edd3ff9e79a5f7b91fc8
+MD5 (apk-b1-ts34/fgslab-noperm-ts34.apk) = 8cdadb46bec4dd1fb2b24b1afc614fe7
+MD5 (apk-b1-ts33/fgslab-none-ts33.apk) = 1aa4bf202a6248bcf138d6f17943bdf2

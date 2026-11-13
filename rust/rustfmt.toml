@@ -1,0 +1,3 @@
+# EffectCraft's formatting settings, so CraftBridge's code reads like the EffectCraft code it is read beside.
+max_width = 160
+use_small_heuristics = "Max"

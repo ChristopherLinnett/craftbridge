@@ -1,0 +1,28 @@
+== emulator-5554 sdk=29 avd=Pixel_6_API_29
+Success
+pkg=[]
+data_sync_fgs_timeout_duration=null
+media_processing_fgs_timeout_duration=null
+short_fgs_timeout_duration=null
+sync=Invalid command: get_sync_disabled_for_tests
+== emulator-5556 sdk=31 avd=Pixel_6_API_31
+Success
+pkg=[]
+data_sync_fgs_timeout_duration=null
+media_processing_fgs_timeout_duration=null
+short_fgs_timeout_duration=null
+sync=Invalid command: get_sync_disabled_for_tests
+== emulator-5554 sdk=34 avd=Pixel_6_API_34
+pkg=[]
+data_sync_fgs_timeout_duration=null
+media_processing_fgs_timeout_duration=null
+short_fgs_timeout_duration=null
+sync=none
+activity_manager list: bg_current_drain_auto_restrict_abusive_apps_enabled=false bg_prompt_fgs_on_long_running=false push_messaging_over_quota_behavior=1 
+== emulator-5556 sdk=37 avd=Pixel_6_API_37
+pkg=[]
+data_sync_fgs_timeout_duration=null
+media_processing_fgs_timeout_duration=null
+short_fgs_timeout_duration=null
+sync=none
+activity_manager list: bg_current_drain_auto_restrict_abusive_apps_enabled=false bg_prompt_fgs_on_long_running=false push_messaging_over_quota_behavior=1 

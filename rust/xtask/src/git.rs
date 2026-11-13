@@ -1,0 +1,136 @@
+//! Every git command the gate runs, in its checks and in their tests, started one way.
+//!
+//! Git exports its repository variables (`GIT_DIR`, `GIT_INDEX_FILE` and the rest of
+//! `git rev-parse --local-env-vars`) to a hook and to everything a hook, `git rebase --exec` or
+//! `git bisect run` starts. A command that then runs `git -C <folder>` acts on the repository those
+//! variables name, with `<folder>` taken as the top of its work tree: in a linked worktree's pre-push hook
+//! a check would read the pushing worktree's index as if `android/` were the root, and a test's
+//! `git init` and `git add` in a scratch folder would set `core.bare` in the shared configuration and
+//! stage the scratch files into that index. So every command here starts with those variables removed and
+//! finds its repository from the folder it is given, whoever started the gate.
+//!
+//! `core.precomposeunicode=false` makes git report every path as it is stored. With the macOS default, git
+//! reports a name stored decomposed in its composed form, so a check that compares git's names with a
+//! directory listing would not find that name and would treat it as something git does not hold.
+
+use std::path::Path;
+use std::process::{Command, Stdio};
+use std::sync::OnceLock;
+
+/// The repository variables git itself lists, asked once. Git answers from its own build, whatever the
+/// environment holds, so the answer is right for whichever git the gate runs.
+fn local_env_vars() -> &'static [String] {
+    static VARIABLES: OnceLock<Vec<String>> = OnceLock::new();
+    VARIABLES.get_or_init(|| {
+        Command::new("git")
+            .args(["rev-parse", "--local-env-vars"])
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).lines().map(str::to_string).filter(|name| !name.is_empty()).collect())
+            .unwrap_or_default()
+    })
+}
+
+/// `git -C <dir>`, with git's repository variables removed, paths reported as stored, and every path the
+/// gate passes taken literally: a file name holding `*` or `[` names that file, not a pattern.
+pub(crate) fn command(dir: &Path) -> Command {
+    let mut git = Command::new("git");
+    for variable in local_env_vars() {
+        git.env_remove(variable);
+    }
+    git.arg("-c").arg("core.precomposeunicode=false").arg("--literal-pathspecs").arg("-C").arg(dir);
+    git
+}
+
+/// Run a git command in `dir` and return what it printed, or git's own words when it fails.
+pub(crate) fn output(dir: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
+    let output = command(dir).args(args).output().map_err(|error| format!("could not run git: {error}"))?;
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err(format!("`git {}` failed: {}", args.join(" "), String::from_utf8_lossy(&output.stderr).trim()))
+    }
+}
+
+/// The paths a `-z` listing printed, one per entry. The NUL separator leaves every name as stored, with no
+/// quoting of the bytes git would otherwise escape.
+pub(crate) fn listed(dir: &Path, args: &[&str]) -> Result<Vec<String>, String> {
+    Ok(String::from_utf8_lossy(&output(dir, args)?).split('\0').filter(|path| !path.is_empty()).map(str::to_string).collect())
+}
+
+/// Is `root` the top of a git checkout? A `.git` folder in the main checkout, a `.git` file in a linked
+/// worktree; a scratch tree has neither.
+pub(crate) fn is_checkout(root: &Path) -> bool {
+    root.join(".git").exists()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scratch::Scratch;
+
+    #[test]
+    fn every_repository_variable_git_lists_is_removed() {
+        let names = local_env_vars();
+        for expected in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY"] {
+            assert!(names.iter().any(|name| name == expected), "{expected} is one git lists: {names:?}");
+        }
+        let git = command(Path::new("."));
+        let removed: Vec<&std::ffi::OsStr> = git.get_envs().filter(|(_, value)| value.is_none()).map(|(name, _)| name).collect();
+        for name in names {
+            assert!(removed.iter().any(|removed| *removed == name.as_str()), "{name} is not removed");
+        }
+        let args: Vec<&std::ffi::OsStr> = git.get_args().collect();
+        assert_eq!(&args[..3], ["-c", "core.precomposeunicode=false", "--literal-pathspecs"]);
+    }
+
+    /// The child half of the test below: run only when the parent starts it with a hook's environment.
+    #[test]
+    #[ignore = "run by a_command_started_from_a_hook_acts_on_its_own_folder, in a hook's environment"]
+    fn child_stages_a_file_in_its_own_folder() {
+        let Some(own) = std::env::var_os("XTASK_GIT_OWN") else { return };
+        let own = Path::new(&own);
+        assert!(std::env::var_os("GIT_DIR").is_some(), "the parent sets the hook's GIT_DIR");
+        output(own, &["add", "--", "planted.txt"]).unwrap();
+        let toplevel = String::from_utf8(output(own, &["rev-parse", "--show-toplevel"]).unwrap()).unwrap();
+        assert_eq!(Path::new(toplevel.trim()).canonicalize().unwrap(), own.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn a_command_started_from_a_hook_acts_on_its_own_folder() {
+        let own = Scratch::new("git-own");
+        let other = Scratch::new("git-other");
+        output(&own.0, &["init", "-q"]).unwrap();
+        output(&other.0, &["init", "-q"]).unwrap();
+        own.write("planted.txt", "x\n");
+        let child = crate::scratch::rerun(
+            "git::tests::child_stages_a_file_in_its_own_folder",
+            &[("GIT_DIR", other.0.join(".git").as_os_str()), ("XTASK_GIT_OWN", own.0.as_os_str())],
+        );
+        assert!(child.status.success(), "{}", String::from_utf8_lossy(&child.stdout));
+        assert_eq!(listed(&own.0, &["ls-files", "-z"]).unwrap(), ["planted.txt"], "the file is staged where the command was told to act");
+        assert!(listed(&other.0, &["ls-files", "-z"]).unwrap().is_empty(), "the hook's repository is untouched");
+        assert_eq!(String::from_utf8(output(&other.0, &["config", "core.bare"]).unwrap()).unwrap().trim(), "false");
+    }
+
+    #[test]
+    fn a_decomposed_name_comes_back_as_stored() {
+        let repository = Scratch::new("git-nfd");
+        output(&repository.0, &["init", "-q"]).unwrap();
+        let decomposed = "e\u{301}tude";
+        repository.write(&format!("{decomposed}/notes.md"), "x\n");
+        let listed = listed(&repository.0, &["ls-files", "-z", "--others", "--exclude-standard"]).unwrap();
+        assert_eq!(listed, [format!("{decomposed}/notes.md")]);
+    }
+
+    #[test]
+    fn a_failing_command_names_git_s_error_and_a_scratch_tree_is_no_checkout() {
+        let scratch = Scratch::new("git-none");
+        let error = output(&scratch.0, &["ls-files"]).unwrap_err();
+        assert!(error.contains("not a git repository"), "{error}");
+        assert!(!is_checkout(&scratch.0));
+        assert!(is_checkout(&crate::repo_root()));
+    }
+}

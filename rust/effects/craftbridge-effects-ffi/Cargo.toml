@@ -1,0 +1,19 @@
+[package]
+name = "craftbridge-effects-ffi"
+description = "The EffectCraft distribution library: the one native library an app links."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["staticlib", "cdylib", "lib"]
+
+[dependencies]
+craftbridge-effects.workspace = true
+craftbridge-core-ffi.workspace = true
+
+[lints]
+workspace = true

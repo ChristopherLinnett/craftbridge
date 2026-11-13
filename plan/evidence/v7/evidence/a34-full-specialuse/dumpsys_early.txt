@@ -1,0 +1,21 @@
+ACTIVITY MANAGER SERVICES (dumpsys activity services)
+  User 0 active services:
+  * ServiceRecord{bed0f49 u0 com.example.fgslab/.ExportService}
+    intent={cmp=com.example.fgslab/.ExportService}
+    packageName=com.example.fgslab
+    processName=com.example.fgslab
+    baseDir=/data/app/~~_ngt0FbxP6cb7Hytx4lYDA==/com.example.fgslab-8jcE9BTgjTYhKLB_r1IwIQ==/base.apk
+    dataDir=/data/user/0/com.example.fgslab
+    app=ProcessRecord{caa30dd 6361:com.example.fgslab/u0a192}
+    mAllowWhileInUsePermissionInFgsReason=PROC_STATE_TOP
+    allowUiJobScheduling=true
+    recentCallingPackage=com.example.fgslab
+    recentCallingUid=10192
+    allowStartForeground=PROC_STATE_TOP
+    startForegroundCount=1
+    infoAllowStartForeground=[callingPackage: com.example.fgslab; callingUid: 10192; uidState: TOP ; uidBFSL: [BFSL]; intent: Intent { cmp=com.example.fgslab/.ExportService (has extras) }; code:PROC_STATE_TOP; tempAllowListReason:<null>; targetSdkVersion:37; callerTargetSdkVersion:37; startForegroundCount:0; bindFromPackage:null: isBindService:false]
+    isForeground=true foregroundId=4711 types=40000000 foregroundNoti=Notification(channel=export shortcut=null contentView=null vibrate=null sound=null defaults=0x0 flags=0x6a color=0x00000000 vis=PRIVATE)
+    createTime=-8s147ms startingBgTimeout=--
+    lastActivity=-8s146ms restartTime=-8s146ms createdFromFg=true
+    startRequested=true delayedStop=false stopIfKilled=true callStart=true lastStartId=1
+ startCommandResult=2

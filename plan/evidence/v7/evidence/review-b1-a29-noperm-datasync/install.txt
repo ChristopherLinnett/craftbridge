@@ -1,0 +1,3 @@
+Performing Streamed Install
+adb: failed to install apk-b1/fgslab-noperm-ts37.apk: cmd: Can't find service: package
+

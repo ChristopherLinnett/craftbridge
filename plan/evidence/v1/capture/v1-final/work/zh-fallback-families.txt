@@ -1,0 +1,27 @@
+Apple SD Gothic Neo
+Gulim
+Heiti SC
+Heiti TC
+Hiragino Sans CNS
+Hiragino Sans GB
+Malgun Gothic
+Microsoft JhengHei
+Microsoft YaHei
+MingLiU
+NanumGothic
+Noto Sans CJK KR
+Noto Sans CJK SC
+Noto Sans CJK TC
+Noto Sans KR
+Noto Sans SC
+Noto Sans TC
+PingFang SC
+PingFang TC
+STSong
+SimSun
+Songti SC
+Songti TC
+Source Han Sans KR
+Source Han Sans SC
+Source Han Sans TC
+WenQuanYi Micro Hei

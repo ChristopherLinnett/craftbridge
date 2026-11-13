@@ -1,0 +1,126 @@
+AppleGothic	AppFonts
+Asphalt	CoreUI
+Athelas	AppFonts
+Balega	CoreUI
+Bebas Neue	CoreUI
+Carlito	AppFonts
+Courier	Core
+DB LCD Temp	AppFonts
+Dear Joe Four	CoreUI
+Druk	CoreUI
+Druk Text	CoreUI
+Druk Wide	CoreUI
+Fakt Slab Stencil Pro	CoreUI
+Iowan Old Style	CoreUI
+Journal Sans New	CoreUI
+Marion	AppFonts
+Noto Sans Adlam	UnicodeSupport
+Noto Sans Armenian	Core
+Noto Sans Avestan	UnicodeSupport
+Noto Sans Bamum	UnicodeSupport
+Noto Sans Bassa Vah	UnicodeSupport
+Noto Sans Batak	UnicodeSupport
+Noto Sans Bhaiksuki	UnicodeSupport
+Noto Sans Brahmi	UnicodeSupport
+Noto Sans Buginese	UnicodeSupport
+Noto Sans Buhid	UnicodeSupport
+Noto Sans Canadian Aboriginal	UnicodeSupport
+Noto Sans Carian	UnicodeSupport
+Noto Sans Caucasian Albanian	UnicodeSupport
+Noto Sans Chakma	UnicodeSupport
+Noto Sans Cham	UnicodeSupport
+Noto Sans Coptic	UnicodeSupport
+Noto Sans Cuneiform	UnicodeSupport
+Noto Sans Cypriot	UnicodeSupport
+Noto Sans Duployan	UnicodeSupport
+Noto Sans Egyptian Hieroglyphs	UnicodeSupport
+Noto Sans Elbasan	UnicodeSupport
+Noto Sans Glagolitic	UnicodeSupport
+Noto Sans Gothic	UnicodeSupport
+Noto Sans Gunjala Gondi	UnicodeSupport
+Noto Sans Hanifi Rohingya	UnicodeSupport
+Noto Sans Hanunoo	UnicodeSupport
+Noto Sans Hatran	UnicodeSupport
+Noto Sans Imperial Aramaic	UnicodeSupport
+Noto Sans Inscriptional Pahlavi	UnicodeSupport
+Noto Sans Inscriptional Parthian	UnicodeSupport
+Noto Sans Javanese	UnicodeSupport
+Noto Sans Kaithi	UnicodeSupport
+Noto Sans Kayah Li	UnicodeSupport
+Noto Sans Kharoshthi	UnicodeSupport
+Noto Sans Khojki	UnicodeSupport
+Noto Sans Khudawadi	UnicodeSupport
+Noto Sans Lepcha	UnicodeSupport
+Noto Sans Limbu	UnicodeSupport
+Noto Sans Linear A	UnicodeSupport
+Noto Sans Linear B	UnicodeSupport
+Noto Sans Lisu	UnicodeSupport
+Noto Sans Lycian	UnicodeSupport
+Noto Sans Lydian	UnicodeSupport
+Noto Sans Mahajani	UnicodeSupport
+Noto Sans Mandaic	UnicodeSupport
+Noto Sans Manichaean	UnicodeSupport
+Noto Sans Marchen	UnicodeSupport
+Noto Sans Masaram Gondi	UnicodeSupport
+Noto Sans Meetei Mayek	UnicodeSupport
+Noto Sans Mende Kikakui	UnicodeSupport
+Noto Sans Meroitic	UnicodeSupport
+Noto Sans Miao	UnicodeSupport
+Noto Sans Modi	UnicodeSupport
+Noto Sans Mongolian	UnicodeSupport
+Noto Sans Mro	UnicodeSupport
+Noto Sans Multani	UnicodeSupport
+Noto Sans NKo	UnicodeSupport
+Noto Sans Nabataean	UnicodeSupport
+Noto Sans Nag Mundari	UnicodeSupport
+Noto Sans New Tai Lue	UnicodeSupport
+Noto Sans Newa	UnicodeSupport
+Noto Sans Ol Chiki	UnicodeSupport
+Noto Sans Old Hungarian	UnicodeSupport
+Noto Sans Old Italic	UnicodeSupport
+Noto Sans Old North Arabian	UnicodeSupport
+Noto Sans Old Permic	UnicodeSupport
+Noto Sans Old Persian	UnicodeSupport
+Noto Sans Old South Arabian	UnicodeSupport
+Noto Sans Old Turkic	UnicodeSupport
+Noto Sans Osage	UnicodeSupport
+Noto Sans Osmanya	UnicodeSupport
+Noto Sans Pahawh Hmong	UnicodeSupport
+Noto Sans Palmyrene	UnicodeSupport
+Noto Sans Pau Cin Hau	UnicodeSupport
+Noto Sans PhagsPa	UnicodeSupport
+Noto Sans Phoenician	UnicodeSupport
+Noto Sans Psalter Pahlavi	UnicodeSupport
+Noto Sans Rejang	UnicodeSupport
+Noto Sans Samaritan	UnicodeSupport
+Noto Sans Saurashtra	UnicodeSupport
+Noto Sans Sharada	UnicodeSupport
+Noto Sans Siddham	UnicodeSupport
+Noto Sans Sora Sompeng	UnicodeSupport
+Noto Sans Sundanese	UnicodeSupport
+Noto Sans Syloti Nagri	UnicodeSupport
+Noto Sans Tagalog	UnicodeSupport
+Noto Sans Tagbanwa	UnicodeSupport
+Noto Sans Tai Le	UnicodeSupport
+Noto Sans Tai Tham	UnicodeSupport
+Noto Sans Tai Viet	UnicodeSupport
+Noto Sans Takri	UnicodeSupport
+Noto Sans Thaana	UnicodeSupport
+Noto Sans Tifinagh	UnicodeSupport
+Noto Sans Tirhuta	UnicodeSupport
+Noto Sans Ugaritic	UnicodeSupport
+Noto Sans Vai	UnicodeSupport
+Noto Sans Wancho	UnicodeSupport
+Noto Sans Warang Citi	UnicodeSupport
+Noto Sans Yi	UnicodeSupport
+Noto Serif Ahom	UnicodeSupport
+Noto Serif Balinese	UnicodeSupport
+Noto Serif Hmong Nyiakeng	UnicodeSupport
+Noto Serif Yezidi	UnicodeSupport
+STIXGeneral	CoreAddition
+Scheme	CoreUI
+Seravek	AppFonts
+SignPainter	CoreUI
+Superclarendon	AppFonts
+System Font	Core
+The Hand Serif	CoreUI

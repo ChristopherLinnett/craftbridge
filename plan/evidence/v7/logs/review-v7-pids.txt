@@ -1,0 +1,2 @@
+Pixel_6_API_34 port=5554 pid=26809 started=2026-11-13T17:47:19+08:00
+Pixel_6_API_29 port=5556 pid=26810 started=2026-11-13T17:47:19+08:00

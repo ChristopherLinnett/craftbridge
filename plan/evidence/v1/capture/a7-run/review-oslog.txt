@@ -1,0 +1,2 @@
+Timestamp               Ty Process[PID:TID]
+2026-11-13 16:29:34.638 Df FontProbe[77973:ae6861b] (Foundation) FontProbe report: 88087 bytes, written to Documents/fontprobe_report.txt

@@ -1,0 +1,11 @@
+case=review-a4-a29-combo-short-notdeclared
+apk=/tmp/craftbridge-v7/apk-b1/fgslab-combo-ts37.apk
+apk_md5=3d45b867f8c088c64cd874303ccad7bc
+serial=emulator-5554 device_sdk=29
+type=shortService duration_s=45
+start=2026-11-13T16:26:13+08:00
+install_rc=0
+pid=
+result=PROCESS_GONE_AT_LAUNCH end=2026-11-13T16:26:14+08:00
+target_sdk=37
+fatal_exception_at_launch=android.app.RemoteServiceException

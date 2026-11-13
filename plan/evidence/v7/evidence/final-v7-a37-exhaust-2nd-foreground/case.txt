@@ -1,0 +1,12 @@
+case=final-v7-a37-exhaust-2nd-foreground
+apk=/tmp/craftbridge-v7/apk-b1/fgslab-combo-ts37.apk
+apk_md5=3d45b867f8c088c64cd874303ccad7bc
+serial=emulator-5556 device_sdk=37
+type=dataSync duration_s=150
+start=2026-11-13T21:19:50+08:00
+install_rc=0
+pid=9732
+home_sent_device=21:20:00.228
+home_sent=2026-11-13T21:20:00+08:00
+result=FGS_ON_TIMEOUT end=2026-11-13T21:21:31+08:00
+target_sdk=37

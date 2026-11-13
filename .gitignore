@@ -5,8 +5,8 @@
 /ios/sdk/.build/
 /ios/sdk/.swiftpm/
 /ios/sdk/Frameworks/
-/android/sdk/.gradle/
-/android/sdk/.kotlin/
+/android/sdk/**/.gradle/
+/android/sdk/**/.kotlin/
 /android/sdk/local.properties
 /android/sdk/**/build/
 /android/sdk/*/src/main/jniLibs/

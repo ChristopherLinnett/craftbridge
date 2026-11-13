@@ -1,0 +1,21 @@
+pull against each other                       0
+states the listing rule, not the route        0
+still no EffectCraft change                   0
+never forces an EffectCraft change            0
+only if face-by-face matching cannot work     0
+decision's fallback                           0
+already has CoreText's face list              0
+effectcraft_text::add_source                  0
+The other 133 come from the 160 files         0
+--- V1-3: where each entry point is classified
+engine.batch: lines 113 114 
+file.runScript: lines 114 
+script.run: lines 114 
+run_script: lines 114 
+execute_command: lines 113 
+command_run: lines 113 
+command_batch: lines 113 
+`batch`: lines 113 
+`run` method: lines 112 
+`script` method: lines 114 
+replay: lines 

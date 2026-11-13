@@ -6,7 +6,7 @@
   "master": "EFFECTCRAFT-PLUGIN-PORT-SCOPING.md",
   "html": "EFFECTCRAFT-PLUGIN-PORT-PLAN.html",
   "created": "2026-11-12T07:07:09.853Z",
-  "updated": "2026-11-12T10:37:38.267Z",
+  "updated": "2026-11-12T17:15:54.472Z",
   "deck": false,
   "pieces": [
     {
@@ -136,7 +136,7 @@
       "kind": "header",
       "title": "Write the header table",
       "accept": "Status line, surfaces with base branch + SHA (or snapshot date), and the hard constraints exactly as the user stated them — if the brief states none, ask (q add) instead of inventing one.",
-      "review": "Surfaces row names the repository's visibility (PD3), the per-platform layout (PD19) and craftbridge-swift (D-24); status counts 19 product decisions."
+      "review": "Surfaces row: the pin is EffectCraft's official revision, never modified, adapted in CraftBridge (§15)."
     },
     {
       "status": "done",
@@ -152,7 +152,7 @@
       "diagrams": [
         "d01-journey"
       ],
-      "review": "Commercial position states private until hosted CI starts; footprint names craftbridge-swift; nothing else in §1 depends on the layout."
+      "review": "Ideas 1 and 3 and Footprint rewritten for PD5: no pull requests to EffectCraft; seven adaptations listed with the code they rely on."
     },
     {
       "status": "done",
@@ -208,7 +208,7 @@
       "heading": "## 6. Product decisions",
       "title": "Write §6. Product decisions",
       "accept": "The PD register: | PD | Area | Decision | Where it lands |, one row per answered business question, numbered PD1…PDn with no gaps.",
-      "review": "PD3 rewritten for visibility from hosted CI, PD10 path wording moved inside the platform folders, PD19 added with where it lands; the register reads PD1-PD19 without gaps."
+      "review": "PD4 (official pin, update names changed adaptations, quick not automatic), PD5 (Q21 verbatim intent), PD12 (hardware encoding in CraftBridge's exporter), PD17 (official revisions only) rewritten; count stays 19."
     },
     {
       "status": "done",
@@ -221,7 +221,7 @@
       "heading": "## 7. Scope",
       "title": "Write §7. Scope",
       "accept": "In scope (v1) as one paragraph; out of scope as a table: not in v1 · why (cite the PD) · revisit.",
-      "review": "In-scope names the per-platform repository; the not-in-release row now covers publishing the packages, the repository going public with CI (PD3)."
+      "review": "In-scope list and the hardware-encoding row now name the pin and CraftBridge's exporter instead of seams and S7."
     },
     {
       "status": "done",
@@ -234,7 +234,7 @@
       "heading": "## 8. Access, pricing and rollout",
       "title": "Write §8. Access, pricing and rollout",
       "accept": "Who gets it, what it costs, how it launches, the safety order in one line, and the kill switches.",
-      "review": "Who-gets-it and launch bullets say private until hosted CI, then public; packages from the checkout or craftbridge-swift and GitHub Packages."
+      "review": "Safety order starts with the official pin; update-effort metric is hand work only in named adaptations."
     },
     {
       "status": "done",
@@ -254,12 +254,14 @@
       "kind": "section",
       "heading": "## 10. Risks (business-level)",
       "title": "Write §10. Risks (business-level)",
-      "accept": "Risk · likelihood/impact · mitigation, in business terms; points to the technical register."
+      "accept": "Risk · likelihood/impact · mitigation, in business terms; points to the technical register.",
+      "review": "Declined-seam risk replaced by the adaptation-recheck risk; size trimming without upstream flags."
     },
     {
       "status": "done",
       "notes": [
-        "reopened: PD19 layout and PD3 visibility"
+        "reopened: PD19 layout and PD3 visibility",
+        "reopened: D-28 analysers, Project and iteration branches"
       ],
       "id": "design/roadmap",
       "phase": "design",
@@ -267,7 +269,7 @@
       "heading": "## 11. Roadmap and effort",
       "title": "Write §11. Roadmap and effort",
       "accept": "Waves (W0 prerequisites …) · when · team · scope · effort, calendar estimate and the critical path.",
-      "review": "W0 is 2.5 engineer-days (OPS-3 grew to the three platform builds); total 66 engineer-days, equal to the sum of the §31 estimates."
+      "review": "W1 1.5 d (UP-9 builds the update script's first steps), W5 9 d (OPS-4 the rest); total stays 64.5."
     },
     {
       "status": "done",
@@ -283,7 +285,7 @@
       "diagrams": [
         "d02-architecture"
       ],
-      "review": "Opening sentence states one repository with rust/, ios/sdk and android/sdk (PD19); surface table names craftbridge-effects-codegen and craftbridge-swift."
+      "review": "Intro, d02 twin and surface table: EffectCraft unchanged; craftbridge-effects carries AD1-AD7; CLI is the oracle."
     },
     {
       "status": "done",
@@ -296,7 +298,8 @@
       "accept": "Where in the product lifecycle each piece of data can change, who can change it, what a change triggers; normative rules table L1…Ln with 'enforced by'. Diagram d03 (and states if two lifecycles exist).",
       "diagrams": [
         "d03-lifecycle"
-      ]
+      ],
+      "review": "L9: the update script moves to an official revision and names changed adaptations."
     },
     {
       "status": "done",
@@ -309,12 +312,14 @@
       "accept": "Every new/changed data shape: JSON/DDL/model code blocks, field tables (type · required · rule), invariants, error codes, shared test vectors. Diagram d04. Code blocks that become files carry an @code tag.",
       "diagrams": [
         "d04-data-model"
-      ]
+      ],
+      "review": "Method table, FrameRequest and RenderRequest now CraftBridge's (AD3, AD4, AD5, AD6), d04 twin updated; parity is checked by the corpus against the CLI."
     },
     {
       "status": "done",
       "notes": [
-        "reopened: PD19 layout and PD3 visibility"
+        "reopened: PD19 layout and PD3 visibility",
+        "reopened: D-28 analysers, Project and iteration branches"
       ],
       "id": "design/surface:repository-and-pins",
       "phase": "design",
@@ -322,7 +327,7 @@
       "heading": "## 15. Repository and pins design",
       "title": "Write §15. Repository and pins design",
       "accept": "For Repository and pins: files changed (NEW/MOD/CHK/NONE table with file:line anchors at the recorded base SHA), behaviour, states, edge cases, tests.",
-      "review": "Layout table rewritten to the per-platform tree, dependency-direction table added (layers.rs), pins point at rust/Cargo.toml, tests paragraph replaced by the gate stage table matching tools/ci.sh."
+      "review": "Seam table replaced by the AD1-AD7 adaptations table, each traced at 10376058 (Session fields, FileExporter, fonts add_source/DirectorySource, render queue polling, Renderer, Exporter/ExportJob, sysinfo memory has no iOS/Android branch, export frames in flight bounded by rayon threads); pins, states and edge cases rewritten; tools/adaptations.toml."
     },
     {
       "status": "done",
@@ -335,7 +340,7 @@
       "heading": "## 16. Core runtime design",
       "title": "Write §16. Core runtime design",
       "accept": "For Core runtime: files changed (NEW/MOD/CHK/NONE table with file:line anchors at the recorded base SHA), behaviour, states, edge cases, tests.",
-      "review": "Lints sentence states the inherited workspace table with unsafe_code denied and never allowed without a platform module."
+      "review": "Added src/platform/memory.rs (available_memory for AD7); core becomes a platform crate for it, as the layer table allows."
     },
     {
       "status": "done",
@@ -358,7 +363,7 @@
       "heading": "## 18. Native media design",
       "title": "Write §18. Native media design",
       "accept": "For Native media: files changed (NEW/MOD/CHK/NONE table with file:line anchors at the recorded base SHA), behaviour, states, edge cases, tests.",
-      "review": "VideoToolbox and MediaCodec files move under src/platform/ behind one allow(unsafe_code) mod platform; lints row states the inherited table."
+      "review": "Encoding: EffectCraft's encoders are crate-private (encode.rs:100-115), so W6 hardware encoding is CraftBridge's exporter fed Targa frames through FileExporter's in-memory sink (out.rs:8-10), traced at the pin."
     },
     {
       "status": "done",
@@ -371,7 +376,8 @@
       "accept": "For EffectCraft app crate: files changed (NEW/MOD/CHK/NONE table with file:line anchors at the recorded base SHA), behaviour, states, edge cases, tests.",
       "diagrams": [
         "d05-main-flow"
-      ]
+      ],
+      "review": "Construction builds CraftBridge's own session (AD1, AD2); file table gains session/requests/runner/timings/exporter; render runner and other methods reworded; d05 twin updated."
     },
     {
       "status": "done",
@@ -436,7 +442,7 @@
       "heading": "## 24. Upstream update loop design",
       "title": "Write §24. Upstream update loop design",
       "accept": "For Upstream update loop: files changed (NEW/MOD/CHK/NONE table with file:line anchors at the recorded base SHA), behaviour, states, edge cases, tests.",
-      "review": "Pins written into rust/Cargo.toml; regeneration through cargo xtask generate and the renamed codegen diff; the update record moves to docs/upstream-updates.md, as the root holds no extra files."
+      "review": "§24 says UP-9 builds steps 1-2 and sets the first pin with them, so generated tables are never hand-written; OPS-4 adds steps 3-6."
     },
     {
       "status": "done",
@@ -465,7 +471,7 @@
       "diagrams": [
         "d06-rollout"
       ],
-      "review": "G3 now decides package publishing; the repository is already public once hosted CI runs (PD3)."
+      "review": "B11 is the adaptation recheck; d06 twin without G1; gates renumbered G1 (devices), G2 (publish) as the register requires."
     },
     {
       "status": "done",
@@ -478,7 +484,7 @@
       "heading": "## 27. Integration edges and validation",
       "title": "Write §27. Integration edges and validation",
       "accept": "Edge table E1…En (from → to · contract · how it is validated on staging) and the end-to-end validation spine.",
-      "review": "E1 validated by the Swift Testing corpus, matching §22 and §28."
+      "review": "E5 includes adaptations; E12 is the update script against official revisions."
     },
     {
       "status": "done",
@@ -491,7 +497,7 @@
       "heading": "## 28. Testing strategy",
       "title": "Write §28. Testing strategy",
       "accept": "Layer · what · where (unit, shared vectors, golden files, device, staging E2E, manual QA).",
-      "review": "Desktop conformance runner and corpus paths moved to craftbridge-effects-conformance and conformance/effects; QA-2 Swift side uses Swift Testing."
+      "review": "Upstream row replaced by the update recheck; device acceptance before G1."
     },
     {
       "status": "done",
@@ -501,7 +507,8 @@
       "kind": "section",
       "heading": "## 29. Non-functional requirements",
       "title": "Write §29. Non-functional requirements",
-      "accept": "Privacy, security, performance, reliability, accessibility, observability — each concrete and checkable."
+      "accept": "Privacy, security, performance, reliability, accessibility, observability — each concrete and checkable.",
+      "review": "Helper processes excluded by AD1."
     },
     {
       "status": "done",
@@ -511,12 +518,14 @@
       "kind": "section",
       "heading": "## 30. Risk register (technical)",
       "title": "Write §30. Risk register (technical)",
-      "accept": "R1…Rn · risk · severity · mitigation."
+      "accept": "R1…Rn · risk · severity · mitigation.",
+      "review": "R3 (V1 before FX-3, AD2), R4 (adaptation recheck), R6 (AD7 thread pool), R14 (no upstream flags)."
     },
     {
       "status": "done",
       "notes": [
-        "reopened: PD19 layout and PD3 visibility"
+        "reopened: PD19 layout and PD3 visibility",
+        "reopened: D-28 analysers, Project and iteration branches"
       ],
       "id": "design/tasks",
       "phase": "design",
@@ -524,7 +533,7 @@
       "heading": "## 31. Team task lists",
       "title": "Write §31. Team task lists",
       "accept": "One ordered checklist per team (IDs like BE-1, M-1), every task naming its acceptance (edge, matrix row or test layer). Wrap each team's list in its own @view block for tasks/<team>.md.",
-      "review": "OPS-1 adds AGENTS.md, CLAUDE.md, CHANGELOG and decision issues; OPS-2 lists what doctor checks; OPS-3 is 1.5 d with acceptance that each rule check fails on a planted violation; QA-1, QA-2, FFI-1, GEN-1, IOS-1, AND-1 and OPS-5 use the new paths, D-24 and D-27."
+      "review": "UP-9 1.5 d with the script's first steps and an idempotence acceptance; OPS-4 1.5 d for steps 3-6."
     },
     {
       "status": "done",
@@ -537,7 +546,7 @@
       "heading": "## 32. Prerequisites, verifications and follow-ups",
       "title": "Write §32. Prerequisites, verifications and follow-ups",
       "accept": "Prerequisites P1…Pn (owner · blocks), verifications V1…Vn to close during build, related issues outside scope for their owners.",
-      "review": "P3 lists every toolchain doctor checks, x86_64-linux-android included, uniffi-bindgen as the workspace crate; F2 ties hosted CI to the repository going public."
+      "review": "P2 blocks OPS-5 only; P5 is the fork kept in step, nothing pushed or opened upstream; V1 before FX-3; F1, F3 and related work reworded."
     },
     {
       "status": "done",
@@ -550,7 +559,7 @@
       "heading": "## 33. Sign-off checklist",
       "title": "Write §33. Sign-off checklist",
       "accept": "Checklist: requirements mapped, decisions recorded, prerequisites closed, tasks done, staging green, production deployed.",
-      "review": "Verification record path is plan/evidence/99-verification.md; PD1-PD19."
+      "review": "G1 seam-branch item replaced by UP-9; gate ids renumbered."
     },
     {
       "status": "done",
@@ -563,12 +572,13 @@
       "heading": "## Appendix A — Module inventory",
       "title": "Write §Appendix A — Module inventory",
       "accept": "Every module/file touched: id · surface · path · change type · section.",
-      "review": "M1-M11 paths follow the per-platform tree; M6 adds rust/uniffi-bindgen."
+      "review": "M12-M14 are the EffectCraft interfaces, CLI and export CraftBridge checks (CHK), no MOD rows; M15-M16 renumbered."
     },
     {
       "status": "done",
       "notes": [
-        "reopened: PD19 layout and PD3 visibility"
+        "reopened: PD19 layout and PD3 visibility",
+        "reopened: D-28 analysers, Project and iteration branches"
       ],
       "id": "design/eng-decisions",
       "phase": "design",
@@ -576,7 +586,7 @@
       "heading": "## Appendix B — Engineering decisions",
       "title": "Write §Appendix B — Engineering decisions",
       "accept": "D-1…D-n · decision · why · where; the engineering choices that implement the PDs.",
-      "review": "D-1 rewritten for the per-platform layout; D-24 craftbridge-swift, D-25 rules checked by code behind tools/ci.sh, D-26 generated-code placement, D-27 one version, each with its reason and evidence."
+      "review": "D-29 added: adapt, never patch, with tools/adaptations.toml."
     },
     {
       "status": "done",
@@ -599,7 +609,7 @@
       "heading": "## Appendix D — Glossary",
       "title": "Write §Appendix D — Glossary",
       "accept": "Every domain term and identifier a reader meets, defined once.",
-      "review": "Platform folder and Gate added; universal core and app plugin entries still match §15."
+      "review": "Seam and Seam branch removed; Adaptation added; Pin is the official revision."
     },
     {
       "status": "done",
@@ -623,7 +633,7 @@
       "recipe": "architecture",
       "title": "What changes, where (change-type legend) (d02-architecture, in §12. Architecture overview)",
       "accept": "diagrams/src/d02-architecture.mjs built with the kit (recipe \"architecture\"), lint clean, reviewed PNG judged against the rubric, mermaid twin tagged \"%% @drawio d02-architecture | <caption>\" placed in §12. Architecture overview. Drop it (plan.mjs drop) only if the plan genuinely has no such view.",
-      "review": "Opened both PNGs. Glance: new / seam / unchanged / platform layers read at once; trace: all 14 edges followable, turning only in gutters. Fixed: three edges ran through group-title text (titles shortened, left-column entries moved to 0.8 of the node), a legend pill overflowed the page (labels shortened), two edge labels sat on a group border (dropped; node subs carry them), and the mermaid twin's auto-layout tangled the effects fan-out (rewritten as ranked nodes without subgraphs, same 14 nodes and edges)."
+      "review": "Opened the PNG: EffectCraft group relabelled 'EffectCraft at the pin' with all five nodes dashed Unchanged (automation: Backend/McpServer/tools; host: FileExporter; engine: Session/render queue/fonts); craftbridge-effects carries AD1-AD7; legend label shortened to 'Unchanged' after the pill-wrap warning; no crossings, edges unchanged."
     },
     {
       "status": "done",
@@ -647,7 +657,7 @@
       "recipe": "data-model",
       "title": "The data model and contracts (d04-data-model, in §14. Data model and contracts)",
       "accept": "diagrams/src/d04-data-model.mjs built with the kit (recipe \"data-model\"), lint clean, reviewed PNG judged against the rubric, mermaid twin tagged \"%% @drawio d04-data-model | <caption>\" placed in §14. Data model and contracts. Drop it (plan.mjs drop) only if the plan genuinely has no such view.",
-      "review": "Opened both PNGs. Glance: typed layer → one Engine object → method table, with what each carries; trace: four edges, all straight between level centres. Fixed: a legend label wrapped (shortened), the row gap squeezed two edge labels (row 2 moved down 24 px), and the diagram exposed a contract inconsistency: CraftError listed Busy for calls during an export while L3 says they wait; Busy removed from §14, §16 and §19 (8 error kinds)."
+      "review": "Opened the PNG: RenderRequest/FrameRequest now New, 'in craftbridge-effects (AD3, AD4)'; legend only New; layout unchanged and clean."
     },
     {
       "status": "done",
@@ -659,7 +669,7 @@
       "recipe": "sequence",
       "title": "The main runtime flow across components (d05-main-flow, in §19. EffectCraft app crate design)",
       "accept": "diagrams/src/d05-main-flow.mjs built with the kit (recipe \"sequence\"), lint clean, reviewed PNG judged against the rubric, mermaid twin tagged \"%% @drawio d05-main-flow | <caption>\" placed in §19. EffectCraft app crate design. Drop it (plan.mjs drop) only if the plan genuinely has no such view.",
-      "review": "Opened both PNGs. Glance: one export request, progress and cancel through the engine actor; trace: 17 numbered messages, each between real lanes. Fixed: the first version sent progress and cancel straight between the automation lane and the app/Swift lanes, skipping the engine actor, which contradicted §16 and its own note; rerouted every message through the actor (17 messages, under the 18 limit) and matched the mermaid sequence twin message for message."
+      "review": "Opened the PNG: fifth lane is the render runner in craftbridge-effects (AD3), message 4 run(session, request, on_progress); title says CraftBridge's runner drives EffectCraft's own render queue; steps 6-13 note unchanged; lanes and arrows read in order."
     },
     {
       "status": "done",
@@ -671,7 +681,7 @@
       "recipe": "flow",
       "title": "Deploy order: every step safe on its own (d06-rollout, in §26. Backwards compatibility and rollout)",
       "accept": "diagrams/src/d06-rollout.mjs built with the kit (recipe \"flow\"), lint clean, reviewed PNG judged against the rubric, mermaid twin tagged \"%% @drawio d06-rollout | <caption>\" placed in §26. Backwards compatibility and rollout. Drop it (plan.mjs drop) only if the plan genuinely has no such view.",
-      "review": "Opened both PNGs. Glance: nine steps in three phases, gates in their own colour; trace: eight neighbour-to-neighbour edges. Fixed: 'T1–T24' broke across a line (reworded as the whole corpus) and stages had ~30 px dead space (height 150 → 124, groups shrunk). Effort figures match §11 and §31 (2 + 10 + 14 + 16 + 14 + 9.5 = 65.5 d)."
+      "review": "Opened the PNG: W1 shows 1.5 d, W5 9 d, total line 64.5 unchanged; no wraps or overlaps."
     },
     {
       "status": "done",
@@ -1131,6 +1141,31 @@
         "private until a first release",
         "private until its first release",
         "stays private until the owner releases it"
+      ]
+    },
+    {
+      "id": "Q21",
+      "area": "upstream",
+      "text": "Does CraftBridge change EffectCraft to support phones?",
+      "why": "Decides PD4, PD5, PD12 and PD17, §15's seams, wave W1 and how updates are taken",
+      "options": [
+        "never: adapt inside CraftBridge",
+        "small seams proposed upstream"
+      ],
+      "recommend": "never: adapt inside CraftBridge|a standalone project that follows official releases",
+      "status": "answered",
+      "asked": "2026-11-12T15:59:37.725Z",
+      "answer": "We don't modify EffectCraft; we make the relevant changes in this project. If iOS or Android need a modified or adapted variant of something, including hardware encoding, it goes in this project. CraftBridge is a standalone project, built so that official EffectCraft updates are not painful to integrate (not necessarily automatic), not one that puts surgical changes into EffectCraft.",
+      "answeredAt": "2026-11-12T15:59:37.758Z",
+      "pd": "PD5",
+      "supersedes": [
+        "seam pull request",
+        "seam branch",
+        "craftbridge/seams-",
+        "proposed to storytold/effectcraft",
+        "until an encoder seam",
+        "seven seams",
+        "seven small pull requests"
       ]
     }
   ],
@@ -2174,6 +2209,374 @@
     {
       "at": "2026-11-12T10:37:38.267Z",
       "msg": "Amended for PD19 (one folder per platform, Package.swift at ios/sdk, craftbridge-swift written by each release) and PD3 (public when hosted CI starts): §1, §5–§8, §11, §12, §15–§16, §18, §20–§28, §31–§33, Appendices A, B, D; D-1 rewritten, D-24–D-27 added; research/07 conventions; check --final clean; anchors re-resolved (62, the same nine accepted warnings)."
+    },
+    {
+      "at": "2026-11-12T15:00:19.390Z",
+      "msg": "reopened design/roadmap: D-28 analysers, Project and iteration branches"
+    },
+    {
+      "at": "2026-11-12T15:00:19.419Z",
+      "msg": "reopened design/surface:repository-and-pins: D-28 analysers, Project and iteration branches"
+    },
+    {
+      "at": "2026-11-12T15:00:19.448Z",
+      "msg": "reopened design/tasks: D-28 analysers, Project and iteration branches"
+    },
+    {
+      "at": "2026-11-12T15:00:19.477Z",
+      "msg": "reopened design/eng-decisions: D-28 analysers, Project and iteration branches"
+    },
+    {
+      "at": "2026-11-12T15:01:03.055Z",
+      "msg": "started design/roadmap"
+    },
+    {
+      "at": "2026-11-12T15:01:03.084Z",
+      "msg": "done design/roadmap"
+    },
+    {
+      "at": "2026-11-12T15:01:03.114Z",
+      "msg": "started design/surface:repository-and-pins"
+    },
+    {
+      "at": "2026-11-12T15:01:03.143Z",
+      "msg": "done design/surface:repository-and-pins"
+    },
+    {
+      "at": "2026-11-12T15:01:03.172Z",
+      "msg": "started design/tasks"
+    },
+    {
+      "at": "2026-11-12T15:01:03.202Z",
+      "msg": "done design/tasks"
+    },
+    {
+      "at": "2026-11-12T15:01:03.232Z",
+      "msg": "started design/eng-decisions"
+    },
+    {
+      "at": "2026-11-12T15:01:03.262Z",
+      "msg": "done design/eng-decisions"
+    },
+    {
+      "at": "2026-11-12T15:01:03.292Z",
+      "msg": "Amended for D-28 (syntax-aware analysers, OPS-6–OPS-8; W0 4 d, total 67.5) and the working plan in GitHub Project 9 with iteration branches."
+    },
+    {
+      "at": "2026-11-12T15:59:37.726Z",
+      "msg": "question Q21 [upstream]: Does CraftBridge change EffectCraft to support phones?"
+    },
+    {
+      "at": "2026-11-12T15:59:37.758Z",
+      "msg": "answered Q21 → PD5"
+    },
+    {
+      "at": "2026-11-12T16:10:01.489Z",
+      "msg": "reopened design/header"
+    },
+    {
+      "at": "2026-11-12T16:10:01.520Z",
+      "msg": "reopened design/summary"
+    },
+    {
+      "at": "2026-11-12T16:10:01.552Z",
+      "msg": "reopened design/decisions"
+    },
+    {
+      "at": "2026-11-12T16:10:01.583Z",
+      "msg": "reopened design/scope"
+    },
+    {
+      "at": "2026-11-12T16:10:01.619Z",
+      "msg": "reopened design/rollout-business"
+    },
+    {
+      "at": "2026-11-12T16:10:01.655Z",
+      "msg": "reopened design/risks-business"
+    },
+    {
+      "at": "2026-11-12T16:10:01.690Z",
+      "msg": "reopened design/roadmap"
+    },
+    {
+      "at": "2026-11-12T16:10:01.721Z",
+      "msg": "reopened design/architecture"
+    },
+    {
+      "at": "2026-11-12T16:10:01.752Z",
+      "msg": "reopened design/lifecycle"
+    },
+    {
+      "at": "2026-11-12T16:10:01.784Z",
+      "msg": "reopened design/data"
+    },
+    {
+      "at": "2026-11-12T16:10:01.816Z",
+      "msg": "reopened design/surface:repository-and-pins"
+    },
+    {
+      "at": "2026-11-12T16:10:01.847Z",
+      "msg": "reopened design/surface:core-runtime"
+    },
+    {
+      "at": "2026-11-12T16:10:01.883Z",
+      "msg": "reopened design/surface:native-media"
+    },
+    {
+      "at": "2026-11-12T16:10:01.919Z",
+      "msg": "reopened design/surface:effectcraft-app-crate"
+    },
+    {
+      "at": "2026-11-12T16:10:01.950Z",
+      "msg": "reopened design/surface:upstream-update-loop"
+    },
+    {
+      "at": "2026-11-12T16:10:01.980Z",
+      "msg": "reopened design/compat"
+    },
+    {
+      "at": "2026-11-12T16:10:02.009Z",
+      "msg": "reopened design/edges"
+    },
+    {
+      "at": "2026-11-12T16:10:02.036Z",
+      "msg": "reopened design/testing"
+    },
+    {
+      "at": "2026-11-12T16:10:02.066Z",
+      "msg": "reopened design/nfr"
+    },
+    {
+      "at": "2026-11-12T16:10:02.100Z",
+      "msg": "reopened design/risks-tech"
+    },
+    {
+      "at": "2026-11-12T16:10:02.130Z",
+      "msg": "reopened design/tasks"
+    },
+    {
+      "at": "2026-11-12T16:10:02.159Z",
+      "msg": "reopened design/prereqs"
+    },
+    {
+      "at": "2026-11-12T16:10:02.188Z",
+      "msg": "reopened design/signoff"
+    },
+    {
+      "at": "2026-11-12T16:10:02.218Z",
+      "msg": "reopened design/modules"
+    },
+    {
+      "at": "2026-11-12T16:10:02.247Z",
+      "msg": "reopened design/eng-decisions"
+    },
+    {
+      "at": "2026-11-12T16:10:02.277Z",
+      "msg": "reopened design/glossary"
+    },
+    {
+      "at": "2026-11-12T16:10:02.307Z",
+      "msg": "reopened diagrams/d02-architecture"
+    },
+    {
+      "at": "2026-11-12T16:10:02.337Z",
+      "msg": "reopened diagrams/d04-data-model"
+    },
+    {
+      "at": "2026-11-12T16:10:02.368Z",
+      "msg": "reopened diagrams/d05-main-flow"
+    },
+    {
+      "at": "2026-11-12T16:10:02.400Z",
+      "msg": "reopened diagrams/d06-rollout"
+    },
+    {
+      "at": "2026-11-12T16:21:18.960Z",
+      "msg": "done design/header"
+    },
+    {
+      "at": "2026-11-12T16:21:19.022Z",
+      "msg": "done design/summary"
+    },
+    {
+      "at": "2026-11-12T16:21:19.076Z",
+      "msg": "done design/decisions"
+    },
+    {
+      "at": "2026-11-12T16:21:19.128Z",
+      "msg": "done design/scope"
+    },
+    {
+      "at": "2026-11-12T16:21:19.186Z",
+      "msg": "done design/rollout-business"
+    },
+    {
+      "at": "2026-11-12T16:21:19.240Z",
+      "msg": "done design/risks-business"
+    },
+    {
+      "at": "2026-11-12T16:21:19.301Z",
+      "msg": "done design/roadmap"
+    },
+    {
+      "at": "2026-11-12T16:21:19.353Z",
+      "msg": "done design/architecture"
+    },
+    {
+      "at": "2026-11-12T16:21:19.409Z",
+      "msg": "done design/lifecycle"
+    },
+    {
+      "at": "2026-11-12T16:21:19.460Z",
+      "msg": "done design/data"
+    },
+    {
+      "at": "2026-11-12T16:21:19.511Z",
+      "msg": "done design/surface:repository-and-pins"
+    },
+    {
+      "at": "2026-11-12T16:21:19.559Z",
+      "msg": "done design/surface:core-runtime"
+    },
+    {
+      "at": "2026-11-12T16:21:19.607Z",
+      "msg": "done design/surface:native-media"
+    },
+    {
+      "at": "2026-11-12T16:21:19.658Z",
+      "msg": "done design/surface:effectcraft-app-crate"
+    },
+    {
+      "at": "2026-11-12T16:21:19.706Z",
+      "msg": "done design/surface:upstream-update-loop"
+    },
+    {
+      "at": "2026-11-12T16:21:19.754Z",
+      "msg": "done design/compat"
+    },
+    {
+      "at": "2026-11-12T16:21:19.801Z",
+      "msg": "done design/edges"
+    },
+    {
+      "at": "2026-11-12T16:21:19.849Z",
+      "msg": "done design/testing"
+    },
+    {
+      "at": "2026-11-12T16:21:19.896Z",
+      "msg": "done design/nfr"
+    },
+    {
+      "at": "2026-11-12T16:21:19.948Z",
+      "msg": "done design/risks-tech"
+    },
+    {
+      "at": "2026-11-12T16:21:19.999Z",
+      "msg": "done design/tasks"
+    },
+    {
+      "at": "2026-11-12T16:21:20.051Z",
+      "msg": "done design/prereqs"
+    },
+    {
+      "at": "2026-11-12T16:21:20.102Z",
+      "msg": "done design/signoff"
+    },
+    {
+      "at": "2026-11-12T16:21:20.152Z",
+      "msg": "done design/modules"
+    },
+    {
+      "at": "2026-11-12T16:21:20.204Z",
+      "msg": "done design/eng-decisions"
+    },
+    {
+      "at": "2026-11-12T16:21:20.252Z",
+      "msg": "done design/glossary"
+    },
+    {
+      "at": "2026-11-12T16:21:32.103Z",
+      "msg": "started diagrams/d02-architecture"
+    },
+    {
+      "at": "2026-11-12T16:21:32.187Z",
+      "msg": "done diagrams/d02-architecture"
+    },
+    {
+      "at": "2026-11-12T16:21:32.236Z",
+      "msg": "started diagrams/d04-data-model"
+    },
+    {
+      "at": "2026-11-12T16:21:32.318Z",
+      "msg": "done diagrams/d04-data-model"
+    },
+    {
+      "at": "2026-11-12T16:21:32.367Z",
+      "msg": "started diagrams/d05-main-flow"
+    },
+    {
+      "at": "2026-11-12T16:21:32.450Z",
+      "msg": "done diagrams/d05-main-flow"
+    },
+    {
+      "at": "2026-11-12T16:21:32.501Z",
+      "msg": "started diagrams/d06-rollout"
+    },
+    {
+      "at": "2026-11-12T16:21:32.583Z",
+      "msg": "done diagrams/d06-rollout"
+    },
+    {
+      "at": "2026-11-12T16:21:49.639Z",
+      "msg": "Amended for PD5 (Q21): EffectCraft never modified; seams S1-S7 replaced by CraftBridge adaptations AD1-AD7 on public interfaces, listed in tools/adaptations.toml; W1 = UP-9 1 d, W2 20 d, W6 6.5 d after the first release, total 64.5; gates renumbered G1 devices, G2 publish; D-29; issues FX-1g #114 and gate titles updated to match."
+    },
+    {
+      "at": "2026-11-12T17:15:05.039Z",
+      "msg": "reopened design/roadmap"
+    },
+    {
+      "at": "2026-11-12T17:15:05.089Z",
+      "msg": "reopened design/surface:upstream-update-loop"
+    },
+    {
+      "at": "2026-11-12T17:15:05.129Z",
+      "msg": "reopened design/tasks"
+    },
+    {
+      "at": "2026-11-12T17:15:05.169Z",
+      "msg": "reopened diagrams/d06-rollout"
+    },
+    {
+      "at": "2026-11-12T17:15:54.228Z",
+      "msg": "started design/roadmap"
+    },
+    {
+      "at": "2026-11-12T17:15:54.259Z",
+      "msg": "done design/roadmap"
+    },
+    {
+      "at": "2026-11-12T17:15:54.293Z",
+      "msg": "started design/surface:upstream-update-loop"
+    },
+    {
+      "at": "2026-11-12T17:15:54.325Z",
+      "msg": "done design/surface:upstream-update-loop"
+    },
+    {
+      "at": "2026-11-12T17:15:54.357Z",
+      "msg": "started design/tasks"
+    },
+    {
+      "at": "2026-11-12T17:15:54.387Z",
+      "msg": "done design/tasks"
+    },
+    {
+      "at": "2026-11-12T17:15:54.418Z",
+      "msg": "started diagrams/d06-rollout"
+    },
+    {
+      "at": "2026-11-12T17:15:54.472Z",
+      "msg": "done diagrams/d06-rollout"
     }
   ]
 }

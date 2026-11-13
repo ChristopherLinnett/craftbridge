@@ -1,0 +1,440 @@
+AppleGothic.otf: 1 faces
+  AppleGothic/Regular (index 0, full "AppleGothic Regular")
+Athelas.ttc: 4 faces
+  Athelas/Regular (index 0, full "Athelas Regular")
+  Athelas/Italic (index 1, full "Athelas Italic")
+  Athelas/Bold Italic (index 2, full "Athelas Bold Italic")
+  Athelas/Bold (index 3, full "Athelas Bold")
+Carlito.ttc: 4 faces
+  Carlito/Regular (index 0, full "Carlito")
+  Carlito/Italic (index 1, full "Carlito Italic")
+  Carlito/Bold Italic (index 2, full "Carlito Bold Italic")
+  Carlito/Bold (index 3, full "Carlito Bold")
+DB_LCD_Temp-Black.ttf: 1 faces
+  DB LCD Temp/Black (index 0, full "DB LCD Temp Black")
+LockClock.ttf: 1 faces
+  .Lock Clock/Light (index 0, full "Lock Clock Light")
+Marion.ttc: 3 faces
+  Marion/Regular (index 0, full "Marion Regular")
+  Marion/Italic (index 1, full "Marion Italic")
+  Marion/Bold (index 2, full "Marion Bold")
+Seravek.ttc: 10 faces
+  Seravek/Regular (index 0, full "Seravek")
+  Seravek/Italic (index 1, full "Seravek Italic")
+  Seravek/Medium Italic (index 2, full "Seravek Medium Italic")
+  Seravek/Medium (index 3, full "Seravek Medium")
+  Seravek/Light Italic (index 4, full "Seravek Light Italic")
+  Seravek/Light (index 5, full "Seravek Light")
+  Seravek/ExtraLight Italic (index 6, full "Seravek ExtraLight Italic")
+  Seravek/ExtraLight (index 7, full "Seravek ExtraLight")
+  Seravek/Bold Italic (index 8, full "Seravek Bold Italic")
+  Seravek/Bold (index 9, full "Seravek Bold")
+SuperClarendon.ttc: 8 faces
+  Superclarendon/Regular (index 0, full "Superclarendon Regular")
+  Superclarendon/Italic (index 1, full "Superclarendon Italic")
+  Superclarendon/Light Italic (index 2, full "Superclarendon Light Italic")
+  Superclarendon/Light (index 3, full "Superclarendon Light")
+  Superclarendon/Bold Italic (index 4, full "Superclarendon Bold Italic")
+  Superclarendon/Bold (index 5, full "Superclarendon Bold")
+  Superclarendon/Black Italic (index 6, full "Superclarendon Black Italic")
+  Superclarendon/Black (index 7, full "Superclarendon Black")
+ADTNumeric.ttc: 13 faces
+  .ADT Slab Numeric/Light (index 0, full ".ADT Slab Numeric Light")
+  .ADT Slab Soft Numeric/Light (index 1, full ".ADT Slab Soft Numeric Light")
+  .New York Numeric/Light (index 2, full ".New York Numeric Light")
+  .New York Soft Numeric/Light (index 3, full ".New York Soft Numeric Light")
+  .SF Numeric/Regular (index 4, full ".SF Numeric")
+  .SF Adaptive Numeric/Regular (index 5, full ".SF Adaptive Numeric")
+  .SF Adaptive Soft Numeric/Regular (index 6, full ".SF Adaptive Soft Numeric")
+  .SF Compact Soft/Black (index 7, full ".SF Compact Soft")
+  .SF Rail Numeric/Black (index 8, full ".SF Rail Numeric Black")
+  .SF Rail Rounded Numeric/Black (index 9, full ".SF Rail Rounded Numeric Black")
+  .SF Rounded Numeric/Regular (index 10, full ".SF Rounded Numeric")
+  .SF Soft Numeric/Regular (index 11, full ".SF Soft Numeric")
+  .SF Stencil Numeric/Regular (index 12, full ".SF Stencil Numeric")
+CJKSymbolsFallback.ttc: 10 faces
+  .CJK Symbols Fallback HK/Regular (index 0, full ".CJK Symbols Fallback HK")
+  .CJK Symbols Fallback JA/Regular (index 1, full ".CJK Symbols Fallback JA")
+  .CJK Symbols Fallback MO/Regular (index 2, full ".CJK Symbols Fallback MO")
+  .CJK Symbols Fallback SC/Regular (index 3, full ".CJK Symbols Fallback SC")
+  .CJK Symbols Fallback TC/Regular (index 4, full ".CJK Symbols Fallback TC")
+  .CJK Symbols Fallback Watch HK/Regular (index 5, full ".CJK Symbols Fallback Watch HK")
+  .CJK Symbols Fallback Watch JA/Regular (index 6, full ".CJK Symbols Fallback Watch JA")
+  .CJK Symbols Fallback Watch MO/Regular (index 7, full ".CJK Symbols Fallback Watch MO")
+  .CJK Symbols Fallback Watch SC/Regular (index 8, full ".CJK Symbols Fallback Watch SC")
+  .CJK Symbols Fallback Watch TC/Regular (index 9, full ".CJK Symbols Fallback Watch TC")
+Courier.ttc: 4 faces
+  Courier/Regular (index 0, full "Courier")
+  Courier/Bold (index 1, full "Courier Bold")
+  Courier/Oblique (index 2, full "Courier Oblique")
+  Courier/Bold Oblique (index 3, full "Courier Bold Oblique")
+DecoTypeNastaleeqUrdu.ttc: 2 faces
+  .DecoType Nastaleeq Urdu UI/Regular (index 0, full ".DecoType Nastaleeq Urdu UI")
+  .DecoType Nastaleeq Urdu UI/Bold (index 1, full ".DecoType Nastaleeq Urdu UI Bold")
+Fallback.ttf: 1 faces
+  .PhoneFallback/Regular (index 0, full ".PhoneFallback")
+HelveticaNeueInterface.ttc: 2 faces
+  .Helvetica Neue Interface/UltraLight (index 0, full ".Helvetica Neue Interface UltraLight P2")
+  .Helvetica Neue Interface/Thin (index 1, full ".Helvetica Neue Interface Thin")
+LastResort.otf: 1 faces
+  .LastResort/Regular (index 0, full ".LastResort")
+NewYork.ttf: 1 faces
+  .New York/Regular (index 0, full ".New York")
+NewYorkItalic.ttf: 1 faces
+  .New York/Regular Italic (index 0, full ".New York Italic")
+NotoSansArmenian.ttc: 3 faces
+  Noto Sans Armenian/Bold (index 0, full "Noto Sans Armenian Bold")
+  Noto Sans Armenian/Light (index 1, full "Noto Sans Armenian Light")
+  Noto Sans Armenian/Regular (index 2, full "Noto Sans Armenian Regular")
+PhonepadTwo.ttf: 1 faces
+  .PhonepadTwo/Regular (index 0, full "PhonepadTwo")
+SFArabic.ttf: 1 faces
+  .SF Arabic/Regular (index 0, full ".SF Arabic")
+SFArabicRounded.ttf: 1 faces
+  .SF Arabic Rounded/Regular (index 0, full ".SF Arabic Rounded")
+SFArmenian.ttf: 1 faces
+  .SF Armenian/Regular (index 0, full ".SF Armenian")
+SFArmenianRounded.ttf: 1 faces
+  .SF Armenian Rounded/Regular (index 0, full ".SF Armenian Rounded")
+SFCamera.ttf: 1 faces
+  .SF Camera/Regular (index 0, full ".SF Camera")
+SFCompact.ttf: 1 faces
+  .SF Compact/Black (index 0, full ".SF Compact")
+SFCompactItalic.ttf: 1 faces
+  .SF Compact/Black Italic (index 0, full ".SF Compact")
+SFCompactRounded.ttf: 1 faces
+  .SF Compact Rounded/Regular (index 0, full ".SF Compact Rounded")
+SFGeorgian.ttf: 1 faces
+  .SF Georgian/Regular (index 0, full ".SF Georgian")
+SFGeorgianRounded.ttf: 1 faces
+  .SF Georgian Rounded/Regular (index 0, full ".SF Georgian Rounded")
+SFHebrew.ttf: 1 faces
+  .SF Hebrew/Regular (index 0, full ".SF Hebrew")
+SFHebrewRounded.ttf: 1 faces
+  .SF Hebrew Rounded/Regular (index 0, full ".SF Hebrew Rounded")
+SFIndia.ttc: 9 faces
+  .SF Bangla/Regular (index 0, full ".SF Bangla Regular")
+  .SF Devanagari/Regular (index 1, full ".SF Devanagari Regular")
+  .SF Gujarati/Regular (index 2, full ".SF Gujarati Regular")
+  .SF Gurmukhi/Regular (index 3, full ".SF Gurmukhi Regular")
+  .SF Kannada/Regular (index 4, full ".SF Kannada Regular")
+  .SF Malayalam/Regular (index 5, full ".SF Malayalam Regular")
+  .SF Odia/Regular (index 6, full ".SF Odia Regular")
+  .SF Tamil/Regular (index 7, full ".SF Tamil Regular")
+  .SF Telugu/Regular (index 8, full ".SF Telugu Regular")
+SFUI.ttf: 1 faces
+  System Font/Regular (index 0, full "System Font")
+SFUIItalic.ttf: 1 faces
+  System Font/Regular Italic (index 0, full "System Font Regular Italic")
+SFUIMono.ttf: 1 faces
+  .SF UI Mono/Light (index 0, full ".SF UI Mono Light")
+SFUIMonoItalic.ttf: 1 faces
+  .SF UI Mono/Light Italic (index 0, full ".SF UI Mono Light Italic")
+SFUISymbols-Regular.otf: 1 faces
+  .SF UI Symbols/Regular (index 0, full ".SF UI Symbols Regular")
+ThonburiUI.ttc: 2 faces
+  .ThonburiUI/Regular (index 0, full ".ThonburiUI Regular")
+  .ThonburiUIWatch/Regular (index 1, full ".ThonburiUIWatch Regular")
+STIXGeneral.otf: 1 faces
+  STIXGeneral/Regular (index 0, full "STIXGeneral-Regular")
+STIXGeneralBol.otf: 1 faces
+  STIXGeneral/Bold (index 0, full "STIXGeneral-Bold")
+STIXGeneralBolIta.otf: 1 faces
+  STIXGeneral/Bold Italic (index 0, full "STIXGeneral-BoldItalic")
+STIXGeneralItalic.otf: 1 faces
+  STIXGeneral/Italic (index 0, full "STIXGeneral-Italic")
+AsphaltMedium.otf: 1 faces
+  Asphalt/Medium (index 0, full "Asphalt-Medium")
+BalegaRegular.otf: 1 faces
+  Balega/Regular (index 0, full "Balega-Regular")
+BebasNeue.otf: 1 faces
+  Bebas Neue/Regular (index 0, full "BebasNeue")
+DearJoe-small-semibold.ttf: 1 faces
+  Dear Joe Four/Small Semibold (index 0, full "Dear Joe Four Small Semibold")
+Druk.ttc: 13 faces
+  Druk/Bold (index 0, full "Druk Bold Regular")
+  Druk/Bold Italic (index 1, full "Druk Bold Italic")
+  Druk/Heavy (index 2, full "Druk Heavy Regular")
+  Druk/Heavy Italic (index 3, full "Druk Heavy Italic")
+  Druk/Medium (index 4, full "Druk Medium Regular")
+  Druk/Medium Italic (index 5, full "Druk Medium Italic")
+  Druk/Super (index 6, full "Druk Super Regular")
+  Druk/Super Italic (index 7, full "Druk Super Italic")
+  Druk Text/Bold (index 8, full "Druk Text Bold")
+  Druk Wide/Medium (index 9, full "Druk Wide Medium")
+  Druk Wide/Medium Italic (index 10, full "Druk Wide Medium Italic")
+  Druk Wide/Bold (index 11, full "Druk Wide Bold")
+  Druk Wide/Bold Italic (index 12, full "Druk Wide Bold Italic")
+FaktSlabStencilPro-medium.otf: 1 faces
+  Fakt Slab Stencil Pro/Medium (index 0, full "Fakt Slab Stencil Pro Medium")
+IowanOldStyle.ttc: 4 faces
+  Iowan Old Style/Roman (index 0, full "Iowan Old Style Roman")
+  Iowan Old Style/Bold (index 1, full "Iowan Old Style Bold")
+  Iowan Old Style/Bold Italic (index 2, full "Iowan Old Style Bold Italic")
+  Iowan Old Style/Italic (index 3, full "Iowan Old Style Italic")
+JournalSansInline.otf: 1 faces
+  Journal Sans New/Inline (index 0, full "JournalSansNew-Inline")
+Keycaps.ttc: 4 faces
+  .Keycaps/Keys (index 0, full ".Keycaps Keys")
+  .Keycaps A/Keys (index 1, full ".Keycaps A Keys")
+  .Keycaps B/Keys (index 2, full ".Keycaps B Keys")
+  .Keycaps/Popups (index 3, full ".Keycaps Popups")
+KeycapsPad.ttc: 2 faces
+  .Keycaps Pad/Keys (index 0, full ".Keycaps Pad Keys")
+  .Keycaps Pad A/Keys (index 1, full ".Keycaps Pad A Keys")
+PhoneKeyCaps.ttf: 1 faces
+  .PhoneKeyCaps/Regular (index 0, full ".PhoneKeyCaps Regular")
+SFUIRounded.ttf: 1 faces
+  .SF UI Rounded/Regular (index 0, full ".SF UI Rounded")
+SFUISoft.ttc: 41 faces
+  .SF UI Soft/Black (index 0, full ".SF UI Soft Black")
+  .SF UI Soft/Bold (index 1, full ".SF UI Soft Bold")
+  .SF UI Soft/Bold G1 (index 2, full ".SF UI Soft Bold G1")
+  .SF UI Soft/Bold G2 (index 3, full ".SF UI Soft Bold G2")
+  .SF UI Soft/Bold G3 (index 4, full ".SF UI Soft Bold G3")
+  .SF UI Soft/Bold G4 (index 5, full ".SF UI Soft Bold G4")
+  .SF UI Soft/Heavy (index 6, full ".SF UI Soft Heavy")
+  .SF UI Soft/Heavy G1 (index 7, full ".SF UI Soft Heavy G1")
+  .SF UI Soft/Heavy G2 (index 8, full ".SF UI Soft Heavy G2")
+  .SF UI Soft/Heavy G3 (index 9, full ".SF UI Soft Heavy G3")
+  .SF UI Soft/Heavy G4 (index 10, full ".SF UI Soft Heavy G4")
+  .SF UI Soft/Light (index 11, full ".SF UI Soft Light")
+  .SF UI Soft/Light G1 (index 12, full ".SF UI Soft Light G1")
+  .SF UI Soft/Light G2 (index 13, full ".SF UI Soft Light G2")
+  .SF UI Soft/Light G3 (index 14, full ".SF UI Soft Light G3")
+  .SF UI Soft/Light G4 (index 15, full ".SF UI Soft Light G4")
+  .SF UI Soft/Medium (index 16, full ".SF UI Soft Medium")
+  .SF UI Soft/Medium G1 (index 17, full ".SF UI Soft Medium G1")
+  .SF UI Soft/Medium G2 (index 18, full ".SF UI Soft Medium G2")
+  .SF UI Soft/Medium G3 (index 19, full ".SF UI Soft Medium G3")
+  .SF UI Soft/Medium G4 (index 20, full ".SF UI Soft Medium G4")
+  .SF UI Soft/Regular (index 21, full ".SF UI Soft Regular")
+  .SF UI Soft/Regular G1 (index 22, full ".SF UI Soft Regular G1")
+  .SF UI Soft/Regular G2 (index 23, full ".SF UI Soft Regular G2")
+  .SF UI Soft/Regular G3 (index 24, full ".SF UI Soft Regular G3")
+  .SF UI Soft/Regular G4 (index 25, full ".SF UI Soft Regular G4")
+  .SF UI Soft/Semibold (index 26, full ".SF UI Soft Semibold")
+  .SF UI Soft/Semibold G1 (index 27, full ".SF UI Soft Semibold G1")
+  .SF UI Soft/Semibold G2 (index 28, full ".SF UI Soft Semibold G2")
+  .SF UI Soft/Semibold G3 (index 29, full ".SF UI Soft Semibold G3")
+  .SF UI Soft/Semibold G4 (index 30, full ".SF UI Soft Semibold G4")
+  .SF UI Soft/Thin (index 31, full ".SF UI Soft Thin")
+  .SF UI Soft/Thin G1 (index 32, full ".SF UI Soft Thin G1")
+  .SF UI Soft/Thin G2 (index 33, full ".SF UI Soft Thin G2")
+  .SF UI Soft/Thin G3 (index 34, full ".SF UI Soft Thin G3")
+  .SF UI Soft/Thin G4 (index 35, full ".SF UI Soft Thin G4")
+  .SF UI Soft/Ultralight (index 36, full ".SF UI Soft Ultralight")
+  .SF UI Soft/Ultralight G1 (index 37, full ".SF UI Soft Ultralight G1")
+  .SF UI Soft/Ultralight G2 (index 38, full ".SF UI Soft Ultralight G2")
+  .SF UI Soft/Ultralight G3 (index 39, full ".SF UI Soft Ultralight G3")
+  .SF UI Soft/Ultralight G4 (index 40, full ".SF UI Soft Ultralight G4")
+SchemeBold.otf: 1 faces
+  Scheme/Bold (index 0, full "Scheme-Bold")
+SignPainter-Semibold.otf: 1 faces
+  SignPainter/HouseScript Semibold (index 0, full "SignPainter-HouseScript Semibold")
+TheHandSerif-semibold.otf: 1 faces
+  The Hand Serif/Semibold (index 0, full "TheHandSerifSemibold")
+NotoSansAdlam-Regular.ttf: 1 faces
+  Noto Sans Adlam/Regular (index 0, full "Noto Sans Adlam Regular")
+NotoSansAvestan-Regular.ttf: 1 faces
+  Noto Sans Avestan/Regular (index 0, full "Noto Sans Avestan Regular")
+NotoSansBamum-Regular.ttf: 1 faces
+  Noto Sans Bamum/Regular (index 0, full "Noto Sans Bamum Regular")
+NotoSansBassaVah-Regular.ttf: 1 faces
+  Noto Sans Bassa Vah/Regular (index 0, full "Noto Sans Bassa Vah Regular")
+NotoSansBatak-Regular.ttf: 1 faces
+  Noto Sans Batak/Regular (index 0, full "Noto Sans Batak Regular")
+NotoSansBhaiksuki-Regular.ttf: 1 faces
+  Noto Sans Bhaiksuki/Regular (index 0, full "Noto Sans Bhaiksuki Regular")
+NotoSansBrahmi-Regular.ttf: 1 faces
+  Noto Sans Brahmi/Regular (index 0, full "Noto Sans Brahmi Regular")
+NotoSansBuginese-Regular.ttf: 1 faces
+  Noto Sans Buginese/Regular (index 0, full "Noto Sans Buginese Regular")
+NotoSansBuhid-Regular.ttf: 1 faces
+  Noto Sans Buhid/Regular (index 0, full "Noto Sans Buhid Regular")
+NotoSansCanadianAboriginal-Regular.otf: 1 faces
+  Noto Sans Canadian Aboriginal/Regular (index 0, full "Noto Sans Canadian Aboriginal Regular")
+NotoSansCarian-Regular.ttf: 1 faces
+  Noto Sans Carian/Regular (index 0, full "Noto Sans Carian Regular")
+NotoSansCaucasianAlbanian-Regular.ttf: 1 faces
+  Noto Sans Caucasian Albanian/Regular (index 0, full "Noto Sans Caucasian Albanian Regular")
+NotoSansChakma-Regular.ttf: 1 faces
+  Noto Sans Chakma/Regular (index 0, full "Noto Sans Chakma Regular")
+NotoSansCham-Regular.ttf: 1 faces
+  Noto Sans Cham/Regular (index 0, full "Noto Sans Cham Regular")
+NotoSansCoptic-Regular.ttf: 1 faces
+  Noto Sans Coptic/Regular (index 0, full "Noto Sans Coptic Regular")
+NotoSansCuneiform-Regular.ttf: 1 faces
+  Noto Sans Cuneiform/Regular (index 0, full "Noto Sans Cuneiform Regular")
+NotoSansCypriot-Regular.ttf: 1 faces
+  Noto Sans Cypriot/Regular (index 0, full "Noto Sans Cypriot Regular")
+NotoSansDuployan-Regular.ttf: 1 faces
+  Noto Sans Duployan/Regular (index 0, full "Noto Sans Duployan Regular")
+NotoSansEgyptianHieroglyphs-Regular.ttf: 1 faces
+  Noto Sans Egyptian Hieroglyphs/Regular (index 0, full "Noto Sans Egyptian Hieroglyphs Regular")
+NotoSansElbasan-Regular.ttf: 1 faces
+  Noto Sans Elbasan/Regular (index 0, full "Noto Sans Elbasan Regular")
+NotoSansGlagolitic-Regular.ttf: 1 faces
+  Noto Sans Glagolitic/Regular (index 0, full "Noto Sans Glagolitic Regular")
+NotoSansGothic-Regular.ttf: 1 faces
+  Noto Sans Gothic/Regular (index 0, full "Noto Sans Gothic Regular")
+NotoSansGunjalaGondi-Regular.otf: 1 faces
+  Noto Sans Gunjala Gondi/Regular (index 0, full "Noto Sans Gunjala Gondi Regular")
+NotoSansHanifiRohingya-Regular.ttf: 1 faces
+  Noto Sans Hanifi Rohingya/Regular (index 0, full "Noto Sans Hanifi Rohingya Regular")
+NotoSansHanunoo-Regular.ttf: 1 faces
+  Noto Sans Hanunoo/Regular (index 0, full "Noto Sans Hanunoo Regular")
+NotoSansHatran-Regular.ttf: 1 faces
+  Noto Sans Hatran/Regular (index 0, full "Noto Sans Hatran Regular")
+NotoSansImperialAramaic-Regular.ttf: 1 faces
+  Noto Sans Imperial Aramaic/Regular (index 0, full "Noto Sans Imperial Aramaic Regular")
+NotoSansInscriptionalPahlavi-Regular.ttf: 1 faces
+  Noto Sans Inscriptional Pahlavi/Regular (index 0, full "Noto Sans Inscriptional Pahlavi Regular")
+NotoSansInscriptionalParthian-Regular.ttf: 1 faces
+  Noto Sans Inscriptional Parthian/Regular (index 0, full "Noto Sans Inscriptional Parthian Regular")
+NotoSansJavanese-Regular.otf: 1 faces
+  Noto Sans Javanese/Regular (index 0, full "Noto Sans Javanese Regular")
+NotoSansKaithi-Regular.ttf: 1 faces
+  Noto Sans Kaithi/Regular (index 0, full "Noto Sans Kaithi Regular")
+NotoSansKayahLi-Regular.ttf: 1 faces
+  Noto Sans Kayah Li/Regular (index 0, full "Noto Sans Kayah Li Regular")
+NotoSansKharoshthi-Regular.ttf: 1 faces
+  Noto Sans Kharoshthi/Regular (index 0, full "Noto Sans Kharoshthi Regular")
+NotoSansKhojki-Regular.ttf: 1 faces
+  Noto Sans Khojki/Regular (index 0, full "Noto Sans Khojki Regular")
+NotoSansKhudawadi-Regular.ttf: 1 faces
+  Noto Sans Khudawadi/Regular (index 0, full "Noto Sans Khudawadi Regular")
+NotoSansLepcha-Regular.ttf: 1 faces
+  Noto Sans Lepcha/Regular (index 0, full "Noto Sans Lepcha Regular")
+NotoSansLimbu-Regular.ttf: 1 faces
+  Noto Sans Limbu/Regular (index 0, full "Noto Sans Limbu Regular")
+NotoSansLinearA-Regular.ttf: 1 faces
+  Noto Sans Linear A/Regular (index 0, full "Noto Sans Linear A Regular")
+NotoSansLinearB-Regular.ttf: 1 faces
+  Noto Sans Linear B/Regular (index 0, full "Noto Sans Linear B Regular")
+NotoSansLisu-Regular.ttf: 1 faces
+  Noto Sans Lisu/Regular (index 0, full "Noto Sans Lisu Regular")
+NotoSansLycian-Regular.ttf: 1 faces
+  Noto Sans Lycian/Regular (index 0, full "Noto Sans Lycian Regular")
+NotoSansLydian-Regular.ttf: 1 faces
+  Noto Sans Lydian/Regular (index 0, full "Noto Sans Lydian Regular")
+NotoSansMahajani-Regular.ttf: 1 faces
+  Noto Sans Mahajani/Regular (index 0, full "Noto Sans Mahajani Regular")
+NotoSansMandaic-Regular.ttf: 1 faces
+  Noto Sans Mandaic/Regular (index 0, full "Noto Sans Mandaic Regular")
+NotoSansManichaean-Regular.ttf: 1 faces
+  Noto Sans Manichaean/Regular (index 0, full "Noto Sans Manichaean Regular")
+NotoSansMarchen-Regular.ttf: 1 faces
+  Noto Sans Marchen/Regular (index 0, full "Noto Sans Marchen Regular")
+NotoSansMasaramGondi-Regular.otf: 1 faces
+  Noto Sans Masaram Gondi/Regular (index 0, full "Noto Sans Masaram Gondi Regular")
+NotoSansMeeteiMayek-Regular.ttf: 1 faces
+  Noto Sans Meetei Mayek/Regular (index 0, full "Noto Sans Meetei Mayek Regular")
+NotoSansMendeKikakui-Regular.ttf: 1 faces
+  Noto Sans Mende Kikakui/Regular (index 0, full "Noto Sans Mende Kikakui Regular")
+NotoSansMeroitic-Regular.ttf: 1 faces
+  Noto Sans Meroitic/Regular (index 0, full "Noto Sans Meroitic Regular")
+NotoSansMiao-Regular.ttf: 1 faces
+  Noto Sans Miao/Regular (index 0, full "Noto Sans Miao Regular")
+NotoSansModi-Regular.ttf: 1 faces
+  Noto Sans Modi/Regular (index 0, full "Noto Sans Modi Regular")
+NotoSansMongolian-Regular.ttf: 1 faces
+  Noto Sans Mongolian/Regular (index 0, full "Noto Sans Mongolian Regular")
+NotoSansMro-Regular.ttf: 1 faces
+  Noto Sans Mro/Regular (index 0, full "Noto Sans Mro Regular")
+NotoSansMultani-Regular.ttf: 1 faces
+  Noto Sans Multani/Regular (index 0, full "Noto Sans Multani Regular")
+NotoSansNKo-Regular.ttf: 1 faces
+  Noto Sans NKo/Regular (index 0, full "Noto Sans NKo Regular")
+NotoSansNabataean-Regular.ttf: 1 faces
+  Noto Sans Nabataean/Regular (index 0, full "Noto Sans Nabataean Regular")
+NotoSansNagMundari-Regular.ttf: 1 faces
+  Noto Sans Nag Mundari/Regular (index 0, full "Noto Sans Nag Mundari Regular")
+NotoSansNewTaiLue-Regular.ttf: 1 faces
+  Noto Sans New Tai Lue/Regular (index 0, full "Noto Sans New Tai Lue Regular")
+NotoSansNewa-Regular.ttf: 1 faces
+  Noto Sans Newa/Regular (index 0, full "Noto Sans Newa Regular")
+NotoSansOlChiki-Regular.ttf: 1 faces
+  Noto Sans Ol Chiki/Regular (index 0, full "Noto Sans Ol Chiki Regular")
+NotoSansOldHungarian-Regular.ttf: 1 faces
+  Noto Sans Old Hungarian/Regular (index 0, full "Noto Sans Old Hungarian Regular")
+NotoSansOldItalic-Regular.ttf: 1 faces
+  Noto Sans Old Italic/Regular (index 0, full "Noto Sans Old Italic Regular")
+NotoSansOldNorthArabian-Regular.ttf: 1 faces
+  Noto Sans Old North Arabian/Regular (index 0, full "Noto Sans Old North Arabian Regular")
+NotoSansOldPermic-Regular.ttf: 1 faces
+  Noto Sans Old Permic/Regular (index 0, full "Noto Sans Old Permic Regular")
+NotoSansOldPersian-Regular.ttf: 1 faces
+  Noto Sans Old Persian/Regular (index 0, full "Noto Sans Old Persian Regular")
+NotoSansOldSouthArabian-Regular.ttf: 1 faces
+  Noto Sans Old South Arabian/Regular (index 0, full "Noto Sans Old South Arabian Regular")
+NotoSansOldTurkic-Regular.ttf: 1 faces
+  Noto Sans Old Turkic/Regular (index 0, full "Noto Sans Old Turkic Regular")
+NotoSansOsage-Regular.ttf: 1 faces
+  Noto Sans Osage/Regular (index 0, full "Noto Sans Osage Regular")
+NotoSansOsmanya-Regular.ttf: 1 faces
+  Noto Sans Osmanya/Regular (index 0, full "Noto Sans Osmanya Regular")
+NotoSansPahawhHmong-Regular.ttf: 1 faces
+  Noto Sans Pahawh Hmong/Regular (index 0, full "Noto Sans Pahawh Hmong Regular")
+NotoSansPalmyrene-Regular.ttf: 1 faces
+  Noto Sans Palmyrene/Regular (index 0, full "Noto Sans Palmyrene Regular")
+NotoSansPauCinHau-Regular.ttf: 1 faces
+  Noto Sans Pau Cin Hau/Regular (index 0, full "Noto Sans Pau Cin Hau Regular")
+NotoSansPhagsPa-Regular.ttf: 1 faces
+  Noto Sans PhagsPa/Regular (index 0, full "Noto Sans PhagsPa Regular")
+NotoSansPhoenician-Regular.ttf: 1 faces
+  Noto Sans Phoenician/Regular (index 0, full "Noto Sans Phoenician Regular")
+NotoSansPsalterPahlavi-Regular.ttf: 1 faces
+  Noto Sans Psalter Pahlavi/Regular (index 0, full "Noto Sans Psalter Pahlavi Regular")
+NotoSansRejang-Regular.ttf: 1 faces
+  Noto Sans Rejang/Regular (index 0, full "Noto Sans Rejang Regular")
+NotoSansSamaritan-Regular.ttf: 1 faces
+  Noto Sans Samaritan/Regular (index 0, full "Noto Sans Samaritan Regular")
+NotoSansSaurashtra-Regular.ttf: 1 faces
+  Noto Sans Saurashtra/Regular (index 0, full "Noto Sans Saurashtra Regular")
+NotoSansSharada-Regular.ttf: 1 faces
+  Noto Sans Sharada/Regular (index 0, full "Noto Sans Sharada Regular")
+NotoSansSiddham-Regular.otf: 1 faces
+  Noto Sans Siddham/Regular (index 0, full "Noto Sans Siddham Regular")
+NotoSansSoraSompeng-Regular.ttf: 1 faces
+  Noto Sans Sora Sompeng/Regular (index 0, full "Noto Sans Sora Sompeng Regular")
+NotoSansSundanese-Regular.ttf: 1 faces
+  Noto Sans Sundanese/Regular (index 0, full "Noto Sans Sundanese Regular")
+NotoSansSylotiNagri-Regular.ttf: 1 faces
+  Noto Sans Syloti Nagri/Regular (index 0, full "Noto Sans Syloti Nagri Regular")
+NotoSansTagalog-Regular.ttf: 1 faces
+  Noto Sans Tagalog/Regular (index 0, full "Noto Sans Tagalog Regular")
+NotoSansTagbanwa-Regular.ttf: 1 faces
+  Noto Sans Tagbanwa/Regular (index 0, full "Noto Sans Tagbanwa Regular")
+NotoSansTaiLe-Regular.ttf: 1 faces
+  Noto Sans Tai Le/Regular (index 0, full "Noto Sans Tai Le Regular")
+NotoSansTaiTham-Regular.ttf: 1 faces
+  Noto Sans Tai Tham/Regular (index 0, full "Noto Sans Tai Tham")
+NotoSansTaiViet-Regular.ttf: 1 faces
+  Noto Sans Tai Viet/Regular (index 0, full "Noto Sans Tai Viet Regular")
+NotoSansTakri-Regular.ttf: 1 faces
+  Noto Sans Takri/Regular (index 0, full "Noto Sans Takri Regular")
+NotoSansThaana-Regular.ttf: 1 faces
+  Noto Sans Thaana/Regular (index 0, full "Noto Sans Thaana Regular")
+NotoSansTifinagh-Regular.otf: 1 faces
+  Noto Sans Tifinagh/Regular (index 0, full "Noto Sans Tifinagh Regular")
+NotoSansTirhuta-Regular.ttf: 1 faces
+  Noto Sans Tirhuta/Regular (index 0, full "Noto Sans Tirhuta Regular")
+NotoSansUgaritic-Regular.ttf: 1 faces
+  Noto Sans Ugaritic/Regular (index 0, full "Noto Sans Ugaritic Regular")
+NotoSansVai-Regular.ttf: 1 faces
+  Noto Sans Vai/Regular (index 0, full "Noto Sans Vai Regular")
+NotoSansWancho-Regular.ttf: 1 faces
+  Noto Sans Wancho/Regular (index 0, full "Noto Sans Wancho Regular")
+NotoSansWarangCiti-Regular.ttf: 1 faces
+  Noto Sans Warang Citi/Regular (index 0, full "Noto Sans Warang Citi Regular")
+NotoSansYi-Regular.ttf: 1 faces
+  Noto Sans Yi/Regular (index 0, full "Noto Sans Yi Regular")
+NotoSerifAhom-Regular.ttf: 1 faces
+  Noto Serif Ahom/Regular (index 0, full "Noto Serif Ahom Regular")
+NotoSerifBalinese-Regular.ttf: 1 faces
+  Noto Serif Balinese/Regular (index 0, full "Noto Serif Balinese Regular")
+NotoSerifNyiakengPuachueHmong-Regular.ttf: 1 faces
+  Noto Serif Hmong Nyiakeng/Regular (index 0, full "Noto Serif Hmong Nyiakeng Regular")
+NotoSerifYezidi-Regular.otf: 1 faces
+  Noto Serif Yezidi/Regular (index 0, full "Noto Serif Yezidi Regular")

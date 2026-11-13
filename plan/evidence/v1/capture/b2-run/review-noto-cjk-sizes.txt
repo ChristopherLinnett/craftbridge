@@ -1,0 +1,78 @@
+# GitHub contents API, fetched 2026-11-13T02:28Z; sizes in bytes
+## https://api.github.com/repos/notofonts/noto-cjk/contents/Sans/SubsetOTF/SC
+   8855916 file NotoSansSC-Black.otf
+   8543168 file NotoSansSC-Bold.otf
+   8325948 file NotoSansSC-DemiLight.otf
+   8299104 file NotoSansSC-Light.otf
+   8345436 file NotoSansSC-Medium.otf
+   8331336 file NotoSansSC-Regular.otf
+   7574608 file NotoSansSC-Thin.otf
+## https://api.github.com/repos/notofonts/noto-cjk/contents/Sans/SubsetOTF/TC
+   6068384 file NotoSansTC-Black.otf
+   5839972 file NotoSansTC-Bold.otf
+   5679024 file NotoSansTC-DemiLight.otf
+   5661684 file NotoSansTC-Light.otf
+   5695744 file NotoSansTC-Medium.otf
+   5683368 file NotoSansTC-Regular.otf
+   5215632 file NotoSansTC-Thin.otf
+## https://api.github.com/repos/notofonts/noto-cjk/contents/Sans/Variable/OTF/Subset
+  10087192 file NotoSansHK-VF.otf
+   8128756 file NotoSansJP-VF.otf
+   8698600 file NotoSansKR-VF.otf
+  15054748 file NotoSansSC-VF.otf
+  10119544 file NotoSansTC-VF.otf
+## https://api.github.com/repos/notofonts/noto-cjk/contents/Sans/Variable/TTF/Subset
+  11906640 file NotoSansHK-VF.ttf
+   9590732 file NotoSansJP-VF.ttf
+  10415420 file NotoSansKR-VF.ttf
+  17773132 file NotoSansSC-VF.ttf
+  11942800 file NotoSansTC-VF.ttf
+## https://api.github.com/repos/notofonts/noto-cjk/contents/Sans/OTF/SimplifiedChinese
+  17797908 file NotoSansCJKsc-Black.otf
+  17002248 file NotoSansCJKsc-Bold.otf
+  16414760 file NotoSansCJKsc-DemiLight.otf
+  16329648 file NotoSansCJKsc-Light.otf
+  16523632 file NotoSansCJKsc-Medium.otf
+  16437364 file NotoSansCJKsc-Regular.otf
+  14896688 file NotoSansCJKsc-Thin.otf
+## https://api.github.com/repos/notofonts/noto-cjk/contents/Sans/OTF/TraditionalChinese
+  17796428 file NotoSansCJKtc-Black.otf
+  17000768 file NotoSansCJKtc-Bold.otf
+  16413280 file NotoSansCJKtc-DemiLight.otf
+  16328168 file NotoSansCJKtc-Light.otf
+  16522152 file NotoSansCJKtc-Medium.otf
+  16435884 file NotoSansCJKtc-Regular.otf
+  14895208 file NotoSansCJKtc-Thin.otf
+## https://api.github.com/repos/google/fonts/contents/ofl/notosanssc
+       378 file DESCRIPTION.en_us.html
+      1296 file METADATA.pb
+  17772300 file NotoSansSC[wght].ttf
+      4388 file OFL.txt
+         0 dir article
+      2694 file upstream_info.md
+## https://api.github.com/repos/google/fonts/contents/ofl/notosanstc
+       381 file DESCRIPTION.en_us.html
+      1197 file METADATA.pb
+  11941968 file NotoSansTC[wght].ttf
+      4388 file OFL.txt
+         0 dir article
+      2696 file upstream_info.md
+## https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/LICENSE (first 2 lines)
+This Font Software is licensed under the SIL Open Font License,
+Version 1.1.
+## https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssc/METADATA.pb (name, license, font file and default instance)
+name: "Noto Sans SC"
+license: "OFL"
+  name: "Noto Sans SC"
+  weight: 400
+  filename: "NotoSansSC[wght].ttf"
+  post_script_name: "NotoSansSC-Thin"
+## https://raw.githubusercontent.com/google/fonts/main/ofl/notosanstc/METADATA.pb (name, license, font file and default instance)
+name: "Noto Sans TC"
+license: "OFL"
+  name: "Noto Sans TC"
+  weight: 400
+  filename: "NotoSansTC[wght].ttf"
+  post_script_name: "NotoSansTC-Thin"
+## https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssc/upstream_info.md (source of the Google Fonts binary)
+Noto Sans SC is a regional subset of the Noto CJK mega-font family, targeting Simplified Chinese. The binary was taken from the `Sans2.004` tag at commit `523d033d`, specifically from `Sans/Variable/TTF/Subset/NotoSansSC-VF.ttf`. An 832-byte post-processing difference exists between the upstream binary and the shipped version, consistent with table rewriting during onboarding.

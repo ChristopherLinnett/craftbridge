@@ -19,27 +19,25 @@ CraftBridge is new, so compatibility is with EffectCraft's documents and release
 | B8 | iOS app in the background without the GPU entitlement | the export continues on the CPU | L7, §17 |
 | B9 | Footage in a codec or profile without a hardware decoder | software decoding, identical frames | §18 |
 | B10 | One app wants EffectCraft and a later FilmCraft plugin | one combined native library | §20 |
-| B11 | A seam merges upstream in a different shape | CraftBridge adapts to upstream's version | §15, §24 |
+| B11 | An EffectCraft update changes code an adaptation relies on | the update names the adaptation, which is rechecked before the update merges | §15, §24 |
 
 **Build order.** Each wave is usable on its own, and nothing is published until the owner says so.
 
 ```mermaid
-%% @drawio d06-rollout | Build order: each wave stands on the one before; three gates decide when the SDK moves on and when it is published.
+%% @drawio d06-rollout | Build order: each wave stands on the one before; two gates decide when the SDK moves on and when it is published.
 flowchart LR
-  W0["W0 Prerequisites"] --> W1["W1 Upstream seams<br/>+ seam branch"]
-  W1 --> G1{"G1 seam branch<br/>passes desktop gate"}
-  G1 --> W2["W2 Core + EffectCraft crate"]
+  W0["W0 Prerequisites"] --> W1["W1 Official pin<br/>+ adaptations list"]
+  W1 --> W2["W2 Core + EffectCraft crate"]
   W2 --> W3["W3 Bindings + packages"]
   W3 --> W4["W4 GPU surfaces + decoders"]
-  W4 --> G2{"G2 device<br/>acceptance"}
-  G2 --> W5["W5 Samples + staged release"]
-  W5 --> G3{"G3 owner<br/>publishes"}
+  W4 --> G1{"G1 device<br/>acceptance"}
+  G1 --> W5["W5 Samples + staged release"]
+  W5 --> G2{"G2 owner<br/>publishes"}
 ```
 
 | Gate | Passes when | Decides |
 |---|---|---|
-| G1 | the seam branch builds and the desktop CLI's own tests pass on it | W2 starts on that pin |
-| G2 | the conformance corpus passes on the three acceptance devices and V2–V5 are closed | W5 starts |
-| G3 | the owner says to publish | the packages are published (the repository is already public once hosted CI runs, PD3) |
+| G1 | the conformance corpus passes on the three acceptance devices and V2–V5 are closed | W5 starts |
+| G2 | the owner says to publish | the packages are published (the repository is already public once hosted CI runs, PD3) |
 
 **Switches.** GPU (`GpuChoice.cpuOnly`), hardware decoding (`hardwareDecoding = false`), plug-ins (`Folders.plugins = nil`), background GPU (`BackgroundPolicy`). Each is a host-app setting; none needs a CraftBridge release.

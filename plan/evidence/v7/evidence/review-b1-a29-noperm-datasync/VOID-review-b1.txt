@@ -1,0 +1,12 @@
+VOID — review B1, 2026-11-13.
+
+This attempt never reached the platform: `adb install` returned
+"cmd: Can't find service: package", i.e. the API 29 emulator's package service was
+not running (that device was mid-shutdown after a failed boot on port 5554, see
+logs/b1-emulator-29.log / logs/b1-emulator-29b.log). install_rc=1, no case ran.
+
+It is kept, and labelled, rather than deleted so the gap is visible. It supports no
+claim. The noperm permission-enforcement evidence is unchanged and comes from
+evidence/a34-noperm-datasync, a34-noperm-mediaproc, a34-noperm-specialuse,
+a37-noperm-datasync, a37-noperm-mediaproc (APK md5 15b2745f2b375a3a020f5e40707f7612,
+identical to apk-b1/fgslab-noperm-ts37.apk).

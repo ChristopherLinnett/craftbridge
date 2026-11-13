@@ -1,0 +1,5 @@
+The fatal_exception= line in case.txt is a harness artefact (review A3): it is the
+previous case's crash (pid 3717, review-a3-a29-combo-short-notdeclared), which the
+API 29 logcat clear left in the crash buffer. This case's own process (pid 3807) did
+not crash: STARTFOREGROUND_OK typeBit=8192 -> EXPORT_DONE elapsedS=45. run_case.sh
+now takes crash fields only from the run's own pid.

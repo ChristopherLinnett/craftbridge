@@ -1,0 +1,4 @@
+review-a3-harness-a29-crash-then-ok-1 PROCESS_GONE_AT_LAUNCH
+review-a3-harness-a29-crash-then-ok-2 EXPORT_DONE
+1: pid= result=PROCESS_GONE_AT_LAUNCH end=2026-11-13T14:56:02+08:00 target_sdk=37 fatal_exception_at_launch=android.app.RemoteServiceException  stale_crash_lines=1
+2: pid=5480 result=EXPORT_DONE end=2026-11-13T14:56:51+08:00 target_sdk=37  stale_crash_lines=0

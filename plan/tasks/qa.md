@@ -8,4 +8,4 @@
 **QA: conformance** (W2–W4)
 - [ ] QA-1 · 3 d · W2 — `craftbridge-effects-conformance` and `conformance/effects/`: the corpus T1–T24, the CLI oracle runner, the D-12 comparison. Acceptance: T1–T22 and T24 pass on macOS in the gate.
 - [ ] QA-2 · 3 d · W3 — The corpus through Swift Testing on the iPhone simulator and instrumented tests on the Android emulator. Acceptance: E1–E3.
-- [ ] QA-3 · 3 d · W4 — Device acceptance on the three phones (P4), including T23 and the spine (§27). Acceptance: G2.
+- [ ] QA-3 · 3 d · W4 — Device acceptance on the three phones (P4), including T23 and the spine (§27). Acceptance: G1.

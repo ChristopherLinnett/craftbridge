@@ -1,0 +1,11 @@
+registered 613 faces from @/tmp/craftbridge-v1/capture/review-fontsroot-dir.txt
+  汉 (zh-Hans) -> Inter/Regular
+  漢 (zh-Hant) -> Hiragino Sans/W4
+  漢 (ja) -> Hiragino Sans/W4
+  한 (ko) -> Apple SD Gothic Neo/Regular
+registered 633 faces from @/tmp/craftbridge-v1/capture/review-coretext-dirs.txt
+  PingFang SC/Medium index 20 in PingFangUI.ttc: parses true, glyph(汉) Some(484), has_char(汉) false
+  汉 (zh-Hans) -> Inter/Regular
+  漢 (zh-Hant) -> Hiragino Sans/W4
+  漢 (ja) -> Hiragino Sans/W4
+  한 (ko) -> Apple SD Gothic Neo/Regular
