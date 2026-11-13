@@ -1,0 +1,19 @@
+[package]
+name = "xtask"
+description = "CraftBridge's rule checks and regeneration: `cargo xtask <rules|generate>`."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# serde_json reads `cargo metadata`; toml reads the manifests and the licence files. No other crates: the
+# checks stay small enough that std covers walking, and a lint gate that needs its own dependencies to
+# build is a gate that cannot run when they break.
+[dependencies]
+serde_json.workspace = true
+toml.workspace = true
+
+[lints]
+workspace = true

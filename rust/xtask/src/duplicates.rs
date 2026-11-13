@@ -1,0 +1,106 @@
+//! Rule 7 — one copy of each upstream library crate.
+//!
+//! CraftBridge's decoders register themselves into the decoder registry EffectCraft decodes through,
+//! and a registry is only one copy deep: if a second copy of an EffectCraft, FilmCraft or Craft crate
+//! lands in the graph, the decoders register into the copy the decoder does not consult, and the broken
+//! registration is silent — video that will not decode, with no error anywhere. So a duplicated name in
+//! these three families is an error, not a warning, and it is reported with the package ids so the two
+//! copies (usually one from crates.io and one from the pinned git revision) can be told apart.
+//!
+//! Other crates duplicate all the time in a graph this size and are cargo-deny's business (it warns);
+//! only these prefixes are the ownership boundary this rule protects.
+
+use crate::layers::{CRAFT_APPS, CRAFT_LIBRARY_PREFIX};
+use crate::meta::Crate;
+use std::path::Path;
+
+/// Is `name` a crate of one of the families that must appear once: a Craft app's (the layer table's
+/// list) or a shared Craft library?
+fn owned(name: &str) -> bool {
+    name.starts_with(CRAFT_LIBRARY_PREFIX) || CRAFT_APPS.iter().any(|app| name.starts_with(app.crates))
+}
+
+/// Group packages by name and return every owned name that has more than one copy, with their ids.
+pub(crate) fn duplicate_ids(crates: &[Crate]) -> Vec<String> {
+    let mut names: Vec<&str> = crates.iter().map(|package| package.name.as_str()).filter(|name| owned(name)).collect();
+    names.sort_unstable();
+    names.dedup();
+    let mut errors = Vec::new();
+    for name in names {
+        let copies: Vec<&Crate> = crates.iter().filter(|package| package.name == name).collect();
+        if copies.len() > 1 {
+            let ids: Vec<String> = copies.iter().map(|package| format!("{} ({})", package.id, package.source.as_deref().unwrap_or("a local path"))).collect();
+            errors.push(format!("{} is in the graph {} times: {}", name, copies.len(), ids.join("; ")));
+        }
+    }
+    errors
+}
+
+#[cfg(test)]
+fn package(name: &str, id: &str, source: Option<&str>) -> Crate {
+    Crate {
+        name: name.to_string(),
+        id: id.to_string(),
+        source: source.map(str::to_string),
+        manifest_path: format!("/repo/rust/{name}/Cargo.toml"),
+        dependencies: Vec::new(),
+        library_targets: Vec::new(),
+    }
+}
+
+/// Run the check against the resolved graph: `cargo metadata` with dependencies.
+pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
+    let crates = crate::meta::read(&root.join("rust"), false)?;
+    Ok(duplicate_ids(&crates))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_second_copy_of_an_owned_crate_is_reported_with_its_ids() {
+        let crates = vec![
+            package(
+                "effectcraft-engine",
+                "registry+https://github.com/rust-lang/crates.io-index#effectcraft-engine@1.2.0",
+                Some("registry+https://github.com/rust-lang/crates.io-index"),
+            ),
+            package(
+                "effectcraft-engine",
+                "git+https://github.com/storytold/effectcraft?rev=abcd#effectcraft-engine@1.3.0",
+                Some("git+https://github.com/storytold/effectcraft?rev=abcd"),
+            ),
+            package("filmcraft-media", "path+file:///repo/rust/core/filmcraft-media#0.1.0", None),
+        ];
+        let errors = duplicate_ids(&crates);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].starts_with("effectcraft-engine is in the graph 2 times"), "{errors:?}");
+        assert!(errors[0].contains("crates.io-index") && errors[0].contains("storytold/effectcraft"), "both copies must be named: {errors:?}");
+    }
+
+    #[test]
+    fn one_copy_of_each_owned_crate_passes() {
+        let crates = vec![
+            package(
+                "effectcraft-engine",
+                "git+https://github.com/storytold/effectcraft?rev=abcd#effectcraft-engine@1.3.0",
+                Some("git+https://github.com/storytold/effectcraft?rev=abcd"),
+            ),
+            package("filmcraft-media", "path+file:///repo/core/filmcraft-media#0.1.0", None),
+            package("craft-core", "path+file:///repo/core/craft-core#0.1.0", None),
+        ];
+        assert!(duplicate_ids(&crates).is_empty());
+    }
+
+    #[test]
+    fn crates_outside_the_owned_families_are_not_this_rule() {
+        let crates = vec![
+            package("libc", "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.1", Some("registry+https://github.com/rust-lang/crates.io-index")),
+            package("libc", "registry+https://github.com/rust-lang/crates.io-index#libc@0.1.0", Some("registry+https://github.com/rust-lang/crates.io-index")),
+            package("craftbridge-effects", "path+file:///repo/effects/craftbridge-effects#0.1.0", None),
+            package("effectcraftness", "path+file:///repo/x#1.0.0", None),
+        ];
+        assert!(duplicate_ids(&crates).is_empty(), "an unowned duplicate and a crate that merely starts like an owned prefix are both left alone");
+    }
+}

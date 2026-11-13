@@ -1,0 +1,4 @@
+[alias]
+# `--locked`: the rule checks read the graph Cargo.lock pins and never rewrite the lock file under a
+# change. tools/ci.sh runs the same command itself, because this file could redefine the alias.
+xtask = "run --package xtask --locked --quiet --"

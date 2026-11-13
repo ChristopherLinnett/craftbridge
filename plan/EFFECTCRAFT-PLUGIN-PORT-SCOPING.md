@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Plan of record · 12 Nov 2026. 19 product decisions (§6). Build starts after the prerequisites in §32. |
 | **Owner** | ChristopherLinnett (PD1) |
-| **Surfaces** | `effectcraft` (storytold/effectcraft) · `origin/main` @ `10376058` — the engine, unchanged except the seams in §15 · `filmcraft` (storytold/filmcraft) @ `d5ead4ba` — EffectCraft's own pin of FilmCraft's codecs, read for the decoder registry · `craft-libs` (storytold/craft-libs) @ `e7c3dda` — EffectCraft's pin of the shared Craft libraries · `figcraft` (storytold/figcraft) `origin/main` @ `a4251ca8` — read for the universal-core assessment only · **new:** `ChristopherLinnett/craftbridge`, private until hosted CI starts (PD3), checked out at `artcraft-plugin-port/` with one folder per platform (PD19), and `ChristopherLinnett/craftbridge-swift`, which each release writes for Swift Package Manager (D-24) |
+| **Surfaces** | `effectcraft` (storytold/effectcraft) · `origin/main` @ `10376058` — the engine, never modified: CraftBridge builds this official revision as it is and adapts it in its own crates (§15) · `filmcraft` (storytold/filmcraft) @ `d5ead4ba` — EffectCraft's own pin of FilmCraft's codecs, read for the decoder registry · `craft-libs` (storytold/craft-libs) @ `e7c3dda` — EffectCraft's pin of the shared Craft libraries · `figcraft` (storytold/figcraft) `origin/main` @ `a4251ca8` — read for the universal-core assessment only · **new:** `ChristopherLinnett/craftbridge`, private until hosted CI starts (PD3), checked out at `artcraft-plugin-port/` with one folder per platform (PD19), and `ChristopherLinnett/craftbridge-swift`, which each release writes for Swift Package Manager (D-24) |
 | **Hard constraint** | "Everything the CLI variant of effectcraft can do, can be done on Android/iOS plugins." "iOS is natively connected to what it uses as opposed to generic GPUs etc, and similar for android processes." Upstream changes must be "EASY to replicate … if not deterministic". No code is copied into a second place: reuse, extend or promote it instead (the owner's standing rule). |
 | **How to read this** | **Part A** (§1–§11) is the business view: what, why, for whom, decisions, rollout, success. **Part B** (§12–§30) is the technical design, surface by surface. **Part C** (§31–§33) is delivery: team task lists, prerequisites, sign-off. Appendices hold the module inventory, the engineering decisions, sources and glossary. |
 | **This file is the single source of truth** | Every per-team file (`DECISIONS.md`, `CONNECTIONS.md`, `MODULES.md`, `modules/`, `tasks/`, `contracts/`, generated code) is **generated** from tagged sections of this document by `node build/build-plan.mjs`. Edit here, never there. The rendered version is [`EFFECTCRAFT-PLUGIN-PORT-PLAN.html`](./EFFECTCRAFT-PLUGIN-PORT-PLAN.html). |
@@ -19,14 +19,14 @@
 
 It works on four ideas:
 
-1. **The same engine, not a port.** CraftBridge compiles EffectCraft's own engine for phones, unchanged apart from a few small additions proposed back to EffectCraft (PD4, PD5). On the CPU, a frame rendered on an iPhone, an Android phone and the desktop app is byte-for-byte the same (`evidence/03-device-feasibility.md` Finding 4).
+1. **The same engine, not a port.** CraftBridge compiles EffectCraft's own engine for phones, at an official revision and never modified; whatever a phone needs done differently is adapted inside CraftBridge, on EffectCraft's public interfaces (PD4, PD5). On the CPU, a frame rendered on an iPhone, an Android phone and the desktop app is byte-for-byte the same (`evidence/03-device-feasibility.md` Finding 4).
 2. **Native on each platform.** The engine's GPU compositor draws through Metal on iOS and Vulkan on Android, and video footage decodes on the phone's hardware decoder where it has one (PD12, PD18).
-3. **Generated from EffectCraft itself.** The Swift and Kotlin APIs are generated from the engine's own command list. Taking a new EffectCraft release is one script: move the pin, regenerate, compare the API, run the conformance suite (PD4).
+3. **Generated from EffectCraft itself.** The Swift and Kotlin APIs are generated from the engine's own command list. Taking a new EffectCraft release is one script: move the pin, regenerate, compare the API, name the adaptations whose EffectCraft code changed, run the conformance suite (PD4).
 4. **A universal core.** The parts every Craft app needs on a phone (the request channel, progress and cancellation, the GPU device, folders, fonts, hardware decoding) live in a core that knows nothing about EffectCraft. A future FilmCraft plugin imports the same core (PD9, PD10).
 
 **Commercial position.** An independent SDK by ChristopherLinnett, "based on EffectCraft by the ArtCraft team", licensed MIT OR Apache-2.0 like EffectCraft, in a repository that is private until hosted CI starts and public from then on (PD2, PD3, PD16). There is no price.
 
-**Footprint.** One new repository (`ChristopherLinnett/craftbridge`, one folder per platform), the Swift distribution repository each release writes (`ChristopherLinnett/craftbridge-swift`), and seven small pull requests to EffectCraft that move code out of its command-line program into its libraries, so CraftBridge reuses it instead of copying it (§15).
+**Footprint.** One new repository (`ChristopherLinnett/craftbridge`, one folder per platform) and the Swift distribution repository each release writes (`ChristopherLinnett/craftbridge-swift`). EffectCraft is not touched: the seven places where a phone needs something done differently are CraftBridge adaptations, each listed with the EffectCraft code it relies on, so an update shows which ones to recheck (§15, PD5).
 
 ```mermaid
 %% @drawio d01-journey | A template made on the desktop becomes a card exported on the phone: Leo builds Postcard Studio on CraftBridge; Maya makes Sam's birthday card.
@@ -60,7 +60,7 @@ flowchart LR
 | How big is it? | About 60 MB per architecture before store compression; each release reports the exact size (PD15). |
 | Can exports continue when the user leaves the app? | Yes, if your app runs them as a background task; CraftBridge provides progress, cancellation and recipes for iOS and Android (PD14). |
 | Can users load effect plug-ins? | Scripts and expressions always run. WebAssembly plug-ins load on Android, and on iOS only from your app bundle, and you can switch them off (PD13). |
-| How do updates from EffectCraft arrive? | Each EffectCraft release is taken by one script that regenerates the API and runs the conformance suite (PD4). |
+| How do updates from EffectCraft arrive? | Each EffectCraft release is taken by one script that moves the pin, regenerates the API, names the CraftBridge adaptations whose EffectCraft code changed and runs the conformance suite (PD4). |
 | Is it an ArtCraft product? | No. It is an independent SDK based on EffectCraft by the ArtCraft team (PD2). |
 
 ## 4. What we're building — capabilities
@@ -119,45 +119,45 @@ flowchart LR
 | PD1 | Ownership | The plan's owner is ChristopherLinnett. | header, §33 |
 | PD2 | Naming | CraftBridge is an independent SDK: no ArtCraft name or marks in its names, listings or marketing; its README says in plain text that it is based on EffectCraft by the ArtCraft team. | §1, §15, §25 |
 | PD3 | Distribution | A new repository under the ChristopherLinnett GitHub account, licensed MIT OR Apache-2.0, private at first and public from when hosted CI starts; releases go to GitHub Releases (the XCFramework zip Swift Package Manager downloads) and GitHub Packages (Maven AAR). | §8, §15, §22, §23, §32 |
-| PD4 | Upstream linkage | CraftBridge depends on EffectCraft's crates at a pinned git revision; the Swift and Kotlin API is generated from the engine's command registry and tool catalogue; one update script moves the pin, regenerates, compares the API surface and runs the conformance suite. | §15, §21, §24 |
-| PD5 | Upstream seams | Small seams are proposed to storytold/effectcraft as pull requests through the ChristopherLinnett fork. | §15, §24 |
+| PD4 | Upstream linkage | CraftBridge depends on EffectCraft's crates at a pinned official revision of storytold/effectcraft, used as they are; the Swift and Kotlin API is generated from the engine's command registry and tool catalogue; one update script moves the pin, regenerates, compares the API surface, names the adaptations whose EffectCraft code changed and runs the conformance suite. An update need not be automatic, only quick to take. | §15, §21, §24 |
+| PD5 | Adaptations | EffectCraft is never modified. What iOS or Android needs done differently, including hardware encoding, is adapted inside CraftBridge on EffectCraft's public interfaces, never copied from EffectCraft, and each adaptation lists the EffectCraft code it relies on, so official EffectCraft updates stay quick to take. | §1, §7, §12, §15, §19, §24 |
 | PD6 | API scope | Everything the EffectCraft command line does except `--bridge` and the interface and Roto Brush benchmarks: info, commands, exec, run, props, get, set, render-frame, render (every format, the render queue, templates), script, replay, an in-process MCP endpoint and render timings. | §4, §19 |
 | PD7 | API shape | Two layers: a generated typed facade (one method per engine command with named parameters) and a generic `exec` / `run`; hand-written typed calls only for the fixed-shape operations (render, props, get, set, templates). | §21, §22, §23 |
 | PD8 | Frames | Three outputs: render into a layer or surface the developer passes in (frames stay on the GPU), a platform image (CVPixelBuffer, Bitmap or HardwareBuffer) and PNG bytes; no interface widgets. | §17 |
 | PD9 | Universal core | Two layers from the start: a universal core that knows nothing about EffectCraft, and the EffectCraft plugin that imports it; the core holds only what EffectCraft needs today. | §12, §16 |
 | PD10 | Core location | The core lives in the CraftBridge repository as its own crates and packages, beside the EffectCraft plugin inside each platform folder (`rust/core/` beside `rust/effects/`, `CraftBridge` beside `CraftBridgeEffects`, `:core` beside `:effects`); it may be proposed to storytold/craft-libs later. | §15 |
 | PD11 | Platforms | iOS 17 and later (arm64 devices, arm64 simulators); Android 10 (API 29) and later on arm64-v8a, plus x86_64 for emulators; no 32-bit. | §22, §23, §28 |
-| PD12 | Video codecs | H.264 and HEVC (and AV1 where the device has it) decode through VideoToolbox on iOS and MediaCodec on Android, in front of the pure-Rust decoders, which stay the fallback; exports use the pure-Rust encoders until an encoder seam exists in EffectCraft, after which hardware H.264 and HEVC encoding becomes an export option. | §18, §19 |
+| PD12 | Video codecs | H.264 and HEVC (and AV1 where the device has it) decode through VideoToolbox on iOS and MediaCodec on Android, in front of the pure-Rust decoders, which stay the fallback; exports use EffectCraft's pure-Rust encoders in the first release, and hardware H.264 and HEVC encoding follows as an export option, built in CraftBridge's own exporter on EffectCraft's public `Exporter` interface. | §18, §19 |
 | PD13 | Scripts and plug-ins | Scripts and expressions run on both platforms; WebAssembly plug-ins load on Android always and on iOS only from files the host app bundles, behind a switch the host app can turn off. | §19 |
 | PD14 | Background exports | The host app schedules background work; CraftBridge exposes progress, cancellation and a background-safe export call, and documents and samples the iOS and Android recipes. | §19, §25 |
 | PD15 | Size | About 60 MB per architecture is acceptable for the first release; each release measures and reports the library's size. | §29 |
 | PD16 | Names | Repository `ChristopherLinnett/craftbridge`; core `CraftBridge` (Swift) and `io.github.christopherlinnett.craftbridge:core` (Maven); EffectCraft plugin `CraftBridgeEffects` and `io.github.christopherlinnett.craftbridge:effects`; the local folder `artcraft-plugin-port` keeps its name. | §15, §22, §23 |
-| PD17 | Seam pins | Until a seam pull request merges, CraftBridge builds against the ChristopherLinnett/effectcraft branch that carries it on top of the upstream pin, never a copy of the code; the update script rebases that branch onto each new upstream pin, and the pin returns to storytold/effectcraft once every seam has merged. | §15, §24 |
+| PD17 | Pins | The pin is always an official storytold/effectcraft revision; CraftBridge never builds from a fork or from a branch that carries changes to EffectCraft. The fork `ChristopherLinnett/effectcraft` is only kept in step with upstream. | §15, §24 |
 | PD18 | Hardware decoders | The universal core carries CraftBridge's own VideoToolbox and MediaCodec decoders, registered through FilmCraft's public decoder registry that EffectCraft decodes through; every app plugin imports them from the core; FilmCraft is not forked or changed. | §18 |
 | PD19 | Repository layout | One folder per platform, each a complete build: `rust/` (the Cargo workspace), `ios/sdk/` (the Swift package, `Package.swift` at its top) and `android/sdk/` (the Gradle build), each holding the universal core and the app plugins as sibling folders, with samples beside the library in `samples/`; nothing of a platform sits at the repository root. Swift Package Manager takes a package by URL only from a repository root, so each release writes `ChristopherLinnett/craftbridge-swift` from `ios/sdk/`. | §12, §15, §20–§25 |
 <!-- @end -->
 
 ## 7. Scope
 
-**In scope (first release).** The `ChristopherLinnett/craftbridge` repository holding the universal core and the EffectCraft plugin, one folder per platform (PD19); the seven EffectCraft seam pull requests and the branch that carries them; the Swift package and the Kotlin libraries with every PD6 capability; Metal and Vulkan GPU paths with CPU fallback; hardware video decoding on iOS and Android; the API generator, the update script and the conformance suite; Postcard Studio samples for iOS and Android with background-export recipes; a release workflow that builds, checks and stages packages, with publishing waiting on the owner's go-ahead.
+**In scope (first release).** The `ChristopherLinnett/craftbridge` repository holding the universal core and the EffectCraft plugin, one folder per platform (PD19); the official EffectCraft pin and CraftBridge's seven adaptations of it (§15); the Swift package and the Kotlin libraries with every PD6 capability; Metal and Vulkan GPU paths with CPU fallback; hardware video decoding on iOS and Android; the API generator, the update script and the conformance suite; Postcard Studio samples for iOS and Android with background-export recipes; a release workflow that builds, checks and stages packages, with publishing waiting on the owner's go-ahead.
 
 | Not in the first release | Why | Revisit |
 |---|---|---|
 | `--bridge` mode (driving a desktop app over the network) | It exists to drive the desktop app, which a phone does not run (PD6) | if an app needs to control a desktop EffectCraft |
 | Interface (`bench --ops`) and Roto Brush benchmarks | They measure the desktop interface and installed models (PD6) | never in the SDK |
-| Hardware video encoding | It needs the encoder seam in EffectCraft to merge first (PD12) | F1, after seam S7 merges |
+| Hardware video encoding | The pure-Rust encoders write every format first; hardware encoding is CraftBridge's own exporter on EffectCraft's public `Exporter` interface, built after the first release (PD12) | F1, W6 |
 | External effect helpers | They run as separate processes, which iOS forbids and Android allows only for binaries inside the app package (`evidence/05-mobile-platforms.md` Findings 14–15) | if EffectCraft offers an in-process helper API |
 | Interface widgets (SwiftUI, Compose) | Developers bring their own interface (PD8) | on request |
 | Kotlin Multiplatform and 32-bit Android | Swift serves iOS and Kotlin serves Android; 32-bit was not chosen (PD11) | on request |
 | Other Craft apps' plugins | The core holds only what EffectCraft needs (PD9) | when a FilmCraft plugin is planned |
-| Publishing the packages | Nothing is published until the owner says so; the repository itself becomes public when hosted CI starts (PD3) | G3 |
+| Publishing the packages | Nothing is published until the owner says so; the repository itself becomes public when hosted CI starts (PD3) | G2 |
 
 ## 8. Access, pricing and rollout
 
 - **Who gets it.** The repository is private to ChristopherLinnett until hosted CI starts, then public (PD3). Apps consume the packages from a checkout (`ios/sdk/`, `android/sdk/`) or, from the first release, from `craftbridge-swift` and the GitHub Packages feed.
 - **Price.** None; licence MIT OR Apache-2.0 (PD3).
-- **Launch.** Version 0.1.0 is built, checked and staged by the release workflow. Publishing the packages is a separate go-ahead from the owner (G3, §26); the repository becomes public earlier, when hosted CI starts (PD3, F2).
-- **Safety order.** Upstream seams first, on their own branch; then the core and the EffectCraft crate, proved on the desktop against the command line; then bindings on simulators and emulators; then physical devices; then the samples and the staged release (§11, §26).
+- **Launch.** Version 0.1.0 is built, checked and staged by the release workflow. Publishing the packages is a separate go-ahead from the owner (G2, §26); the repository becomes public earlier, when hosted CI starts (PD3, F2).
+- **Safety order.** The official pin first, built for every target; then the core and the EffectCraft crate with its adaptations, proved on the desktop against the command line; then bindings on simulators and emulators; then physical devices; then the samples and the staged release (§11, §26).
 - **Switches the host app controls.** GPU on or off (CPU rendering), hardware decoding on or off, WebAssembly plug-ins on or off, the folders the engine may read and write (§16–§19).
 
 ## 9. Success metrics and analytics
@@ -169,7 +169,7 @@ flowchart LR
 | Command-line parity | every scenario of the conformance corpus passes on the iOS simulator, the Android emulator and the three acceptance devices | §28, QA-1 to QA-3 |
 | Rendered-frame fidelity | CPU frames byte-identical to the desktop command line's | conformance corpus |
 | Export fidelity | same frame count and size as the desktop export, and every decoded frame within the D-12 tolerance | conformance corpus |
-| Update effort | an EffectCraft release that removes or renames no command is taken by `tools/update-upstream.sh` with no hand edits | §24, each update |
+| Update effort | an EffectCraft release is taken by `tools/update-upstream.sh` with hand work only in the adaptations it names | §24, each update |
 | Size | measured per release; a growth of more than 10 % over the previous release is flagged in the release notes | release workflow |
 | Device performance | first-preview time and export time of the running example on each acceptance device, recorded as the baseline | V5 |
 
@@ -179,10 +179,10 @@ flowchart LR
 
 | Risk | Likelihood / impact | Mitigation |
 |---|---|---|
-| EffectCraft's maintainers decline some seams | medium / medium: CraftBridge keeps building from the seam branch, which must be rebased on each update | seams are small and FFI-free, matching the maintainers' stated position (storytold/effectcraft#819); PD17 keeps every capability working meanwhile (R4) |
+| An EffectCraft update changes code an adaptation relies on | high / medium: the adaptation is rechecked before the update lands | each adaptation lists the EffectCraft code it relies on (`tools/adaptations.toml`) and the update script names the ones that changed; the conformance suite compares every method with the new revision's CLI (§24, R4) |
 | Physical phones behave differently from simulators | medium / high: GPU driver bugs or limits on real Mali and Adreno GPUs | acceptance on three physical devices before release; the compositor falls back to the CPU per effect (R1, R2) |
 | App Review treats WebAssembly plug-ins as downloaded code | low / medium | plug-ins on iOS load only from the app bundle and can be switched off (PD13, R7) |
-| The SDK is large | certain / low: about 60 MB per architecture, accepted for the first release (PD15) | size reported each release; trimming needs EffectCraft feature flags, a later seam (F3) |
+| The SDK is large | certain / low: about 60 MB per architecture, accepted for the first release (PD15) | size reported each release; trimming means building only the EffectCraft crates and features CraftBridge calls (F3) |
 | EffectCraft changes faster than the SDK follows | high / medium: 21 recently active branches touch the files CraftBridge depends on (`evidence/02-in-flight-work.md`) | generated API and one-script updates (PD4, §24) |
 | Naming or brand confusion | low / medium | independent name, plain-text attribution, no ArtCraft marks (PD2) |
 
@@ -192,15 +192,15 @@ The technical register is §30.
 
 | Wave | When (after the start) | Team | Scope | Effort |
 |---|---|---|---|---|
-| W0 | week 1 | OPS | prerequisites: repository, toolchains, the three platform builds and the gate (P1–P5) | 2.5 engineer-days |
-| W1 | weeks 1–3 | UP | the seven seam pull requests and the seam branch (S1–S7) | 10 engineer-days |
-| W2 | weeks 3–6 | CORE, FX, QA | core runtime, GPU device, EffectCraft crate, desktop conformance | 14 engineer-days |
+| W0 | week 1 | OPS | prerequisites: repository, toolchains, the three platform builds, the gate and its syntax-aware analysers (P1–P5) | 4 engineer-days |
+| W1 | week 1 | UP | the official EffectCraft pin, set by the update script's first steps, and the adaptations list (UP-9) | 1.5 engineer-days |
+| W2 | weeks 2–5 | CORE, FX, QA | core runtime, GPU device, EffectCraft crate with its adaptations, desktop conformance | 20 engineer-days |
 | W3 | weeks 6–9 | FFI, GEN, IOS, AND, QA | bindings, generator, Swift package, Kotlin libraries, simulator and emulator conformance | 16 engineer-days |
-| W4 | weeks 9–12 | IOS, AND, MED, QA | surfaces and platform images, hardware decoders, device acceptance | 14 engineer-days |
-| W5 | weeks 12–14 | DOC, OPS | samples, guides, update script, release workflow | 9.5 engineer-days |
-| W6 | after S7 merges | MED | hardware encoding (F1) | 5 engineer-days |
+| W4 | weeks 9–11 | IOS, AND, MED, QA | surfaces and platform images, hardware decoders, device acceptance | 14 engineer-days |
+| W5 | weeks 12–13 | DOC, OPS | samples, guides, the rest of the update script, release workflow | 9 engineer-days |
+| W6 | after the first release | MED | hardware encoding in CraftBridge's exporter (F1) | 6.5 engineer-days |
 
-**Total for the first release: 66 engineer-days** (W0–W5, the sum of the task estimates in §31); W6 follows the upstream merge. Calendar weeks assume one engineer full time. **Critical path:** W0 → seam S4 (W1) → EffectCraft crate (W2) → bindings (W3) → device acceptance (W4) → staged release (W5).
+**Total for the first release: 64.5 engineer-days** (W0–W5, the sum of the task estimates in §31); W6 follows the first release. Calendar weeks assume one engineer full time. **Critical path:** W0 → the pin (W1) → EffectCraft crate (W2) → bindings (W3) → device acceptance (W4) → staged release (W5).
 
 ---
 
@@ -208,23 +208,23 @@ The technical register is §30.
 
 ## 12. Architecture overview
 
-CraftBridge is one repository, `ChristopherLinnett/craftbridge` (checked out at `artcraft-plugin-port/`, PD3, PD16), with one folder per platform (PD19): a Rust workspace in `rust/`, a Swift package in `ios/sdk/` and a Gradle build of two library modules in `android/sdk/`. It depends on EffectCraft's crates at a pinned revision (PD4) and changes nothing in them except the seven seams of §15, which travel as pull requests (PD5, PD17).
+CraftBridge is one repository, `ChristopherLinnett/craftbridge` (checked out at `artcraft-plugin-port/`, PD3, PD16), with one folder per platform (PD19): a Rust workspace in `rust/`, a Swift package in `ios/sdk/` and a Gradle build of two library modules in `android/sdk/`. It depends on EffectCraft's crates at a pinned official revision (PD4, PD17) and changes nothing in them: what a phone needs done differently is adapted in CraftBridge's own crates (PD5, §15).
 
 ```mermaid
-%% @drawio d02-architecture | CraftBridge wraps the unchanged engine: new packages and a native library above EffectCraft's crates, where seven seams are the only changes.
+%% @drawio d02-architecture | CraftBridge wraps the unchanged engine: new packages and a native library above EffectCraft's crates, which it builds as they are.
 flowchart TB
   app["Postcard Studio<br/>host app"]
   swift["CraftBridgeEffects + CraftBridge<br/>Swift · new"]
   kotlin[":effects + :core<br/>Kotlin · new"]
   ffi["UniFFI exports<br/>native library · new"]
-  fx["craftbridge-effects<br/>method table · new"]
+  fx["craftbridge-effects<br/>method table · adaptations · new"]
   core["craftbridge-core<br/>engine thread · GPU · folders · new"]
-  auto["EffectCraft automation + CLI<br/>seams S4 S5"]
-  host["EffectCraft host<br/>seams S1 S2"]
+  auto["EffectCraft automation<br/>unchanged"]
+  host["EffectCraft host<br/>unchanged"]
   gpu["EffectCraft GPU compositor<br/>unchanged"]
   media["craftbridge-media<br/>hardware decoders · new"]
   gfx["Metal · Vulkan"]
-  eng["EffectCraft engine · text · export<br/>seams S3 S6 S7"]
+  eng["EffectCraft engine · text · export<br/>unchanged"]
   codec["VideoToolbox · MediaCodec"]
   reg["FilmCraft decoder registry<br/>unchanged"]
   app --> swift
@@ -245,11 +245,11 @@ flowchart TB
 
 | Surface | New | Modified | Verify only | Untouched |
 |---|---|---|---|---|
-| Repository and pins (§15) | the repository, workspace, toolchain, gate | effectcraft seams S1–S7 (on the seam branch) | upstream `Cargo.lock` and `[patch]` tables | storytold/filmcraft, storytold/craft-libs |
+| Repository and pins (§15) | the repository, workspace, toolchain, gate, `tools/adaptations.toml` | — | upstream `Cargo.lock` and `[patch]` tables | storytold/effectcraft, storytold/filmcraft, storytold/craft-libs |
 | Core runtime (§16) | `craftbridge-core` | — | `effectcraft-automation` `Confinement` | — |
 | GPU and frames (§17) | GPU device, surfaces, blit, platform images | — | `Gpu::new`, `Gpu::render_display`, `Session::render_rgba8_alpha` | EffectCraft's desktop viewer |
 | Native media (§18) | `craftbridge-media` | — | `filmcraft_codecs` registry and fallback | `filmcraft-platform` |
-| EffectCraft app crate (§19) | `craftbridge-effects` | — | `Backend`, tools, `McpServer`, render queue, replay | the CLI binary (beyond S4, S5) |
+| EffectCraft app crate (§19) | `craftbridge-effects` and its adaptations AD1–AD7 | — | `Session`, `Backend`, tools, `McpServer`, render queue, replay, `Exporter`, `FileExporter`, the font database | the CLI binary, the oracle the adaptations are compared with (§28) |
 | FFI and bindings (§20) | `craftbridge-core-ffi`, `craftbridge-effects-ffi` | — | UniFFI 0.32 | — |
 | API generator (§21) | `craftbridge-effects-codegen`, `api-surface.json` | — | `command_specs`, `params_schema`, tool catalogue | — |
 | Swift packages (§22) | `ios/sdk/`, `CraftBridge`, `CraftBridgeEffects`, XCFramework, `craftbridge-swift` | — | — | — |
@@ -284,7 +284,7 @@ flowchart LR
 | L6 | The GPU device belongs to the engine; an app layer or surface is borrowed for preview and released on `detachPreview` or `close`. | `craftbridge-core` GPU module (§17) |
 | L7 | When the GPU is lost or refused, the engine drops it and renders on the CPU, whose output is the reference. | §17, `Session.accel = None` (`effectcraft: crates/engine/src/lib.rs:126-133`) |
 | L8 | Hardware decoding can be switched off at any time; decoders opened afterwards are the software ones. | `filmcraft_codecs::hw::set_hardware_decoding` (filmcraft `crates/codecs/src/hw.rs:25-32`) |
-| L9 | The upstream pin changes only through `tools/update-upstream.sh`, which rebuilds the seam branch from the new pin. | §24 |
+| L9 | The upstream pin changes only through `tools/update-upstream.sh`, which moves it to an official EffectCraft revision and names the adaptations whose EffectCraft code changed. | §24 |
 | L10 | Generated sources change only by regeneration; the gate regenerates and fails on any difference. | `tools/ci.sh` (§21, §28) |
 
 ## 14. Data model and contracts
@@ -353,22 +353,22 @@ Platform handles live in `craftbridge-core-ffi`'s platform modules (§20): `atta
 |---|---|---|---|---|
 | `info` | `{}` | `{engine, version, pin, commands, effects, project, activeComp, gpu, hardwareDecoding}` | `info` | tools `get_project`, `get_comp`; `command_specs().len()`; `effects::registry().len()` (`apps/effectcraft-cli/src/main.rs:630-671`) |
 | `commands` | `{filter?, enabledOnly?, schemas?}` | array of command specs | `commands`, `exec --list` | tool `list_commands` (`apps/effectcraft-cli/src/main.rs:1038-1056`) |
-| `exec` | `{command, params}` | the command's result | `exec` | `Backend::exec` + `automation::render_failure` (S4) |
+| `exec` | `{command, params}` | the command's result | `exec` | `Backend::exec`, failed render items reported as the CLI reports them (AD3) |
 | `run` | `{steps: [{command, params}]}` | `[{command, result}]`; fails at the first error with its step | `run` | `Backend::exec` per step (`apps/effectcraft-cli/src/main.rs:691-745`) |
 | `props` | `{comp, layer, flat?, time?, depth?}` | the layer's property tree | `props` | tool `get_layer` |
 | `get` | `{comp, layer, path, time?}` | the property | `get` | tool `get_property` |
 | `set` | `{comp, layer, path, value?, time?, expression?}` | the property after the change | `set` | tool `set_property` |
 | `open`, `save`, `saveAs`, `new` | `{path?}` | `{path}` | `--project`, `--save`, `--save-as`, `--empty` | commands `file.open`, `file.save`, `file.saveAs`, `file.newProject` |
-| `frame` (binary) | `FrameRequest` | `FrameBytes` | `render-frame` | `automation::FrameRequest::resolve` (S4) → `Session::render_rgba8_alpha` or `Backend::render_with` |
-| `export` | `RenderRequest` | `{rendered: [{comp, output, seconds}]}` | `render`, `render --queue` | `automation::RenderRequest` (S4) → `renderQueue.add`, `renderQueue.render {wait: false}`, `Session::poll_render` |
-| `template.render` | `{template, values, output?: RenderRequest, frame?: FrameRequest}` | as `export` or `frame` | `render --template`, `render-frame --template` | `automation::template` (S4) |
-| `template.open` | `{template, values}` | `{comp}` | — (the first half of `--template`) | `automation::template::prepare` (S4) |
+| `frame` (binary) | `FrameRequest` | `FrameBytes` | `render-frame` | `FrameRequest` (AD4) → `Session::render_rgba8_alpha` or `Backend::render_with` |
+| `export` | `RenderRequest` | `{rendered: [{comp, output, seconds}]}` | `render`, `render --queue` | `RenderRequest` and CraftBridge's render runner (AD3) → `renderQueue.add`, `renderQueue.render {wait: false}`, `Session::poll_render` |
+| `template.render` | `{template, values, output?: RenderRequest, frame?: FrameRequest}` | as `export` or `frame` | `render --template`, `render-frame --template` | CraftBridge's template runner over the `essential` and `templates` commands (AD5) |
+| `template.open` | `{template, values}` | `{comp}` | — (the first half of `--template`) | the template runner's first half (AD5) |
 | `script` | `{code, name?}` | `{ok, output, result, error}` | `script` | command `script.run` (`crates/engine/src/cmd/file_more.rs:614-619`) |
 | `replay` | `{script, keepGoing?}` | the replay report | `replay` | `effectcraft_engine::replay::run` (`crates/engine/src/replay.rs:504`) |
-| `timings` | `{comp?, time?, scale?, runs?, play?, gpu?}` | per-layer and per-effect timings | `bench`, `bench --gpu` | `automation::bench` (S5) |
+| `timings` | `{comp?, time?, scale?, runs?, play?, gpu?}` | per-layer and per-effect timings | `bench`, `bench --gpu` | CraftBridge's timings over `effectcraft_render::Renderer` (AD6) |
 | `mcp` (line) | one JSON-RPC line | one JSON-RPC line or none | `mcp` | `McpServer::handle_line` (`effectcraft: crates/automation/src/server.rs:92-102`) |
 
-**`FrameRequest`** (S4, `effectcraft-automation`; the CLI's `render-frame` flags):
+**`FrameRequest`** (AD4, `craftbridge-effects`; the CLI's `render-frame` flags):
 
 | Field | Type | Required | Rule |
 |---|---|---|---|
@@ -377,7 +377,7 @@ Platform handles live in `craftbridge-core-ffi`'s platform modules (§20): `atta
 | `maxSide` / `scale` | px / factor | no, one of | `scale` × the comp's long side; 0 = full size |
 | `transparent` | bool | no | straight alpha instead of the background colour |
 
-**`RenderRequest`** (S4, `effectcraft-automation`; one field per `render` flag of the CLI, `apps/effectcraft-cli/src/main.rs:888-1037`): `comp`, `output` (path in the container), `format` (`h264|hevc|av1|prores|webm|png|jpeg|tiff|exr|tga|gif|wav|aiff`), `start`, `end`, `workArea`, `fps`, `resolution`, `quality`, `channels`, `jpegQuality`, `bitrate`, `prores`, `audio`, `profile`, `level`, `rateControl`, `videoQuality`, `keyint`, `webmCodec`, `audioBitrate`, `opusApp`, `exrCompression`, `exrDepth`, `queue` (render the project's own queue instead). Defaults, ranges and errors are the CLI's, because both call the same `RenderRequest::to_queue_params`.
+**`RenderRequest`** (AD3, `craftbridge-effects`; one field per `render` flag of the CLI, `apps/effectcraft-cli/src/main.rs:888-1037`): `comp`, `output` (path in the container), `format` (`h264|hevc|av1|prores|webm|png|jpeg|tiff|exr|tga|gif|wav|aiff`), `start`, `end`, `workArea`, `fps`, `resolution`, `quality`, `channels`, `jpegQuality`, `bitrate`, `prores`, `audio`, `profile`, `level`, `rateControl`, `videoQuality`, `keyint`, `webmCodec`, `audioBitrate`, `opusApp`, `exrCompression`, `exrDepth`, `queue` (render the project's own queue instead). Defaults, ranges and errors are the CLI's: `RenderRequest::to_queue_params` sets the same render-queue parameters as the CLI's flags, and the conformance corpus runs both on the same inputs (T9–T17).
 
 **Error mapping** (`craftbridge-core`):
 
@@ -443,7 +443,7 @@ flowchart LR
   surface["api-surface.json<br/>763 commands · keys · types"] -->|request| engine["Engine object<br/>request · frame · mcp"]
   folders["Folders<br/>container · config · plugins?"] -->|start| engine
   engine -->|JSON| table["EffectCraft method table<br/>exec · run · export …"]
-  table -->|export · frame| requests["RenderRequest · FrameRequest<br/>effectcraft-automation"]
+  table -->|export · frame| requests["RenderRequest · FrameRequest<br/>craftbridge-effects"]
 ```
 
 ## 15. Repository and pins design
@@ -471,8 +471,9 @@ flowchart LR
 | `conformance/effects/` | NEW | §28: the corpus every platform's runner reads |
 | `plan/` | NEW | this plan; `node_modules/`, `review/`, `analysis/` and the bundle stay out of git |
 | `tools/env.sh`, `tools/doctor.sh`, `tools/ci.sh`, `tools/hooks/pre-push` | NEW | the build environment, resolved once; the prerequisites check; the gate; the gate before every push |
-| `tools/build-xcframework.sh`, `tools/build-android.sh`, `tools/update-upstream.sh`, `tools/seams.toml`, `tools/release.sh`, `tools/licences.toml` | NEW | §22, §23, §24, the release; the licences of Gradle and SwiftPM dependencies |
+| `tools/build-xcframework.sh`, `tools/build-android.sh`, `tools/update-upstream.sh`, `tools/adaptations.toml`, `tools/release.sh`, `tools/licences.toml` | NEW | §22, §23, §24, the adaptations and the EffectCraft items each relies on (below), the release; the licences of Gradle and SwiftPM dependencies |
 | `AGENTS.md`, `CLAUDE.md` | NEW | the repository's rules, each naming the gate check that enforces it |
+| `ATTRIBUTION.md` | NEW | the asset index: each folder that holds assets and the file listing their authors, sources and licences |
 | `README.md`, `NOTICE`, `LICENSE-MIT`, `LICENSE-APACHE`, `CHANGELOG.md` | NEW | the README says "based on EffectCraft by the ArtCraft team" in plain text and carries no ArtCraft mark (PD2, `docs/brand/LICENSE-brand.txt:1-42`) |
 
 **Dependency direction.** Within the core and within a plugin, dependencies point down the layers. `rust/xtask/src/layers.rs` lists each crate's layer once, and the gate fails on any edge the table does not allow (D-25).
@@ -488,47 +489,53 @@ flowchart LR
 
 - A core crate never depends on an `effectcraft-*` crate or on an app crate (PD9). An app crate never depends on another app's crates: code two plugins need moves into the core (PD18).
 - `uniffi` appears only in `-ffi` crates, and only an app's `-ffi` crate builds a `staticlib` or `cdylib` (D-4).
-- Swift: `CraftBridgeFFI` ← `CraftBridge` ← `CraftBridgeEffects`. Kotlin: `:effects` exposes `:core`. A platform folder never refers to another platform's code; every platform reads `conformance/`.
-- Generated files live only in `generated` or `Generated` directories, carry an `@generated` header where the format has comments, and are written only by `cargo xtask generate` (D-26, L10).
+- Swift: `CraftBridgeFFI` ← `CraftBridge` ← `CraftBridgeEffects`. Kotlin: `:effects` exposes `:core`. Swift and Kotlin take the same rule as Rust: a plugin target or plugin module depends only on the core (in Swift, the core's targets `CraftBridge`, the generated `CraftBridgeFFI` and its binary target), `CraftBridge` and `:core` depend on no plugin, and no plugin depends on another; the package manifest, read by `swift package dump-package`, and Gradle's own project graph, declared and resolved, enforce this. A platform folder never refers to another platform's code; every platform reads `conformance/`.
+- Code and data a generator in this repository writes live only in `generated` or `Generated` directories, carry an `@generated` header where the format has comments, and are written only by `cargo xtask generate` (D-26, L10). Two kinds of written-for-you file are outside that rule: what a build tool writes for itself (`Cargo.lock`, `Package.resolved`, the Gradle wrapper), which change only through that tool, and the plan's views in `plan/`, which the plan kit builds from this file and `plan/diagrams/src/` and `plan/plan check --final` checks.
 
-**Pins.** `[workspace.dependencies]` names each EffectCraft crate CraftBridge uses (`effectcraft-engine`, `-host`, `-automation`, `-gpu`, `-render`, `-time`) with one `git` and one `rev`, and `filmcraft-codecs` and `filmcraft-isobmff` with EffectCraft's own FilmCraft revision `d5ead4ba` (`effectcraft: Cargo.toml:89-90`), so CraftBridge's decoders register into the same registry EffectCraft decodes through (D-13).
+**Pins.** `[workspace.dependencies]` names each EffectCraft crate CraftBridge uses (`effectcraft-engine`, `-host`, `-automation`, `-gpu`, `-render`, `-time`, `-text`, `-media`, `-expr`, `-script`, `-plugin`) with `git = "https://github.com/storytold/effectcraft"` and one `rev`, an official revision (`10376058` at the start, PD4, PD17), and `filmcraft-codecs` and `filmcraft-isobmff` with EffectCraft's own FilmCraft revision `d5ead4ba` (`effectcraft: Cargo.toml:89-90`), so CraftBridge's decoders register into the same registry EffectCraft decodes through (D-13).
 
-- While any seam is unmerged, `git` is `https://github.com/ChristopherLinnett/effectcraft` and `rev` is the head of `craftbridge/seams-<pin>`: the upstream pin with every open seam pull request merged onto it (PD17).
-- Once every seam has merged, `git` returns to `https://github.com/storytold/effectcraft` and `rev` to the upstream commit.
 - Cargo applies `[patch]` tables only at the root workspace, so EffectCraft's own `[patch.crates-io]` entries (`hayro-syntax`, `hayro-jbig2` and the egui family, `effectcraft: Cargo.toml:223-239`) and its `[profile.release]` (`effectcraft: Cargo.toml:219-221`) are **generated** into `rust/Cargo.toml` from the pinned upstream `Cargo.toml` by `tools/update-upstream.sh`, and `Cargo.lock` starts from the pinned upstream `Cargo.lock`. No line of them is written by hand (D-21).
+- Nothing in EffectCraft is changed, and CraftBridge never builds from a fork or a patched branch; the fork `ChristopherLinnett/effectcraft` is only kept in step with upstream (PD17).
 
-**The seams** (PD5): each is a pull request from `ChristopherLinnett/effectcraft` to storytold/effectcraft, FFI-free, with a test, following the repository's rules (`AGENTS.md`).
+**The adaptations** (PD5, D-29). Where a phone needs EffectCraft to do something differently, CraftBridge does it in its own crates on EffectCraft's public interfaces, never by copying EffectCraft code. `tools/adaptations.toml` lists each adaptation with the EffectCraft files and items it relies on, so the update script names the adaptations an update touches (§24).
 
-| ID | Seam | Files (at `10376058`) | Why CraftBridge needs it |
-|---|---|---|---|
-| S1 | `effectcraft_host::session_in(&HostDirs)`: config, models, plug-ins and cache folders given explicitly; `session()` calls it with today's folders; iOS joins macOS in `platform_dir` (as storytold/effectcraft#1401 does) | MOD `crates/host/src/lib.rs:96-115`, `crates/host/src/app_dirs.rs:78-88` | an app's folders without process environment variables (`evidence/03-device-feasibility.md` Finding 11) |
-| S2 | External effect helpers compiled out on iOS and Android, as on wasm32 | MOD `crates/host/src/lib.rs:117-134`, `crates/host/Cargo.toml` | neither platform can run helper processes (`evidence/05-mobile-platforms.md` Findings 14–15) |
-| S3 | System font folders on iOS (`/System/Library/Fonts`) and Android (`/system/fonts`); an explicit `fonts` list in `HostDirs` | MOD `effectcraft: crates/text/src/fonts.rs:79-101` | system fonts on phones (`evidence/03-device-feasibility.md` Finding 10; V1) |
-| S4 | The CLI's orchestration moves into `effectcraft-automation`: `RenderRequest` (flags → queue parameters, defaults, validation) and `render::run` (queue, poll, progress, stop), `FrameRequest` resolution, `render_failure`, and `template::{prepare, render}`; the CLI keeps argument parsing and printing | MOD `apps/effectcraft-cli/src/main.rs:789-821`, `:860-1037`, `apps/effectcraft-cli/src/template.rs` (190 lines); NEW `crates/automation/src/{render_request,render,frame_request,template}.rs` | templates, frames and exports through the same code as the CLI, never a copy |
-| S5 | Render timings move into `effectcraft-automation::bench`, returning structured results the CLI prints | MOD `apps/effectcraft-cli/src/main.rs:1265-1350`, `:1507-1616`; NEW `crates/automation/src/bench.rs` | the `timings` method (PD6) |
-| S6 | Free memory on Android from `/proc/meminfo`, as on Linux | MOD `crates/engine/src/system/sysinfo.rs:143-160` | export memory sizing on Android (`evidence/01-system-inventory.md` Finding 19) |
-| S7 | An FFI-free video encoder registry in `effectcraft-export`, tried before the built-in encoders, mirroring `filmcraft_export::register_encoder` | MOD `crates/export/src/encode.rs:119-139`, `crates/export/src/lib.rs` | hardware encoding later (PD12, F1) |
+| ID | Adaptation in CraftBridge | Instead of | Relies on (EffectCraft at `10376058`) | Task |
+|---|---|---|---|---|
+| AD1 | `craftbridge-effects` builds its own `Session` from the public fields: models and plug-ins folders from the app's `Folders`, EffectCraft's `MediaPool`, an importer over `effectcraft_media::probe`, CraftBridge's exporter (AD7), `effectcraft_expr`'s expressions and syntax check, the plug-in loader of PD13 and no helper hooks; then `effectcraft_script::install` | `effectcraft_host::session()`, which takes its folders from `EFFECTCRAFT_CONFIG_DIR` or the desktop conventions and starts external helpers (`effectcraft: crates/host/src/lib.rs:96-147`; `evidence/03-device-feasibility.md` Finding 11; `evidence/05-mobile-platforms.md` Findings 14–15) | `Session` (`effectcraft: crates/engine/src/lib.rs:104-269`), `effectcraft_media::probe` (`effectcraft: crates/media/src/probe.rs:17`), `effectcraft_script::install` (`effectcraft: crates/script/src/lib.rs:78`) | FX-1a |
+| AD2 | At engine start, `effectcraft_text::add_source(&DirectorySource { dirs })` with the phone's system font folder (iOS `/System/Library/Fonts` once V1 confirms an app can read it; Android `/system/fonts`) and `Folders.fonts` | `DirectorySource::system()`, which knows the macOS, Windows and Unix desktop folders (`effectcraft: crates/text/src/fonts.rs:79-101`; `evidence/03-device-feasibility.md` Finding 10) | `FontSource`, `DirectorySource` (`effectcraft: crates/text/src/fonts.rs:67-76`), `add_source` (`:396-412`), `add_font_data` (`:414-422`) | FX-3 |
+| AD3 | `RenderRequest` (one field per `render` flag, mapped to the render-queue parameters with the CLI's names, defaults and errors) and the render runner: unqueue the project's other items, add this one, render without waiting, poll every 100 ms, report progress, stop on cancel, report failed items | the CLI's flag handling and queue-and-wait loop, which live in its binary (`effectcraft: apps/effectcraft-cli/src/main.rs:860-1037`) | the `renderQueue.add` and `renderQueue.render` commands; `render_progress`, `stop_render` and `poll_render` (`effectcraft: crates/engine/src/render_queue.rs:545`, `:692`, `:723`) | FX-1c |
+| AD4 | `FrameRequest`: comp, time or frame, maximum side or scale, transparency, resolved as `render-frame` resolves them | the CLI's `render-frame` (`effectcraft: apps/effectcraft-cli/src/main.rs:789-821`) | `Session::render_rgba8_alpha` (`effectcraft: crates/engine/src/session/render.rs:132-143`), `Backend::render_with` (`effectcraft: crates/automation/src/backend.rs:122-124`) | FX-1e |
+| AD5 | Templates: open an `.ectemplate`, apply values, render a frame or an export, and surface missing-font warnings | the CLI's `--template` (`effectcraft: apps/effectcraft-cli/src/template.rs`) | the `essential` and `templates` commands | FX-1f |
+| AD6 | Render timings per layer and effect, CPU against GPU, in the shape of the CLI's `bench` | the CLI's `bench` (`effectcraft: apps/effectcraft-cli/src/main.rs:1265-1350`, `:1507-1616`) | `effectcraft_render::Renderer`, `LayerCache`, `LayerTiming` (`effectcraft: crates/render/src/lib.rs:66`, `effectcraft: crates/render/src/opts.rs:92`) | FX-1d |
+| AD7 | CraftBridge's exporter, set as `Session.exporter`: it hands each job to EffectCraft's `FileExporter` inside a thread pool with as many threads as half the memory the phone reports available holds output frames at 16 bytes a pixel, between one and the core count; from W6 it also encodes H.264 and HEVC in hardware (§18) | `FileExporter` alone, whose free-memory figure is empty on iOS and Android because `sysinfo::memory()` has no branch for either (`effectcraft: crates/host/src/lib.rs:91-94`, `effectcraft: crates/engine/src/system/sysinfo.rs:142-168`), which leaves frames in flight bounded only by the thread count (`effectcraft: crates/export/src/pipeline.rs:140-149`, `:171-176`) | `Exporter`, `ExportJob` (`effectcraft: crates/engine/src/render_queue.rs:93-113`, `:22-46`), `FileExporter` (`effectcraft: crates/host/src/lib.rs:25-89`), the export frame loop's thread count | FX-1g, MED-3 |
 
 **States.**
-- *Pinned to the seam branch*: one or more seams unmerged; `rev` is the seam branch head; `info` reports `pin: "<upstream sha>+seams"`.
-- *Pinned upstream*: every seam merged; `rev` is a storytold commit.
-- *Seam rejected*: the pull request is closed; the seam stays on the branch and is listed in `NOTICE` as a CraftBridge change to EffectCraft (MIT OR Apache-2.0 permits it) until the owner decides otherwise (R4).
+- *Pinned*: `rev` is an official storytold/effectcraft commit; `info` reports it as `pin`.
+- *Update in progress*: the update script has moved the pin and named the adaptations whose EffectCraft code changed; the update merges once each named adaptation is rechecked and the gate passes (§24).
 
-**Edge cases.** A seam conflicts with a new upstream commit: the update script stops and names the seam and files (§24). Upstream merges a seam in a different shape: the next update drops the seam branch's version and adapts CraftBridge to upstream's (the owner's rule that upstream wins).
+**Edge cases.**
+- An update changes code an adaptation follows (a new `render` flag, a renamed command an adaptation calls): the script names the adaptation; `RenderRequest` gains the field and the corpus the scenario, in the same update.
+- An update removes a public item an adaptation uses: the build fails at the gate, and the adaptation is rewritten on what upstream offers instead, in the same update.
+- Upstream adds a public interface that does what an adaptation does (a session with explicit folders, an encoder interface): the adaptation moves onto it and leaves `tools/adaptations.toml` (upstream wins).
 
 **The gate.** `tools/ci.sh` is the one entry point for people, agents and CI (D-25). It runs `tools/doctor.sh --gate`, then every stage, and one run reports every failure.
 
 | Stage | Checks |
 |---|---|
 | Rust | `cargo fmt --check`; `cargo clippy --workspace --all-targets -D warnings`; `cargo test --workspace`; `cargo check` of the libraries for the four mobile targets; `cargo deny check licenses bans sources` |
-| Rules | `cargo xtask rules`: the root and platform-folder layout; layers and dependency direction; the inherited, unweakened lint table and `panic = "unwind"`; `unsafe` only in platform modules (D-20); Swift pointer APIs only under `Platform/`; the never-crash calls banned in Swift and Kotlin; JNI declarations only under `platform/`; generated-file placement; the licences of Gradle and SwiftPM dependencies (`tools/licences.toml`); one copy of each EffectCraft, FilmCraft and Craft library crate (D-13) |
+| Rules | `cargo xtask rules`: the root and platform-folder layout; layers and dependency direction, in Swift too (the manifest, read by `swift package dump-package`), with no plugin depending on a plugin; the inherited lint table, weakened by no crate, module, clippy configuration, Cargo configuration or compiler wrapper, with a build script only for a crate the layer table marks, and `panic = "unwind"`; `unsafe` only in platform modules (D-20), read from Rust's syntax tree by `syn` (D-28); generated-file placement; the licences of what the builds ship — every external module resolved onto a Gradle library module's release runtime classpath, every package a `Package.swift` names and every pin a `Package.resolved` records, each declared in `tools/licences.toml`, with build plugins checked by name; one copy of each EffectCraft, FilmCraft and Craft library crate (D-13) |
 | Generated | `cargo xtask generate --check`: everything regenerated, any difference fails (L10) |
-| Swift | `swift format lint --strict`; every target built for the iOS Simulator |
-| Android | Spotless (ktlint), Android Lint and the release build, with warnings as errors |
+| Swift | `swift format lint --strict`, whose never-crash rules (force unwraps and `as!`, `try!`, implicitly unwrapped optionals) neither its configuration nor a file-wide `swift-format-ignore-file` switches off; SwiftLint for the never-crash calls (`fatalError`, `exit`, `abort()` and the like), `.unsafelyUnwrapped` and the pointer APIs confined to `Platform/`, read from Swift's own syntax tree (D-28); every target built for the iOS Simulator, with an import the package does not declare an error (`DIAGNOSE_MISSING_TARGET_DEPENDENCIES=YES_ERROR`), so `CraftBridge` cannot import a plugin |
+| Android | Spotless (ktlint), detekt for the never-crash calls and the JNI declarations confined to `platform/`, read from Kotlin's own syntax tree (D-28), Android Lint and the release build, with warnings as errors; the build itself refuses a module that skips the convention plugin or sets its rules back, a check the gate asks for that no longer brings the tasks doing its work, and a project dependency, declared or resolved, from `:core` on any module or from a plugin module on anything but `:core`; a task any module disables or skips with `onlyIf` reports SKIPPED, which fails the stage |
 | Shell | shellcheck on every script |
-| Duplicates | jscpd over Rust, Swift, Kotlin and shell: ten repeated lines or seventy repeated tokens fail; generated directories are skipped |
+| Duplicates | jscpd over Rust, Swift, Kotlin and shell: a block of ten lines repeated anywhere fails; generated directories are skipped |
 | Conformance | the desktop corpus (§28), from QA-1 on |
 
+Until OPS-6, OPS-7 and OPS-8 land, `cargo xtask rules` makes the Swift and Kotlin checks named in the Swift and Android rows, and reads `unsafe` and lint attributes in Rust, on text with its comments and literals stripped (OPS-3); each of those tasks moves its checks onto the language's syntax tree and out of the rules stage.
+
+**Gate machinery.** The gate's own machinery decides what the gate checks, so it cannot guard itself: `tools/ci.sh`, `tools/env.sh`, `tools/hooks/`, `rust/xtask/`, `rust/.cargo/config.toml`, `android/sdk/settings.gradle.kts`, `android/sdk/build-logic/`, and the single copy of each of `rust/clippy.toml`, `rust/rustfmt.toml`, `rust/deny.toml`, `ios/sdk/.swift-format` and `tools/licences.toml`. A change to any of those files is a gate change, which its pull request names and whose review checks for weakened rules; the gate fails on a second copy of any listed configuration file, or of a tool configuration that would act like one, anywhere in the tree (AGENTS §10, decision #120).
+
+**Module build files.** An Android module's build file holds only comments, `plugins { id("craftbridge.android.library") }`, `android { namespace = "io.github.christopherlinnett.craftbridge.<module>" }` and a `dependencies` block whose entries are `api`, `implementation`, `testImplementation` or `androidTestImplementation` of a `project(":…")` or a `libs.<alias>`; the root `android/sdk/build.gradle.kts` holds only comments and a `plugins` block of `alias(libs.plugins.<alias>) apply false` lines and `id("craftbridge.quality")`. Every module the settings include has its build file, spelled exactly `build.gradle.kts` because a case-insensitive disk would hand Gradle a `Build.gradle.kts` all the same, no build file is written in Groovy — Gradle would read `build.gradle` in place of `build.gradle.kts`, and the rule reads only Kotlin — and anything else a build needs is configured once in `android/sdk/build-logic`, so a module's file never carries the reach to rewire a check the gate relies on (AGENTS §10, decision #121).
 <!-- @end -->
 
 ## 16. Core runtime design
@@ -544,6 +551,7 @@ flowchart LR
 | `src/cancel.rs` | NEW | `CancelToken` (`Arc<AtomicBool>`); the progress closure returns `false` once it is set |
 | `src/folders.rs` | NEW | `Folders` → `Confinement` read roots (container, bundle) and write root (container) (L5) |
 | `src/error.rs` | NEW | `CraftError` and the mapping in §14 |
+| `src/platform/memory.rs` | NEW | `available_memory()`: what the platform says the app may still allocate, `os_proc_available_memory()` on iOS and `MemAvailable` from `/proc/meminfo` on Android, for AD7 (§15). The core never depends on EffectCraft (PD9), and EffectCraft's `sysinfo` has no branch for either platform, so the core reads it itself; the layer table marks `craftbridge-core` a platform crate for this module (D-20) |
 | `src/gpu.rs`, `src/surface.rs`, `src/blit.wgsl`, `src/frames.rs` | NEW | §17 |
 
 **Behaviour.**
@@ -612,7 +620,7 @@ flowchart LR
 4. With one, it returns `Fallback<VtDecoder>` or `Fallback<McDecoder>`; without one, it returns `None` and FilmCraft's software decoder takes the stream. That decline path ran in the iOS Simulator, which has no hardware decoder, with a byte-identical result (`evidence/03-device-feasibility.md` Finding 14).
 5. Frames are converted into the same `DecodedFrame` layout the software decoder produces for that stream (filmcraft `crates/codecs/src/video.rs:19-55`), so EffectCraft's pipeline sees no difference.
 
-**Encoding.** Exports use EffectCraft's pure-Rust encoders (PD12). When seam S7 has merged, `craftbridge-media` adds VideoToolbox and MediaCodec H.264 and HEVC encoders registered through it, exposed as an export option (F1).
+**Encoding.** The first release exports through EffectCraft's pure-Rust encoders (PD12). Those encoders are internal to EffectCraft's export crate (`effectcraft: crates/export/src/encode.rs:100-115`), so hardware encoding (W6, F1) lives in CraftBridge's exporter (AD7). For an H.264 or HEVC job with hardware encoding chosen, it runs the same item through `FileExporter` (`effectcraft: crates/host/src/lib.rs:25-30`) as a Targa sequence and a WAV, handed to an in-memory sink and never written to disk: the sink receives each finished file, sequence frames from the render threads (`effectcraft: crates/export/src/out.rs:8-10`), and Targa frames are uncompressed (`effectcraft: crates/project/src/render_queue.rs:528-530`). The exporter puts the frames back in order, encodes them with `craftbridge-media`'s VideoToolbox or MediaCodec encoder and the sound with the platform's AAC encoder, and writes the MP4 with the ISO BMFF writer EffectCraft's own export uses, tagged BT.709 limited range as EffectCraft tags its own (`effectcraft: crates/export/src/encode.rs:22-58`). Every frame is still rendered by EffectCraft's pipeline, so its timing, colour and size rules apply unchanged.
 
 **States.**
 - *Hardware*: `info.hardwareDecoding = "VideoToolbox"` or `"MediaCodec"`.
@@ -632,14 +640,19 @@ flowchart LR
 
 | File | Change | What |
 |---|---|---|
-| `Cargo.toml` | NEW | `effectcraft-engine`, `-host`, `-automation`, `-gpu` from the workspace pins; `[target.'cfg(target_os = "android")'.dependencies] boa_engine = { version = "0.22", features = ["jsvalue-enum"] }` (D-8) |
+| `Cargo.toml` | NEW | `effectcraft-engine`, `-host`, `-automation`, `-gpu`, `-render`, `-text`, `-media`, `-expr`, `-script` and `-plugin` from the workspace pins; `[target.'cfg(target_os = "android")'.dependencies] boa_engine = { version = "0.22", features = ["jsvalue-enum"] }` (D-8) |
 | `src/app.rs` | NEW | `EffectCraftApp`: construction, GPU attach, the method table of §14 |
 | `src/methods.rs` | NEW | one function per method, each calling the upstream function named in §14's table |
 | `src/plugins.rs` | NEW | PD13: plug-in policy |
 | `src/info.rs` | NEW | `info`: engine version and pin from the generator's constants (§21), counts, GPU and decoder state |
+| `src/session.rs` | NEW | AD1: the session from EffectCraft's public fields with the app's folders; AD2: the phone's fonts |
+| `src/requests.rs` | NEW | AD3 `RenderRequest` and AD4 `FrameRequest` |
+| `src/runner.rs` | NEW | AD3: the render runner; AD5: the template runner |
+| `src/timings.rs` | NEW | AD6 |
+| `src/exporter.rs` | NEW | AD7: CraftBridge's exporter |
 
 **Construction.**
-1. `effectcraft_host::session_in(&HostDirs { config, models, plugins, cache, fonts })` (S1) builds the wired session. On iOS and Android it carries no helper hooks (S2).
+1. CraftBridge builds the session (AD1): `Session { models_dir, plugins_dir, footage: MediaPool::new(), importer, exporter, expr, expr_check, plugin_loader, plugin_previewer, ..Default::default() }` with the app's folders, CraftBridge's exporter (AD7) and no helper hooks, then `effectcraft_script::install`, then the phone's fonts (AD2).
 2. **Plug-ins (PD13):** with `Folders.plugins = None`, `session.plugin_loader` and `session.plugin_previewer` are `None` (fields at `effectcraft: crates/engine/src/lib.rs:207-215`), so no WebAssembly plug-in loads. On Android the loader is `effectcraft_plugin::loader` (`crates/plugin/src/lib.rs:61`). On iOS it is `plugins::bundle_loader`, a function with the same `PluginLoader` signature (`crates/engine/src/lib.rs:294`; the bundle path sits in a process-wide `OnceLock` set at start, because the signature is a plain function pointer) that refuses any `source` outside the bundle's plug-ins folder with `Unsupported` and otherwise calls `effectcraft_plugin::loader`, so a script or command cannot load a plug-in from the container (T24).
 3. `Backend::headless(session)` then `Backend::confine(Confinement::new(read: [container, bundle], write: [container]))` (L5).
 4. `McpServer::new(backend)`.
@@ -648,18 +661,18 @@ flowchart LR
 **Export (`export`, `template.render`), the main runtime flow:**
 
 ```mermaid
-%% @drawio d05-main-flow | Maya's export, call by call: the typed Swift call becomes one request; EffectCraft's own render code queues, renders and reports progress through the engine actor until done or cancelled.
+%% @drawio d05-main-flow | Maya's export, call by call: the typed Swift call becomes one request; CraftBridge's render runner drives EffectCraft's own render queue and reports progress through the engine actor until done or cancelled.
 sequenceDiagram
   participant App as Postcard Studio
   participant SW as CraftBridgeEffects
   participant EN as Engine actor
   participant FX as craftbridge-effects
-  participant AU as automation
+  participant AU as render runner
   participant SE as EffectCraft session
   App->>SW: export(card, mp4, h264, progress)
   SW->>EN: requestWithProgress("export", RenderRequest)
   EN->>FX: request_with_progress (other calls wait, L3)
-  FX->>AU: render::run(session, request, on_progress)
+  FX->>AU: run(session, request, on_progress)
   AU->>SE: renderQueue.add · renderQueue.render {wait: false}
   AU->>AU: every 100 ms: poll_render · render_progress
   AU-->>EN: on_progress(done, total, seconds left)
@@ -675,9 +688,9 @@ sequenceDiagram
   SW-->>App: file URL, or CancellationError
 ```
 
-`render::run` (S4) is the CLI's queue-and-wait code moved into the library: it unqueues the project's other items, adds this one, starts the render without waiting, polls every 100 ms and reads each item's status (`apps/effectcraft-cli/src/main.rs:958-1035`). New in the library, it calls `on_progress(done, total, seconds_left)` on each poll and `Session::stop_render` (`crates/engine/src/render_queue.rs:691-692`) when `on_progress` returns `false`. The CLI calls it with its terminal printer; CraftBridge with the listener.
+The render runner (AD3) does what the CLI's queue-and-wait loop does (`apps/effectcraft-cli/src/main.rs:958-1035`), written in CraftBridge on EffectCraft's public render-queue commands: it unqueues the project's other items, adds this one, starts the render without waiting, polls every 100 ms and reads each item's status. It calls `on_progress(done, total, seconds_left)` on each poll and `Session::stop_render` (`crates/engine/src/render_queue.rs:691-692`) when `on_progress` returns `false`. The conformance corpus runs it and the CLI on the same inputs (T9–T17, T22).
 
-**Other methods** follow §14's table: `exec` and `run` through `Backend::exec` with `automation::render_failure` (S4); `props`, `get`, `set` through the tools; `frame` through `FrameRequest::resolve` (S4) then `Session::render_rgba8_alpha` or `Backend::render_with`; `template.open` and `template.render` through `automation::template` (S4); `script` through the `script.run` command; `replay` through `effectcraft_engine::replay::run` on `Backend::session` (`crates/automation/src/backend.rs:61-66`); `timings` through `automation::bench` (S5); `mcp` through `McpServer::handle_line`.
+**Other methods** follow §14's table: `exec` and `run` through `Backend::exec`, failed render items reported as the CLI reports them (AD3); `props`, `get`, `set` through the tools; `frame` through `FrameRequest` (AD4) then `Session::render_rgba8_alpha` or `Backend::render_with`; `template.open` and `template.render` through the template runner (AD5); `script` through the `script.run` command; `replay` through `effectcraft_engine::replay::run` on `Backend::session` (`crates/automation/src/backend.rs:61-66`); `timings` through CraftBridge's timings (AD6); `mcp` through `McpServer::handle_line`.
 
 **States** (per call): success · `InvalidParams` (unknown key, bad JSON) · `NotFound` (comp, layer, property, template control) · `CommandFailed` (the engine's message; `run` adds the step) · waiting in order during an export (L3) · `Cancelled` · `Unsupported` (helper effects; plug-ins switched off; a script asking for a helper) · `Io` (outside the confinement).
 
@@ -802,9 +815,9 @@ Two Android library modules in the Gradle build at `android/sdk/` (PD16, PD19), 
 
 **Build.** `tools/build-android.sh` runs `cargo ndk -t arm64-v8a -t x86_64 -o android/sdk/effects/src/main/jniLibs build --release -p craftbridge-effects-ffi` with NDK r28, which aligns to 16 KB pages by default (`evidence/05-mobile-platforms.md` Finding 11), then `rust/uniffi-bindgen` for Kotlin into each module's `src/generated/kotlin/`. The script checks the alignment of the built library.
 
-**Build setup.** `gradle/libs.versions.toml` holds every version and `build-logic` the setup every module shares: AGP 9 with its built-in Kotlin, explicit API mode, Kotlin and Android Lint warnings as errors, Spotless with ktlint. A module's build file names only its namespace and dependencies (D-25).
+**Build setup.** `gradle/libs.versions.toml` holds every version and `build-logic` the setup every module shares: AGP 9 with its built-in Kotlin, explicit API mode, Kotlin and Android Lint warnings as errors, Spotless with ktlint. A module's build file holds only its convention plugin, its namespace and its dependencies, and `cargo xtask rules` refuses any other statement (AGENTS §10, decision #121); `settings.gradle.kts` fails the build for a module that does not apply the convention plugin, which would otherwise build without those rules; the plugin reads its rules back once a module's build file has run, so that file cannot set them back; the settings refuse a gate check whose working tasks a build file has unhooked, the Android stage a task one has disabled, and `cargo xtask rules` a `lint.xml`, which would switch Lint checks off for its folder (D-25).
 
-**Publishing.** `maven-publish` to `https://maven.pkg.github.com/ChristopherLinnett/craftbridge` with the ChristopherLinnett token (PD3); release builds only, at the version `rust/Cargo.toml` gives (§26, G3, D-27).
+**Publishing.** `maven-publish` to `https://maven.pkg.github.com/ChristopherLinnett/craftbridge` with the ChristopherLinnett token (PD3); release builds only, at the version `rust/Cargo.toml` gives (§26, G2, D-27).
 
 **Tests.** `./gradlew :effects:connectedAndroidTest` on the emulator in the gate; on the two acceptance Android phones (QA-3).
 <!-- @end -->
@@ -812,20 +825,20 @@ Two Android library modules in the Gradle build at `android/sdk/` (PD16, PD19), 
 ## 24. Upstream update loop design
 
 <!-- @view modules/upstream-update-loop.md -->
-`tools/update-upstream.sh <upstream-commit>` takes a new EffectCraft revision in one run (PD4, PD17, L9). GitHub calls use the ChristopherLinnett account per command (`GH_TOKEN=$(gh auth token --user ChristopherLinnett)`), never the machine's active login.
+`tools/update-upstream.sh <upstream-commit>` takes a new official EffectCraft revision in one run (PD4, PD17, L9). It need not be automatic, only quick to take: it does the mechanical steps and names what a person must recheck. UP-9 builds steps 1 and 2 and uses them to set the first pin, so the generated tables are never written by hand even once; OPS-4 adds steps 3 to 6. Any GitHub call it makes names the ChristopherLinnett account (`GH_TOKEN=$(gh auth token --user ChristopherLinnett)`), never the machine's active login.
 
 1. **Fetch** storytold/effectcraft and read the new revision's `Cargo.toml` and `Cargo.lock`.
-2. **Seams:** for each seam in `tools/seams.toml` (id, pull request, branch), drop it if its pull request has merged into the new revision; rebase the rest onto it in a scratch clone; merge them into `craftbridge/seams-<sha8>` and push it to `ChristopherLinnett/effectcraft`. A conflict stops the run and names the seam and files.
-3. **Pins:** write the `git`/`rev` pair (the seam branch, or storytold when no seam is open) and EffectCraft's FilmCraft revision into `[workspace.dependencies]` of `rust/Cargo.toml`; regenerate `[patch.crates-io]` and `[profile.release]` from upstream; start `Cargo.lock` from upstream's and resolve CraftBridge's own crates (D-21).
+2. **Pins:** write the new `rev` and EffectCraft's FilmCraft revision into `[workspace.dependencies]` of `rust/Cargo.toml`; regenerate `[patch.crates-io]` and `[profile.release]` from upstream; start `Cargo.lock` from upstream's and resolve CraftBridge's own crates (D-21).
+3. **Adaptations:** for each entry of `tools/adaptations.toml`, diff the EffectCraft files and items it lists between the old and the new revision, and name every adaptation whose items changed, with its diff, for a person to recheck against upstream's new code (§15).
 4. **Regenerate:** `cargo xtask generate` (the API surface and both facades); `craftbridge-effects-codegen diff` against the previous surface.
-5. **Gate:** `tools/ci.sh` (desktop conformance, mobile type-checks, duplicate-crate check).
-6. **Record:** append to `docs/upstream-updates.md`: from and to revisions, seams dropped or carried, commands added, changed and removed, the gate result.
+5. **Gate:** `tools/ci.sh` (desktop conformance against the new revision's CLI, mobile type-checks, duplicate-crate check).
+6. **Record:** append to `docs/upstream-updates.md`: from and to revisions, the adaptations named and how each was resolved, commands added, changed and removed, the gate result.
 
-**States.** Up to date · updated cleanly (commit ready) · seam conflict (stops; the seam is fixed on its branch) · breaking API change (exit 2; the next release is a major version) · gate failure (stops with the failing scenarios).
+**States.** Up to date · updated cleanly (commit ready) · adaptations to recheck (the run completes and lists them; the update merges once each is rechecked) · breaking API change (exit 2; the next release is a major version) · gate failure (stops with the failing scenarios).
 
-**Edge cases.** Upstream merged a seam in a different shape: CraftBridge's call sites adapt to upstream's version, which governs (§15). A FilmCraft revision change: taken from EffectCraft's `Cargo.toml`; the duplicate-crate check proves one copy of `filmcraft-codecs` (D-13).
+**Edge cases.** Upstream adds a public interface that does what an adaptation does: the adaptation moves onto it in that update (§15). Upstream adds a CLI flag or method: AD3 lists the CLI's flag code, so the script names it, and the corpus gains a scenario. A FilmCraft revision change: taken from EffectCraft's `Cargo.toml`; the duplicate-crate check proves one copy of `filmcraft-codecs` (D-13).
 
-**Tests.** A dry run against the current pin produces no changes; a fixture surface with a removed command makes `diff` exit 2.
+**Tests.** A dry run against the current pin produces no changes; a fixture surface with a removed command makes `diff` exit 2; a fixture revision that changes a file an adaptation lists names that adaptation.
 <!-- @end -->
 
 ## 25. Samples and guides design
@@ -866,28 +879,26 @@ CraftBridge is new, so compatibility is with EffectCraft's documents and release
 | B8 | iOS app in the background without the GPU entitlement | the export continues on the CPU | L7, §17 |
 | B9 | Footage in a codec or profile without a hardware decoder | software decoding, identical frames | §18 |
 | B10 | One app wants EffectCraft and a later FilmCraft plugin | one combined native library | §20 |
-| B11 | A seam merges upstream in a different shape | CraftBridge adapts to upstream's version | §15, §24 |
+| B11 | An EffectCraft update changes code an adaptation relies on | the update names the adaptation, which is rechecked before the update merges | §15, §24 |
 
 **Build order.** Each wave is usable on its own, and nothing is published until the owner says so.
 
 ```mermaid
-%% @drawio d06-rollout | Build order: each wave stands on the one before; three gates decide when the SDK moves on and when it is published.
+%% @drawio d06-rollout | Build order: each wave stands on the one before; two gates decide when the SDK moves on and when it is published.
 flowchart LR
-  W0["W0 Prerequisites"] --> W1["W1 Upstream seams<br/>+ seam branch"]
-  W1 --> G1{"G1 seam branch<br/>passes desktop gate"}
-  G1 --> W2["W2 Core + EffectCraft crate"]
+  W0["W0 Prerequisites"] --> W1["W1 Official pin<br/>+ adaptations list"]
+  W1 --> W2["W2 Core + EffectCraft crate"]
   W2 --> W3["W3 Bindings + packages"]
   W3 --> W4["W4 GPU surfaces + decoders"]
-  W4 --> G2{"G2 device<br/>acceptance"}
-  G2 --> W5["W5 Samples + staged release"]
-  W5 --> G3{"G3 owner<br/>publishes"}
+  W4 --> G1{"G1 device<br/>acceptance"}
+  G1 --> W5["W5 Samples + staged release"]
+  W5 --> G2{"G2 owner<br/>publishes"}
 ```
 
 | Gate | Passes when | Decides |
 |---|---|---|
-| G1 | the seam branch builds and the desktop CLI's own tests pass on it | W2 starts on that pin |
-| G2 | the conformance corpus passes on the three acceptance devices and V2–V5 are closed | W5 starts |
-| G3 | the owner says to publish | the packages are published (the repository is already public once hosted CI runs, PD3) |
+| G1 | the conformance corpus passes on the three acceptance devices and V2–V5 are closed | W5 starts |
+| G2 | the owner says to publish | the packages are published (the repository is already public once hosted CI runs, PD3) |
 
 **Switches.** GPU (`GpuChoice.cpuOnly`), hardware decoding (`hardwareDecoding = false`), plug-ins (`Folders.plugins = nil`), background GPU (`BackgroundPolicy`). Each is a host-app setting; none needs a CraftBridge release.
 <!-- @end -->
@@ -900,14 +911,14 @@ flowchart LR
 | E2 | Kotlin app → `:effects` | the Kotlin API (§23) | instrumented corpus on the emulator and the acceptance phones (QA-2, QA-3) |
 | E3 | Swift / Kotlin → native library | UniFFI boundary (§14, §20) | smoke tests call every boundary function (QA-2) |
 | E4 | Engine actor → `craftbridge-effects` | `CraftApp` (§16) | fake-app unit tests; desktop corpus (QA-1) |
-| E5 | `craftbridge-effects` → EffectCraft | method table → `Backend`, tools, `McpServer`, `automation` (§14, §19) | desktop corpus against the CLI on the same inputs (QA-1) |
+| E5 | `craftbridge-effects` → EffectCraft | method table and adaptations → `Session`, `Backend`, tools, `McpServer`, the render queue (§14, §15, §19) | desktop corpus against the CLI on the same inputs (QA-1) |
 | E6 | core → Metal | device and surface (§17) | `present` on the simulator and the acceptance iPhone (V4) |
 | E7 | core → Vulkan | device and surface (§17) | `present` on the emulator and the acceptance Android phones (V4) |
 | E8 | `craftbridge-media` → VideoToolbox | hardware decoding (§18) | T23 on the acceptance iPhone (V2) |
 | E9 | `craftbridge-media` → MediaCodec | hardware decoding (§18) | T23 on the acceptance Android phones (V3) |
 | E10 | `craftbridge-media` → FilmCraft registry | `register_video_decoder` (§18) | duplicate-crate check proves one registry; decline path on the simulator (`evidence/03-device-feasibility.md` Finding 14) |
 | E11 | generator → registry | `command_specs`, `params_schema`, tool catalogue (§21) | golden surface and regeneration check (L10) |
-| E12 | update script → GitHub | seam branches, pull requests (§24) | dry run on the current pin; one real update before G2 |
+| E12 | update script → storytold/effectcraft | official revisions; `tools/adaptations.toml` (§24) | dry run on the current pin; one real update before G1 |
 
 **The validation spine:** the running example (§5) end to end, as T17 of the corpus: open `Birthday Card.ectemplate`, set Name = "Sam" and Photo = `sam.jpg`, preview at 2 s, export 180 frames of 1080 × 1080 H.264, cancel one export half-way, export again in the background (§25), on the simulator, the emulator and the three acceptance devices.
 
@@ -918,8 +929,8 @@ flowchart LR
 | Unit | core actor, cancel, errors, journal; generator type rules; media `Fallback`; blit pass | `cargo test` on the host |
 | Desktop conformance (QA-1) | every corpus scenario through `craftbridge-effects` on macOS, compared with the EffectCraft CLI on the same inputs | `craftbridge-effects-conformance` over `conformance/effects/`, in `tools/ci.sh` |
 | Simulator and emulator (QA-2) | the corpus through Swift (Swift Testing, iPhone simulator) and Kotlin (instrumented, Android emulator) | gate |
-| Device acceptance (QA-3) | the corpus and the spine on an iPhone with iOS 17 or later, a Mali Android phone and an Adreno Android phone | before G2 |
-| Upstream | the seams' own tests in EffectCraft (`cargo xtask ci`) | each seam pull request |
+| Device acceptance (QA-3) | the corpus and the spine on an iPhone with iOS 17 or later, a Mali Android phone and an Adreno Android phone | before G1 |
+| Update | the adaptations an update names, rechecked; the corpus against the new revision's CLI | each upstream update (§24) |
 | Manual | the samples on each device: preview smoothness, background export | V5 |
 
 **The conformance corpus** (`conformance/effects/corpus.toml`, read by the runner of every platform; the desktop CLI is the oracle):
@@ -954,7 +965,7 @@ flowchart LR
 ## 29. Non-functional requirements
 
 - **Privacy.** No network calls and no telemetry; the engine reads only the app's container, its bundle and paths the app passes, and writes only its container (L5). Nothing is logged off the device.
-- **Security.** Hand-written `unsafe` only in the platform modules, each block justified (§20); WebAssembly plug-ins run in EffectCraft's interpreter sandbox and load only where the app allows (PD13); no helper processes (S2).
+- **Security.** Hand-written `unsafe` only in the platform modules, each block justified (§20); WebAssembly plug-ins run in EffectCraft's interpreter sandbox and load only where the app allows (PD13); no helper processes (AD1).
 - **Reliability.** EffectCraft's "never crash" rules hold in every CraftBridge crate; a panic becomes `Internal` and the document stays (§16). A cancel takes effect within one 100 ms poll plus the frame being rendered.
 - **Responsiveness.** No engine call blocks the caller's thread; all are `async` (§20).
 - **Performance.** First-preview and export times of the running example on each acceptance device are recorded as the baseline (V5) and reported per release; a release slower than the baseline by more than 10 % is flagged.
@@ -969,10 +980,10 @@ flowchart LR
 |---|---|---|---|
 | R1 | A physical iPhone or Android GPU rejects the device request or behaves unlike the simulator and emulator | high | limits clamped to the adapter (§17); CPU fallback (L7); V4 on three devices |
 | R2 | Mobile GPU driver bugs in wgpu (Mali, Adreno; `evidence/05-mobile-platforms.md` Finding 3) give wrong pixels | high | T8 on the devices; the compositor already renders an effect on the CPU when its kernel fails; affected effects reported upstream |
-| R3 | An iOS app cannot read `/System/Library/Fonts` | medium | V1 before S3 merges; if it cannot, S3 leaves iOS out and apps bundle fonts through `Folders.fonts` |
-| R4 | A seam is declined or conflicts on rebase | medium | PD17 branch; the update script stops on conflicts with the seam named (§24) |
+| R3 | An iOS app cannot read `/System/Library/Fonts` | medium | V1 before FX-3; if it cannot, AD2 registers no iOS system folder and apps bundle fonts through `Folders.fonts` |
+| R4 | An EffectCraft update changes or removes code an adaptation relies on | medium | the update script names the adaptation from `tools/adaptations.toml` (§24); the corpus compares with the new CLI; the update merges only when both are clean |
 | R5 | UniFFI, pre-1.0, changes its interface | medium | UniFFI pinned to one version; updated deliberately with the gate |
-| R6 | Long exports exhaust memory on a phone | medium | S6 on Android; V5 records peak memory for the running example; the iOS increased-memory-limit entitlement documented |
+| R6 | Long exports exhaust memory on a phone | medium | AD7 sizes the export's thread pool from the memory the phone reports available; V5 records peak memory for the running example; the iOS increased-memory-limit entitlement documented |
 | R7 | App Review treats WebAssembly plug-ins as downloaded code | low | PD13: bundle-only on iOS, switchable |
 | R8 | No AHardwareBuffer import in wgpu, so Android footage preview copies frames | low | measured in V5; zero-copy follows wgpu#2320 (F4) |
 | R9 | A boa upgrade renames `jsvalue-enum`, and scripts panic on Android again | medium | T18 and T5 on the emulator in the gate |
@@ -980,7 +991,7 @@ flowchart LR
 | R11 | The iOS continued-processing GPU entitlement is unavailable | low | CPU in the background (L7) |
 | R12 | MediaCodec vendor quirks | medium | `AImageReader` output; hardware-only factories with software fallback (§18) |
 | R13 | CraftBridge resolves different crate versions from upstream | medium | generated `[patch]` and lock (D-21); the duplicate-crate check |
-| R14 | The library grows past what apps accept | low | size reported each release; feature-gating needs upstream flags (F3) |
+| R14 | The library grows past what apps accept | low | size reported each release; building only the EffectCraft crates and features CraftBridge calls (F3) |
 
 ---
 
@@ -988,27 +999,23 @@ flowchart LR
 
 ## 31. Team task lists
 
-Estimates are in engineer-days; each wave's total in §11 is the sum of its tasks here. Every task names its acceptance.
+Estimates are in engineer-days; each wave's total in §11 is the sum of its tasks here. Every task names its acceptance. Each task is an issue in the CraftBridge project (https://github.com/users/ChristopherLinnett/projects/9) with its blockers linked, so the tasks ready to start are always visible; a task over two days is split there into sub-issues along its section's file table. Each issue merges into its wave's iteration branch (`iteration/w0`, …) once its review loop is clean (`AGENTS.md` §12), and the iteration branch reaches `main` through one pull request the owner approves.
 
 <!-- @view tasks/ops.md -->
 **OPS: repository, release** (W0, W5)
 - [ ] OPS-1 · 0.5 d · W0 — Create the private `ChristopherLinnett/craftbridge` repository from `artcraft-plugin-port/` with `README.md` (PD2 attribution), `NOTICE`, `LICENSE-MIT`, `LICENSE-APACHE`, `CHANGELOG.md`, `AGENTS.md` and `CLAUDE.md`, the git and editor files, and this plan in `plan/` (§15); each decision behind `AGENTS.md` is an issue labelled `decision`. Acceptance: P1 closed; the README carries no ArtCraft mark.
 - [ ] OPS-2 · 0.5 d · W0 — `tools/env.sh` and `tools/doctor.sh`: checks the pinned Rust 1.99.1 and its four targets, cargo-deny, Xcode 26.6 with its iOS Simulator SDK and swift-format, Android platform and build tools 37, NDK r28, JDK 21, shellcheck, Node.js, `cargo-ndk` and the ChristopherLinnett token, printing the fix for each gap; `--gate` checks only what the gate needs, `--install-hooks` runs the gate before every push. Acceptance: P3 closed on this machine.
 - [ ] OPS-3 · 1.5 d · W0 — The three platform builds as skeletons (the Cargo workspace with every crate empty, the Swift package, the Gradle build with `build-logic`), their formatters and lints, `cargo xtask rules` and `generate`, and the `tools/ci.sh` gate (§15). Acceptance: the gate passes on the skeleton, and each rule check fails on a planted violation.
-- [ ] OPS-4 · 2 d · W5 — `tools/update-upstream.sh` and `tools/seams.toml` (§24). Acceptance: a dry run on the current pin changes nothing; E12.
-- [ ] OPS-5 · 1.5 d · W5 — `tools/release.sh`: version, XCFramework zip and checksum, AARs, release notes with size and baseline (§9), the one version from `rust/Cargo.toml` (D-27), and `craftbridge-swift` written from `ios/sdk/` (D-24); stages a draft release without publishing. Acceptance: G3 is the only step left.
+- [ ] OPS-6 · 0.5 d · W0 — The Swift never-crash and pointer-API rules, and the refusal of a file-wide `swift-format-ignore-file` of a never-crash rule, as SwiftLint rules, pinned and checked by `tools/doctor.sh` (D-28). Acceptance: each banned call, pointer API and file-wide ignore, planted, fails the Swift stage; a call inside a nested comment does not.
+- [ ] OPS-7 · 0.5 d · W0 — The Kotlin never-crash and JNI rules as detekt rules, configured once in `build-logic` (D-28). Acceptance: each banned call, planted in a main source set, fails the Android stage.
+- [ ] OPS-8 · 0.5 d · W0 — The Rust `unsafe` and lint-attribute checks on the `syn` parser, and the hand-written source stripper removed from `rust/xtask` (D-28). Acceptance: every planted violation still fails; no stripper remains.
+- [ ] OPS-4 · 1.5 d · W5 — Steps 3 to 6 of `tools/update-upstream.sh` (§24): the adaptations diff over `tools/adaptations.toml`, regeneration and the API diff, the gate, the record. Acceptance: a dry run on the current pin changes nothing; a fixture revision that changes a file an adaptation lists names it; E12.
+- [ ] OPS-5 · 1.5 d · W5 — `tools/release.sh`: version, XCFramework zip and checksum, AARs, release notes with size and baseline (§9), the one version from `rust/Cargo.toml` (D-27), and `craftbridge-swift` written from `ios/sdk/` (D-24); stages a draft release without publishing. Acceptance: G2 is the only step left.
 <!-- @end -->
 
 <!-- @view tasks/up.md -->
-**UP: upstream seams** (W1; each a pull request from `ChristopherLinnett/effectcraft`, following EffectCraft's rules: claim the issue, a test that fails without the change, `cargo xtask ci`)
-- [ ] UP-1 · 1 d — S1 `session_in(&HostDirs)` and the iOS `platform_dir` branch. Acceptance: host tests; B1.
-- [ ] UP-2 · 0.5 d — S2 helpers compiled out on iOS and Android. Acceptance: `cargo check` for both targets without `effectcraft-helper-host`.
-- [ ] UP-3 · 0.5 d — S3 iOS and Android font folders and `HostDirs.fonts`. Acceptance: V1 closed first; `list_fonts` shows system families on the simulator and emulator.
-- [ ] UP-4 · 3 d — S4 `RenderRequest`, `render::run`, `FrameRequest`, `render_failure` and `template` move into `effectcraft-automation`; the CLI calls them. Acceptance: the CLI's own integration tests pass unchanged.
-- [ ] UP-5 · 2 d — S5 `automation::bench`; the CLI prints its results. Acceptance: CLI `bench` output unchanged.
-- [ ] UP-6 · 0.5 d — S6 Android free memory. Acceptance: unit test of the parser on Android's `/proc/meminfo` layout.
-- [ ] UP-7 · 1.5 d — S7 the encoder registry in `effectcraft-export`. Acceptance: export tests unchanged; a test encoder registered through it is used.
-- [ ] UP-8 · 1 d — The `craftbridge/seams-10376058` branch carrying S1–S7, and the pins pointing at it (§15). Acceptance: G1.
+**UP: upstream pin** (W1; EffectCraft itself is never changed, PD5)
+- [ ] UP-9 · 1.5 d — Steps 1 and 2 of `tools/update-upstream.sh` (§24): fetch an official storytold/effectcraft revision, write the `[workspace.dependencies]` pins of `rust/Cargo.toml`, and generate `[patch.crates-io]`, `[profile.release]` and the starting `Cargo.lock` from it (D-21); run it to pin `10376058` with FilmCraft `d5ead4ba`; `tools/adaptations.toml` with AD1–AD7 and the EffectCraft items each relies on (§15). Acceptance: the workspace builds for the host and the four mobile targets against the pin; `cargo deny` and the duplicate check pass; running the script again on the same revision changes nothing; the gate fails unless every `[patch]` entry in `rust/Cargo.toml` is exactly what the script generates, and fails on `[patch]` or `paths` in the Cargo configuration, so no hand-written path or patch can build a changed EffectCraft (cargo-deny sees only git and registry sources); nothing in EffectCraft or its fork is changed.
 <!-- @end -->
 
 <!-- @view tasks/core.md -->
@@ -1019,15 +1026,16 @@ Estimates are in engineer-days; each wave's total in §11 is the sum of its task
 
 <!-- @view tasks/fx.md -->
 **FX: EffectCraft app crate** (W2)
-- [ ] FX-1 · 4 d — `craftbridge-effects`: construction and every method of §14's table. Acceptance: E5; T1–T22 on the desktop.
+- [ ] FX-1 · 9.5 d — `craftbridge-effects`: construction, the adaptations AD1 and AD3–AD7, and every method of §14's table (§15, §19). Acceptance: E5; T1–T22 on the desktop.
 - [ ] FX-2 · 1 d — Plug-in policy, the Android `jsvalue-enum` dependency, GPU attach (§19). Acceptance: T24 and T18 on the desktop.
+- [ ] FX-3 · 0.5 d — AD2: the phone's font folders through `effectcraft_text::add_source` (§15). Acceptance: V1 closed first; `list_fonts` shows the system families on the simulator and the emulator.
 <!-- @end -->
 
 <!-- @view tasks/qa.md -->
 **QA: conformance** (W2–W4)
 - [ ] QA-1 · 3 d · W2 — `craftbridge-effects-conformance` and `conformance/effects/`: the corpus T1–T24, the CLI oracle runner, the D-12 comparison. Acceptance: T1–T22 and T24 pass on macOS in the gate.
 - [ ] QA-2 · 3 d · W3 — The corpus through Swift Testing on the iPhone simulator and instrumented tests on the Android emulator. Acceptance: E1–E3.
-- [ ] QA-3 · 3 d · W4 — Device acceptance on the three phones (P4), including T23 and the spine (§27). Acceptance: G2.
+- [ ] QA-3 · 3 d · W4 — Device acceptance on the three phones (P4), including T23 and the spine (§27). Acceptance: G1.
 <!-- @end -->
 
 <!-- @view tasks/ffi.md -->
@@ -1056,7 +1064,7 @@ Estimates are in engineer-days; each wave's total in §11 is the sum of its task
 **MED: native media** (W4, W6)
 - [ ] MED-1 · 3 d · W4 — VideoToolbox decoder and `Fallback` (§18). Acceptance: E8, E10; V2.
 - [ ] MED-2 · 4 d · W4 — MediaCodec decoder through `AImageReader` (§18). Acceptance: E9; V3.
-- [ ] MED-3 · 5 d · W6 — Hardware H.264 and HEVC encoders through S7 once it has merged. Acceptance: F1 closed; T9 and T10 with the hardware option.
+- [ ] MED-3 · 6.5 d · W6 — Hardware H.264 and HEVC encoding in CraftBridge's exporter (AD7, §18): VideoToolbox and MediaCodec encoders in `craftbridge-media`. Acceptance: F1 closed; T9 and T10 with the hardware option; every other format unchanged.
 <!-- @end -->
 
 <!-- @view tasks/doc.md -->
@@ -1071,14 +1079,14 @@ Estimates are in engineer-days; each wave's total in §11 is the sum of its task
 | ID | Prerequisite | Owner | Blocks |
 |---|---|---|---|
 | P1 | The private repository `ChristopherLinnett/craftbridge` exists (PD3) | ChristopherLinnett | OPS-1 |
-| P2 | `gh auth token --user ChristopherLinnett` returns a token with `repo` and `workflow` scopes (both present on 2026-11-12), plus `write:packages` for publishing the AARs (absent on 2026-11-12; `gh auth refresh -s write:packages` adds it); every GitHub call uses it per command (D-22) | ChristopherLinnett | UP-1 to UP-8, OPS-5 |
+| P2 | `gh auth token --user ChristopherLinnett` returns a token with `repo` and `workflow` scopes (both present on 2026-11-12), plus `write:packages` for publishing the AARs (absent on 2026-11-12; `gh auth refresh -s write:packages` adds it); every GitHub call uses it per command (D-22) | ChristopherLinnett | OPS-5 |
 | P3 | Toolchains: rustc 1.99.1 with targets `aarch64-apple-ios`, `aarch64-apple-ios-sim`, `aarch64-linux-android` and `x86_64-linux-android`, Xcode 26.6, Android platform 37, NDK 28.2, JDK 21, `cargo-ndk` and `cargo-deny`; `uniffi-bindgen` is the workspace crate (§20); `tools/doctor.sh` checks each | OPS | W0 onward |
-| P4 | Acceptance devices with developer mode: an iPhone on iOS 17 or later, an Android phone with a Mali GPU (for example a Pixel 8) and one with an Adreno GPU (for example a Snapdragon 8 Gen 3 phone); an Apple development team to sign test builds | ChristopherLinnett | QA-3, G2 |
-| P5 | The fork `ChristopherLinnett/effectcraft` (exists) synced to `10376058`, and each seam's issue claimed on storytold/effectcraft per its contribution rules | UP | UP-1 to UP-7 |
+| P4 | Acceptance devices with developer mode: an iPhone on iOS 17 or later, an Android phone with a Mali GPU (for example a Pixel 8) and one with an Adreno GPU (for example a Snapdragon 8 Gen 3 phone); an Apple development team to sign test builds | ChristopherLinnett | QA-3, G1 |
+| P5 | The fork `ChristopherLinnett/effectcraft` (exists) kept in step with storytold/effectcraft; nothing of CraftBridge's is pushed to it or opened upstream (PD5, PD17) | ChristopherLinnett | — |
 
 | ID | Verification (closed during the build) | Closes in |
 |---|---|---|
-| V1 | An iOS app can list and read `/System/Library/Fonts` from its sandbox, on the simulator and the acceptance iPhone | before UP-3 |
+| V1 | An iOS app can list and read `/System/Library/Fonts` from its sandbox, on the simulator and the acceptance iPhone | before FX-3 |
 | V2 | VideoToolbox decodes the running example's footage in hardware on the acceptance iPhone, frames equal to software (T23) | MED-1 |
 | V3 | MediaCodec does the same on both acceptance Android phones (T23) | MED-2 |
 | V4 | Metal and Vulkan devices with clamped limits on the three phones, and whether each also accepts the compositor's default limits (T8) | IOS-2, AND-2 |
@@ -1088,24 +1096,24 @@ Estimates are in engineer-days; each wave's total in §11 is the sum of its task
 
 | ID | Follow-up | Owner |
 |---|---|---|
-| F1 | Hardware encoding (MED-3) once S7 merges | MED |
+| F1 | Hardware encoding (MED-3) in CraftBridge's exporter, after the first release | MED |
 | F2 | Hosted CI for `tools/ci.sh` on GitHub-hosted runners, free once the repository is public; the repository becomes public when it starts (PD3) | ChristopherLinnett |
-| F3 | Optional engine modules through upstream feature flags, to trim the size | UP |
+| F3 | A smaller library: build only the EffectCraft crates and features CraftBridge calls | UP |
 | F4 | Zero-copy Android footage once wgpu imports AHardwareBuffers (gfx-rs/wgpu#2320) | CORE |
 | F5 | Proposing `craftbridge-core` to storytold/craft-libs (PD10) | ChristopherLinnett |
 
-**Related work outside scope.** storytold/effectcraft#1401 (the iOS desktop port) changes the same `platform_dir` line as S1: whichever merges second adapts. storytold/effectcraft#2846 (how the Android entry point carries `unsafe`) does not affect CraftBridge, whose `unsafe` lives in its own repository. storytold/effectcraft#1840 (hardware encoding on desktops) touches the files S7 changes: S7 is the FFI-free part both need. storytold/effectcraft#1518 is the same limits class as §17's clamp, on the web build.
+**Related work outside scope.** storytold/effectcraft#1401 (the iOS desktop port) adds iOS to `platform_dir`, which CraftBridge does not call: AD1 passes its folders explicitly. storytold/effectcraft#2846 (how the Android entry point carries `unsafe`) does not affect CraftBridge, whose `unsafe` lives in its own repository. storytold/effectcraft#1840 (hardware encoding on desktops) may give EffectCraft an encoder interface; the update that takes it moves AD7's hardware encoding onto that interface (upstream wins). storytold/effectcraft#1518 is the same limits class as §17's clamp, on the web build.
 
 ## 33. Sign-off checklist
 
 - [ ] RQ1–RQ8 each delivered by the capabilities and sections in Appendix C's requirement map
 - [ ] PD1–PD19 applied in the sections §6 names
 - [ ] P1–P5 closed; V1–V7 closed with results recorded in `plan/evidence/99-verification.md`
-- [ ] G1 passed: the seam branch builds and passes the desktop gate
+- [ ] UP-9 closed: the workspace builds against the official pin for the host and the four mobile targets
 - [ ] All W0–W5 tasks done with their acceptance met
-- [ ] T1–T24 pass on the simulator, the emulator and the three acceptance devices (G2)
+- [ ] T1–T24 pass on the simulator, the emulator and the three acceptance devices (G1)
 - [ ] The staged 0.1.0 release reports its size and baseline
-- [ ] G3: the owner (ChristopherLinnett) decides on publishing
+- [ ] G2: the owner (ChristopherLinnett) decides on publishing
 
 ---
 
@@ -1127,13 +1135,11 @@ Estimates are in engineer-days; each wave's total in §11 is the sum of its task
 | M9 | Kotlin | `android/sdk` (`build-logic`, `:core`, `:effects`) | NEW | §23 |
 | M10 | Conformance | `rust/effects/craftbridge-effects-conformance`, `conformance/effects` | NEW | §28 |
 | M11 | Samples and guides | `ios/samples`, `android/samples`, `docs/` | NEW | §25 |
-| M12 | EffectCraft host | `crates/host/src/lib.rs`, `crates/host/src/app_dirs.rs`, `crates/host/Cargo.toml` | MOD (S1, S2) | §15 |
-| M13 | EffectCraft text | `crates/text/src/fonts.rs` | MOD (S3) | §15 |
-| M14 | EffectCraft automation and CLI | `crates/automation/src/{render_request,render,frame_request,template,bench}.rs`, `apps/effectcraft-cli/src/main.rs`, `apps/effectcraft-cli/src/template.rs` | NEW, MOD (S4, S5) | §15 |
-| M15 | EffectCraft engine | `crates/engine/src/system/sysinfo.rs` | MOD (S6) | §15 |
-| M16 | EffectCraft export | `crates/export/src/encode.rs`, `crates/export/src/lib.rs` | MOD (S7) | §15 |
-| M17 | EffectCraft engine, GPU, automation | `crates/engine/src/cmd.rs`, `crates/engine/src/cmd/schema.rs`, `crates/gpu/src/lib.rs`, `crates/automation/src/{backend,server,tools,confine}.rs` | CHK | §14, §17, §19, §21 |
-| M18 | FilmCraft codecs | filmcraft `crates/codecs/src/{lib,hw,video}.rs` | CHK | §18 |
+| M12 | EffectCraft interfaces the adaptations use | `crates/engine/src/{lib,render_queue}.rs`, `crates/host/src/lib.rs`, `crates/text/src/fonts.rs`, `crates/render/src/{lib,opts}.rs`, `crates/media/src/probe.rs`, `crates/script/src/lib.rs` | CHK | §15, §19 |
+| M13 | EffectCraft CLI | `apps/effectcraft-cli/src/main.rs`, `apps/effectcraft-cli/src/template.rs` | CHK: the behaviour AD3–AD6 follow, and the oracle | §15, §28 |
+| M14 | EffectCraft export | `crates/export/src/{out,encode,pipeline}.rs` | CHK | §15, §18 |
+| M15 | EffectCraft engine, GPU, automation | `crates/engine/src/cmd.rs`, `crates/engine/src/cmd/schema.rs`, `crates/gpu/src/lib.rs`, `crates/automation/src/{backend,server,tools,confine}.rs` | CHK | §14, §17, §19, §21 |
+| M16 | FilmCraft codecs | filmcraft `crates/codecs/src/{lib,hw,video}.rs` | CHK | §18 |
 <!-- @end -->
 
 ## Appendix B — Engineering decisions
@@ -1167,6 +1173,8 @@ Estimates are in engineer-days; each wave's total in §11 is the sum of its task
 | D-25 | Every rule in `AGENTS.md` that a check can decide is checked by code behind one gate, `tools/ci.sh`: `cargo xtask rules` over `cargo metadata` and the sources, cargo-deny, swift-format, Spotless with ktlint, Android Lint, shellcheck and jscpd | a rule a reviewer must remember drifts; EffectCraft checks its layering the same way (`evidence/07-repository-conventions.md` Findings 25, 30) | §15, §23 |
 | D-26 | Generated files live only in `generated` or `Generated` directories with an `@generated` header, are committed, and are written only by `cargo xtask generate` | Swift Package Manager consumers cannot run a build step, and each generated API change shows in review (`evidence/07-repository-conventions.md` Findings 3, 29, 31) | §15, §21 |
 | D-27 | One version for every artifact, written only in `rust/Cargo.toml`; the release script passes it to Gradle and tags the release with it | the artifacts share one native library and are never mixed | §23, OPS-5 |
+| D-28 | Language rules are checked on each language's own syntax tree: SwiftLint (SourceKit) for Swift, detekt for Kotlin, `syn` for Rust, never on text scanned by hand | a hand-written stripper must re-implement each language's comment and literal rules and drifts from the compiler; a parser settles what is code (`evidence/07-repository-conventions.md` Findings 7, 19) | §15, OPS-6–OPS-8 |
+| D-29 | EffectCraft is never modified: what a phone needs done differently is a CraftBridge adaptation on EffectCraft's public interfaces, listed in `tools/adaptations.toml` with the EffectCraft items it relies on | PD5; the list turns each update's recheck into a named set instead of a search, and nothing waits on, or is carried for, upstream | §15, §19, §24 |
 
 ## Appendix C — Sources and evidence
 
@@ -1211,9 +1219,8 @@ Estimates are in engineer-days; each wave's total in §11 is the sum of its task
 | Method table | the JSON methods an app crate answers (§14) |
 | Command | one of EffectCraft's 763 registered actions, run by id |
 | Tool | one of the automation layer's agent operations (27 without the desktop app) |
-| Pin | the EffectCraft revision CraftBridge builds from |
-| Seam | a small change to EffectCraft that lets CraftBridge reuse its code (S1–S7) |
-| Seam branch | `craftbridge/seams-<pin>` on `ChristopherLinnett/effectcraft`: the pin plus every unmerged seam |
+| Pin | the official EffectCraft revision CraftBridge builds from |
+| Adaptation | a part of CraftBridge that does what a phone needs EffectCraft to do differently, on EffectCraft's public interfaces, listed with the EffectCraft code it relies on (AD1–AD7, §15) |
 | Conformance corpus | the scenarios T1–T24 run against the desktop CLI and the plugins |
 | Running example | Postcard Studio's Birthday Card for Sam (§5) |
 | `.ectemplate` | an EffectCraft template file with editable controls |

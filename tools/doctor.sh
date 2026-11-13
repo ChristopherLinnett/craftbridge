@@ -55,8 +55,10 @@ if [ -d "$ANDROID_HOME/platforms" ]; then
   ok "Android SDK at $ANDROID_HOME"
   if compgen -G "$ANDROID_HOME/platforms/android-$CRAFTBRIDGE_ANDROID_API*" >/dev/null; then ok "Android platform $CRAFTBRIDGE_ANDROID_API"; else gap "Android platform $CRAFTBRIDGE_ANDROID_API" "sdkmanager \"platforms;android-$CRAFTBRIDGE_ANDROID_API.0\""; fi
   if compgen -G "$ANDROID_HOME/build-tools/$CRAFTBRIDGE_ANDROID_API.*" >/dev/null; then ok "Android build tools $CRAFTBRIDGE_ANDROID_API"; else gap "Android build tools $CRAFTBRIDGE_ANDROID_API" "sdkmanager \"build-tools;$CRAFTBRIDGE_ANDROID_API.0.0\""; fi
-  ndk="$(find "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -name "$CRAFTBRIDGE_NDK_MAJOR.*" 2>/dev/null | sort | tail -n 1)"
-  if [ -n "$ndk" ]; then ok "Android NDK $(basename "$ndk")"; else gap "Android NDK r$CRAFTBRIDGE_NDK_MAJOR" "sdkmanager \"ndk;28.2.13676358\" (NDK r28 aligns native libraries to 16 KB pages)"; fi
+  # `|| true`: with no ndk folder find fails, and under pipefail that would end the doctor before it
+  # printed the fix.
+  ndk="$(find "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -name "$CRAFTBRIDGE_NDK_MAJOR.*" 2>/dev/null | sort | tail -n 1 || true)"
+  if [ -n "$ndk" ]; then ok "Android NDK $(basename "$ndk")"; else gap "Android NDK r$CRAFTBRIDGE_NDK_MAJOR" "sdkmanager \"ndk;$CRAFTBRIDGE_NDK_VERSION\" (NDK r$CRAFTBRIDGE_NDK_MAJOR aligns native libraries to 16 KB pages)"; fi
 else
   gap "Android SDK (looked in $ANDROID_HOME)" "install Android Studio, or set ANDROID_HOME to an Android SDK"
 fi
@@ -84,11 +86,13 @@ if [ "$mode" = full ]; then
   elif ! token="$(gh auth token --user "$owner" 2>/dev/null)"; then
     gap "a GitHub token for $owner" "gh auth login (as $owner)"
   else
-    scopes="$(GH_TOKEN="$token" gh api -i user 2>/dev/null | sed -n 's/^[Xx]-[Oo][Aa]uth-[Ss]copes: //p' | tr -d '\r')"
+    # One scope per line, matched whole: `repo:status` is not `repo`. `|| true` keeps a failed request
+    # a missing scope rather than the end of the doctor.
+    scopes="$(GH_TOKEN="$token" gh api -i user 2>/dev/null | sed -n 's/^[Xx]-[Oo][Aa]uth-[Ss]copes: //p' | tr -d '\r ' | tr ',' '\n' || true)"
     for scope in repo workflow; do
-      if grep -qw "$scope" <<<"$scopes"; then ok "GitHub token for $owner: $scope"; else gap "GitHub token for $owner: $scope scope" "gh auth refresh -s $scope --user $owner"; fi
+      if grep -qx "$scope" <<<"$scopes"; then ok "GitHub token for $owner: $scope"; else gap "GitHub token for $owner: $scope scope" "gh auth refresh -s $scope --user $owner"; fi
     done
-    if grep -qw "write:packages" <<<"$scopes"; then ok "GitHub token for $owner: write:packages"; else note "GitHub token for $owner lacks write:packages, which only publishing the Android libraries needs: gh auth refresh -s write:packages --user $owner"; fi
+    if grep -qx "write:packages" <<<"$scopes"; then ok "GitHub token for $owner: write:packages"; else note "GitHub token for $owner lacks write:packages, which only publishing the Android libraries needs: gh auth refresh -s write:packages --user $owner"; fi
   fi
 fi
 

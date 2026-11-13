@@ -1,0 +1,572 @@
+//! Rule 3 and rule 10 — the inherited, unweakened lint table, and `panic = "unwind"`.
+//!
+//! Never crash outranks everything except not losing work, so the panicking shortcuts are denied once
+//! in the workspace manifest and every crate inherits them. The rule is only real if nothing can weaken
+//! it: not the inheriting table (`[lints]` must say `workspace = true` and nothing else); not the
+//! workspace table itself, where a lint group allowed at a later priority (`clippy::restriction` holds
+//! every denied lint) switches them all off, and where a second key for the same lint (`unwrap-used`, or
+//! the former name `option_unwrap_used`) is passed to the compiler as well; not a crate or module
+//! attribute (`#![allow(…)]`, also when it is spread over lines or nested in `cfg_attr`, and `#[allow(…)]`
+//! on a `mod`, which covers the whole module); not clippy's configuration, whose `allow-unwrap-types`
+//! lets `unwrap` and `expect` through on whole types and of which clippy reads only the file nearest a
+//! crate; and not Cargo's own configuration in `rust/.cargo/`, whose `rustflags` come after the table,
+//! whose profiles override the manifest's, whose compiler wrappers sit between Cargo and the compiler,
+//! whose `[alias]` can stand in for `cargo clippy` or `cargo xtask`, and whose `[env]` reaches clippy;
+//! and not a build script, which
+//! runs before the compiler takes the table and can hand it flags and cfgs through `cargo::rustc-env` and
+//! `cargo::rustc-cfg`, so a crate has one only when the layer table marks it. A profile that aborts is
+//! refused wherever it is set: the engine's last-resort guard catches a panic on a Craft thread, which
+//! needs unwinding to exist at all.
+//!
+//! The two levels that count are `deny` and `forbid`; `warn` and `allow` do not stop a change, so a
+//! weaker level is reported as missing. Both spellings of a level are accepted: the string form and the
+//! `{ level = "deny", priority = N }` table form.
+
+use crate::{attributes, machinery, scan};
+use std::path::Path;
+
+/// The clippy lints that forbid panicking, plus the one that keeps every `unsafe` block documented.
+pub(crate) const DENIED_CLIPPY_LINTS: &[&str] = &["unwrap_used", "expect_used", "panic", "unimplemented", "todo", "unreachable", "undocumented_unsafe_blocks"];
+
+/// The clippy group every lint above belongs to, so switching the group off switches them all off.
+const DENIED_CLIPPY_GROUP: &str = "restriction";
+
+/// Former names of the denied lints, and the lint each now is. The compiler still applies a former name
+/// to the lint it became, with only a warning, so an `allow` under the old name is an `allow` of the lint.
+const FORMER_CLIPPY_NAMES: &[(&str, &str)] = &[
+    ("option_unwrap_used", "unwrap_used"),
+    ("result_unwrap_used", "unwrap_used"),
+    ("option_expect_used", "expect_used"),
+    ("result_expect_used", "expect_used"),
+];
+
+/// The lint a table key or an attribute item (without its `clippy::` prefix) reaches: the compiler reads
+/// `-` in a lint name as `_`, and a former name as the lint it became.
+fn canonical_lint(name: &str) -> String {
+    let name = name.replace('-', "_");
+    FORMER_CLIPPY_NAMES.iter().find(|(former, _)| *former == name).map_or(name, |(_, current)| (*current).to_string())
+}
+
+/// Every entry of a lint table that reaches `lint`, under whatever key it is written: Cargo passes each
+/// key to the compiler as written, so `unwrap_used = "deny"` beside `unwrap-used = "allow"` at a later
+/// priority is two flags for one lint, and the later one wins.
+fn entries_reaching<'a>(table: Option<&'a toml::map::Map<String, toml::Value>>, lint: &str) -> Vec<(&'a str, &'a toml::Value)> {
+    table.into_iter().flatten().filter(|(key, _)| canonical_lint(key) == lint).map(|(key, value)| (key.as_str(), value)).collect()
+}
+
+/// Is a lint level strong enough to be a gate?
+fn level_is_denied(value: Option<&toml::Value>) -> bool {
+    match value {
+        Some(toml::Value::String(level)) => level == "deny" || level == "forbid",
+        Some(toml::Value::Table(table)) => table.get("level").and_then(toml::Value::as_str).is_some_and(|level| level == "deny" || level == "forbid"),
+        _ => false,
+    }
+}
+
+/// Does an attribute's lint item (`clippy::unwrap_used`, `clippy::restriction`) reach a denied lint?
+fn reaches_denied_lint(item: &str) -> bool {
+    item.strip_prefix("clippy::").map(canonical_lint).is_some_and(|name| name == DENIED_CLIPPY_GROUP || DENIED_CLIPPY_LINTS.contains(&name.as_str()))
+}
+
+/// Parse a TOML file, turning a parse failure into a named error rather than a panic or an `unwrap`.
+fn parse(source: &str, name: &str) -> Result<toml::Value, Vec<String>> {
+    toml::from_str::<toml::Value>(source).map_err(|error| vec![format!("{name}: is not valid TOML: {error}")])
+}
+
+/// Check the workspace manifest: the denied lints, no group that switches them off, and no profile that
+/// aborts instead of unwinding.
+///
+/// `source` is the manifest text and `name` how a message should call it, so a test can feed strings.
+pub(crate) fn workspace_manifest_violations(source: &str, name: &str) -> Vec<String> {
+    let document = match parse(source, name) {
+        Ok(document) => document,
+        Err(errors) => return errors,
+    };
+    let mut errors = Vec::new();
+    let lints = document.get("workspace").and_then(toml::Value::as_table).and_then(|workspace| workspace.get("lints"));
+    let rust_lints = lints.and_then(|lints| lints.get("rust")).and_then(toml::Value::as_table);
+    let clippy_lints = lints.and_then(|lints| lints.get("clippy")).and_then(toml::Value::as_table);
+    let required = std::iter::once(("rust", rust_lints, "unsafe_code", "unsafe is a decision, not a default"))
+        .chain(DENIED_CLIPPY_LINTS.iter().map(|lint| ("clippy", clippy_lints, *lint, "never crash: no panicking shortcuts")));
+    for (tool, table, lint, why) in required {
+        let entries = entries_reaching(table, lint);
+        if entries.is_empty() {
+            errors.push(format!("{name}: [workspace.lints.{tool}].{lint} must be deny or forbid ({why})"));
+        }
+        for (key, _) in entries.iter().filter(|(_, level)| !level_is_denied(Some(level))) {
+            errors.push(format!("{name}: [workspace.lints.{tool}].{key} must be deny or forbid ({why})"));
+        }
+    }
+    for (key, _) in entries_reaching(clippy_lints, DENIED_CLIPPY_GROUP).iter().filter(|(_, level)| !level_is_denied(Some(level))) {
+        errors.push(format!("{name}: [workspace.lints.clippy].{key} below deny switches off every denied lint the group holds"));
+    }
+    errors.extend(panic_violations(&document, name));
+    errors
+}
+
+/// Does any profile abort? A crate-level override counts too: `[profile.release.package.foo]` with
+/// `panic = "abort"` aborts just as dead as the profile-wide setting. Only `unwind` is accepted, so a
+/// strategy Cargo adds later is refused until someone decides it keeps the guard working.
+fn panic_violations(document: &toml::Value, name: &str) -> Vec<String> {
+    let mut errors = Vec::new();
+    let Some(profiles) = document.get("profile").and_then(toml::Value::as_table) else { return errors };
+    let mut settings: Vec<(String, &toml::Value)> = Vec::new();
+    for (profile, table) in profiles {
+        settings.push((format!("[profile.{profile}]"), table));
+        for (package, overrides) in table.get("package").and_then(toml::Value::as_table).into_iter().flatten() {
+            settings.push((format!("[profile.{profile}.package.{package}]"), overrides));
+        }
+    }
+    for (table_name, table) in settings {
+        if let Some(strategy) = table.get("panic").and_then(toml::Value::as_str).filter(|strategy| *strategy != "unwind") {
+            errors.push(format!("{name}: {table_name} sets panic = \"{strategy}\": the engine's last-resort guard catches panics, which needs unwinding"));
+        }
+    }
+    errors
+}
+
+/// Check Cargo's configuration: no profile that aborts, no `rustflags` that set a lint level or a panic
+/// strategy, which would override what the workspace table and its profile say, no compiler wrapper, no
+/// alias that stands in for a command the gate runs, and no `[env]` entry for clippy, which reads its lint
+/// flags (`CLIPPY_ARGS`) and finds its configuration (`CLIPPY_CONF_DIR`) through the environment Cargo
+/// gives it.
+pub(crate) fn cargo_config_violations(source: &str, name: &str) -> Vec<String> {
+    let document = match parse(source, name) {
+        Ok(document) => document,
+        Err(errors) => return errors,
+    };
+    let mut errors = panic_violations(&document, name);
+    // The compiler binary and its wrappers are the toolchain's, not the repository's: a wrapper sits
+    // between Cargo and rustc (and clippy-driver) and can strip `-D warnings` and every denied lint
+    // before they arrive, exactly the bypass the rest of this check refuses.
+    if let Some(build) = document.get("build") {
+        for key in ["rustc", "rustc-wrapper", "rustc-workspace-wrapper"] {
+            if build.get(key).is_some() {
+                errors.push(format!("{name}: [build].{key} points the compiler or its wrapper at code no rule reads: the denied lints and `-D warnings` must reach rustc untouched"));
+            }
+        }
+    }
+    for (alias, value) in document.get("alias").and_then(toml::Value::as_table).into_iter().flatten() {
+        if let Some(violation) = alias_violation(alias, value) {
+            errors.push(format!("{name}: [alias].{alias} {violation}"));
+        }
+    }
+    for variable in document.get("env").and_then(toml::Value::as_table).into_iter().flatten().map(|(variable, _)| variable) {
+        if variable.starts_with("CLIPPY_") {
+            errors.push(format!(
+                "{name}: [env].{variable} reaches clippy: its lint flags and its configuration come only from rust/Cargo.toml and rust/clippy.toml"
+            ));
+        }
+    }
+    let mut flag_lists: Vec<(String, &toml::Value)> = Vec::new();
+    if let Some(flags) = document.get("build").and_then(|build| build.get("rustflags")) {
+        flag_lists.push(("[build].rustflags".to_string(), flags));
+    }
+    for (target, table) in document.get("target").and_then(toml::Value::as_table).into_iter().flatten() {
+        if let Some(flags) = table.get("rustflags") {
+            flag_lists.push((format!("[target.{target}].rustflags"), flags));
+        }
+    }
+    for (key, flags) in flag_lists {
+        let tokens: Vec<String> = match flags {
+            toml::Value::String(line) => line.split_whitespace().map(str::to_string).collect(),
+            toml::Value::Array(items) => items.iter().filter_map(toml::Value::as_str).flat_map(str::split_whitespace).map(str::to_string).collect(),
+            _ => Vec::new(),
+        };
+        for token in tokens.iter().filter(|token| overrides_the_table(token)) {
+            errors.push(format!("{name}: {key} passes `{token}`: lint levels and the panic strategy come only from rust/Cargo.toml"));
+        }
+    }
+    errors
+}
+
+/// The cargo subcommands the gate runs that Cargo does not build in. Cargo ignores an alias named after
+/// one of its own commands, but an alias named after one of these runs in its place, with only a warning:
+/// `clippy = "test --no-run"` turns the lint stage into a build that reads no lint.
+const GATE_EXTERNAL_COMMANDS: &[&str] = &["clippy", "fmt", "deny"];
+
+/// What is wrong with one `[alias]` entry, if anything: it may not stand in for a command the gate runs,
+/// and `xtask`, the alias a person runs the rule checks through, must run the xtask package, or
+/// `cargo xtask rules` would pass having checked nothing (`xtask = "test --no-run"` reads `rules` as a test
+/// filter). The gate itself runs the package with `cargo run`, which no alias can redefine.
+fn alias_violation(alias: &str, value: &toml::Value) -> Option<&'static str> {
+    if GATE_EXTERNAL_COMMANDS.contains(&alias) {
+        return Some("stands in for a command the gate runs, so the stage would run something else under its name");
+    }
+    let words: Vec<&str> = match value {
+        toml::Value::String(line) => line.split_whitespace().collect(),
+        toml::Value::Array(items) => items.iter().filter_map(toml::Value::as_str).collect(),
+        _ => Vec::new(),
+    };
+    let runs_xtask = words.first() == Some(&"run") && words.windows(2).any(|pair| matches!(pair, ["--package" | "-p", "xtask"]));
+    (alias == "xtask" && !runs_xtask).then_some("must run the xtask package, or `cargo xtask rules` checks nothing")
+}
+
+/// Is one `rustflags` token a lint level or a panic strategy? Levels are `-A`, `-W`, `--allow`, `--warn`,
+/// `--force-warn` and `--cap-lints`, each glued to its lint or followed by it; any of them can only lower
+/// what the table denies. A panic strategy appears as `panic=` after `-C` or `--codegen`.
+fn overrides_the_table(token: &str) -> bool {
+    ["-A", "-W", "--allow", "--warn", "--force-warn", "--cap-lints"].iter().any(|flag| token.starts_with(flag)) || token.contains("panic=")
+}
+
+/// Check clippy's configuration: `allow-unwrap-types` lets `unwrap()` and `expect()` through on every
+/// value of the types it lists, which switches the denied lints off for them. Its other settings that
+/// touch a denied lint allow it only in tests, or in code evaluated while compiling, where a panic is a
+/// build error rather than a crash, or say where a safety comment may sit. That one configuration is
+/// `rust/clippy.toml` alone: a second copy is the machinery check's to refuse, because clippy reads only
+/// the file nearest a crate and a copy would replace this one below it.
+pub(crate) fn clippy_config_violations(source: &str, name: &str) -> Vec<String> {
+    let document = match parse(source, name) {
+        Ok(document) => document,
+        Err(errors) => return errors,
+    };
+    match document.get("allow-unwrap-types").and_then(toml::Value::as_array) {
+        Some(types) if !types.is_empty() => {
+            vec![format!("{name}: allow-unwrap-types lets unwrap() and expect() through on whole types, which the workspace denies")]
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Does a package manifest inherit the workspace lints and nothing else?
+pub(crate) fn package_lints_violations(source: &str, name: &str) -> Vec<String> {
+    let document = match parse(source, name) {
+        Ok(document) => document,
+        Err(errors) => return errors,
+    };
+    let Some(lints) = document.get("lints").and_then(toml::Value::as_table) else {
+        return vec![format!("{name}: no [lints] table, so it does not inherit the workspace lints")];
+    };
+    let mut errors = Vec::new();
+    match lints.get("workspace") {
+        Some(toml::Value::Boolean(true)) => {}
+        Some(_) => errors.push(format!("{name}: [lints] must say workspace = true, nothing weaker")),
+        None => errors.push(format!("{name}: [lints] must inherit the workspace lints with workspace = true")),
+    }
+    for key in lints.keys() {
+        if key != "workspace" {
+            errors.push(format!("{name}: [lints] may only inherit, and `{key}` adds or overrides a lint here"));
+        }
+    }
+    errors
+}
+
+/// Every crate- or module-level attribute that weakens a denied lint, directly or through its group,
+/// reported at the line of the attribute's `#`: `#![allow(…)]`, `#![expect(…)]`, `#![warn(…)]`, one of them
+/// inside `cfg_attr`, and the same as an outer attribute on a `mod`, which covers the whole module just as
+/// the inner one does. The rule is "never crash outside tests", so `cfg_attr(test, …)` is not reported,
+/// and an attribute on any other item is not this rule's: `AGENTS.md` allows one on the one item, with a
+/// reason.
+pub(crate) fn weakened_crate_attributes(stripped_lines: &[String], name: &str) -> Vec<String> {
+    let text = stripped_lines.join("\n");
+    let mut errors = Vec::new();
+    for allowance in attributes::allowances(&text).into_iter().filter(|allowance| !allowance.test_only) {
+        let (hash, place) = match (allowance.inner, attributes::declared_module(&text, allowance.after)) {
+            (true, _) => ("#!", String::new()),
+            (false, Some(module)) => ("#", format!(" on `mod {module}`")),
+            (false, None) => continue,
+        };
+        for lint in allowance.lints.iter().filter(|lint| reaches_denied_lint(lint)) {
+            errors.push(format!(
+                "{name}:{}: {hash}[{}({lint})]{place} weakens a lint the workspace denies, and a crate may not switch it off",
+                allowance.line, allowance.level
+            ));
+        }
+    }
+    errors
+}
+
+/// May this crate have a build script? A build script runs before the compiler reads the lint table and
+/// can hand the compiler flags and cfgs around it through `cargo::rustc-env` and `cargo::rustc-cfg`, so a
+/// crate has one only when its row in the layer table marks it.
+pub(crate) fn build_script_violations(name: &str, marked: bool, has_build_script: bool) -> Option<String> {
+    (!marked && has_build_script)
+        .then(|| format!("{name}: has a build script, which reaches the compiler around the lint table: only a crate the layer table marks may have one"))
+}
+
+/// Does this manifest have a build script? Cargo takes one from the `package.build` key, or from a
+/// `build.rs` sitting beside the manifest when the manifest names no other; `build = false` turns that
+/// detection off, so such a crate has none.
+fn declares_build_script(document: &toml::Value, manifest: &Path) -> bool {
+    match document.get("package").and_then(|package| package.get("build")) {
+        Some(toml::Value::Boolean(false)) => false,
+        Some(_) => true,
+        None => manifest.parent().is_some_and(|folder| folder.join("build.rs").is_file()),
+    }
+}
+
+/// Run the check against the repository: the workspace manifest, Cargo's configuration, clippy's
+/// configuration, every package manifest, and every `.rs` file's crate- and module-level attributes.
+pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
+    let rust_dir = root.join("rust");
+    let mut errors = workspace_manifest_violations(&scan::read_text(&rust_dir.join("Cargo.toml"))?, "rust/Cargo.toml");
+
+    for file in machinery::CARGO_CONFIGURATION_NAMES {
+        let shown = format!("{}/{file}", machinery::CARGO_CONFIGURATION_FOLDER);
+        let config = root.join(&shown);
+        if config.is_file() {
+            errors.extend(cargo_config_violations(&scan::read_text(&config)?, &shown));
+        }
+    }
+
+    // Clippy reads its configuration from one file only, the one nearest a crate; the machinery check
+    // refuses any copy that would be nearer elsewhere, so this check reads exactly the listed one.
+    let clippy_config = root.join(machinery::CLIPPY_CONFIGURATION);
+    if clippy_config.is_file() {
+        errors.extend(clippy_config_violations(&scan::read_text(&clippy_config)?, machinery::CLIPPY_CONFIGURATION));
+    }
+
+    for package in crate::meta::read(&rust_dir, true)? {
+        let manifest = Path::new(&package.manifest_path);
+        let shown = crate::report::shown(root, manifest);
+        let source = scan::read_text(manifest)?;
+        errors.extend(package_lints_violations(&source, &shown));
+        // A manifest that does not parse was just reported; a build script in it is its owner's next fix.
+        if let Ok(document) = parse(&source, &shown) {
+            let marked = crate::layers::entry(&package.name).is_some_and(|row| row.build);
+            errors.extend(build_script_violations(&shown, marked, declares_build_script(&document, manifest)));
+        }
+    }
+
+    // A generator's output is checked by regenerating it, not here.
+    for file in scan::walk(&rust_dir, ".rs")?.into_iter().filter(|file| !crate::generated::in_generated(&file.components)) {
+        let shown = crate::report::shown(root, &file.path);
+        errors.extend(weakened_crate_attributes(&scan::strip_rust(&scan::read_text(&file.path)?), &shown));
+    }
+    Ok(errors)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const GOOD_MANIFEST: &str = r#"
+[workspace]
+members = ["core/*"]
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unimplemented = "deny"
+todo = "deny"
+unreachable = "deny"
+undocumented_unsafe_blocks = "deny"
+
+[profile.release]
+panic = "unwind"
+"#;
+
+    fn weakened(source: &str) -> Vec<String> {
+        weakened_crate_attributes(&scan::strip_rust(source), "x.rs")
+    }
+
+    #[test]
+    fn a_strong_table_passes_in_both_level_spellings() {
+        assert!(workspace_manifest_violations(GOOD_MANIFEST, "rust/Cargo.toml").is_empty());
+        let table_form = GOOD_MANIFEST.replace("unwrap_used = \"deny\"", "unwrap_used = { level = \"forbid\", priority = -2 }");
+        assert!(workspace_manifest_violations(&table_form, "rust/Cargo.toml").is_empty());
+    }
+
+    #[test]
+    fn a_missing_or_weak_lint_is_named() {
+        let without_unwrap = GOOD_MANIFEST.replace("unwrap_used = \"deny\"", "");
+        let errors = workspace_manifest_violations(&without_unwrap, "rust/Cargo.toml");
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("unwrap_used"), "{errors:?}");
+
+        let weak = GOOD_MANIFEST.replace("expect_used = \"deny\"", "expect_used = \"warn\"");
+        let errors = workspace_manifest_violations(&weak, "rust/Cargo.toml");
+        assert!(errors.iter().any(|e| e.contains("expect_used")), "{errors:?}");
+
+        let no_unsafe = GOOD_MANIFEST.replace("unsafe_code = \"deny\"", "");
+        let errors = workspace_manifest_violations(&no_unsafe, "rust/Cargo.toml");
+        assert!(errors.iter().any(|e| e.contains("unsafe_code")), "{errors:?}");
+    }
+
+    #[test]
+    fn a_second_key_for_a_denied_lint_is_read_as_that_lint() {
+        // Cargo passes every key on as written; the compiler reads `-` as `_` and a former name as the lint
+        // it became, so each of these switches a denied lint off beside its strong spelling.
+        for (table, weak, lint) in [
+            ("[workspace.lints.clippy]", "unwrap-used = { level = \"allow\", priority = 1 }", "unwrap-used"),
+            ("[workspace.lints.clippy]", "option_unwrap_used = { level = \"allow\", priority = 1 }", "option_unwrap_used"),
+            ("[workspace.lints.clippy]", "result_expect_used = \"warn\"", "result_expect_used"),
+            ("[workspace.lints.clippy]", "Restriction = \"allow\"", ""),
+            ("[workspace.lints.rust]", "unsafe-code = { level = \"allow\", priority = 1 }", "unsafe-code"),
+        ] {
+            let manifest = GOOD_MANIFEST.replace(table, &format!("{table}\n{weak}"));
+            let errors = workspace_manifest_violations(&manifest, "rust/Cargo.toml");
+            if lint.is_empty() {
+                // An upper-case name is no lint at all to the compiler, so it weakens nothing.
+                assert!(errors.is_empty(), "{weak}: {errors:?}");
+            } else {
+                assert!(errors.iter().any(|e| e.contains(&format!("].{lint} must be deny"))), "{weak}: {errors:?}");
+            }
+        }
+        // A second strong spelling of a denied lint is still a denied lint.
+        let doubled = GOOD_MANIFEST.replace("unwrap_used = \"deny\"", "unwrap_used = \"deny\"\nunwrap-used = \"forbid\"");
+        assert!(workspace_manifest_violations(&doubled, "rust/Cargo.toml").is_empty());
+        let hyphen_only = GOOD_MANIFEST.replace("unwrap_used = \"deny\"", "unwrap-used = \"deny\"");
+        assert!(workspace_manifest_violations(&hyphen_only, "rust/Cargo.toml").is_empty(), "the hyphen spelling alone denies the lint");
+    }
+
+    #[test]
+    fn a_group_that_switches_the_denied_lints_off_is_named() {
+        let allowed = GOOD_MANIFEST.replace("[profile.release]", "restriction = { level = \"allow\", priority = 1 }\n\n[profile.release]");
+        let errors = workspace_manifest_violations(&allowed, "rust/Cargo.toml");
+        assert!(errors.iter().any(|e| e.contains("restriction")), "{errors:?}");
+        let denied = GOOD_MANIFEST.replace("[profile.release]", "restriction = \"deny\"\n\n[profile.release]");
+        assert!(workspace_manifest_violations(&denied, "rust/Cargo.toml").is_empty());
+    }
+
+    #[test]
+    fn an_aborting_profile_is_reported_wherever_it_is_set() {
+        let profile_wide = GOOD_MANIFEST.replace("panic = \"unwind\"", "panic = \"abort\"");
+        let errors = workspace_manifest_violations(&profile_wide, "rust/Cargo.toml");
+        assert!(errors.iter().any(|e| e.contains("[profile.release]") && e.contains("unwinding")), "{errors:?}");
+
+        let per_crate = format!("{GOOD_MANIFEST}\n[profile.release.package.craftbridge-core]\npanic = \"abort\"\n");
+        let errors = workspace_manifest_violations(&per_crate, "rust/Cargo.toml");
+        assert!(errors.iter().any(|e| e.contains("package.craftbridge-core")), "{errors:?}");
+
+        let unknown = GOOD_MANIFEST.replace("panic = \"unwind\"", "panic = \"immediate-abort\"");
+        assert!(!workspace_manifest_violations(&unknown, "rust/Cargo.toml").is_empty());
+
+        let with_lto = GOOD_MANIFEST.replace("panic = \"unwind\"", "lto = true\npanic = \"unwind\"");
+        assert!(workspace_manifest_violations(&with_lto, "rust/Cargo.toml").is_empty(), "other profile settings are none of our business");
+    }
+
+    #[test]
+    fn cargo_configuration_may_not_override_the_table_or_the_profile() {
+        assert!(cargo_config_violations("[alias]\nxtask = \"run --package xtask --locked --quiet --\"\n", "c").is_empty());
+        let profile = cargo_config_violations("[profile.release]\npanic = \"abort\"\n", "c");
+        assert!(profile.iter().any(|e| e.contains("[profile.release]")), "{profile:?}");
+        let glued = cargo_config_violations("[build]\nrustflags = [\"-Aclippy::unwrap_used\"]\n", "c");
+        assert!(glued.iter().any(|e| e.contains("-Aclippy::unwrap_used")), "{glued:?}");
+        let spread = cargo_config_violations("[target.aarch64-linux-android]\nrustflags = \"--cap-lints warn -C panic=abort\"\n", "c");
+        assert_eq!(spread.len(), 2, "{spread:?}");
+        let harmless = cargo_config_violations("[build]\nrustflags = [\"-C\", \"link-arg=-Wl,-z,max-page-size=16384\"]\n", "c");
+        assert!(harmless.is_empty(), "{harmless:?}");
+        let clippy_env = cargo_config_violations(
+            "[env]\nCLIPPY_ARGS = { value = \"-Aclippy::unwrap_used\", force = true }\nCLIPPY_CONF_DIR = \"/elsewhere\"\nIPHONEOS_DEPLOYMENT_TARGET = \"17.0\"\n",
+            "c",
+        );
+        assert_eq!(clippy_env.len(), 2, "{clippy_env:?}");
+        assert!(clippy_env.iter().all(|e| e.contains("[env].CLIPPY_")), "{clippy_env:?}");
+        // A wrapper around rustc (or clippy-driver) strips the denied lints before they arrive.
+        let wrapper =
+            cargo_config_violations("[build]\nrustc-wrapper = \"./wrap.sh\"\nrustc-workspace-wrapper = \"./wrap.sh\"\nrustc = \"./fake-rustc\"\n", "c");
+        assert_eq!(wrapper.len(), 3, "{wrapper:?}");
+        // An alias named after an external command the gate runs runs in its place; `xtask` must run xtask.
+        let aliases = cargo_config_violations("[alias]\nxtask = \"test --no-run\"\nclippy = \"test --no-run\"\nfmt = [\"version\"]\nb = \"build\"\n", "c");
+        assert_eq!(aliases.len(), 3, "{aliases:?}");
+        assert!(aliases.iter().any(|e| e.contains("[alias].xtask must run the xtask package")), "{aliases:?}");
+        assert!(aliases.iter().any(|e| e.contains("[alias].clippy stands in")) && aliases.iter().any(|e| e.contains("[alias].fmt stands in")), "{aliases:?}");
+        assert!(cargo_config_violations("[alias]\nxtask = [\"run\", \"-p\", \"xtask\", \"--\"]\n", "c").is_empty(), "the list form of the gate's alias");
+        assert!(wrapper.iter().all(|e| e.contains("must reach rustc untouched")), "{wrapper:?}");
+    }
+
+    #[test]
+    fn clippy_configuration_may_not_let_unwrap_through_on_a_type() {
+        let ours = "allow-unwrap-in-tests = true\nallow-expect-in-tests = true\nallow-panic-in-tests = true\ncognitive-complexity-threshold = 30\n";
+        assert!(clippy_config_violations(ours, "rust/clippy.toml").is_empty());
+        assert!(clippy_config_violations(&format!("{ours}allow-unwrap-types = []\n"), "rust/clippy.toml").is_empty(), "an empty list lets nothing through");
+        let typed = clippy_config_violations(&format!("{ours}allow-unwrap-types = [\"core::option::Option\"]\n"), "rust/clippy.toml");
+        assert!(typed.len() == 1 && typed[0].contains("allow-unwrap-types"), "{typed:?}");
+    }
+
+    #[test]
+    fn build_false_means_no_build_script_even_beside_a_build_rs() {
+        let scratch = crate::scratch::Scratch::new("build-false");
+        scratch.write("x/Cargo.toml", "");
+        scratch.write("x/build.rs", "fn main() {}\n");
+        let manifest = scratch.0.join("x/Cargo.toml");
+        let read = |source: &str| declares_build_script(&toml::from_str::<toml::Value>(source).unwrap(), &manifest);
+        assert!(read("[package]\nname = \"x\"\n"), "a build.rs beside the manifest is a build script");
+        assert!(!read("[package]\nname = \"x\"\nbuild = false\n"), "Cargo ignores the file when the manifest says build = false");
+        assert!(read("[package]\nname = \"x\"\nbuild = \"gen.rs\"\n") && read("[package]\nname = \"x\"\nbuild = true\n"));
+    }
+
+    #[test]
+    fn a_build_script_needs_a_mark_in_the_layer_table() {
+        assert!(build_script_violations("craftbridge-core", false, true).is_some(), "a build script in an unmarked crate is the bypass it is");
+        assert!(build_script_violations("craftbridge-core", true, true).is_none(), "a marked crate may have one");
+        assert!(build_script_violations("craftbridge-core", false, false).is_none());
+        // The table marks no crate today, which is what the AGENTS.md rule says.
+        assert!(crate::layers::ENTRIES.iter().all(|row| !row.build), "no crate is marked for a build script yet");
+    }
+
+    #[test]
+    fn a_cargo_configuration_planted_in_a_real_tree_is_caught() {
+        let copy = crate::scratch::rust_tree_copy("lints-config");
+        copy.write("rust/.cargo/config", "[build]\nrustflags = [\"-Aclippy::unwrap_used\"]\n");
+        let errors = check(&copy.0).unwrap();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors.iter().any(|e| e.starts_with("rust/.cargo/config: [build].rustflags passes `-Aclippy::unwrap_used`")), "{errors:?}");
+        std::fs::remove_file(copy.0.join("rust/.cargo/config")).unwrap();
+        assert!(check(&copy.0).unwrap().is_empty(), "the copy without the file is the clean tree");
+    }
+
+    #[test]
+    fn a_package_inherits_and_only_inherits() {
+        assert!(package_lints_violations("[package]\nname = \"x\"\n[lints]\nworkspace = true\n", "x/Cargo.toml").is_empty());
+        assert!(package_lints_violations("[package]\nname = \"x\"\n", "x/Cargo.toml").iter().any(|e| e.contains("no [lints] table")));
+        let weakened = package_lints_violations("[package]\nname = \"x\"\n[lints]\nworkspace = true\n\"clippy::unwrap_used\" = \"allow\"\n", "x/Cargo.toml");
+        assert!(weakened.iter().any(|e| e.contains("clippy::unwrap_used") && e.contains("only inherit")), "{weakened:?}");
+        let not_inherited = package_lints_violations("[package]\nname = \"x\"\n[lints]\nworkspace = false\n", "x/Cargo.toml");
+        assert!(not_inherited.iter().any(|e| e.contains("workspace = true")), "{not_inherited:?}");
+    }
+
+    #[test]
+    fn a_crate_level_allow_is_reported_with_its_line_and_level() {
+        let errors = weakened("//! docs\n#![allow(clippy::unwrap_used)]\nfn f() {}\n");
+        assert_eq!(errors, ["x.rs:2: #![allow(clippy::unwrap_used)] weakens a lint the workspace denies, and a crate may not switch it off"]);
+    }
+
+    #[test]
+    fn every_spelling_of_a_crate_level_weakening_is_caught() {
+        let multiline = weakened("#![expect(\n    clippy::expect_used\n)]\n");
+        assert!(multiline.len() == 1 && multiline[0].contains("x.rs:1: #![expect(clippy::expect_used)]"), "{multiline:?}");
+        assert!(weakened("#![allow(clippy::all, clippy::todo)]\n").iter().any(|e| e.contains("clippy::todo")));
+        assert!(weakened("#![allow(clippy::restriction)]\n").iter().any(|e| e.contains("clippy::restriction")), "the group holds every denied lint");
+        assert!(weakened("#![cfg_attr(not(test), allow(clippy::panic))]\n").iter().any(|e| e.contains("clippy::panic")));
+        assert!(weakened("#![cfg_attr(any(test, feature = \"x\"), allow(clippy::panic))]\n").iter().any(|e| e.contains("clippy::panic")));
+        assert!(weakened("#![allow(clippy::undocumented_unsafe_blocks)]\n").iter().any(|e| e.contains("undocumented_unsafe_blocks")));
+        assert!(weakened("#![allow(clippy::option_unwrap_used)]\n").iter().any(|e| e.contains("clippy::option_unwrap_used")), "a former name");
+    }
+
+    #[test]
+    fn an_outer_attribute_on_a_module_weakens_the_whole_module() {
+        let errors = weakened("#[allow(clippy::unwrap_used, clippy::panic)]\nmod inner {\n    pub fn f(x: Option<u8>) -> u8 { x.unwrap() }\n}\n");
+        assert_eq!(
+            errors,
+            [
+                "x.rs:1: #[allow(clippy::unwrap_used)] on `mod inner` weakens a lint the workspace denies, and a crate may not switch it off",
+                "x.rs:1: #[allow(clippy::panic)] on `mod inner` weakens a lint the workspace denies, and a crate may not switch it off",
+            ]
+        );
+        let declared = weakened("#[cfg(feature = \"x\")]\n#[expect(clippy::todo)]\npub(crate) mod later;\n");
+        assert!(declared.len() == 1 && declared[0].contains("x.rs:2: #[expect(clippy::todo)] on `mod later`"), "{declared:?}");
+        assert!(weakened("#[cfg_attr(test, allow(clippy::unwrap_used))]\nmod tests;\n").is_empty(), "a module's tests may unwrap");
+        assert!(weakened("#[allow(clippy::needless_range_loop)]\nmod grid;\n").is_empty(), "a lint the workspace does not deny");
+    }
+
+    #[test]
+    fn compliant_attributes_and_comments_pass() {
+        assert!(weakened("#![deny(missing_docs)]\n#![allow(clippy::needless_range_loop)]\n// #![allow(clippy::panic)]\nfn f() {}\n").is_empty());
+        assert!(weakened("#![cfg_attr(test, allow(clippy::unwrap_used))]\n").is_empty(), "tests may unwrap");
+        // An outer attribute on one item is a different rule (an item-level allow is allowed by AGENTS.md
+        // with a reason), so it must not be reported here.
+        assert!(weakened("#[allow(clippy::expect_used)]\nfn f() -> i32 { 1 }\n").is_empty());
+    }
+
+    #[test]
+    fn the_check_reads_the_workspace_on_disk() {
+        let errors = check(&crate::repo_root()).unwrap();
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+}

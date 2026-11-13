@@ -1,0 +1,17 @@
+# Licences of the dependencies Cargo does not see: Gradle modules and SwiftPM packages.
+# `cargo xtask rules` fails when any of these is missing here: a library named in
+# android/sdk/gradle/libs.versions.toml; an external module Gradle resolves onto a library module's
+# release runtime classpath (the `runtimeLicences` task asks); a package named in a Package.swift;
+# or a pin in an ios/sdk/Package.resolved, once one exists. It also fails when an entry here is no
+# longer used.
+
+[maven]
+# Build tools the convention plugins compile against; nothing here ships inside an AAR.
+"com.android.tools.build:gradle" = "Apache-2.0"
+"com.diffplug.spotless:spotless-plugin-gradle" = "Apache-2.0"
+"org.jetbrains.kotlin:kotlin-gradle-plugin" = "Apache-2.0"
+# What the Kotlin plugin puts on every module's runtime classpath: this ships inside the AAR.
+"org.jetbrains.kotlin:kotlin-stdlib" = "Apache-2.0"
+"org.jetbrains:annotations" = "Apache-2.0"
+
+[swiftpm]

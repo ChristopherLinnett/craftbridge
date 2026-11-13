@@ -6,5 +6,6 @@
 ## 31. Team task lists
 
 **FX: EffectCraft app crate** (W2)
-- [ ] FX-1 · 4 d — `craftbridge-effects`: construction and every method of §14's table. Acceptance: E5; T1–T22 on the desktop.
+- [ ] FX-1 · 9.5 d — `craftbridge-effects`: construction, the adaptations AD1 and AD3–AD7, and every method of §14's table (§15, §19). Acceptance: E5; T1–T22 on the desktop.
 - [ ] FX-2 · 1 d — Plug-in policy, the Android `jsvalue-enum` dependency, GPU attach (§19). Acceptance: T24 and T18 on the desktop.
+- [ ] FX-3 · 0.5 d — AD2: the phone's font folders through `effectcraft_text::add_source` (§15). Acceptance: V1 closed first; `list_fonts` shows the system families on the simulator and the emulator.

@@ -1,0 +1,3 @@
+# EffectCraft conformance corpus
+
+The scenarios (T1–T24 of the plan, §28) that every platform will run against the EffectCraft command line, which is the oracle, together with their fixtures and the running example's template recipe. The data here belongs to no platform: the desktop runner (`rust/effects/craftbridge-effects-conformance`), the Swift tests (`ios/sdk/Tests`) and the Android instrumented tests (`android/sdk/effects/src/androidTest`) will all read it, so a scenario is written once. The scenarios and fixtures arrive with the wave that first runs them; this folder is their home from the start.

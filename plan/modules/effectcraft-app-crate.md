@@ -9,14 +9,19 @@
 
 | File | Change | What |
 |---|---|---|
-| `Cargo.toml` | NEW | `effectcraft-engine`, `-host`, `-automation`, `-gpu` from the workspace pins; `[target.'cfg(target_os = "android")'.dependencies] boa_engine = { version = "0.22", features = ["jsvalue-enum"] }` (D-8) |
+| `Cargo.toml` | NEW | `effectcraft-engine`, `-host`, `-automation`, `-gpu`, `-render`, `-text`, `-media`, `-expr`, `-script` and `-plugin` from the workspace pins; `[target.'cfg(target_os = "android")'.dependencies] boa_engine = { version = "0.22", features = ["jsvalue-enum"] }` (D-8) |
 | `src/app.rs` | NEW | `EffectCraftApp`: construction, GPU attach, the method table of §14 |
 | `src/methods.rs` | NEW | one function per method, each calling the upstream function named in §14's table |
 | `src/plugins.rs` | NEW | PD13: plug-in policy |
 | `src/info.rs` | NEW | `info`: engine version and pin from the generator's constants (§21), counts, GPU and decoder state |
+| `src/session.rs` | NEW | AD1: the session from EffectCraft's public fields with the app's folders; AD2: the phone's fonts |
+| `src/requests.rs` | NEW | AD3 `RenderRequest` and AD4 `FrameRequest` |
+| `src/runner.rs` | NEW | AD3: the render runner; AD5: the template runner |
+| `src/timings.rs` | NEW | AD6 |
+| `src/exporter.rs` | NEW | AD7: CraftBridge's exporter |
 
 **Construction.**
-1. `effectcraft_host::session_in(&HostDirs { config, models, plugins, cache, fonts })` (S1) builds the wired session. On iOS and Android it carries no helper hooks (S2).
+1. CraftBridge builds the session (AD1): `Session { models_dir, plugins_dir, footage: MediaPool::new(), importer, exporter, expr, expr_check, plugin_loader, plugin_previewer, ..Default::default() }` with the app's folders, CraftBridge's exporter (AD7) and no helper hooks, then `effectcraft_script::install`, then the phone's fonts (AD2).
 2. **Plug-ins (PD13):** with `Folders.plugins = None`, `session.plugin_loader` and `session.plugin_previewer` are `None` (fields at `effectcraft: crates/engine/src/lib.rs:207-215`), so no WebAssembly plug-in loads. On Android the loader is `effectcraft_plugin::loader` (`crates/plugin/src/lib.rs:61`). On iOS it is `plugins::bundle_loader`, a function with the same `PluginLoader` signature (`crates/engine/src/lib.rs:294`; the bundle path sits in a process-wide `OnceLock` set at start, because the signature is a plain function pointer) that refuses any `source` outside the bundle's plug-ins folder with `Unsupported` and otherwise calls `effectcraft_plugin::loader`, so a script or command cannot load a plug-in from the container (T24).
 3. `Backend::headless(session)` then `Backend::confine(Confinement::new(read: [container, bundle], write: [container]))` (L5).
 4. `McpServer::new(backend)`.
@@ -25,18 +30,18 @@
 **Export (`export`, `template.render`), the main runtime flow:**
 
 ```mermaid
-%% @drawio d05-main-flow | Maya's export, call by call: the typed Swift call becomes one request; EffectCraft's own render code queues, renders and reports progress through the engine actor until done or cancelled.
+%% @drawio d05-main-flow | Maya's export, call by call: the typed Swift call becomes one request; CraftBridge's render runner drives EffectCraft's own render queue and reports progress through the engine actor until done or cancelled.
 sequenceDiagram
   participant App as Postcard Studio
   participant SW as CraftBridgeEffects
   participant EN as Engine actor
   participant FX as craftbridge-effects
-  participant AU as automation
+  participant AU as render runner
   participant SE as EffectCraft session
   App->>SW: export(card, mp4, h264, progress)
   SW->>EN: requestWithProgress("export", RenderRequest)
   EN->>FX: request_with_progress (other calls wait, L3)
-  FX->>AU: render::run(session, request, on_progress)
+  FX->>AU: run(session, request, on_progress)
   AU->>SE: renderQueue.add · renderQueue.render {wait: false}
   AU->>AU: every 100 ms: poll_render · render_progress
   AU-->>EN: on_progress(done, total, seconds left)
@@ -52,9 +57,9 @@ sequenceDiagram
   SW-->>App: file URL, or CancellationError
 ```
 
-`render::run` (S4) is the CLI's queue-and-wait code moved into the library: it unqueues the project's other items, adds this one, starts the render without waiting, polls every 100 ms and reads each item's status (`apps/effectcraft-cli/src/main.rs:958-1035`). New in the library, it calls `on_progress(done, total, seconds_left)` on each poll and `Session::stop_render` (`crates/engine/src/render_queue.rs:691-692`) when `on_progress` returns `false`. The CLI calls it with its terminal printer; CraftBridge with the listener.
+The render runner (AD3) does what the CLI's queue-and-wait loop does (`apps/effectcraft-cli/src/main.rs:958-1035`), written in CraftBridge on EffectCraft's public render-queue commands: it unqueues the project's other items, adds this one, starts the render without waiting, polls every 100 ms and reads each item's status. It calls `on_progress(done, total, seconds_left)` on each poll and `Session::stop_render` (`crates/engine/src/render_queue.rs:691-692`) when `on_progress` returns `false`. The conformance corpus runs it and the CLI on the same inputs (T9–T17, T22).
 
-**Other methods** follow §14's table: `exec` and `run` through `Backend::exec` with `automation::render_failure` (S4); `props`, `get`, `set` through the tools; `frame` through `FrameRequest::resolve` (S4) then `Session::render_rgba8_alpha` or `Backend::render_with`; `template.open` and `template.render` through `automation::template` (S4); `script` through the `script.run` command; `replay` through `effectcraft_engine::replay::run` on `Backend::session` (`crates/automation/src/backend.rs:61-66`); `timings` through `automation::bench` (S5); `mcp` through `McpServer::handle_line`.
+**Other methods** follow §14's table: `exec` and `run` through `Backend::exec`, failed render items reported as the CLI reports them (AD3); `props`, `get`, `set` through the tools; `frame` through `FrameRequest` (AD4) then `Session::render_rgba8_alpha` or `Backend::render_with`; `template.open` and `template.render` through the template runner (AD5); `script` through the `script.run` command; `replay` through `effectcraft_engine::replay::run` on `Backend::session` (`crates/automation/src/backend.rs:61-66`); `timings` through CraftBridge's timings (AD6); `mcp` through `McpServer::handle_line`.
 
 **States** (per call): success · `InvalidParams` (unknown key, bad JSON) · `NotFound` (comp, layer, property, template control) · `CommandFailed` (the engine's message; `run` adds the step) · waiting in order during an export (L3) · `Cancelled` · `Unsupported` (helper effects; plug-ins switched off; a script asking for a helper) · `Io` (outside the confinement).
 

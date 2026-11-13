@@ -5,12 +5,5 @@
 
 ## 31. Team task lists
 
-**UP: upstream seams** (W1; each a pull request from `ChristopherLinnett/effectcraft`, following EffectCraft's rules: claim the issue, a test that fails without the change, `cargo xtask ci`)
-- [ ] UP-1 · 1 d — S1 `session_in(&HostDirs)` and the iOS `platform_dir` branch. Acceptance: host tests; B1.
-- [ ] UP-2 · 0.5 d — S2 helpers compiled out on iOS and Android. Acceptance: `cargo check` for both targets without `effectcraft-helper-host`.
-- [ ] UP-3 · 0.5 d — S3 iOS and Android font folders and `HostDirs.fonts`. Acceptance: V1 closed first; `list_fonts` shows system families on the simulator and emulator.
-- [ ] UP-4 · 3 d — S4 `RenderRequest`, `render::run`, `FrameRequest`, `render_failure` and `template` move into `effectcraft-automation`; the CLI calls them. Acceptance: the CLI's own integration tests pass unchanged.
-- [ ] UP-5 · 2 d — S5 `automation::bench`; the CLI prints its results. Acceptance: CLI `bench` output unchanged.
-- [ ] UP-6 · 0.5 d — S6 Android free memory. Acceptance: unit test of the parser on Android's `/proc/meminfo` layout.
-- [ ] UP-7 · 1.5 d — S7 the encoder registry in `effectcraft-export`. Acceptance: export tests unchanged; a test encoder registered through it is used.
-- [ ] UP-8 · 1 d — The `craftbridge/seams-10376058` branch carrying S1–S7, and the pins pointing at it (§15). Acceptance: G1.
+**UP: upstream pin** (W1; EffectCraft itself is never changed, PD5)
+- [ ] UP-9 · 1.5 d — Steps 1 and 2 of `tools/update-upstream.sh` (§24): fetch an official storytold/effectcraft revision, write the `[workspace.dependencies]` pins of `rust/Cargo.toml`, and generate `[patch.crates-io]`, `[profile.release]` and the starting `Cargo.lock` from it (D-21); run it to pin `10376058` with FilmCraft `d5ead4ba`; `tools/adaptations.toml` with AD1–AD7 and the EffectCraft items each relies on (§15). Acceptance: the workspace builds for the host and the four mobile targets against the pin; `cargo deny` and the duplicate check pass; running the script again on the same revision changes nothing; the gate fails unless every `[patch]` entry in `rust/Cargo.toml` is exactly what the script generates, and fails on `[patch]` or `paths` in the Cargo configuration, so no hand-written path or patch can build a changed EffectCraft (cargo-deny sees only git and registry sources); nothing in EffectCraft or its fork is changed.

@@ -18,10 +18,8 @@
 | M9 | Kotlin | `android/sdk` (`build-logic`, `:core`, `:effects`) | NEW | §23 |
 | M10 | Conformance | `rust/effects/craftbridge-effects-conformance`, `conformance/effects` | NEW | §28 |
 | M11 | Samples and guides | `ios/samples`, `android/samples`, `docs/` | NEW | §25 |
-| M12 | EffectCraft host | `crates/host/src/lib.rs`, `crates/host/src/app_dirs.rs`, `crates/host/Cargo.toml` | MOD (S1, S2) | §15 |
-| M13 | EffectCraft text | `crates/text/src/fonts.rs` | MOD (S3) | §15 |
-| M14 | EffectCraft automation and CLI | `crates/automation/src/{render_request,render,frame_request,template,bench}.rs`, `apps/effectcraft-cli/src/main.rs`, `apps/effectcraft-cli/src/template.rs` | NEW, MOD (S4, S5) | §15 |
-| M15 | EffectCraft engine | `crates/engine/src/system/sysinfo.rs` | MOD (S6) | §15 |
-| M16 | EffectCraft export | `crates/export/src/encode.rs`, `crates/export/src/lib.rs` | MOD (S7) | §15 |
-| M17 | EffectCraft engine, GPU, automation | `crates/engine/src/cmd.rs`, `crates/engine/src/cmd/schema.rs`, `crates/gpu/src/lib.rs`, `crates/automation/src/{backend,server,tools,confine}.rs` | CHK | §14, §17, §19, §21 |
-| M18 | FilmCraft codecs | filmcraft `crates/codecs/src/{lib,hw,video}.rs` | CHK | §18 |
+| M12 | EffectCraft interfaces the adaptations use | `crates/engine/src/{lib,render_queue}.rs`, `crates/host/src/lib.rs`, `crates/text/src/fonts.rs`, `crates/render/src/{lib,opts}.rs`, `crates/media/src/probe.rs`, `crates/script/src/lib.rs` | CHK | §15, §19 |
+| M13 | EffectCraft CLI | `apps/effectcraft-cli/src/main.rs`, `apps/effectcraft-cli/src/template.rs` | CHK: the behaviour AD3–AD6 follow, and the oracle | §15, §28 |
+| M14 | EffectCraft export | `crates/export/src/{out,encode,pipeline}.rs` | CHK | §15, §18 |
+| M15 | EffectCraft engine, GPU, automation | `crates/engine/src/cmd.rs`, `crates/engine/src/cmd/schema.rs`, `crates/gpu/src/lib.rs`, `crates/automation/src/{backend,server,tools,confine}.rs` | CHK | §14, §17, §19, §21 |
+| M16 | FilmCraft codecs | filmcraft `crates/codecs/src/{lib,hw,video}.rs` | CHK | §18 |

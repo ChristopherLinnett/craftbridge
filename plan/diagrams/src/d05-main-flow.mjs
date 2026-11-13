@@ -2,27 +2,27 @@ import { diagram } from '../../build/drawio-kit.mjs';
 
 // Question: what happens, call by call, when Maya exports her card?
 // Six lanes in call order, left→right: app · Swift package · engine actor · EffectCraft app crate ·
-// effectcraft-automation · EffectCraft session. Accent marks the path CraftBridge adds.
-// Drawn from §14 (method table), §16 (actor, L3), §19 (render::run) and the CLI's queue loop
+// CraftBridge's render runner · EffectCraft session. Accent marks the path CraftBridge adds.
+// Drawn from §14 (method table), §15 (AD3), §16 (actor, L3), §19 (the render runner) and the CLI's queue loop
 // (apps/effectcraft-cli/src/main.rs:958-1035 @ 10376058).
 const id = 'd05-main-flow';
 export default {
   id,
   xml: diagram({ id, name: 'Maya’s export, call by call', width: 1400, height: 'auto' }, (d) => {
-    d.title('An export is one request: EffectCraft’s own render code queues, renders and reports progress', 'Running example: Birthday Card, 180 frames, 1080 × 1080 H.264 · traced from §14, §16, §19');
+    d.title('An export is one request: CraftBridge’s render runner drives EffectCraft’s own render queue and reports progress', 'Running example: Birthday Card, 180 frames, 1080 × 1080 H.264 · traced from §14, §16, §19');
     const seq = d.sequence([
       ['app', 'Postcard Studio', 'host app', 'lilac'],
       ['swift', 'CraftBridgeEffects', 'Swift package', 'new'],
       ['actor', 'Engine actor', 'craftbridge-core', 'new'],
       ['fx', 'craftbridge-effects', 'method table', 'new'],
-      ['auto', 'automation', 'render::run (S4)', 'mod'],
+      ['auto', 'render runner', 'craftbridge-effects (AD3)', 'new'],
       ['session', 'EffectCraft session', 'unchanged', 'chk'],
     ]);
     const { msg, self } = seq;
     msg('app', 'swift', 'export(card, mp4, .h264, progress)', { kind: 'accent' });
     msg('swift', 'actor', 'requestWithProgress("export", RenderRequest)', { kind: 'accent' });
     msg('actor', 'fx', 'request_with_progress (other calls now wait, L3)', { kind: 'accent' });
-    msg('fx', 'auto', 'render::run(session, request, on_progress)');
+    msg('fx', 'auto', 'run(session, request, on_progress)');
     msg('auto', 'session', 'renderQueue.add · renderQueue.render {wait: false}');
     const poll = self('auto', 'every 100 ms: poll_render · render_progress');
     msg('auto', 'actor', 'on_progress(done, total, seconds left)', { ret: true, kind: 'accent' });

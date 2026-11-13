@@ -8,4 +8,4 @@
 **MED: native media** (W4, W6)
 - [ ] MED-1 · 3 d · W4 — VideoToolbox decoder and `Fallback` (§18). Acceptance: E8, E10; V2.
 - [ ] MED-2 · 4 d · W4 — MediaCodec decoder through `AImageReader` (§18). Acceptance: E9; V3.
-- [ ] MED-3 · 5 d · W6 — Hardware H.264 and HEVC encoders through S7 once it has merged. Acceptance: F1 closed; T9 and T10 with the hardware option.
+- [ ] MED-3 · 6.5 d · W6 — Hardware H.264 and HEVC encoding in CraftBridge's exporter (AD7, §18): VideoToolbox and MediaCodec encoders in `craftbridge-media`. Acceptance: F1 closed; T9 and T10 with the hardware option; every other format unchanged.

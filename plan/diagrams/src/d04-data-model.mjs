@@ -11,7 +11,7 @@ export default {
   xml: diagram({ id, name: 'What crosses each boundary', width: 1400, height: 'auto' }, (d) => {
     const { C } = d;
     d.title('One Engine object carries JSON requests; the typed layer is generated from the engine itself', 'Native boundary in §14 · method table in §14 · api-surface.json in §21', { w: 900 });
-    d.legend({ x: 1010, y: 30, items: ['new', 'mod'], names: { new: 'New', mod: 'Seam S4' } });
+    d.legend({ x: 1010, y: 30, items: ['new'], names: { new: 'New' } });
     const ent = (key, name, fields, { x, y, w = 340, h, kind = 'new' }) =>
       d.node(key, name, { x, y, w, h, kind, sub: fields.join('\n'), mono: true, size: 12.5, align: 'left', valign: 'top' });
 
@@ -24,7 +24,7 @@ export default {
 
     d.group('methods', 'EffectCraft method table', { x: 940, y: 92, w: 420, h: 412, sub: 'craftbridge-effects' });
     ent('table', 'methods  (JSON)', ['info · commands · exec · run', 'props · get · set', 'open · save · saveAs · new', 'frame · export · template.*', 'script · replay · timings', 'mcp'], { x: 960, y: R1, w: 380, h: H1 });
-    ent('requests', 'RenderRequest · FrameRequest', ['comp · output · format', 'start · end · codec options', 'time | frame · maxSide | scale', 'in effectcraft-automation'], { x: 960, y: R2, w: 380, h: H2, kind: 'mod' });
+    ent('requests', 'RenderRequest · FrameRequest', ['comp · output · format', 'start · end · codec options', 'time | frame · maxSide | scale', 'in craftbridge-effects (AD3, AD4)'], { x: 960, y: R2, w: 380, h: H2 });
 
     d.edge('surface', 'engine', { exit: 'r', entry: 'l', label: 'request' });
     d.edge('folders', 'engine', { exit: 't', entry: 'b', label: 'start' });

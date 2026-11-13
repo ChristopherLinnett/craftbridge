@@ -19,7 +19,11 @@ if [ -z "${ANDROID_HOME:-}" ]; then
 fi
 export ANDROID_HOME
 export CRAFTBRIDGE_ANDROID_API="37"
-export CRAFTBRIDGE_NDK_MAJOR="28"
+# The NDK the doctor asks a machine to install: the default NDK of the Android Gradle plugin the version
+# catalog pins (plan/evidence/07-repository-conventions.md, Finding 14). NDK r28 and later align native
+# libraries to 16 KB pages, so the doctor accepts any r28 already installed.
+export CRAFTBRIDGE_NDK_VERSION="28.2.13676358"
+export CRAFTBRIDGE_NDK_MAJOR="${CRAFTBRIDGE_NDK_VERSION%%.*}"
 
 # Gradle runs on JDK 21, the release AGP is tested with here. JAVA_HOME wins when it is 21; else
 # macOS's registry, else the JDK Android Studio bundles.
@@ -38,3 +42,11 @@ if CRAFTBRIDGE_JDK="$(craftbridge_find_jdk)"; then export JAVA_HOME="$CRAFTBRIDG
 
 # The copy-paste detector, pinned so every machine finds the same clones.
 export CRAFTBRIDGE_JSCPD="jscpd@5.4.3"
+
+# Where tools write output instead of hand-written code, as paths from the repository root: the build
+# folders .gitignore names, and generated code, which is committed but written by a generator. The shell
+# stages prune these paths and jscpd ignores them, so a source folder that only shares a name with build
+# output (a Rust module `src/target/`) is still read. rust/xtask/src/scan.rs makes the same cut by its
+# own rule, a build folder only beside the file of the tool that writes it: a folder added to one list
+# belongs in the other.
+export CRAFTBRIDGE_BUILD_OUTPUTS="rust/target ios/**/.build ios/**/.swiftpm android/**/build android/**/.gradle android/**/.kotlin **/generated **/Generated **/node_modules"

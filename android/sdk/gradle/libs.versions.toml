@@ -1,0 +1,22 @@
+# Every version in the Android build, in one place: no module or convention plugin writes a
+# version of its own.
+
+[versions]
+android-compileSdk = "37"
+android-minSdk = "29"
+agp = "9.5.1"
+kotlin = "2.4.21"
+spotless = "8.11.0"
+ktlint = "1.8.0"
+
+[plugins]
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
+
+[libraries]
+# The convention plugins compile against these; the build uses the copies the plugins block at
+# the root puts on its classpath, at the same versions.
+android-gradle-plugin = { module = "com.android.tools.build:gradle", version.ref = "agp" }
+kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+spotless-gradle-plugin = { module = "com.diffplug.spotless:spotless-plugin-gradle", version.ref = "spotless" }
