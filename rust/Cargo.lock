@@ -510,6 +510,11 @@ dependencies = [
 [[package]]
 name = "craftbridge-effects-codegen"
 version = "0.1.0"
+dependencies = [
+ "effectcraft-automation",
+ "effectcraft-engine",
+ "serde_json",
+]
 
 [[package]]
 name = "craftbridge-effects-conformance"

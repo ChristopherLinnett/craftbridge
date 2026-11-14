@@ -363,6 +363,24 @@ fn pinned_source(url: &str, rev: &str) -> String {
     format!("git+{url}?rev={rev}")
 }
 
+/// The commit Cargo builds for the EffectCraft pin: what `rust/Cargo.lock` records after the `#` of the
+/// pinned source. It is the full commit id whatever spelling the manifest gives the pin, in full or
+/// abbreviated, so what is read from it follows the commit and not the spelling. One commit or an
+/// error: none means nothing builds against the pin, and two are what [`lock_pin_errors`] refuses.
+pub(crate) fn locked_effectcraft_commit(lock: &str, pin: &Pin) -> Result<String, String> {
+    let source = format!("{}#", pinned_source(&app_url(effectcraft_app()?), &pin.effectcraft_rev));
+    let commits: BTreeSet<String> = lock_packages(lock, "rust/Cargo.lock")?
+        .into_iter()
+        .filter_map(|package| package.source.as_deref().and_then(|locked| locked.strip_prefix(&source)).map(str::to_string))
+        .collect();
+    let mut commits = commits.into_iter();
+    match (commits.next(), commits.next()) {
+        (Some(commit), None) => Ok(commit),
+        (None, _) => Err(format!("rust/Cargo.lock has no package from {source}<commit>: nothing builds against the EffectCraft pin")),
+        (Some(first), Some(second)) => Err(format!("rust/Cargo.lock builds the EffectCraft pin at two commits, {first} and {second}")),
+    }
+}
+
 /// The sources the pinned upstream's own lock resolves each crate name to, whole: what the lock check
 /// holds every FilmCraft and Craft library package to. Upstream's lock is the authority on which
 /// revisions of those repositories the pin builds — FilmCraft names a `craft-media` revision of its own,
@@ -1018,6 +1036,18 @@ mod tests {
 
     fn lock_errors(lock: &str) -> Vec<String> {
         lock_pin_errors(lock, &fixture_pin(), EFFECTCRAFT_COMMIT, &upstream()).expect("the fixture parses")
+    }
+
+    #[test]
+    fn the_locked_commit_is_the_full_one_the_pin_builds_whatever_its_spelling() {
+        assert_eq!(locked_effectcraft_commit(&good_lock(), &fixture_pin()), Ok(EFFECTCRAFT_COMMIT.to_string()));
+        let abbreviated = good_lock().replace("effectcraft?rev=10376058#", "effectcraft?rev=1037605#");
+        let seven = Pin { effectcraft_rev: "1037605".to_string(), ..fixture_pin() };
+        assert_eq!(locked_effectcraft_commit(&abbreviated, &seven), Ok(EFFECTCRAFT_COMMIT.to_string()));
+        assert!(locked_effectcraft_commit(&abbreviated, &fixture_pin()).is_err_and(|error| error.contains("nothing builds")), "the lock is at another rev");
+        let split = good_lock().replacen(EFFECTCRAFT_COMMIT, "1037605899999999999999999999999999999999", 1);
+        assert!(locked_effectcraft_commit(&split, &fixture_pin()).is_err_and(|error| error.contains("two commits")));
+        assert!(locked_effectcraft_commit("not a lock", &fixture_pin()).is_err());
     }
 
     #[test]
