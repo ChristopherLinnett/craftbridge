@@ -21,7 +21,21 @@ craftbridge-effects = { path = "effects/craftbridge-effects" }
 # xtask
 serde_json = "1"
 toml = "0.9"
+toml_edit = "0.25"
 unicode-normalization = "0.1"
+effectcraft-engine = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
+effectcraft-host = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
+effectcraft-automation = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
+effectcraft-gpu = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
+effectcraft-render = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
+effectcraft-time = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
+effectcraft-text = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
+effectcraft-media = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
+effectcraft-expr = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
+effectcraft-script = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
+effectcraft-plugin = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
+filmcraft-codecs = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
+filmcraft-isobmff = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
 
 # One definition for every crate: each manifest says `[lints] workspace = true`, and
 # `cargo xtask rules` fails if one does not or if this table is weakened.
@@ -54,3 +68,27 @@ wildcard_imports = "deny"
 dbg_macro = "deny"
 needless_range_loop = "allow"
 type_complexity = "allow"
+
+# Written by tools/update-upstream.sh from the pinned EffectCraft; never edit by hand (AGENTS.md §6, §7).
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# Written by tools/update-upstream.sh from the pinned EffectCraft; never edit by hand (AGENTS.md §6, §7).
+[patch.crates-io]
+hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "e7c3dda7f3e339dd2c8d40fc4eb405472be1a1e4", version = "=0.7.2" }
+hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "e7c3dda7f3e339dd2c8d40fc4eb405472be1a1e4", version = "=0.3.0" }
+ecolor = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+emath = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint_default_fonts = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-winit = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-wgpu = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_glow = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_extras = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_kittest = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+# Patch a crate only together with the dependency that needs it: an unused patch makes the Nix
+# build, which uses vendored sources, fail (`cargo xtask lock-patches`).
+winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }

@@ -49,6 +49,11 @@ export CRAFTBRIDGE_RUST_CHANNEL CRAFTBRIDGE_RUST_TARGETS
 export CARGO_TARGET_DIR="$CRAFTBRIDGE_ROOT/rust/target"
 unset CARGO_BUILD_TARGET
 
+# The machine-local git cache of official EffectCraft, a bare clone: tools/update-upstream.sh fetches
+# official main into it, and the upstream rule only reads it. Outside the repository on purpose — a
+# fetch cache is not a source, and no build reads it.
+export CRAFTBRIDGE_UPSTREAM_CACHE="${CRAFTBRIDGE_UPSTREAM_CACHE:-$HOME/.cache/craftbridge/upstream/effectcraft}"
+
 # The Xcode release the iOS build is made and tested with.
 export CRAFTBRIDGE_XCODE="26.6"
 

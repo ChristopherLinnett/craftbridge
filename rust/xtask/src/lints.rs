@@ -199,6 +199,9 @@ pub(crate) fn cargo_config_violations(source: &str, name: &str) -> Vec<String> {
             ));
         }
     }
+    // What a configuration may not carry against the pin — `[patch]`, `paths`, a `[source]`
+    // replacement — is refused by the `upstream` rule, which reads every configuration Cargo reads
+    // for a build in `rust/`, this file included, with one mechanism (rust/xtask/src/upstream.rs).
     let mut flag_lists: Vec<(String, &toml::Value)> = Vec::new();
     if let Some(flags) = document.get("build").and_then(|build| build.get("rustflags")) {
         flag_lists.push(("[build].rustflags".to_string(), flags));
