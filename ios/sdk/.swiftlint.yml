@@ -1,0 +1,17 @@
+# SwiftLint configuration — gate machinery (AGENTS.md §10): this is its only copy, and a change here is a
+# gate change. `cargo xtask swift-lint` runs SwiftLint with it, in the Swift stage of tools/ci.sh.
+#
+# Only built-in rules, which read swift-syntax and so lex a file as the Swift 6 compiler does. A custom
+# rule's `match_kinds` reads the syntax map SwiftLint asks SourceKit for without the package's compiler
+# arguments, which lexes Swift 5: there a Swift 6 regex literal such as `/\/*/` opens a comment and every
+# line after it vanishes from the rule. So the Swift rules no built-in covers — the never-crash calls,
+# every postfix `!`, the pointer confinement and the tool directives (AGENTS.md §3, §4, §10) — are read
+# through the compiler's language server by `cargo xtask swift-lint` itself, which also refuses every
+# `swiftlint:` command, so nothing a file says switches a rule here off.
+#
+# `missing_docs` requires documentation on every `open` and `public` declaration, protocol requirements
+# and enum cases included, which swift-format's AllPublicDeclarationsHaveDocumentation reads only for
+# `public`. `only_rules` names every rule this gate runs: enabling a new default rule is then a change to
+# this file and its review, not a SwiftLint upgrade's surprise.
+only_rules:
+  - missing_docs

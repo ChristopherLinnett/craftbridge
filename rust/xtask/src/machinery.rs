@@ -11,10 +11,11 @@
 //! configuration the gate's tools read therefore sits at exactly one path here; a second copy of any of
 //! them, a Cargo configuration anywhere but `rust/.cargo/config.toml`, and a tool configuration the gate
 //! keeps none of ([`REFUSED`]: shellcheck's rc files, the `.ignore` and nested `.gitignore` files jscpd
-//! honours, and jscpd's ignore markers), and a second `gradle.properties` under `android/sdk`, fail the
-//! gate. Names are compared exactly: `rules: hygiene` refuses every other spelling of each name here (a
-//! `CLIPPY.toml`, or a `rustfmt.toml` spelt with a long s, which a case-insensitive disk opens under the
-//! plain name), so a copy can only sit here under its own name.
+//! honours, jscpd's ignore markers, and SourceKit-LSP's `.sourcekit-lsp` folder), and a second
+//! `gradle.properties` under `android/sdk`, fail the gate. Names are compared exactly: `rules: hygiene`
+//! refuses every other spelling of each name here (a `CLIPPY.toml`, or a `rustfmt.toml` spelt with a long
+//! s, which a case-insensitive disk opens under the plain name), so a copy can only sit here under its own
+//! name.
 
 use crate::scan;
 use std::path::Path;
@@ -41,6 +42,7 @@ pub(crate) const CONFIGURATIONS: &[(&str, &[&str])] = &[
     ("rust/rustfmt.toml", &["rustfmt.toml", ".rustfmt.toml"]),
     (DENY_CONFIGURATION, &["deny.toml", "deny.exceptions.toml", ".deny.exceptions.toml"]),
     ("ios/sdk/.swift-format", &[".swift-format"]),
+    ("ios/sdk/.swiftlint.yml", &[".swiftlint.yml"]),
     ("tools/licences.toml", &["licences.toml"]),
     (".editorconfig", &[".editorconfig"]),
 ];
@@ -68,6 +70,11 @@ const REFUSED: &[(&str, &str)] = &[
     ("shellcheckrc", "shellcheck reads it as directives for every script below it, so it can switch the shell stage's checks off"),
     (".ignore", "jscpd skips what it lists, so it can hide a copied block from the duplicates stage"),
 ];
+
+/// SourceKit-LSP's folder of workspace configuration: the server merges its `config.json` over the options
+/// `cargo xtask swift-lint` starts it with, so it could hand the Swift stage another platform's build, other
+/// compiler flags or another build system's answers. Refused with whatever it holds, wherever it sits.
+const SOURCEKIT_LSP_FOLDER: &str = ".sourcekit-lsp";
 
 /// jscpd honours a `.gitignore` at any depth too, and the duplicates stage runs it with `--no-gitignore`
 /// as well; the repository needs one at the root, and the plan kit keeps its own at `plan/.gitignore`,
@@ -140,6 +147,11 @@ pub(crate) fn second_copy(shown: &str, name: &str, folders: &[String]) -> Option
     }
     if name == GRADLE_PROPERTIES_NAME {
         return second_gradle_properties(shown, folders);
+    }
+    if folders.iter().any(|folder| folder == SOURCEKIT_LSP_FOLDER) {
+        return Some(format!(
+            "{shown}: SourceKit-LSP merges a `{SOURCEKIT_LSP_FOLDER}` folder's configuration over the options the Swift stage starts it with, so it could change the build the stage reads; the gate keeps no such folder"
+        ));
     }
     if let Some((_, does)) = REFUSED.iter().find(|(refused, _)| name == *refused) {
         return Some(format!("{shown}: {does}; the gate keeps no such file"));
@@ -290,7 +302,15 @@ mod tests {
         scratch.write(".gitignore", "/target/\n");
         scratch.write("plan/.gitignore", "node_modules/\n");
         assert!(check(&scratch.0).unwrap().is_empty(), "the root's and the plan kit's .gitignore are the repository's own");
-        let plants = ["tools/.shellcheckrc", "tools/sub/shellcheckrc", "conformance/dup/.ignore", "conformance/dup/.gitignore", "plan/sub/.gitignore"];
+        let plants = [
+            "tools/.shellcheckrc",
+            "tools/sub/shellcheckrc",
+            "conformance/dup/.ignore",
+            "conformance/dup/.gitignore",
+            "plan/sub/.gitignore",
+            "ios/sdk/.sourcekit-lsp/config.json",
+            "ios/.sourcekit-lsp/anything",
+        ];
         for plant in plants {
             scratch.write(plant, "disable=all\n");
         }
@@ -363,7 +383,7 @@ mod tests {
                 assert!(list.contains(&format!("`{path}`")), "{document}'s machinery list does not name `{path}`");
             }
             let other_names = CONFIGURATIONS.iter().flat_map(|(path, names)| names.iter().filter(move |name| !path.ends_with(*name)));
-            for name in other_names.chain(REFUSED.iter().map(|(name, _)| name)) {
+            for name in other_names.chain(REFUSED.iter().map(|(name, _)| name)).chain([&SOURCEKIT_LSP_FOLDER]) {
                 assert!(paragraph.contains(&format!("`{name}`")), "{document}'s machinery paragraph does not name `{name}`");
             }
         }
