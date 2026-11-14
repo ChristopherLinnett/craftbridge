@@ -60,6 +60,8 @@ fn package(name: &str, id: &str, source: Option<&str>) -> Crate {
         name: name.to_string(),
         id: id.to_string(),
         source: source.map(str::to_string),
+        edition: "2024".to_string(),
+        target_editions: Vec::new(),
         manifest_path: format!("/repo/rust/{name}/Cargo.toml"),
         dependencies: Vec::new(),
         library_targets: Vec::new(),

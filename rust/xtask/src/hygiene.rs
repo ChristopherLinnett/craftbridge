@@ -79,8 +79,9 @@ fn read_as_text_by_name(name: &str) -> bool {
     NAMES.contains(&name) && !["gradlew.bat", "buildSrc", ".cargo"].contains(&name)
 }
 
-/// The plan's measurement records, which keep the probe code each verification ran.
-const EVIDENCE: &str = "plan/evidence/";
+/// The plan's measurement records, which keep the probe code each verification ran exactly as it ran, so
+/// no rule about what code or build files sit where reads them.
+pub(crate) const EVIDENCE: &str = "plan/evidence/";
 
 /// What is wrong with one path's spelling, without the disk: the NFC rule, an ASCII-case spelling of a
 /// known extension or name, and a shell script named otherwise than `.sh`.
@@ -225,8 +226,9 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
 }
 
 /// The repository's files: git's tracked and would-be-added files in a checkout, the walk's elsewhere.
-/// A tracked file deleted from the working tree is no file to read.
-fn repository_files(root: &Path) -> Result<Vec<String>, String> {
+/// A tracked file deleted from the working tree is no file to read. Every rule about which files the
+/// repository holds reads this one list, so a file git ignores is outside them all alike (AGENTS.md §1).
+pub(crate) fn repository_files(root: &Path) -> Result<Vec<String>, String> {
     let mut files = if crate::git::is_checkout(root) {
         crate::git::listed(root, &["ls-files", "-z", "--cached", "--others", "--exclude-standard"])?
     } else {
