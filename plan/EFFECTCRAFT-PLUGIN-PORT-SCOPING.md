@@ -749,19 +749,23 @@ UniFFI 0.32 in proc-macro mode generates the Swift and Kotlin bindings (D-3). It
 | `android/sdk/effects/src/generated/kotlin/…/effects/*.kt` | NEW, generated | the same for Kotlin |
 | `rust/effects/craftbridge-effects/src/generated/version.rs` | NEW, generated | `ENGINE_VERSION`, `ENGINE_PIN` constants for `info` |
 
-**Reading the registry.** `effectcraft_engine::command_specs()` gives every command's id, label, menu, shortcuts, `params` text and `journal` flag (`crates/engine/src/cmd.rs:106-121`, `:175-181`). `params_schema(spec)` gives the accepted keys and which are required (`crates/engine/src/cmd/schema.rs:77-101`). The tool catalogue comes from `effectcraft_automation::tools::catalogue()` (`crates/automation/src/tools.rs:93-95`).
+**Reading the registry.** `effectcraft_engine::command_specs()` gives every command's id, label, menu, shortcuts, `params` text and `journal` flag (`crates/engine/src/cmd.rs:106-121`, `:175-181`). `params_schema(spec)` gives the accepted keys and which are required (`crates/engine/src/cmd/schema.rs:77-101`). The tool catalogue comes from `effectcraft_automation::tools::catalogue()` (`crates/automation/src/tools.rs:93-95`). The surface's `pin` is the commit Cargo builds for the pin, in full as `rust/Cargo.lock` records it, whatever spelling `rust/Cargo.toml` gives the pin, so a pin respelt in full or abbreviated leaves the surface as it was.
 
 **Type rules.** The registry gives types only as prose in each key's piece of the `params` text (`evidence/01-system-inventory.md` Finding 11). The generator maps a piece conservatively, and anything else stays a `JSONValue`, so a wrong guess can only be wider, never narrower:
 
 | Piece contains | Type | Example |
 |---|---|---|
 | `: bool` or `?: bool` | `bool` | `preserveFrameRate?: bool` |
+| `: string` | `string` | `query?: string` |
 | `: a\|b\|c` (bare words) | `enum` with those values | `renderer?: classic3D\|advanced3D` |
-| `(s)`, `fps`, `px`, `(16–256)`, a number word | `number` | `duration? (s)` |
+| `(s)`, `fps`, `px`, `(16–256)`, a number word (`number`, `n`) | `number` | `duration? (s)` |
 | `[x,y]` / `[x, y]` | `vec2` | `position? [x,y]` |
-| `[r,g,b]\|#hex` | `color` | `background? [r,g,b]\|#hex` |
+| `[x,y,z]` / `[x, y, z]` | `vec3` | `eye? [x,y,z]` |
+| `[r,g,b]\|#hex`, in either order | `color` | `background? [r,g,b]\|#hex` |
 | `id\|name`, `#n` | `ref` (id, name or index) | `effect: id\|name` |
 | anything else | `json` | `attributes as layer.setText` |
+
+A rule applies only when the piece says the type and nothing more: a value with a further alternative (`bool|null`, `[x,y]|null`, `[r,g,b]|#hex|false`, or a note that offers one, `(or display name)`) or text after the type that is not a note in parentheses stays `json`, and so does a key whose piece names several keys (`time? (s) | frame?`), since the text then does not say which of them a word describes. An enum lists values, and the prose writes a stand-in for a kind of value the same way (`output?: path|template` takes a file path or a template's name, `resolution?: full|half|third|quarter|scale` a number for `scale`), so a type's name, a number word, a unit, a reference word or a JSON literal (`bool`, `n`, `fps`, `id`, `null`), or a known stand-in (`path`, `template`, `timecode`, `frame`, `scale`), keeps the key `json`, even where another command lists the word as a value. The rules read only the prose, so where it reads two ways they keep the wider type: a typed key never refuses a value its piece describes.
 
 **Emitted code.** For `layer.newText` the Swift is
 `extension EffectsEngine.LayerCommands { public func newText(text: String? = nil, name: String? = nil, position: Vec2? = nil, …, extra: [String: JSONValue] = [:]) async throws -> JSONValue }`,

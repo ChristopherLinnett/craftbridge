@@ -17,6 +17,7 @@ mod buildfiles;
 mod compiled;
 mod direction;
 mod duplicates;
+mod effects_api;
 mod files;
 mod generate;
 mod generated;
