@@ -1,0 +1,106 @@
+# The adaptations list required by AGENTS.md §7: every adaptation CraftBridge carries against the
+# pinned EffectCraft, with the EffectCraft files and items each one relies on. An adaptation is
+# CraftBridge code written against EffectCraft's public interfaces for something a phone needs done
+# differently; it never holds a copy of EffectCraft code.
+#
+# The point of the list is the update loop (plan §24 step 4): when tools/update-upstream.sh moves the
+# pin, the revision diff is read against these entries, and every adaptation whose items the diff
+# touches is rechecked before the pin is accepted. An adaptation leaves this file the moment EffectCraft
+# offers a public interface that does its job (§7: upstream wins), and an entry is updated in the same
+# change that alters what it relies on.
+#
+# File and line references name the revision the pin carries (see [workspace.dependencies] in
+# rust/Cargo.toml); item names are EffectCraft's, spelled as its sources spell them. `implements`
+# names the plan task that lands each adaptation's code (plan §15); entries are written here before
+# their code exists so the first pin's updates already recheck what the first release will carry.
+#
+# Nothing in this file is generated: it is the list AGENTS.md §7 makes hand-written, by the change
+# that adds or alters each adaptation.
+
+[[adaptation]]
+id = "AD1"
+crate = "craftbridge-effects"
+file = "src/session.rs"
+implements = "FX-1a"
+summary = "Builds CraftBridge's own Session from EffectCraft's public fields: models and plug-ins folders from the app's Folders, EffectCraft's MediaPool, an importer over effectcraft_media::probe, CraftBridge's exporter (AD7), effectcraft_expr's expressions and syntax check, the plug-in loader and no helper hooks; then effectcraft_script::install."
+replaces = "effectcraft_host::session(), which takes its folders from EFFECTCRAFT_CONFIG_DIR or the desktop conventions and starts external helpers — folders and helpers a phone has neither of (crates/host/src/lib.rs:96-147)."
+depends = [
+  "Session (crates/engine/src/lib.rs:104-269)",
+  "effectcraft_media::probe (crates/media/src/probe.rs:17)",
+  "effectcraft_script::install (crates/script/src/lib.rs:78)",
+]
+
+[[adaptation]]
+id = "AD2"
+crate = "craftbridge-effects"
+file = "src/session.rs"
+implements = "FX-3"
+summary = "At engine start, registers the phone's font folders through effectcraft_text::fonts::add_source with a DirectorySource: on iOS the parent folders of the font files CoreText reports, never a hard-coded /System/Library/Fonts; on Android /system/fonts. Every face stays registered for drawing and fallback; craftbridge-effects filters the font list of every response that comes back through it carrying text.fonts' output to the faces CoreText offers matched by (file, PostScript name) plus the bundled ones; code inside EffectCraft's own dispatch sees the full registry."
+replaces = "DirectorySource::system(), which knows only the macOS, Windows and Unix desktop folders (crates/text/src/fonts.rs:79-101)."
+depends = [
+  "FontSource, DirectorySource (crates/text/src/fonts.rs:67-76)",
+  "add_source (crates/text/src/fonts.rs:396-412)",
+  "add_font_data (crates/text/src/fonts.rs:414-422)",
+  "text.fonts (crates/engine/src/cmd/text_edit.rs:880-903)",
+  "effectcraft_text::families (crates/text/src/fonts.rs:556)",
+  "the {steps, results} of engine.batch and file.runScript and the command-list format the latter reads (crates/engine/src/cmd/batch.rs:66-119, crates/engine/src/cmd/file_more.rs:516-556)",
+]
+
+[[adaptation]]
+id = "AD3"
+crate = "craftbridge-effects"
+file = "src/requests.rs and src/runner.rs"
+implements = "FX-1c"
+summary = "RenderRequest — one field per render flag of EffectCraft's CLI, mapped to the render-queue parameters with the CLI's names, defaults and errors — and the render runner: unqueue the project's other items, add this one, render without waiting, poll every 100 ms, report progress, stop on cancel, report failed items."
+replaces = "the CLI's flag handling and its queue-and-wait loop, which live in its binary (apps/effectcraft-cli/src/main.rs:860-1037)."
+depends = [
+  "the renderQueue.add and renderQueue.render commands (crates/engine/src/cmd/render_queue.rs)",
+  "render_progress, stop_render and poll_render (crates/engine/src/render_queue.rs:545, :692, :723)",
+]
+
+[[adaptation]]
+id = "AD4"
+crate = "craftbridge-effects"
+file = "src/requests.rs"
+implements = "FX-1e"
+summary = "FrameRequest: comp, time or frame, maximum side or scale, transparency, resolved the way render-frame resolves them."
+replaces = "the CLI's render-frame flag handling (apps/effectcraft-cli/src/main.rs:789-821)."
+depends = [
+  "Session::render_rgba8_alpha (crates/engine/src/session/render.rs:132-143)",
+  "Backend::render_with (crates/automation/src/backend.rs:122-124)",
+]
+
+[[adaptation]]
+id = "AD5"
+crate = "craftbridge-effects"
+file = "src/runner.rs"
+implements = "FX-1f"
+summary = "Templates: open an .ectemplate, apply values, render a frame or an export, and surface missing-font warnings."
+replaces = "the CLI's --template handling (apps/effectcraft-cli/src/template.rs)."
+depends = [
+  "the essential and templates commands (crates/engine/src/cmd/essential.rs, crates/engine/src/home/templates.rs)",
+]
+
+[[adaptation]]
+id = "AD6"
+crate = "craftbridge-effects"
+file = "src/timings.rs"
+implements = "FX-1d"
+summary = "Render timings per layer and effect, CPU against GPU, in the shape of the CLI's bench."
+replaces = "the CLI's bench (apps/effectcraft-cli/src/main.rs:1265-1350, :1507-1616)."
+depends = [
+  "effectcraft_render::Renderer, LayerCache and LayerTiming (crates/render/src/lib.rs:66, crates/render/src/cache.rs:39, crates/render/src/opts.rs:92)",
+]
+
+[[adaptation]]
+id = "AD7"
+crate = "craftbridge-effects"
+file = "src/exporter.rs"
+implements = "FX-1g, MED-3"
+summary = "CraftBridge's exporter, set as Session.exporter: hands each job to EffectCraft's FileExporter inside a thread pool sized from half the memory the phone reports available at 16 bytes a pixel, between one and the core count; from wave 6 it also encodes H.264 and HEVC in hardware through craftbridge-media (plan §18)."
+replaces = "FileExporter alone, whose free-memory figure is empty on iOS and Android because sysinfo::memory() has no branch for either (crates/host/src/lib.rs:91-94, crates/engine/src/system/sysinfo.rs:142-168), which leaves frames in flight bounded only by the thread count (crates/export/src/pipeline.rs:140-149, :171-176)."
+depends = [
+  "Exporter, ExportJob (crates/engine/src/render_queue.rs:93-113, :22-46)",
+  "FileExporter (crates/host/src/lib.rs:25-89)",
+  "the export frame loop's thread count (crates/export/src/pipeline.rs:140-149)",
+]

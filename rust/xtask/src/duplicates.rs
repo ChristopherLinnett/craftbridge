@@ -1,25 +1,44 @@
 //! Rule 7 — one copy of each upstream library crate.
 //!
 //! CraftBridge's decoders register themselves into the decoder registry EffectCraft decodes through,
-//! and a registry is only one copy deep: if a second copy of an EffectCraft, FilmCraft or Craft crate
-//! lands in the graph, the decoders register into the copy the decoder does not consult, and the broken
+//! and a registry is only one copy deep: if a second copy of an EffectCraft or FilmCraft crate lands in
+//! the graph, the decoders register into the copy the decoder does not consult, and the broken
 //! registration is silent — video that will not decode, with no error anywhere. So a duplicated name in
-//! these three families is an error, not a warning, and it is reported with the package ids so the two
-//! copies (usually one from crates.io and one from the pinned git revision) can be told apart.
+//! these families is an error, not a warning, and it is reported with the package ids so the two copies
+//! (usually one from crates.io and one from the pinned git revision) can be told apart.
+//!
+//! A Craft *library* crate is exempt when every copy comes from the official Craft library repository:
+//! the pinned upstream's own lock resolves some library crates (craft-media today) at two revisions,
+//! because FilmCraft names a revision of its own, and this rule refusing that would refuse the official
+//! pin itself. Which split passes is the `upstream` rule's to say, since only it reads upstream's lock:
+//! it holds a library crate upstream's lock resolves to the sources it resolves that very crate to, and
+//! any other library crate to one copy, so the gate passes exactly upstream's split and no other — not a
+//! second revision of a crate upstream holds once, nor a revision whose commit upstream never locked. A second copy from anywhere else —
+//! crates.io, a fork, a path — is this rule's business still, and every app crate (each Craft app's own
+//! crates, where the decoder registry lives) stays strictly one.
 //!
 //! Other crates duplicate all the time in a graph this size and are cargo-deny's business (it warns);
 //! only these prefixes are the ownership boundary this rule protects.
 
-use crate::layers::{CRAFT_APPS, CRAFT_LIBRARY_PREFIX, CRAFT_LIBRARY_REPOSITORY};
+use crate::layers::{CraftFamily, family};
 use crate::meta::Crate;
 use std::path::Path;
 
 /// Is the package `name` from `source` a crate of one of the families that must appear once: a Craft
-/// app's (the layer table's list, by name or repository) or a shared Craft library?
+/// app's (the layer table's list, by name or repository) or a shared Craft library? The one answer to
+/// "which packages are Craft family" is [`crate::layers::family`], which the pin rule reads too.
 fn owned(name: &str, source: Option<&str>) -> bool {
-    name.starts_with(CRAFT_LIBRARY_PREFIX)
-        || source.is_some_and(|source| crate::layers::from_repository(source, CRAFT_LIBRARY_REPOSITORY))
-        || CRAFT_APPS.iter().any(|app| app.owns(name, source))
+    family(name, source).is_some()
+}
+
+/// Are these copies of one name all git packages of the official Craft library repository, so their
+/// split is upstream's own doing (see the module docs) rather than a second copy this repository added?
+fn sanctioned_library_split(copies: &[&Crate]) -> bool {
+    let prefix = crate::upstream::library_source_prefix();
+    copies.iter().all(|package| {
+        matches!(family(&package.name, package.source.as_deref()), Some(CraftFamily::Library))
+            && package.source.as_deref().is_some_and(|source| source.starts_with(&prefix))
+    })
 }
 
 /// Group packages by name and return every owned name that has more than one copy, with their ids and
@@ -32,7 +51,7 @@ pub(crate) fn duplicate_ids(crates: &[Crate], root: &Path) -> Vec<String> {
     let mut errors = Vec::new();
     for name in names {
         let copies: Vec<&Crate> = crates.iter().filter(|package| package.name == name).collect();
-        if copies.len() > 1 {
+        if copies.len() > 1 && !sanctioned_library_split(&copies) {
             let ids: Vec<String> = copies
                 .iter()
                 .map(|package| {
@@ -146,6 +165,25 @@ mod tests {
             duplicate_ids(&crates, Path::new("/repo")).is_empty(),
             "an unowned duplicate and a crate that merely starts like an owned prefix are both left alone"
         );
+    }
+
+    /// A `craft-media` package from one revision of the official Craft library repository.
+    fn official_craft_media(rev: &str) -> Crate {
+        let source = format!("git+https://github.com/storytold/craft-libs?rev={rev}");
+        package("craft-media", &format!("{source}#craft-media@0.1.0"), Some(&source))
+    }
+
+    #[test]
+    fn two_official_revisions_of_one_craft_library_crate_are_upstreams_split_not_ours() {
+        let crates = vec![official_craft_media("aaaa"), official_craft_media("bbbb")];
+        assert!(duplicate_ids(&crates, Path::new("/repo")).is_empty(), "the pinned upstream resolves craft-media at two revisions itself");
+    }
+
+    #[test]
+    fn a_craft_library_crate_with_a_copy_from_elsewhere_is_still_a_second_copy() {
+        let crates = vec![official_craft_media("aaaa"), package("craft-media", "path+file:///repo/vendor/craft-media#0.1.0", None)];
+        let errors = duplicate_ids(&crates, Path::new("/repo"));
+        assert_eq!(errors.len(), 1, "only the official repository's own split is exempt: {errors:?}");
     }
 
     /// The whole path on a copy of the real tree: a second copy of a Craft crate that only a feature brings

@@ -11,5 +11,20 @@ publish.workspace = true
 [dependencies]
 craftbridge-core.workspace = true
 
+# The plugin builds against EffectCraft itself: an adaptation (AGENTS.md §7) calls EffectCraft's public
+# interfaces, so the interfaces are dependencies. Every rev is the pin `tools/update-upstream.sh` wrote
+# into [workspace.dependencies] (plan §15 "Pins"); the plugin names the crates, never the revisions.
+effectcraft-engine.workspace = true
+effectcraft-host.workspace = true
+effectcraft-automation.workspace = true
+effectcraft-gpu.workspace = true
+effectcraft-render.workspace = true
+effectcraft-time.workspace = true
+effectcraft-text.workspace = true
+effectcraft-media.workspace = true
+effectcraft-expr.workspace = true
+effectcraft-script.workspace = true
+effectcraft-plugin.workspace = true
+
 [lints]
 workspace = true

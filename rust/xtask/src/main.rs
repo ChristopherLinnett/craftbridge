@@ -32,6 +32,7 @@ mod scan;
 mod scratch;
 mod sources;
 mod unsafe_check;
+mod upstream;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -57,6 +58,7 @@ fn main() -> ExitCode {
         ["skipped-tasks", log] => gradle_log::run(log),
         ["files", kind] => files::run(&root, kind),
         ["compiled"] => compiled::run(&root),
+        ["upstream", "pin", rev] => upstream::run(&root, rev),
         _ => {
             usage();
             ExitCode::from(2)
@@ -69,6 +71,7 @@ fn usage() {
     eprintln!("       cargo xtask generate [--check]");
     eprintln!("       cargo xtask skipped-tasks <gradle log>");
     eprintln!("       cargo xtask files <swift|shell|duplicates>");
+    eprintln!("       cargo xtask upstream pin <rev>   (through tools/update-upstream.sh: <rev> is a commit of official EffectCraft main)");
     eprintln!("       cargo <check|clippy|test> --message-format=json … | cargo xtask compiled");
 }
 
@@ -82,7 +85,7 @@ mod rules {
     type Check = (&'static str, fn(&Path) -> Result<Vec<String>, String>);
 
     pub(super) fn run(root: &Path) -> ExitCode {
-        let checks: [Check; 12] = [
+        let checks: [Check; 13] = [
             ("hygiene", crate::hygiene::check),
             ("layout", crate::layout::check),
             ("machinery", crate::machinery::check),
@@ -95,6 +98,7 @@ mod rules {
             ("generated", crate::generated::check),
             ("licences", crate::licences::check),
             ("duplicates", crate::duplicates::check),
+            ("upstream", crate::upstream::check),
         ];
         let (failed, lines) = outcome(root, &checks);
         for line in lines {
