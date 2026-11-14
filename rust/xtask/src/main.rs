@@ -1,6 +1,7 @@
-//! CraftBridge's rule checks and regeneration: `cargo xtask rules` and `cargo xtask generate`; the
-//! judgements `tools/ci.sh` hands over from the stages it runs, `cargo xtask skipped-tasks <gradle log>`
-//! and `cargo xtask compiled`; and the file lists its stages read, `cargo xtask files <kind>`.
+//! CraftBridge's rule checks and regeneration: `cargo xtask rules` and `cargo xtask generate`; the plan's
+//! views, `cargo xtask plan-views --check`, rebuilt from their sources and compared; the judgements
+//! `tools/ci.sh` hands over from the stages it runs, `cargo xtask skipped-tasks <gradle log>` and `cargo
+//! xtask compiled`; and the file lists its stages read, `cargo xtask files <kind>`.
 //!
 //! The rules in `AGENTS.md` that no compiler, formatter or linter already enforces are checked here,
 //! behind one command, so a change cannot merge with one broken. Each check lives in its own module: a
@@ -27,6 +28,7 @@ mod licences;
 mod lints;
 mod machinery;
 mod meta;
+mod plan_views;
 mod report;
 mod scan;
 mod scratch;
@@ -56,6 +58,7 @@ fn main() -> ExitCode {
         ["rules"] => rules::run(&root),
         ["generate"] => generate::run(&root, false),
         ["generate", "--check"] => generate::run(&root, true),
+        ["plan-views", "--check"] => plan_views::run(&root),
         ["skipped-tasks", log] => gradle_log::run(log),
         ["files", kind] => files::run(&root, kind),
         ["compiled"] => compiled::run(&root),
@@ -71,6 +74,7 @@ fn main() -> ExitCode {
 fn usage() {
     eprintln!("usage: cargo xtask rules");
     eprintln!("       cargo xtask generate [--check]");
+    eprintln!("       cargo xtask plan-views --check");
     eprintln!("       cargo xtask skipped-tasks <gradle log>");
     eprintln!("       cargo xtask files <swift|shell|duplicates>");
     eprintln!("       cargo xtask upstream pin <rev>   (through tools/update-upstream.sh: <rev> is a commit of official EffectCraft main)");
