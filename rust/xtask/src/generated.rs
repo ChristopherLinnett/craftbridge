@@ -20,8 +20,9 @@
 //! trees cover. Two kinds of written-for-you file sit outside this rule, as §6 says: what a build tool
 //! writes for itself (`Cargo.lock`, `Package.resolved`, the Gradle wrapper), which the tool owns, so their
 //! files are not read here, bar the wrapper's properties file, which carries no marker; and the plan's
-//! views in `plan/`, which are not read at all — the plan kit builds them from their sources and its own
-//! `plan check --final` owns them. What `tools/update-upstream.sh` writes into `rust/Cargo.toml` is a table
+//! views in `plan/`, which are not read at all — the plan kit builds them from their sources, and
+//! `cargo xtask plan-views --check` rebuilds them and weighs their bytes while its own `plan check --final`
+//! owns the rest. What `tools/update-upstream.sh` writes into `rust/Cargo.toml` is a table
 //! in a hand-written file, which this rule does not read either.
 
 use crate::scan::{self, FoundFile};

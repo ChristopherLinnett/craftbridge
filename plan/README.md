@@ -12,10 +12,10 @@
 |---|---|
 | `evidence/NN-*.md` | Research findings, one topic per file, every fact with its source anchor. `00` is the brief. |
 | `analysis/` | Read-only snapshots of deployed-only sources (configs, definitions, templates). No user data. |
-| `diagrams/src/*.mjs` → `diagrams/drawio/*.drawio + .svg` | Diagram definitions (built with the kit) and their exports. |
+| `diagrams/src/*.mjs` → `diagrams/drawio/*.drawio + .svg` | Diagram definitions (built with the kit) and their exports. The gate rebuilds each `.drawio` and fails on any byte that differs, and on an export no source builds; the drawing in each `.svg` is draw.io Desktop's, which it cannot weigh. |
 | `mockups/capture/*.mjs` → `mockups/*.html` → `mockups/shots/*.png` | Capture scripts that render the real products at their pins, the galleries they generate, and the screenshots the plan embeds. |
 | `review/` | What the reviews render and report: diagrams, HTML tiles, mockups, anchors (every code anchor with its excerpt), work in flight. |
-| generated views (`DECISIONS.md`, `modules/`, `tasks/`, …) | Written from tagged master sections by `build/build-plan.mjs`. Never edit them. |
+| generated views (`DECISIONS.md`, `modules/`, `tasks/`, …) | Written from tagged master sections by `build/build-plan.mjs`. Never edit them: the gate rebuilds them (`cargo xtask plan-views --check`) and fails on any byte that differs. |
 | `build/` | The scoping-plan kit (installed copies; see `build/KIT-INSTALLED.md`). Never edit it here. |
 | `plan.config.mjs` | This plan's settings: names, mockup galleries, generators. |
 

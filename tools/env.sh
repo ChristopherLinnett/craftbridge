@@ -44,9 +44,15 @@ craftbridge_require "Rust targets" "$CRAFTBRIDGE_RUST_TARGETS" "$craftbridge_too
 export CRAFTBRIDGE_RUST_CHANNEL CRAFTBRIDGE_RUST_TARGETS
 # Each worktree builds into its own rust/target: a machine-wide CARGO_TARGET_DIR would share one target
 # folder between worktrees, whose gates would then reuse each other's artifacts. A machine-wide
-# CARGO_BUILD_TARGET would send the host build of xtask to rust/target/<triple>/, and the gate would run
-# whatever older binary sits at rust/target/debug/xtask.
-export CARGO_TARGET_DIR="$CRAFTBRIDGE_ROOT/rust/target"
+# CARGO_BUILD_TARGET would send the host build of xtask to a <triple>/ folder, where the gate, which
+# starts the binary from debug/, would not find it.
+# The pre-push hook gates each pushed commit in a temporary worktree of its own, and with
+# CRAFTBRIDGE_PUSH_TARGET names the one build folder all its gates share, kept warm from push to push.
+# That sharing is safe where a machine-wide folder is not: the hook runs one gate at a time and checks each
+# commit out only once the gate before it has finished, so every file a gate builds is newer than every
+# artifact in the folder, and Cargo, which judges a workspace crate by file times, rebuilds it rather than
+# take another tree's artifacts for it. With no hook naming a folder, each tree keeps its own rust/target.
+export CARGO_TARGET_DIR="${CRAFTBRIDGE_PUSH_TARGET:-$CRAFTBRIDGE_ROOT/rust/target}"
 unset CARGO_BUILD_TARGET
 
 # The machine-local git cache of official EffectCraft, a bare clone: tools/update-upstream.sh fetches
@@ -104,3 +110,23 @@ if CRAFTBRIDGE_JDK="$(craftbridge_find_jdk)"; then export JAVA_HOME="$CRAFTBRIDG
 
 # The copy-paste detector, pinned so every machine finds the same clones.
 export CRAFTBRIDGE_JSCPD="jscpd@5.4.3"
+
+# The plan kit's dependencies, installed as plan/package-lock.json pins them: every package plan/package.json
+# names stands in plan/node_modules at the version the lock records for it. The plan stage rebuilds from a
+# scratch inside that folder, whose imports resolve there before anywhere else, so that copy is the one the
+# rebuild runs, and a version drifted from the lock can render the views differently: they would read as
+# edited by hand on one machine and pass on another. `npm ls` judges by the ranges in plan/package.json,
+# which a drifted version still meets, and Node's own import takes any copy it finds further up. The doctor
+# reports this prerequisite, and the plan stage asks it before rebuilding.
+craftbridge_plan_dependencies() {
+  (cd "$CRAFTBRIDGE_ROOT/plan" && node --input-type=module --eval '
+    import fs from "node:fs";
+    const read = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
+    const pinned = read("package-lock.json").packages;
+    for (const name of Object.keys(read("package.json").dependencies || {})) {
+      const manifest = "node_modules/" + name + "/package.json";
+      const version = (pinned["node_modules/" + name] || {}).version;
+      if (!version || !fs.existsSync(manifest) || read(manifest).version !== version) process.exit(1);
+    }
+  ' >/dev/null 2>&1)
+}
