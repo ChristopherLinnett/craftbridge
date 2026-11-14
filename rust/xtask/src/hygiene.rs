@@ -227,7 +227,8 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
 
 /// The repository's files: git's tracked and would-be-added files in a checkout, the walk's elsewhere.
 /// A tracked file deleted from the working tree is no file to read. Every rule about which files the
-/// repository holds reads this one list, so a file git ignores is outside them all alike (AGENTS.md §1).
+/// repository holds reads this one list, and so does the plan stage when it copies the plan, so a file git
+/// ignores is outside them all alike (AGENTS.md §1).
 pub(crate) fn repository_files(root: &Path) -> Result<Vec<String>, String> {
     let mut files = if crate::git::is_checkout(root) {
         crate::git::listed(root, &["ls-files", "-z", "--cached", "--others", "--exclude-standard"])?
