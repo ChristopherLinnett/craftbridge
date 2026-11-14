@@ -126,7 +126,10 @@ done
 # The gate's other tools.
 if has shellcheck; then ok "shellcheck $(shellcheck --version | sed -n 's/^version: //p')"; else gap "shellcheck" "brew install shellcheck"; fi
 node_major="$(node --version 2>/dev/null | sed -n 's/^v\([0-9]*\).*/\1/p' || true)"
-if [ -n "$node_major" ] && [ "$node_major" -ge 18 ] && has npx; then ok "Node.js $(node --version) (runs $CRAFTBRIDGE_JSCPD)"; else gap "Node.js 18 or later" "brew install node"; fi
+if [ -n "$node_major" ] && [ "$node_major" -ge 20 ] && has npx; then ok "Node.js $(node --version) (runs $CRAFTBRIDGE_JSCPD)"; else gap "Node.js 20 or later" "brew install node"; fi
+# The plan stage rebuilds the plan's views with the kit's own builders, on the same Node the line above
+# checks for, from the dependencies as plan/package-lock.json pins them (tools/env.sh says why).
+if craftbridge_plan_dependencies; then ok "the plan kit's dependencies, as plan/package-lock.json pins them"; else gap "the plan kit's dependencies, as plan/package-lock.json pins them" "(cd plan && npm ci)"; fi
 
 if [ "$mode" = full ]; then
   # The mobile library builds. No gate stage compiles native code for Android yet (rust_mobile builds no

@@ -54,13 +54,23 @@ stage_rust_fmt() { cargo_in_rust fmt --check; }
 # The rule checks are built with `cargo build` and their binary run here, not through the `cargo xtask`
 # alias or `cargo run`: a Cargo configuration can redefine an alias, and a `[target.<triple>].runner`
 # replaces whatever binary `cargo run` (and `cargo test`) would start, so either would pass these stages
-# having checked nothing. `cargo build` runs no runner, and env.sh fixes where it writes; the rules then
+# having checked nothing. `cargo build` runs no runner, and env.sh fixes where it builds; the rules then
 # report the alias or the runner. Building xtask compiles none of the workspace's own crates, so no build
 # script of theirs runs before `rules` has judged whether it may exist.
-build_xtask() { cargo_in_rust build --package xtask --locked --quiet; }
+# Every cargo build replaces the binary in its target folder, even one with nothing to rebuild, so a second
+# gate running in this worktree would replace the binary this one is starting, which is then killed or not
+# found. So each run builds xtask once into a target folder of its own: `build.build-dir` keeps the
+# intermediate artifacts in env.sh's target folder, where every stage shares them, and only the binary
+# lands in the run's folder, which nothing else writes. Each later stage starts that same file.
+xtask_run="$(mktemp -d "${TMPDIR:-/tmp}/craftbridge-xtask.XXXXXX")"
+trap 'rm -rf "$xtask_run"' EXIT
+build_xtask() {
+  [ -x "$xtask_run/debug/xtask" ] ||
+    CARGO_BUILD_BUILD_DIR="$CARGO_TARGET_DIR" cargo_in_rust build --package xtask --locked --quiet --target-dir "$xtask_run"
+}
 xtask() {
   build_xtask || return 1
-  "$CARGO_TARGET_DIR/debug/xtask" "$@"
+  "$xtask_run/debug/xtask" "$@"
 }
 # A cargo stage that compiles the workspace prints its diagnostics through `cargo xtask compiled`, which
 # then reads the dep-info of every workspace unit the stage built and fails on any file the compiler read
@@ -68,7 +78,7 @@ xtask() {
 # the pipe, its build would wait on the build lock while cargo, blocked on the full pipe, held it.
 compiling() {
   build_xtask || return 1
-  cargo_in_rust "$@" | "$CARGO_TARGET_DIR/debug/xtask" compiled
+  cargo_in_rust "$@" | "$xtask_run/debug/xtask" compiled
 }
 # --all-features: code behind a feature is code that ships to whoever turns the feature on. What ships is
 # linted with every never-crash lint; the tests' build takes back the two that name the panicking calls
@@ -98,6 +108,23 @@ stage_rust_mobile() {
 stage_rust_deny() { cargo_in_rust deny --locked check licenses bans sources; }
 stage_rules() { xtask rules; }
 stage_generated() { xtask generate --check; }
+# The plan's views, weighed by their bytes rather than their times: the kit's own builders rebuild them
+# from their sources into a scratch copy of plan/ and every difference fails, named (rust/xtask/src/plan_views.rs).
+# It needs Node and `npm ci` in `plan/` and nothing else: `--no-shots` is the kit's own switch that keeps a
+# browser down, and the diagram build runs with the absolute path of `true` in draw.io's place (for a
+# `DRAWIO_BIN` it cannot find, the kit starts draw.io Desktop), so no app starts: each `.drawio`
+# is rewritten from its source and each committed SVG export is trimmed as the kit always trims it, and both
+# are weighed, as is an export no source builds any more; only the drawing inside an SVG, draw.io's own, is
+# beyond what the stage can rewrite.
+# The dependencies are asked first, as the doctor asks them (tools/env.sh): rebuilt from others, the views
+# would fail as if edited by hand.
+stage_plan_views() {
+  if ! craftbridge_plan_dependencies; then
+    echo "ci: the plan kit's dependencies are not installed as plan/package-lock.json pins them: run (cd plan && npm ci)" >&2
+    return 1
+  fi
+  xtask plan-views --check
+}
 stage_swift_format() {
   # Generated Swift is UniFFI's and the generator's style, not ours; xtask checks it is untouched.
   listed swift || return 1
@@ -187,7 +214,7 @@ stage_duplicates() {
 
 # `rules` runs before every cargo stage that compiles the workspace: what it reads needs no build, and a
 # build script runs as soon as cargo compiles its crate.
-stages=(doctor rules rust_fmt rust_clippy rust_test rust_mobile rust_deny generated swift_format swift_build swift_lint android shell duplicates)
+stages=(doctor rules rust_fmt rust_clippy rust_test rust_mobile rust_deny generated plan_views swift_format swift_build swift_lint android shell duplicates)
 # The stage groups the decision and plan §15 name: Rust and Swift are each several stages.
 group_rust=(rust_fmt rust_clippy rust_test rust_mobile rust_deny)
 group_swift=(swift_format swift_build swift_lint)
