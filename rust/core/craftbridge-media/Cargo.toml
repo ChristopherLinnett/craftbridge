@@ -9,6 +9,11 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+# CraftBridge's decoders register into FilmCraft's decoder registry, the one EffectCraft decodes
+# through (plan §18); the layer table's `upstream` row for this crate names these two and no others.
+# The revisions are the pin [workspace.dependencies] carries, written by tools/update-upstream.sh.
+filmcraft-codecs.workspace = true
+filmcraft-isobmff.workspace = true
 
 [lints]
 workspace = true

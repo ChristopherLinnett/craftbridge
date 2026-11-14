@@ -9,6 +9,15 @@
 //! stage the scratch files into that index. So every command here starts with those variables removed and
 //! finds its repository from the folder it is given, whoever started the gate.
 //!
+//! The same list is also how the environment hands git configuration of its own: it names `GIT_CONFIG`,
+//! `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_COUNT`, and with `GIT_CONFIG_COUNT` set git reads every
+//! `GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` pair as if it had been written with `-c`, above every file,
+//! where `include.path` can even pull in a file the machine chose. Those pairs are not listed, being
+//! counted, but git reads none of them without the count, so removing the listed names leaves a command
+//! with nothing but the configuration of the repository it was pointed at — which is what lets a check
+//! that must not read the machine's git configuration, such as the upstream cache
+//! (`rust/xtask/src/upstream.rs`), rely on this one removal instead of another.
+//!
 //! `core.precomposeunicode=false` makes git report every path as it is stored. With the macOS default, git
 //! reports a name stored decomposed in its composed form, so a check that compares git's names with a
 //! directory listing would not find that name and would treat it as something git does not hold.
@@ -46,7 +55,13 @@ pub(crate) fn command(dir: &Path) -> Command {
 
 /// Run a git command in `dir` and return what it printed, or git's own words when it fails.
 pub(crate) fn output(dir: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
-    let output = command(dir).args(args).output().map_err(|error| format!("could not run git: {error}"))?;
+    run(command(dir), args)
+}
+
+/// Run `git`, a [`command`] its caller has set up further, with `args`, and return what it printed, or
+/// git's own words when it fails.
+pub(crate) fn run(mut git: Command, args: &[&str]) -> Result<Vec<u8>, String> {
+    let output = git.args(args).output().map_err(|error| format!("could not run git: {error}"))?;
     if output.status.success() {
         Ok(output.stdout)
     } else {
@@ -74,7 +89,11 @@ mod tests {
     #[test]
     fn every_repository_variable_git_lists_is_removed() {
         let names = local_env_vars();
-        for expected in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY"] {
+        // The last three are git's configuration carriers, not repository variables: a check that reads no
+        // machine configuration (rust/xtask/src/upstream.rs) depends on their removal as much as the rest.
+        for expected in
+            ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"]
+        {
             assert!(names.iter().any(|name| name == expected), "{expected} is one git lists: {names:?}");
         }
         let git = command(Path::new("."));

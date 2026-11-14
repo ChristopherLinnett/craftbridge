@@ -134,6 +134,31 @@ fn craft_app_of(name: &str, source: Option<&str>) -> Option<&'static CraftApp> {
     CRAFT_APPS.iter().find(|app| app.owns(name, source))
 }
 
+/// The Craft app with this noun, when the table has one: the pin rule names the apps it pins by noun.
+pub(crate) fn app_by_noun(noun: &str) -> Option<&'static CraftApp> {
+    CRAFT_APPS.iter().find(|app| app.noun == noun)
+}
+
+/// Which Craft family a package belongs to: one Craft app's crates, or the shared Craft libraries.
+/// The one reading of that question: the duplicate rule (one copy of each) and the pin rule (every copy
+/// from its pinned official git source) both ask it, and a second answer to it would drift from the first.
+#[derive(Clone, Copy)]
+pub(crate) enum CraftFamily {
+    App(&'static CraftApp),
+    Library,
+}
+
+/// The family of the package `name` from `source`, or `None` when it is no Craft app's and no Craft library.
+pub(crate) fn family(name: &str, source: Option<&str>) -> Option<CraftFamily> {
+    if let Some(app) = craft_app_of(name, source) {
+        return Some(CraftFamily::App(app));
+    }
+    if name.starts_with(CRAFT_LIBRARY_PREFIX) || source.is_some_and(|source| from_repository(source, CRAFT_LIBRARY_REPOSITORY)) {
+        return Some(CraftFamily::Library);
+    }
+    None
+}
+
 /// A dependency one package declares.
 #[derive(Clone, Debug)]
 pub(crate) struct Dependency {
