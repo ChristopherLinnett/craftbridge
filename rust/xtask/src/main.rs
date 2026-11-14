@@ -29,6 +29,7 @@ mod lints;
 mod machinery;
 mod meta;
 mod plan_views;
+mod prepush;
 mod report;
 mod scan;
 mod scratch;

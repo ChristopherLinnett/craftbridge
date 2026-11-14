@@ -46,7 +46,13 @@ export CRAFTBRIDGE_RUST_CHANNEL CRAFTBRIDGE_RUST_TARGETS
 # folder between worktrees, whose gates would then reuse each other's artifacts. A machine-wide
 # CARGO_BUILD_TARGET would send the host build of xtask to a <triple>/ folder, where the gate, which
 # starts the binary from debug/, would not find it.
-export CARGO_TARGET_DIR="$CRAFTBRIDGE_ROOT/rust/target"
+# The pre-push hook gates each pushed commit in a temporary worktree of its own, and with
+# CRAFTBRIDGE_PUSH_TARGET names the one build folder all its gates share, kept warm from push to push.
+# That sharing is safe where a machine-wide folder is not: the hook runs one gate at a time and checks each
+# commit out only once the gate before it has finished, so every file a gate builds is newer than every
+# artifact in the folder, and Cargo, which judges a workspace crate by file times, rebuilds it rather than
+# take another tree's artifacts for it. With no hook naming a folder, each tree keeps its own rust/target.
+export CARGO_TARGET_DIR="${CRAFTBRIDGE_PUSH_TARGET:-$CRAFTBRIDGE_ROOT/rust/target}"
 unset CARGO_BUILD_TARGET
 
 # The machine-local git cache of official EffectCraft, a bare clone: tools/update-upstream.sh fetches
