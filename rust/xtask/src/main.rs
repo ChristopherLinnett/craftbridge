@@ -31,6 +31,7 @@ mod report;
 mod scan;
 mod scratch;
 mod sources;
+mod swift_lint;
 mod unsafe_check;
 mod upstream;
 
@@ -59,6 +60,7 @@ fn main() -> ExitCode {
         ["files", kind] => files::run(&root, kind),
         ["compiled"] => compiled::run(&root),
         ["upstream", "pin", rev] => upstream::run(&root, rev),
+        ["swift-lint"] => swift_lint::run(&root),
         _ => {
             usage();
             ExitCode::from(2)
@@ -73,6 +75,7 @@ fn usage() {
     eprintln!("       cargo xtask files <swift|shell|duplicates>");
     eprintln!("       cargo xtask upstream pin <rev>   (through tools/update-upstream.sh: <rev> is a commit of official EffectCraft main)");
     eprintln!("       cargo <check|clippy|test> --message-format=json … | cargo xtask compiled");
+    eprintln!("       cargo xtask swift-lint")
 }
 
 /// Run every check, print one line per failure and `ok` per clean check, and fail if any failed.

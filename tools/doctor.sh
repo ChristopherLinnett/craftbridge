@@ -54,8 +54,21 @@ elif [ -z "$xcode" ] && [ -d "$selected" ] && [ "${selected%/Contents/Developer}
 else
   gap "Xcode $CRAFTBRIDGE_XCODE (found: ${xcode:-none})" "install Xcode $CRAFTBRIDGE_XCODE from https://developer.apple.com/download/applications/ and select it: sudo xcode-select -s /Applications/Xcode.app"
 fi
-if xcrun --sdk iphonesimulator --show-sdk-path >/dev/null 2>&1; then ok "iOS Simulator SDK"; else gap "iOS Simulator SDK" "Xcode > Settings > Components: install the iOS platform"; fi
+# Both iOS SDKs: the Swift stage reads the package as the device build compiles it as well as the
+# simulator build the swift_build stage makes.
+for sdk in "iphonesimulator:iOS Simulator SDK" "iphoneos:iOS device SDK"; do
+  if xcrun --sdk "${sdk%%:*}" --show-sdk-path >/dev/null 2>&1; then ok "${sdk#*:}"; else gap "${sdk#*:}" "Xcode > Settings > Components: install the iOS platform"; fi
+done
 if xcrun --find swift-format >/dev/null 2>&1; then ok "swift-format $(xcrun swift-format --version)"; else gap "swift-format" "it ships with Xcode $CRAFTBRIDGE_XCODE; select that Xcode"; fi
+swiftlint_fix="install the pinned copy: curl -fsSL $CRAFTBRIDGE_SWIFTLINT_URL | tar -xz -C /usr/local/bin swiftlint && chmod +x /usr/local/bin/swiftlint"
+if has swiftlint && [ "$(swiftlint version)" = "$CRAFTBRIDGE_SWIFTLINT" ]; then
+  ok "swiftlint $(swiftlint version)"
+elif has swiftlint; then
+  gap "swiftlint $CRAFTBRIDGE_SWIFTLINT (found: $(swiftlint version))" "$swiftlint_fix"
+else
+  gap "swiftlint $CRAFTBRIDGE_SWIFTLINT" "$swiftlint_fix"
+fi
+if xcrun --find sourcekit-lsp >/dev/null 2>&1; then ok "sourcekit-lsp"; else gap "sourcekit-lsp" "it ships with Xcode $CRAFTBRIDGE_XCODE; select that Xcode"; fi
 
 # Android: the SDK platform and build tools Gradle compiles against (both pinned in the version catalog),
 # and the JDK Gradle runs on.

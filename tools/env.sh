@@ -57,6 +57,13 @@ export CRAFTBRIDGE_UPSTREAM_CACHE="${CRAFTBRIDGE_UPSTREAM_CACHE:-$HOME/.cache/cr
 # The Xcode release the iOS build is made and tested with.
 export CRAFTBRIDGE_XCODE="26.6"
 
+# SwiftLint runs the Swift stage's built-in rules from `ios/sdk/.swiftlint.yml` (`missing_docs`). The gate
+# pins the version: a release can add a rule or change what a rule reads, so an upgrade is an edit here and
+# a fresh gate run, never a silent surprise. The portable zip of the release carries the binary; put it
+# where PATH finds it.
+export CRAFTBRIDGE_SWIFTLINT="0.65.1"
+export CRAFTBRIDGE_SWIFTLINT_URL="https://github.com/realm/SwiftLint/releases/download/$CRAFTBRIDGE_SWIFTLINT/portable_swiftlint.zip"
+
 # Android: the SDK from the usual variables, else Android Studio's default location on macOS.
 if [ -z "${ANDROID_HOME:-}" ]; then
   if [ -n "${ANDROID_SDK_ROOT:-}" ]; then ANDROID_HOME="$ANDROID_SDK_ROOT"; else ANDROID_HOME="$HOME/Library/Android/sdk"; fi
