@@ -18,15 +18,40 @@ use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-/// One unit cargo reports having built: its package and the files it wrote.
-struct Artifact {
-    package_id: String,
-    filenames: Vec<String>,
+/// One unit cargo reports having built: its package, its target, and the files it wrote.
+pub(crate) struct Artifact {
+    pub(crate) package_id: String,
+    pub(crate) target_name: String,
+    /// The target's kinds, as cargo names them (`lib`, `bin`, `test`, …).
+    pub(crate) target_kinds: Vec<String>,
+    pub(crate) filenames: Vec<String>,
+    /// The program the unit built, when it built one.
+    pub(crate) executable: Option<String>,
+}
+
+impl Artifact {
+    /// The unit a `compiler-artifact` message reports.
+    fn of(message: &serde_json::Value) -> Self {
+        let strings = |value: Option<&serde_json::Value>| -> Vec<String> {
+            value
+                .and_then(serde_json::Value::as_array)
+                .map(|items| items.iter().filter_map(serde_json::Value::as_str).map(str::to_string).collect())
+                .unwrap_or_default()
+        };
+        let target = message.get("target");
+        Self {
+            package_id: message.get("package_id").and_then(serde_json::Value::as_str).unwrap_or_default().to_string(),
+            target_name: target.and_then(|target| target.get("name")).and_then(serde_json::Value::as_str).unwrap_or_default().to_string(),
+            target_kinds: strings(target.and_then(|target| target.get("kind"))),
+            filenames: strings(message.get("filenames")),
+            executable: message.get("executable").and_then(serde_json::Value::as_str).map(str::to_string),
+        }
+    }
 }
 
 /// Read cargo's messages: print what a person reads (each diagnostic as cargo renders it, and every line
 /// that is not a message, such as a test's output), and keep each built unit.
-fn read_messages(input: impl BufRead) -> Result<Vec<Artifact>, String> {
+pub(crate) fn read_messages(input: impl BufRead) -> Result<Vec<Artifact>, String> {
     let mut artifacts = Vec::new();
     for line in input.lines() {
         let line = line.map_err(|error| format!("cannot read cargo's messages: {error}"))?;
@@ -41,14 +66,7 @@ fn read_messages(input: impl BufRead) -> Result<Vec<Artifact>, String> {
                     print!("{rendered}");
                 }
             }
-            Some("compiler-artifact") => artifacts.push(Artifact {
-                package_id: message.get("package_id").and_then(serde_json::Value::as_str).unwrap_or_default().to_string(),
-                filenames: message
-                    .get("filenames")
-                    .and_then(serde_json::Value::as_array)
-                    .map(|names| names.iter().filter_map(serde_json::Value::as_str).map(str::to_string).collect())
-                    .unwrap_or_default(),
-            }),
+            Some("compiler-artifact") => artifacts.push(Artifact::of(&message)),
             _ => {}
         }
     }
@@ -244,15 +262,21 @@ mod tests {
     #[test]
     fn cargo_s_messages_are_printed_and_its_units_kept() {
         let input = concat!(
-            "{\"reason\":\"compiler-artifact\",\"package_id\":\"path+file:///r/core/x#0.1.0\",\"filenames\":[\"/t/deps/libx-1.rmeta\"]}\n",
+            "{\"reason\":\"compiler-artifact\",\"package_id\":\"path+file:///r/core/x#0.1.0\",\"target\":{\"name\":\"x\",\"kind\":[\"lib\"]},",
+            "\"filenames\":[\"/t/deps/libx-1.rmeta\"],\"executable\":null}\n",
+            "{\"reason\":\"compiler-artifact\",\"package_id\":\"path+file:///r/core/y#0.1.0\",\"target\":{\"name\":\"y\",\"kind\":[\"bin\"]},",
+            "\"filenames\":[\"/t/debug/y\"],\"executable\":\"/t/debug/y\"}\n",
             "{\"reason\":\"compiler-message\",\"message\":{\"rendered\":\"warning: x\\n\"}}\n",
             "test a ... ok\n",
             "{\"reason\":\"build-finished\",\"success\":true}\n"
         );
         let artifacts = read_messages(input.as_bytes()).unwrap();
-        assert_eq!(artifacts.len(), 1);
-        assert_eq!(artifacts[0].package_id, "path+file:///r/core/x#0.1.0");
-        assert_eq!(artifacts[0].filenames, ["/t/deps/libx-1.rmeta"]);
+        let [lib, bin] = artifacts.as_slice() else { panic!("two units: {}", artifacts.len()) };
+        assert_eq!(lib.package_id, "path+file:///r/core/x#0.1.0");
+        assert_eq!((lib.target_name.as_str(), lib.target_kinds.as_slice()), ("x", ["lib".to_string()].as_slice()));
+        assert_eq!(lib.filenames, ["/t/deps/libx-1.rmeta"]);
+        assert_eq!(lib.executable, None);
+        assert_eq!((bin.target_kinds.as_slice(), bin.executable.as_deref()), (["bin".to_string()].as_slice(), Some("/t/debug/y")));
     }
 
     /// The whole path on a copy of the real tree, with the real compiler: `include!` under the name `use`
