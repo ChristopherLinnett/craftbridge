@@ -10,6 +10,12 @@ publish.workspace = true
 
 [dependencies]
 craftbridge-media.workspace = true
+# The error mapping takes serde_json's errors in one place, not at every call site: JSON that does
+# not parse is InvalidParams and JSON that could not be read is Io (plan §14).
+serde_json.workspace = true
+# A folder's write probe: a fresh name made only if nothing holds it, removed again, so two engines
+# starting at once never share one. The folder tests' scratch folders come from it too.
+tempfile.workspace = true
 
 [lints]
 workspace = true
