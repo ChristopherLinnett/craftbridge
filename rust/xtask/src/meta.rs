@@ -15,6 +15,14 @@ pub(crate) struct Crate {
     pub(crate) id: String,
     /// `None` for a path package; a source string for one from a registry or git.
     pub(crate) source: Option<String>,
+    /// The edition Cargo resolves this package to compile under — its own `edition`, or the workspace's
+    /// when the manifest says `edition.workspace = true`. Cargo's own answer, so no manifest spelling —
+    /// the old `[project]` table included — hides an edition from the rules.
+    pub(crate) edition: String,
+    /// Each target's name and the edition Cargo compiles it under: the package's, unless the target's own
+    /// table (`[lib]`, `[[bin]]`, `[[test]]`, `[[example]]`, `[[bench]]`) sets one, which Cargo only warns
+    /// about.
+    pub(crate) target_editions: Vec<(String, String)>,
     /// Absolute path of the crate's `Cargo.toml`.
     pub(crate) manifest_path: String,
     /// Every declared dependency, each marked when it is a dev-dependency: a test build ships nothing, so
@@ -110,6 +118,14 @@ fn packages(metadata: &Metadata) -> Result<Vec<Crate>, String> {
                     .unwrap_or_default(),
             })
             .collect();
+        let target_editions = targets
+            .into_iter()
+            .flatten()
+            .map(|target| {
+                let field = |key: &str| target.get(key).and_then(Metadata::as_str).unwrap_or_default().to_string();
+                (field("name"), field("edition"))
+            })
+            .collect();
         let binary_targets = targets
             .into_iter()
             .flatten()
@@ -123,6 +139,8 @@ fn packages(metadata: &Metadata) -> Result<Vec<Crate>, String> {
             name: text("name"),
             id,
             source,
+            edition: text("edition"),
+            target_editions,
             manifest_path: text("manifest_path"),
             dependencies,
             library_targets,
@@ -185,15 +203,15 @@ mod tests {
     const ONE_PACKAGE: &str = r#"{
         "packages": [{
             "name": "craftbridge-core", "version": "0.1.0", "id": "path+file:///x/craftbridge-core#0.1.0",
-            "manifest_path": "/x/craftbridge-core/Cargo.toml",
+            "manifest_path": "/x/craftbridge-core/Cargo.toml", "edition": "2024",
             "dependencies": [
                 {"name": "craftbridge-media", "kind": null, "path": "/x/craftbridge-media"},
                 {"name": "insta", "kind": "dev"},
                 {"name": "uniffi", "kind": "build"}
             ],
             "targets": [
-                {"kind": ["lib"], "name": "craftbridge_core", "crate_types": ["lib", "cdylib"]},
-                {"kind": ["bin"], "name": "core-tool", "crate_types": ["bin"]}
+                {"kind": ["lib"], "name": "craftbridge_core", "crate_types": ["lib", "cdylib"], "edition": "2024"},
+                {"kind": ["bin"], "name": "core-tool", "crate_types": ["bin"], "edition": "2021"}
             ]
         }],
         "workspace_members": ["path+file:///x/craftbridge-core#0.1.0"], "resolve": null, "target_directory": "", "version": 1, "workspace_root": "/x"
@@ -206,6 +224,9 @@ mod tests {
         let package = &parsed[0];
         assert_eq!(package.source, None);
         assert_eq!(package.id, "path+file:///x/craftbridge-core#0.1.0");
+        assert_eq!(package.edition, "2024");
+        let editions: Vec<(&str, &str)> = package.target_editions.iter().map(|(name, edition)| (name.as_str(), edition.as_str())).collect();
+        assert_eq!(editions, [("craftbridge_core", "2024"), ("core-tool", "2021")], "each target's own edition, as Cargo resolved it");
         let names: Vec<(&str, bool)> = package.dependencies.iter().map(|dep| (dep.name.as_str(), dep.dev)).collect();
         assert_eq!(names, [("craftbridge-media", false), ("insta", true), ("uniffi", false)]);
         assert_eq!(package.dependencies[0].path.as_deref(), Some("/x/craftbridge-media"));
