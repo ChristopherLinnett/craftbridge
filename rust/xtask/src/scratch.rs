@@ -1,22 +1,36 @@
-//! Fresh scratch directories under the system's temporary folder, made in one place.
+//! Fresh scratch directories, made in one place.
 //!
 //! `generate --check` regenerates into one, and every test that needs files on disk builds its tree in
 //! one, so the rule that keeps two of them apart is written once; so is the copy of the real `rust/` tree
 //! the rules' tests plant violations in.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// A new, empty directory, unique to this process and this call. The process id separates concurrent
-/// runs; the counter separates two calls in one clock tick, which test threads make all the time.
+/// A new, empty directory under the system's temporary folder.
 pub(crate) fn create(tag: &str) -> Result<PathBuf, String> {
+    create_in(&std::env::temp_dir(), tag)
+}
+
+/// A new, empty directory under `inside`, whose folders are made as needed: for a scratch that has to sit
+/// where a build finds its own dependencies by walking up from its own folder, wherever the temporary
+/// folder would be out of reach of them. The name is unique to this process and this call: the process id
+/// separates concurrent runs, the counter two calls in one clock tick, which test threads make all the
+/// time.
+pub(crate) fn create_in(inside: &Path, tag: &str) -> Result<PathBuf, String> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|elapsed| elapsed.as_nanos()).unwrap_or(0);
     let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("craftbridge-xtask-{tag}-{}-{nanos}-{serial}", std::process::id()));
+    let dir = inside.join(format!("{}{}-{nanos}-{serial}", prefix(tag), std::process::id()));
     std::fs::create_dir_all(&dir).map_err(|error| format!("could not create {}: {error}", dir.display()))?;
     Ok(dir)
+}
+
+/// How the name of every scratch `create_in` makes for `tag` begins, so one that outlives its maker can be
+/// told by its name.
+pub(crate) fn prefix(tag: &str) -> String {
+    format!("craftbridge-xtask-{tag}-")
 }
 
 /// A scratch directory removed when it goes out of scope, so a failing test leaves nothing behind.
@@ -61,7 +75,13 @@ pub(crate) fn rerun(test: &str, env: &[(&str, &std::ffi::OsStr)]) -> std::proces
     for (name, value) in env {
         child.env(name, value);
     }
-    child.output().unwrap()
+    let output = child.output().unwrap();
+    // A rename can leave this name matching no test, and a run of no tests exits zero: the caller's
+    // assertion on the child's status would then pass having weighed nothing. The name must
+    // still name the one ignored child this helper exists to rerun.
+    let ran = String::from_utf8_lossy(&output.stdout);
+    assert!(ran.contains("running 1 test"), "rerun named no test: {test}\n{ran}");
+    output
 }
 
 /// A copy of this repository's `rust/` tree in which a violation can be planted without touching the

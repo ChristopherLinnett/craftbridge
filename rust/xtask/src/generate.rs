@@ -156,7 +156,7 @@ fn check_in(root: &Path, registry: &[Generator], scratch: &Path) -> ExitCode {
                 failed = true;
                 println!("generate: {}: {error}", generator.name);
             }
-            Ok(()) => match tree_differences(&out_dir, &committed) {
+            Ok(()) => match tree_differences(&out_dir, &committed, "the generator", "the working tree") {
                 Ok(differences) if differences.is_empty() => {}
                 Ok(differences) => {
                     failed = true;
@@ -216,8 +216,10 @@ fn generate_into(generator: &Generator, out_dir: &Path) -> Result<(), String> {
 
 /// Compare two directory trees byte for byte, listing every file that was added, removed or changed,
 /// one line per file. A tree that does not exist is empty, so a generator whose output was never
-/// written shows every file as added.
-pub(crate) fn tree_differences(regenerated: &Path, committed: &Path) -> Result<Vec<String>, String> {
+/// written shows every file as added. `writer` and `tree` are what a line calls the one that wrote the
+/// fresh tree and the one it is compared against, so the check that rebuilds something says so in its
+/// own words: the same comparison stands behind `generate --check` and `plan-views --check`.
+pub(crate) fn tree_differences(regenerated: &Path, committed: &Path, writer: &str, tree: &str) -> Result<Vec<String>, String> {
     let fresh = collect_tree(regenerated)?;
     let existing = collect_tree(committed)?;
     let mut names: BTreeSet<&String> = BTreeSet::new();
@@ -228,8 +230,8 @@ pub(crate) fn tree_differences(regenerated: &Path, committed: &Path) -> Result<V
         match (fresh.get(name), existing.get(name)) {
             (Some(bytes), Some(old)) if bytes == old => {}
             (Some(_), Some(_)) => differences.push(format!("{name}: changed")),
-            (Some(_), None) => differences.push(format!("{name}: the generator writes it, and the working tree does not hold it")),
-            (None, Some(_)) => differences.push(format!("{name}: in the working tree, but not written by the generator")),
+            (Some(_), None) => differences.push(format!("{name}: {writer} writes it, and {tree} does not hold it")),
+            (None, Some(_)) => differences.push(format!("{name}: in {tree}, but not written by {writer}")),
             (None, None) => {}
         }
     }
@@ -286,7 +288,7 @@ mod tests {
         let committed = Scratch::new("equal-committed");
         fake_generator(&fresh.0).unwrap();
         fake_generator(&committed.0).unwrap();
-        assert!(tree_differences(&fresh.0, &committed.0).unwrap().is_empty());
+        assert!(tree_differences(&fresh.0, &committed.0, "the generator", "the working tree").unwrap().is_empty());
     }
 
     #[test]
@@ -296,7 +298,7 @@ mod tests {
         fake_generator(&fresh.0).unwrap();
         fake_generator(&committed.0).unwrap();
         committed.write("nested/second.txt", "two, edited by hand\n");
-        let differences = tree_differences(&fresh.0, &committed.0).unwrap();
+        let differences = tree_differences(&fresh.0, &committed.0, "the generator", "the working tree").unwrap();
         assert_eq!(differences, vec!["nested/second.txt: changed"]);
     }
 
@@ -311,7 +313,7 @@ mod tests {
         committed.write("first.txt", fs::read_to_string(fresh.0.join("first.txt")).unwrap());
         committed.write("stale.txt", "the generator dropped this\n");
         fresh.write("surprise.txt", "new in the generator\n");
-        let differences = tree_differences(&fresh.0, &committed.0).unwrap();
+        let differences = tree_differences(&fresh.0, &committed.0, "the generator", "the working tree").unwrap();
         assert_eq!(
             differences,
             vec![
@@ -329,7 +331,7 @@ mod tests {
         fake_generator(&fresh.0).unwrap();
         fs::remove_dir_all(fresh.0.join("nested")).unwrap();
         fake_generator(&committed.0).unwrap();
-        let differences = tree_differences(&fresh.0, &committed.0).unwrap();
+        let differences = tree_differences(&fresh.0, &committed.0, "the generator", "the working tree").unwrap();
         assert_eq!(differences, vec!["nested/second.txt: in the working tree, but not written by the generator"]);
     }
 
@@ -340,7 +342,7 @@ mod tests {
         fake_generator(&fresh.0).unwrap();
         fake_generator(&committed.0).unwrap();
         committed.write("nested/.DS_Store", [0u8, 1]);
-        assert!(tree_differences(&fresh.0, &committed.0).unwrap().is_empty());
+        assert!(tree_differences(&fresh.0, &committed.0, "the generator", "the working tree").unwrap().is_empty());
     }
 
     #[test]
@@ -349,7 +351,7 @@ mod tests {
         let missing = Scratch::new("missing-committed");
         fs::remove_dir_all(&missing.0).unwrap();
         fake_generator(&fresh.0).unwrap();
-        let differences = tree_differences(&fresh.0, &missing.0).unwrap();
+        let differences = tree_differences(&fresh.0, &missing.0, "the generator", "the working tree").unwrap();
         assert_eq!(differences.len(), 2, "{differences:?}");
     }
 
