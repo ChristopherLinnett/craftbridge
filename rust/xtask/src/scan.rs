@@ -1,5 +1,5 @@
 //! The shared machinery every check that reads source files uses: one file walker, and one stripper
-//! for Rust, Swift and Kotlin, which share their comment syntax and differ only in their literals.
+//! for Rust and Kotlin, which share their comment syntax and differ only in their literals.
 //!
 //! Checks must agree about what they are looking at. Two walkers would mean one check seeing a file
 //! another skipped, and a check acting on text that still contains a comment would report a violation
@@ -147,23 +147,20 @@ fn append_blank(out: &mut Vec<String>, pending: &mut String, blanked: &str) {
     }
 }
 
-/// The language whose literals a stripper reads. All three share their comments: `//` to the end of the
-/// line, and `/* */` blocks that nest (`swiftc -parse` accepts `/* a /* b */ c */`, and an inner `*/`
-/// alone leaves the outer comment unterminated). They differ in their literals:
+/// The language whose literals a stripper reads. Both share their comments: `//` to the end of the line,
+/// and `/* */` blocks that nest (`/* a /* b */ c */` is one comment, and an inner `*/` alone leaves the
+/// outer comment unterminated). They differ in their literals:
 /// - Rust: `"…"` (which may span lines), `b"…"`, `c"…"`, the raw forms `r#"…"#`, `br"…"` and `cr"…"`, and
 ///   char literals (`'\u{1F600}'`), told apart from lifetimes;
-/// - Swift: `"…"` and `"""…"""`, both with `\(…)` interpolation, and `#"…"#` delimiters, whose escapes and
-///   interpolation take the same number of `#` (`\#(…)`); Swift has no `'` literal at all;
 /// - Kotlin: `"…"` with escapes and `"""…"""` without, both with `${…}` templates, and char literals,
 ///   whose Unicode escape is `\uXXXX` with no braces.
 ///
-/// Code inside an interpolation or a template is code: `"\(value.unsafelyUnwrapped)"` reads the value
-/// as surely as the same call outside a string, so it is kept and stripped like any other code, and
-/// only the literal text around it is blanked.
+/// Code inside a template is code: `"${s!!.length}"` reads the value as surely as the same call outside a
+/// string, so it is kept and stripped like any other code, and only the literal text around it is blanked.
+/// Swift is read by `cargo xtask swift-lint` through the compiler's language server, not here.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Language {
     Rust,
-    Swift,
     Kotlin,
 }
 
@@ -247,7 +244,7 @@ fn strip_range(source: &str, from: usize, to: usize, language: Language, depth: 
             }
             output.literal(source, at, end);
             i = end;
-        } else if byte == b'\'' && language != Language::Swift {
+        } else if byte == b'\'' {
             match char_literal_end(source, i, language) {
                 Some(end) => {
                     output.literal(source, i, end);
@@ -271,7 +268,7 @@ fn strip_range(source: &str, from: usize, to: usize, language: Language, depth: 
 fn string_literal(source: &str, index: usize, language: Language, depth: usize) -> Option<Literal> {
     match language {
         Language::Rust => rust_string_end(source.as_bytes(), index).map(|end| Literal { end, code: Vec::new() }),
-        Language::Swift | Language::Kotlin => interpolated_string(source, index, language, depth),
+        Language::Kotlin => templated_string(source, index, depth),
     }
 }
 
@@ -297,30 +294,23 @@ fn rust_string_end(bytes: &[u8], index: usize) -> Option<usize> {
     Some(if raw { raw_string_end(bytes, i + 1, 1, hashes) } else { escaped_string_end(bytes, i, false) })
 }
 
-/// A Swift or Kotlin string literal at `index`, with the code its interpolations hold. Swift's `#`
-/// delimiters come first, then `"""` or `"`. A delimited string and a `"""` block end only at their own
-/// closing quotes, so their contents never end them early; a one-line `"…"` cannot span lines in either
-/// language, so a newline ends it and a quote the stripper misreads cannot carry its error onto the next
-/// line. Kotlin's `"""` has no escapes at all, which is why the languages are read apart.
-fn interpolated_string(source: &str, index: usize, language: Language, depth: usize) -> Option<Literal> {
+/// A Kotlin string literal at `index`, with the code its templates hold: `"""` or `"`. A `"""` block ends
+/// only at its own closing quotes, so its contents never end it early; a one-line `"…"` cannot span lines,
+/// so a newline ends it and a quote the stripper misreads cannot carry its error onto the next line.
+/// Kotlin's `"""` has no escapes at all, so a backslash before `${` there is text and the template code.
+fn templated_string(source: &str, index: usize, depth: usize) -> Option<Literal> {
     let bytes = source.as_bytes();
-    let mut i = index;
-    while language == Language::Swift && bytes.get(i) == Some(&b'#') {
-        i += 1;
-    }
-    let hashes = i - index;
-    if bytes.get(i) != Some(&b'"') {
+    if bytes.get(index) != Some(&b'"') {
         return None;
     }
-    let quotes = if bytes.get(i..).is_some_and(|rest| rest.starts_with(b"\"\"\"")) { 3 } else { 1 };
-    let escapes = !(language == Language::Kotlin && quotes == 3);
-    let mut at = i + quotes;
+    let quotes = if bytes.get(index..).is_some_and(|rest| rest.starts_with(b"\"\"\"")) { 3 } else { 1 };
+    let mut at = index + quotes;
     let mut code = Vec::new();
     while let Some(&byte) = bytes.get(at) {
-        if closes(bytes, at, quotes, hashes) {
-            let mut end = at + quotes + hashes;
+        if closes(bytes, at, quotes, 0) {
+            let mut end = at + quotes;
             // Kotlin's `""""` closes on the last three quotes, the extra one belonging to the string.
-            while hashes == 0 && quotes == 3 && bytes.get(end) == Some(&b'"') {
+            while quotes == 3 && bytes.get(end) == Some(&b'"') {
                 end += 1;
             }
             return Some(Literal { end, code });
@@ -328,27 +318,15 @@ fn interpolated_string(source: &str, index: usize, language: Language, depth: us
         if byte == b'\n' && quotes == 1 {
             return Some(Literal { end: at, code });
         }
-        let delimited_escape = byte == b'\\' && bytes.get(at + 1..at + 1 + hashes).is_some_and(|run| run.iter().all(|c| *c == b'#'));
-        if escapes && delimited_escape {
-            let after = at + 1 + hashes;
-            if language == Language::Swift
-                && bytes.get(after) == Some(&b'(')
-                && depth < MAX_NESTING
-                && let Some(close) = matching_close(source, after, (b'(', b')'), language, quotes == 1, depth)
-            {
-                code.push((after + 1, close));
-                at = close + 1;
-                continue;
-            }
-            // Any other escape is one more character, which can never close the string.
-            at = after + 1;
+        if byte == b'\\' && quotes == 1 {
+            // An escape is one more character, which can never close the string.
+            at += 2;
             continue;
         }
-        if language == Language::Kotlin
-            && byte == b'$'
+        if byte == b'$'
             && bytes.get(at + 1) == Some(&b'{')
             && depth < MAX_NESTING
-            && let Some(close) = matching_close(source, at + 1, (b'{', b'}'), language, quotes == 1, depth)
+            && let Some(close) = matching_close(source, at + 1, (b'{', b'}'), Language::Kotlin, quotes == 1, depth)
         {
             code.push((at + 2, close));
             at = close + 1;
@@ -365,8 +343,8 @@ fn closes(bytes: &[u8], at: usize, quotes: usize, hashes: usize) -> bool {
         && bytes.get(at + quotes..at + quotes + hashes).is_some_and(|run| run.iter().all(|c| *c == b'#'))
 }
 
-/// The bracket that closes an interpolation opened at `open`, counting nested brackets and stepping over
-/// the strings, char literals and comments inside it, so `"\(f(")"))"` closes where Swift closes it.
+/// The bracket that closes a template opened at `open`, counting nested brackets and stepping over the
+/// strings, char literals and comments inside it, so `"${f("}")}"` closes where Kotlin closes it.
 /// `None` when nothing closes it (before the line ends, in a one-line string): the text is then read as
 /// the string's own.
 fn matching_close(source: &str, open: usize, (opener, closer): (u8, u8), language: Language, one_line: bool, depth: usize) -> Option<usize> {
@@ -507,14 +485,14 @@ pub(crate) fn strip_rust(source: &str) -> Vec<String> {
     strip(source, Language::Rust, Strings::Blank)
 }
 
-/// Swift or Kotlin source with comments and literal text blanked, the code inside interpolations kept.
+/// Kotlin source with comments and literal text blanked, the code inside templates kept.
 /// A `"""…"""` literal holds example code, which is exactly the text that would otherwise be reported,
 /// so its text is blanked whole.
 pub(crate) fn strip_clike(source: &str, language: Language) -> Vec<String> {
     strip(source, language, Strings::Blank)
 }
 
-/// Swift or Kotlin source with comments blanked and every literal kept, char literals included: for a
+/// Kotlin source with comments blanked and every literal kept, char literals included: for a
 /// scanner that must read a literal's content, a quoted path in a build file say, while still ignoring
 /// everything a comment hides. A literal it kept is never mistaken for a comment, and a line holding a
 /// literal shows that literal to a grammar that may refuse it.
@@ -682,13 +660,13 @@ mod tests {
 
     #[test]
     fn clike_stripper_blanks_comments_strings_and_raw_strings() {
-        let source = "// fatalError(x)\nlet s = \"fatalError(y)\"\nlet r = \"\"\"\nfatalError(z)\n\"\"\"\nexit(1)\n";
-        let stripped = strip_clike(source, Language::Swift);
+        let source = "// TODO(x)\nval s = \"TODO(y)\"\nval r = \"\"\"\nTODO(z)\n\"\"\"\nexitProcess(1)\n";
+        let stripped = strip_clike(source, Language::Kotlin);
         assert_eq!(stripped.len(), 7);
         for line in stripped.iter().take(5) {
-            assert!(!line.contains("fatalError"), "{line}");
+            assert!(!line.contains("TODO"), "{line}");
         }
-        assert!(stripped[5].contains("exit(1)"));
+        assert!(stripped[5].contains("exitProcess(1)"));
     }
 
     #[test]
@@ -698,19 +676,11 @@ mod tests {
     }
 
     #[test]
-    fn swift_delimited_strings_hold_quotes() {
-        let stripped = strip_clike("let json = #\"{\"fatalError\": \"x\"}\"#\nlet multi = #\"\"\"\nfatalError()\n\"\"\"#\nexit(1)\n", Language::Swift);
-        assert!(!stripped[0].contains("fatalError"), "{}", stripped[0]);
-        assert!(!stripped[2].contains("fatalError"), "{}", stripped[2]);
-        assert!(stripped[4].contains("exit(1)"), "{}", stripped[4]);
-    }
-
-    #[test]
     fn clike_stripper_nests_block_comments() {
-        // Swift and Kotlin block comments nest, so text after an inner `*/` is still commented out
-        // until the outer one closes.
-        let stripped = strip_clike("/* a /* inner */ fatalError() */ live\nexit(1)\n", Language::Swift);
-        assert!(!stripped[0].contains("fatalError"), "still inside the outer comment: {}", stripped[0]);
+        // Kotlin block comments nest, so text after an inner `*/` is still commented out until the outer
+        // one closes.
+        let stripped = strip_clike("/* a /* inner */ TODO() */ live\nexit(1)\n", Language::Kotlin);
+        assert!(!stripped[0].contains("TODO"), "still inside the outer comment: {}", stripped[0]);
         assert!(stripped[0].contains("live"), "code after the outer `*/` is live: {}", stripped[0]);
         assert!(stripped[1].contains("exit"));
     }
@@ -731,23 +701,6 @@ mod tests {
         assert_eq!(count_whole_word("x!!.y!!z", "!!", false, false), 2);
         assert_eq!(count_whole_word("external fun", "external", true, true), 1);
         assert_eq!(count_whole_word("notexternal fun", "external", true, true), 0);
-    }
-
-    #[test]
-    fn code_inside_a_swift_interpolation_is_code() {
-        // `\(…)` holds code in every Swift string form; `\#(…)` in a delimited one. The literal text around
-        // it stays blanked, and a string inside the interpolation is still a string.
-        let source = "let a = \"value: \\(value.unsafelyUnwrapped)\"\n\
-                      let b = #\"raw \\(no) \\#(abort())\"#\n\
-                      let c = \"\"\"\n    first \\(x.unsafelyUnwrapped)\n    \"\"\"\n\
-                      let d = \"\\(v.map { _ in fatalError(\")\") })\" + after\n\
-                      let e = \"escaped \\\\(text) stays text\"\n";
-        let stripped = strip_clike(source, Language::Swift);
-        assert!(stripped[0].contains("value.unsafelyUnwrapped") && !stripped[0].contains("value:"), "{}", stripped[0]);
-        assert!(stripped[1].contains("abort()") && !stripped[1].contains("no") && !stripped[1].contains("raw"), "{}", stripped[1]);
-        assert!(stripped[3].contains("x.unsafelyUnwrapped") && !stripped[3].contains("first"), "{}", stripped[3]);
-        assert!(stripped[5].contains("fatalError(") && stripped[5].contains("after") && !stripped[5].contains("\")\""), "{}", stripped[5]);
-        assert!(!stripped[6].contains("text"), "an escaped backslash opens no interpolation: {}", stripped[6]);
     }
 
     #[test]
@@ -776,8 +729,6 @@ mod tests {
     fn kept_literals_include_char_literals_and_interpolations() {
         let kept = strip_comments("val a = 'x' // note\nval b = \"${c} d\" /* gone */\n", Language::Kotlin);
         assert_eq!(kept, "val a = 'x'        \nval b = \"${c} d\"           \n");
-        // Swift has no char literal: a quote is not a literal there, so nothing after it hides.
-        assert!(strip_clike("let a = 'x\nfatalError()\n", Language::Swift)[1].contains("fatalError"));
     }
 
     #[test]
@@ -821,12 +772,10 @@ mod tests {
             let length = 1 + next() % 24;
             let text: String = (0..length).map(|_| alphabet[next() % alphabet.len()]).collect();
             assert!(std::panic::catch_unwind(|| strip_rust(&text)).is_ok(), "strip_rust panicked on {text:?}");
-            for language in [Language::Swift, Language::Kotlin] {
-                let stripped = std::panic::catch_unwind(|| strip_clike(&text, language));
-                assert!(stripped.is_ok(), "strip_clike({language:?}) panicked on {text:?}");
-                let kept = std::panic::catch_unwind(|| strip_comments(&text, language));
-                assert!(kept.is_ok(), "strip_comments({language:?}) panicked on {text:?}");
-            }
+            let stripped = std::panic::catch_unwind(|| strip_clike(&text, Language::Kotlin));
+            assert!(stripped.is_ok(), "strip_clike panicked on {text:?}");
+            let kept = std::panic::catch_unwind(|| strip_comments(&text, Language::Kotlin));
+            assert!(kept.is_ok(), "strip_comments panicked on {text:?}");
         }
     }
 }

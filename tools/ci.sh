@@ -103,6 +103,15 @@ stage_swift_format() {
   listed swift || return 1
   xcrun swift-format lint --strict --configuration ios/sdk/.swift-format "${files[@]}"
 }
+stage_swift_lint() {
+  # SwiftLint's missing_docs over ios/sdk/.swiftlint.yml, and the Swift never-crash bans, the pointer
+  # confinement and the tool directives (AGENTS.md §3, §4, §10) read through the compiler's language
+  # server with SwiftPM's settings for every build the package ships — Debug and Release for each Apple
+  # slice rust/rust-toolchain.toml lists (rust/xtask/src/swift_lint.rs) — so each `#if` branch a shipping
+  # build compiles is read resolved. After the build: a file that does not compile is cheaper to name
+  # through the compiler than through the analyser.
+  xtask swift-lint
+}
 stage_swift_build() {
   # DIAGNOSE_MISSING_TARGET_DEPENDENCIES=YES_ERROR makes an import the package does not declare an
   # error. Without it a module an earlier build left in the derived data satisfies the import with only
@@ -178,10 +187,10 @@ stage_duplicates() {
 
 # `rules` runs before every cargo stage that compiles the workspace: what it reads needs no build, and a
 # build script runs as soon as cargo compiles its crate.
-stages=(doctor rules rust_fmt rust_clippy rust_test rust_mobile rust_deny generated swift_format swift_build android shell duplicates)
+stages=(doctor rules rust_fmt rust_clippy rust_test rust_mobile rust_deny generated swift_format swift_build swift_lint android shell duplicates)
 # The stage groups the decision and plan §15 name: Rust and Swift are each several stages.
 group_rust=(rust_fmt rust_clippy rust_test rust_mobile rust_deny)
-group_swift=(swift_format swift_build)
+group_swift=(swift_format swift_build swift_lint)
 selected=()
 for name in "$@"; do
   case "$name" in
