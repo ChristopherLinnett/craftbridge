@@ -11,9 +11,11 @@
 //! What is read is what the builds use: each library of the version catalog, each package a
 //! `Package.swift` declares (as `swift package dump-package` reads it), each pin a `Package.resolved`
 //! records, and — asked of Gradle itself rather than read off the build files — every external module
-//! resolved onto each library module's release, unit-test and instrumented-test runtime classpaths. That
-//! last part is the point: transitive modules arrive inside the AAR, and in the tests, without any build
-//! file naming them. Build plugins never ship, so they stay checked by
+//! resolved onto each library module's release, unit-test and instrumented-test runtime classpaths, and
+//! onto the tool classpaths the gate itself runs its Kotlin checks with: the rule project's compile,
+//! runtime and test classpaths and the analyser's own runtime, as the build resolves them. That last
+//! part is the point: transitive modules arrive inside the AAR, in the tests, and in the gate's own
+//! tooling, without any build file naming them. Build plugins never ship, so they stay checked by
 //! name, from the catalog's `[plugins]`.
 
 use crate::scan;
@@ -271,7 +273,7 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
             used.push(Used { key, source: CATALOG.to_string(), kind: "build plugin" });
         }
     }
-    for module in gradle_release_modules(root)? {
+    for module in gradle_resolved_modules(root)? {
         used.push(Used { key: module, source: "Gradle runtime classpaths".to_string(), kind: "module" });
     }
     // SwiftPM's own reading of each manifest, so every spelling it accepts — the deprecated
@@ -325,19 +327,21 @@ fn unpinned(shown: &str, published: &[String], resolved: bool) -> Option<String>
     })
 }
 
-/// The external modules that land on the Android library modules' runtime classpaths. Gradle
-/// itself answers — `android/sdk`'s `runtimeLicences` task prints its resolved graph — because the
-/// transitive modules are the whole point and no build file lists them. A tree without the Gradle
-/// wrapper (a scratch tree) has no answer to ask for; a Gradle that fails is an error, because the
-/// licences of what ships cannot be guessed at in its place.
-fn gradle_release_modules(root: &Path) -> Result<Vec<String>, String> {
+/// The external modules Gradle resolves for the licences check: what lands on the Android library
+/// modules' runtime classpaths, and what lands on the gate's own detekt tooling (the rule project's
+/// compile, runtime and test classpaths, and the analyser the gate forks). Gradle
+/// itself answers — `android/sdk`'s `runtimeLicences` and `:build-logic:detekt-rules:gateToolLicences`
+/// tasks print their resolved graphs — because the transitive modules are the whole point and no build
+/// file lists them. A tree without the Gradle wrapper (a scratch tree) has no answer to ask for; a
+/// Gradle that fails is an error, because the licences of what ships cannot be guessed at in its place.
+fn gradle_resolved_modules(root: &Path) -> Result<Vec<String>, String> {
     let sdk = root.join("android").join("sdk");
     if !sdk.join("gradlew").is_file() {
         return Ok(Vec::new());
     }
     let output = std::process::Command::new(sdk.join("gradlew"))
         .current_dir(&sdk)
-        .args(["--quiet", "--no-daemon", "--console=plain", "runtimeLicences"])
+        .args(["--quiet", "--no-daemon", "--console=plain", "runtimeLicences", ":build-logic:detekt-rules:gateToolLicences"])
         .output()
         .map_err(|error| format!("android/sdk: cannot ask Gradle for the runtime classpaths: {error}"))?;
     if !output.status.success() {
@@ -360,7 +364,7 @@ fn gradle_release_modules(root: &Path) -> Result<Vec<String>, String> {
         // Gradle needs the JDK and Android SDK tools/env.sh finds; run by hand, a shell without them gets
         // Gradle's own complaint, so the message says where the environment comes from.
         return Err(format!(
-            "android/sdk: `runtimeLicences` failed, so the licences of what ships cannot be checked: {} (tools/ci.sh rules runs it with the JDK and Android SDK tools/env.sh finds)",
+            "android/sdk: `runtimeLicences`/`gateToolLicences` failed, so the licences of what ships and of the gate's own tooling cannot be checked: {} (tools/ci.sh rules runs it with the JDK and Android SDK tools/env.sh finds)",
             reason.join(" ")
         ));
     }
