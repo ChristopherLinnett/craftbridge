@@ -298,6 +298,54 @@ pub(crate) fn package_lints_violations(source: &str, name: &str) -> Vec<String> 
     errors
 }
 
+/// Does the manifest inherit the workspace edition the way it inherits the lint table — with
+/// `edition.workspace = true`, beside `[lints] workspace = true`? What the compiler accepts, and which
+/// lints even exist to apply, change between editions, so a crate may not pick one for itself; the old
+/// `[project]` table inherits as well, since Cargo reads it wherever it reads the edition. Which edition
+/// a crate actually settles on is Cargo's own answer, held to the workspace's by the rule that reads
+/// `cargo metadata`. A target's table writes no edition at all: writing one sets the target's edition
+/// even when it writes the workspace's own value, and a pin spelt that way is invisible to Cargo's
+/// answer until the day the workspace edition moves — only the spelling shows it, so the spelling is
+/// what is refused.
+pub(crate) fn package_edition_violations(source: &str, name: &str) -> Vec<String> {
+    let document = match parse(source, name) {
+        Ok(document) => document,
+        Err(errors) => return errors,
+    };
+    let mut errors = Vec::new();
+    let declared: Vec<&toml::Value> =
+        ["package", "project"].into_iter().filter_map(|table| document.get(table).and_then(|table| table.get("edition"))).collect();
+    if !declared.iter().any(|edition| edition.get("workspace").and_then(toml::Value::as_bool) == Some(true)) {
+        let spelled =
+            declared.iter().filter_map(|edition| edition.as_str()).map(|edition| format!(" — it says edition = \"{edition}\"")).next().unwrap_or_default();
+        errors.push(format!("{name}: does not inherit the workspace edition{spelled}: a crate says edition.workspace = true beside [lints] workspace = true"));
+    }
+    for (at, target) in target_tables(&document) {
+        if let Some(edition) = target.get("edition") {
+            let value = edition.as_str().map_or_else(|| edition.to_string(), |edition| format!("\"{edition}\""));
+            errors.push(format!("{name}: {at} sets an edition of its own, {value}: a target takes its crate's inherited edition and sets none of its own"));
+        }
+    }
+    errors
+}
+
+/// The manifest tables Cargo reads a target from: `[lib]`, and the `[[bin]]`, `[[test]]`, `[[example]]`
+/// and `[[bench]]` arrays. Each answer is the table and how a message names it; a named array entry is
+/// named back, so the writer sees which one to fix.
+fn target_tables(document: &toml::Value) -> Vec<(String, &toml::Value)> {
+    let mut tables: Vec<(String, &toml::Value)> = Vec::new();
+    if let Some(lib) = document.get("lib") {
+        tables.push(("`[lib]`".to_string(), lib));
+    }
+    for kind in ["bin", "test", "example", "bench"] {
+        for (index, entry) in document.get(kind).and_then(toml::Value::as_array).into_iter().flatten().enumerate() {
+            let named = entry.get("name").and_then(toml::Value::as_str).map_or_else(|| format!("entry {index}"), |target| format!("`{target}`"));
+            tables.push((format!("`[[{kind}]]` {named}"), entry));
+        }
+    }
+    tables
+}
+
 /// Every attribute that weakens a denied lint, directly or through its group, reported at the line of the
 /// attribute's `#`: `#![allow(…)]`, `#![expect(…)]`, `#![warn(…)]`, one of them inside `cfg_attr`, and the
 /// same as an outer attribute on a `mod`, which covers the whole module just as the inner one does. On
@@ -341,11 +389,51 @@ pub(crate) fn build_script_violations(name: &str, marked: bool, script: Option<&
     Some(format!("{name}: has a build script, `{script}`, which reaches the compiler around the lint table: only a crate the layer table marks may have one"))
 }
 
+/// The edition the workspace manifest declares for its crates to inherit, if it declares one. Cargo
+/// resolves a crate's own edition itself, so this is the one half of the edition rule the workspace
+/// manifest answers.
+pub(crate) fn declared_edition(source: &str) -> Option<String> {
+    let document = parse(source, "the workspace manifest").ok()?;
+    Some(document.get("workspace")?.get("package")?.get("edition")?.as_str()?.to_string())
+}
+
+/// The other half of the edition rule ([`package_edition_violations`] says why there is one edition):
+/// Cargo's own answer to which edition the code compiles under, so no spelling hides a pinned one.
+/// `package` is `cargo metadata`'s edition for the crate — the old `[project]` table included, which Cargo
+/// still reads for editions before 2024 — and `targets` its edition for each target, which a target's own
+/// table can set apart from the package's with no more than a warning from Cargo; a target is named only
+/// where it parts from the package, whose own message covers the rest. `workspace` is the edition every
+/// one had to settle to.
+pub(crate) fn resolved_edition_violations(name: &str, package: &str, targets: &[(String, String)], workspace: &str) -> Vec<String> {
+    let mut errors = Vec::new();
+    if package != workspace {
+        errors.push(format!(
+            "{name}: compiles under edition \"{package}\", not the workspace's \"{workspace}\": a crate inherits the workspace edition with edition.workspace = true"
+        ));
+    }
+    for (target, edition) in targets.iter().filter(|(_, edition)| edition != workspace && edition != package) {
+        errors.push(format!(
+            "{name}: target `{target}` compiles under edition \"{edition}\", not the workspace's \"{workspace}\": a target takes its crate's inherited edition and sets none of its own"
+        ));
+    }
+    errors
+}
+
 /// Run the check against the repository: the workspace manifest, Cargo's configuration, clippy's
-/// configuration, every package manifest and build script, and every `.rs` file's attributes.
+/// configuration, every package manifest, build script and edition, and every `.rs` file's attributes.
 pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     let rust_dir = root.join("rust");
-    let mut errors = workspace_manifest_violations(&scan::read_text(&rust_dir.join("Cargo.toml"))?, "rust/Cargo.toml");
+    let workspace_source = scan::read_text(&rust_dir.join("Cargo.toml"))?;
+    let mut errors = workspace_manifest_violations(&workspace_source, "rust/Cargo.toml");
+    // The one edition every crate inherits. With none declared, inheritance has nothing to inherit and
+    // a crate could pin any edition for itself under cover of the rule below.
+    let workspace_edition = declared_edition(&workspace_source);
+    if workspace_edition.is_none() {
+        errors.push(
+            "rust/Cargo.toml: [workspace.package] declares no edition: the workspace sets the one edition every crate inherits with edition.workspace = true"
+                .to_string(),
+        );
+    }
 
     // The one Cargo configuration the gate's commands read; the machinery check refuses any other.
     let config = root.join(machinery::CARGO_CONFIGURATION);
@@ -363,7 +451,12 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     for package in crate::meta::read(&rust_dir, crate::meta::Graph::Workspace)? {
         let manifest = Path::new(&package.manifest_path);
         let shown = crate::report::shown(root, manifest);
-        errors.extend(package_lints_violations(&scan::read_text(manifest)?, &shown));
+        let source = scan::read_text(manifest)?;
+        errors.extend(package_lints_violations(&source, &shown));
+        errors.extend(package_edition_violations(&source, &shown));
+        if let Some(edition) = workspace_edition.as_deref() {
+            errors.extend(resolved_edition_violations(&shown, &package.edition, &package.target_editions, edition));
+        }
         let marked = crate::layers::entry(&package.name).is_some_and(|row| row.build);
         let script = package.build_script.as_deref().map(|script| crate::report::shown(root, Path::new(script)));
         errors.extend(build_script_violations(&shown, marked, script.as_deref()));
@@ -588,11 +681,18 @@ panic = "unwind"
         std::fs::write(&manifest, original.replacen("[package]", "[package]\nbuild = \"gen.rs\"", 1)).unwrap();
         let errors = checked(&copy);
         assert!(errors.len() == 1 && errors[0].contains("`rust/core/craftbridge-core/gen.rs`"), "{errors:?}");
-        // And the old `[project]` table, which Cargo still reads for editions before 2024.
+        // And the old `[project]` table, which Cargo still reads for editions before 2024. Such a manifest
+        // pins an old edition too, so the edition rule names it twice beside the build script: the
+        // spelling inherits nothing, and the edition Cargo settles on is not the workspace's.
         let project = original.replacen("[package]", "[project]\nbuild = \"gen.rs\"", 1).replace("edition.workspace = true", "edition = \"2021\"");
         std::fs::write(&manifest, project).unwrap();
         let errors = checked(&copy);
-        assert!(errors.len() == 1 && errors[0].contains("`rust/core/craftbridge-core/gen.rs`"), "{errors:?}");
+        assert!(
+            errors.len() == 3
+                && errors.iter().any(|e| e.contains("`rust/core/craftbridge-core/gen.rs`"))
+                && errors.iter().filter(|e| e.contains("edition.workspace = true")).count() == 2,
+            "{errors:?}"
+        );
         std::fs::write(&manifest, &original).unwrap();
         std::fs::remove_file(crate_dir.join("gen.rs")).unwrap();
         assert!(checked(&copy).is_empty());
@@ -606,6 +706,124 @@ panic = "unwind"
         assert!(weakened.iter().any(|e| e.contains("clippy::unwrap_used") && e.contains("only inherit")), "{weakened:?}");
         let not_inherited = package_lints_violations("[package]\nname = \"x\"\n[lints]\nworkspace = false\n", "x/Cargo.toml");
         assert!(not_inherited.iter().any(|e| e.contains("workspace = true")), "{not_inherited:?}");
+    }
+
+    #[test]
+    fn a_manifest_inherits_the_workspace_edition_like_the_lint_table() {
+        assert!(package_edition_violations("[package]\nname = \"x\"\nedition.workspace = true\n[lints]\nworkspace = true\n", "x/Cargo.toml").is_empty());
+        assert!(
+            package_edition_violations("[project]\nname = \"x\"\nedition = { workspace = true }\n", "x/Cargo.toml").is_empty(),
+            "the old table inherits the same way"
+        );
+        let pinned = package_edition_violations("[package]\nname = \"x\"\nedition = \"2021\"\n[lints]\nworkspace = true\n", "x/Cargo.toml");
+        assert!(pinned.len() == 1 && pinned[0].starts_with("x/Cargo.toml:") && pinned[0].contains("edition = \"2021\""), "{pinned:?}");
+        let missing = package_edition_violations("[package]\nname = \"x\"\n", "x/Cargo.toml");
+        assert!(missing.iter().any(|e| e.contains("does not inherit the workspace edition")), "{missing:?}");
+        // A target table writing the workspace's own edition sets one of its own all the same: the pin is
+        // the writing, and Cargo's answer only agrees with the workspace until the workspace moves.
+        let lib = package_edition_violations("[package]\nname = \"x\"\nedition.workspace = true\n[lib]\nedition = \"2024\"\n", "x/Cargo.toml");
+        assert!(
+            lib.len() == 1 && lib[0].starts_with("x/Cargo.toml: `[lib]` sets an edition of its own, \"2024\"") && lib[0].contains("sets none of its own"),
+            "{lib:?}"
+        );
+        let bin = package_edition_violations("[package]\nname = \"x\"\nedition.workspace = true\n[[bin]]\nname = \"t\"\nedition = \"2021\"\n", "x/Cargo.toml");
+        assert!(bin.len() == 1 && bin[0].starts_with("x/Cargo.toml: `[[bin]]` `t` sets an edition of its own"), "{bin:?}");
+        let unset =
+            package_edition_violations("[package]\nname = \"x\"\nedition.workspace = true\n[[bin]]\nname = \"t\"\npath = \"src/main.rs\"\n", "x/Cargo.toml");
+        assert!(unset.is_empty(), "a target table says many things; only the edition is the pin: {unset:?}");
+        let mentioned = package_edition_violations(
+            "# [lib]\n# edition = \"2021\"\n[package]\nname = \"x\"\ndescription = \"[lib] edition = \\\"2021\\\"\"\nedition.workspace = true\n",
+            "x/Cargo.toml",
+        );
+        assert!(mentioned.is_empty(), "the manifest is read as TOML, so a comment or a string that spells a target edition is none: {mentioned:?}");
+        assert_eq!(declared_edition("[workspace]\n[workspace.package]\nname = \"x\"\nedition = \"2024\"\n").as_deref(), Some("2024"));
+        assert_eq!(declared_edition("[workspace]\n[workspace.package]\nname = \"x\"\n"), None);
+        let inherited = [("x".to_string(), "2024".to_string()), ("it".to_string(), "2024".to_string())];
+        assert!(resolved_edition_violations("x/Cargo.toml", "2024", &inherited, "2024").is_empty());
+        let settled = resolved_edition_violations("x/Cargo.toml", "2021", &[("x".to_string(), "2021".to_string())], "2024");
+        assert!(
+            settled.len() == 1 && settled[0].starts_with("x/Cargo.toml:") && settled[0].contains("\"2021\"") && settled[0].contains("edition.workspace = true"),
+            "the package's message covers the targets that follow it: {settled:?}"
+        );
+        let target =
+            resolved_edition_violations("x/Cargo.toml", "2024", &[("x".to_string(), "2024".to_string()), ("it".to_string(), "2018".to_string())], "2024");
+        assert!(target.len() == 1 && target[0].starts_with("x/Cargo.toml: target `it` compiles under edition \"2018\""), "{target:?}");
+    }
+
+    #[test]
+    fn a_real_crate_pinning_an_old_edition_is_refused_however_it_spells_the_table() {
+        let copy = crate::scratch::rust_tree_copy("lints-edition");
+        let manifest = copy.0.join("rust/core/craftbridge-core/Cargo.toml");
+        let original = std::fs::read_to_string(&manifest).unwrap();
+        // An old edition, pinned in the crate's own table.
+        std::fs::write(&manifest, original.replace("edition.workspace = true", "edition = \"2021\"")).unwrap();
+        let errors = checked(&copy);
+        assert!(errors.len() == 2, "{errors:?}");
+        assert!(errors.iter().all(|e| e.starts_with("rust/core/craftbridge-core/Cargo.toml:")) && errors.iter().all(|e| e.contains("2021")), "{errors:?}");
+        // The old `[project]` table too: Cargo reads it for editions before 2024, and its answer shows.
+        std::fs::write(&manifest, original.replace("[package]", "[project]").replace("edition.workspace = true", "edition = \"2021\"")).unwrap();
+        let errors = checked(&copy);
+        assert!(errors.len() == 2 && errors.iter().all(|e| e.contains("\"2021\"")), "{errors:?}");
+        // A target's own table, under a package that inherits: it pins that one target's edition and
+        // Cargo only warns, so the writing shows the pin and Cargo's answer for the target follows it.
+        std::fs::write(&manifest, format!("{original}\n[lib]\nedition = \"2021\"\n")).unwrap();
+        let errors = checked(&copy);
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(errors.iter().any(|e| e.starts_with("rust/core/craftbridge-core/Cargo.toml: `[lib]` sets an edition of its own")), "{errors:?}");
+        assert!(errors.iter().any(|e| e.contains("target `craftbridge_core` compiles under edition \"2021\"")), "{errors:?}");
+        // The pin holds even when the table writes the workspace's own edition: Cargo's answer is equal
+        // today and shows nothing, so only the spelling refuses the table that sets one of its own.
+        std::fs::write(&manifest, format!("{original}\n[lib]\nedition = \"2024\"\n")).unwrap();
+        let errors = checked(&copy);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].starts_with("rust/core/craftbridge-core/Cargo.toml: `[lib]` sets an edition of its own, \"2024\""), "{errors:?}");
+        std::fs::write(&manifest, &original).unwrap();
+        assert!(checked(&copy).is_empty(), "the tree itself inherits, and passes");
+    }
+
+    /// Every table Cargo reads a target from, each written in a TOML form of its own (a dotted key, an
+    /// inline array, array-of-tables headers), held against Cargo's own reading of the same manifest: Cargo
+    /// compiles each of the five targets under the edition its table writes, and the rule names each table.
+    #[test]
+    fn every_target_table_cargo_reads_is_named_however_the_toml_spells_it() {
+        let copy = crate::scratch::rust_tree_copy("lints-target-tables");
+        let crate_dir = copy.0.join("rust/core/craftbridge-core");
+        let manifest = crate_dir.join("Cargo.toml");
+        let original = std::fs::read_to_string(&manifest).unwrap();
+        for file in ["src/bin/probe-bin.rs", "tests/probe-test.rs", "examples/probe-example.rs", "benches/probe-bench.rs"] {
+            std::fs::create_dir_all(crate_dir.join(file).parent().unwrap()).unwrap();
+            std::fs::write(crate_dir.join(file), "//! A probe target.\nfn main() {}\n").unwrap();
+        }
+        let ahead = "lib.edition = \"2021\"\nbin = [{ name = \"probe-bin\", edition = \"2021\" }]\n";
+        let arrays = ["test", "example", "bench"].map(|kind| format!("\n[[{kind}]]\nname = \"probe-{kind}\"\nedition = \"2021\"\n")).concat();
+        std::fs::write(&manifest, format!("{ahead}{original}{arrays}")).unwrap();
+        let errors = checked(&copy);
+        for table in ["`[lib]`", "`[[bin]]` `probe-bin`", "`[[test]]` `probe-test`", "`[[example]]` `probe-example`", "`[[bench]]` `probe-bench`"] {
+            assert!(errors.iter().any(|e| e.contains(&format!(": {table} sets an edition of its own, \"2021\""))), "{table}: {errors:?}");
+        }
+        for target in ["craftbridge_core", "probe-bin", "probe-test", "probe-example", "probe-bench"] {
+            assert!(
+                errors.iter().any(|e| e.contains(&format!("target `{target}` compiles under edition \"2021\""))),
+                "Cargo reads {target}'s table: {errors:?}"
+            );
+        }
+        assert_eq!(errors.len(), 10, "{errors:?}");
+    }
+
+    #[test]
+    fn a_workspace_that_declares_no_edition_is_refused() {
+        let copy = crate::scratch::rust_tree_copy("lints-no-edition");
+        let workspace = copy.0.join("rust/Cargo.toml");
+        let source = std::fs::read_to_string(&workspace).unwrap();
+        std::fs::write(&workspace, source.replacen("edition = \"2024\"\n", "", 1)).unwrap();
+        // With nothing to inherit, Cargo reads the tree only once every crate pins an edition of its own.
+        for member in crate::scan::walk(&copy.0.join("rust"), "Cargo.toml").unwrap().into_iter().filter(|file| file.relative != "Cargo.toml") {
+            let manifest = std::fs::read_to_string(&member.path).unwrap();
+            std::fs::write(&member.path, manifest.replace("edition.workspace = true", "edition = \"2024\"")).unwrap();
+        }
+        let errors = checked(&copy);
+        assert!(errors.iter().any(|e| e.starts_with("rust/Cargo.toml: [workspace.package] declares no edition")), "{errors:?}");
+        assert!(errors.iter().filter(|e| e.contains("does not inherit the workspace edition")).count() > 1, "{errors:?}");
     }
 
     #[test]

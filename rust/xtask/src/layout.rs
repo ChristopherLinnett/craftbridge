@@ -126,8 +126,43 @@ fn hidden_package_folders(root: &Path) -> Result<Vec<String>, String> {
     Ok(errors)
 }
 
-/// Run the layout check: the root, then `ios/` and `android/` when they exist, and the code trees for a
-/// folder every rule would skip.
+/// The files each toolchain reads to build, with the one platform folder they belong to. A build file
+/// anywhere else is read by no build — cargo, SwiftPM and Gradle each read their own folder — yet tells
+/// everyone the folder builds something: in `conformance/`, `tools/` or `docs/`, in another platform's
+/// folder (a `Cargo.toml` under `ios/` is a crate the workspace, its lint table and its rules never see),
+/// or in `plan/`, where `rules: hygiene` refuses the Swift and Gradle scripts but not a `.toml`.
+const BUILD_FILES: &[(&str, &str)] = &[
+    ("Cargo.toml", "rust"),
+    ("Package.swift", "ios"),
+    ("build.gradle", "android"),
+    ("build.gradle.kts", "android"),
+    ("settings.gradle", "android"),
+    ("settings.gradle.kts", "android"),
+];
+
+/// Every build file the repository holds outside its own platform folder, each message naming the file.
+/// The files are the repository's, as `rules: hygiene` lists them, so a file git ignores is no part of it
+/// (§1). The root is the root list's to judge, and the probes kept under `plan/evidence/` stay as they ran.
+fn build_files_outside_their_folders(root: &Path) -> Result<Vec<String>, String> {
+    let mut errors = Vec::new();
+    for file in crate::hygiene::repository_files(root)? {
+        let Some((top, _)) = file.split_once('/') else { continue };
+        if file.starts_with(crate::hygiene::EVIDENCE) {
+            continue;
+        }
+        let name = file.rsplit('/').next().unwrap_or_default();
+        if let Some((_, own)) = BUILD_FILES.iter().find(|(build, own)| *build == name && *own != top) {
+            errors.push(format!(
+                "{file}: a {name} outside {own}/: each toolchain's build files are read only in their own folder, so this belongs to no build (AGENTS.md §1)"
+            ));
+        }
+    }
+    errors.sort();
+    Ok(errors)
+}
+
+/// Run the layout check: the root, then `ios/` and `android/` when they exist, the code trees for a
+/// folder every rule would skip, and every file for a platform's build file outside that platform's folder.
 pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     let mut errors = entries_violations(
         root,
@@ -142,6 +177,7 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
         }
     }
     errors.extend(hidden_package_folders(root)?);
+    errors.extend(build_files_outside_their_folders(root)?);
     Ok(errors)
 }
 
@@ -153,7 +189,9 @@ mod tests {
     #[test]
     fn a_compliant_root_passes() {
         let scratch = Scratch::new("ok");
-        for (name, kind) in ALLOWED_ROOT {
+        // Every name but `.git`, which would make the scratch a checkout whose files only git can list; the
+        // checkout tests below hold one.
+        for (name, kind) in ALLOWED_ROOT.iter().filter(|(name, _)| *name != ".git") {
             if *kind == Entry::File {
                 scratch.write(name, "x");
             } else {
@@ -296,5 +334,68 @@ mod tests {
         assert_eq!(errors.len(), 2, "{errors:?}");
         assert!(errors.iter().any(|e| e.contains("extra") && e.contains("only `sdk` and `samples` belong in ios/")), "{errors:?}");
         assert!(errors.iter().any(|e| e.contains("third_party") && e.contains("android/")), "{errors:?}");
+    }
+
+    #[test]
+    fn a_platform_build_file_outside_its_own_platform_folder_is_refused() {
+        let scratch = Scratch::new("build-files");
+        let planted = [
+            ("conformance/Cargo.toml", "rust"),
+            ("conformance/probe/Package.swift", "ios"),
+            ("tools/Cargo.toml", "rust"),
+            ("tools/probe/build.gradle", "android"),
+            ("tools/probe/build.gradle.kts", "android"),
+            ("docs/app/settings.gradle", "android"),
+            ("docs/app/settings.gradle.kts", "android"),
+            (".github/Cargo.toml", "rust"),
+            // Another platform's folder is no more its own: no build there reads it.
+            ("ios/sdk/rustlib/Cargo.toml", "rust"),
+            ("android/sdk/swift/Package.swift", "ios"),
+            ("rust/swift/Package.swift", "ios"),
+            ("rust/core/x/build.gradle.kts", "android"),
+            ("ios/sdk/settings.gradle", "android"),
+            // Nor is the plan, outside the probes its evidence keeps as they ran.
+            ("plan/tasks/Cargo.toml", "rust"),
+        ];
+        for (path, _) in planted {
+            scratch.write(path, "");
+        }
+        scratch.write("conformance/notes.md", "x\n");
+        scratch.write("plan/evidence/probe/Cargo.toml", "");
+        scratch.write("plan/evidence/v7/app/settings.gradle.kts", "");
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), planted.len(), "{errors:?}");
+        for (path, own) in planted {
+            let name = path.rsplit('/').next().unwrap_or_default();
+            assert!(errors.iter().any(|e| e.starts_with(&format!("{path}: a {name} outside {own}/: "))), "{path}: {errors:?}");
+        }
+        assert!(errors.iter().all(|e| e.contains("belongs to no build")), "{errors:?}");
+    }
+
+    #[test]
+    fn a_build_file_git_ignores_is_not_the_repository_s() {
+        let scratch = Scratch::new("build-files-ignored");
+        crate::git::output(&scratch.0, &["init", "-q"]).unwrap();
+        scratch.write(".gitignore", "/tools/scratch/\n");
+        scratch.write("tools/scratch/Cargo.toml", "");
+        scratch.write("tools/kept/Cargo.toml", "");
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].starts_with("tools/kept/Cargo.toml: a Cargo.toml outside rust/"), "{errors:?}");
+    }
+
+    #[test]
+    fn build_files_stay_legal_inside_their_own_platform_trees() {
+        let scratch = Scratch::new("build-files-legal");
+        scratch.write("rust/Cargo.toml", "");
+        scratch.write("rust/core/craftbridge-core/Cargo.toml", "");
+        scratch.write("ios/sdk/Package.swift", "");
+        scratch.write("android/sdk/build.gradle.kts", "");
+        scratch.write("android/sdk/settings.gradle.kts", "");
+        scratch.write("android/sdk/core/build.gradle.kts", "");
+        // A sample is its platform's too, consuming the library the way an app does (§1).
+        scratch.write("ios/samples/Viewer/Package.swift", "");
+        scratch.write("android/samples/viewer/settings.gradle.kts", "");
+        assert!(check(&scratch.0).unwrap().is_empty());
     }
 }

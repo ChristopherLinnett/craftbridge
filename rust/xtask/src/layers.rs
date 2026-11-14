@@ -248,14 +248,26 @@ pub(crate) fn check_crate(input: &CrateInput) -> Vec<String> {
     errors
 }
 
-/// A core crate is `craftbridge-<area>`; an app plugin carries its app's noun, which stops one app's
-/// crate being mistaken for another's, and so does an app's tool. Any other tool keeps the name its
-/// convention gives it (`xtask`, `uniffi-bindgen`). `at` is how a message names the crate's manifest.
+/// The Craft app a crate's name names, as one of its segments: [`CRAFT_APPS`]' noun. Cargo reads `-` and
+/// `_` in a package name alike — `craftbridge-film_utils` builds the library `craftbridge_film_utils` — so
+/// a segment ends at either, and a noun in another case names the app as plainly.
+fn named_app(name: &str) -> Option<&'static str> {
+    CRAFT_APPS.iter().map(|app| app.noun).find(|noun| name.split(['-', '_']).any(|segment| segment.eq_ignore_ascii_case(noun)))
+}
+
+/// A core crate is `craftbridge-<area>`, and its name carries no app's noun: the core serves every app,
+/// so a core name that names one app mislabels the shelf it sits on. An app plugin carries its app's
+/// noun, which stops one app's crate being mistaken for another's, and so does an app's tool. Any other
+/// tool keeps the name its convention gives it (`xtask`, `uniffi-bindgen`). `at` is how a message names
+/// the crate's manifest.
 fn check_name(row: &Entry, at: &str, errors: &mut Vec<String>) {
     match row.kind {
         Kind::Core => {
             if !row.name.starts_with("craftbridge-") {
                 errors.push(format!("{at}: {}: a core crate is named craftbridge-<area>", row.name));
+            }
+            if let Some(noun) = named_app(row.name) {
+                errors.push(format!("{at}: {}: a core crate names no app: {noun} is one, and the core serves them all", row.name));
             }
         }
         Kind::App(app) => {
@@ -265,8 +277,7 @@ fn check_name(row: &Entry, at: &str, errors: &mut Vec<String>) {
             }
         }
         Kind::Tool => {
-            let noun = CRAFT_APPS.iter().map(|app| app.noun).find(|noun| row.name.split('-').any(|segment| segment == *noun));
-            if let Some(noun) = noun.filter(|noun| !row.name.starts_with(&format!("craftbridge-{noun}-"))) {
+            if let Some(noun) = named_app(row.name).filter(|noun| !row.name.starts_with(&format!("craftbridge-{noun}-"))) {
                 errors.push(format!("{at}: {}: a tool of the {noun} app is named craftbridge-{noun}-…, like the app's other crates", row.name));
             }
         }
@@ -646,6 +657,8 @@ mod tests {
             name: name.into(),
             id: id.into(),
             source: source.map(str::to_string),
+            edition: "2024".into(),
+            target_editions: Vec::new(),
             manifest_path: format!("/repo/{}/Cargo.toml", if member { format!("rust/core/{name}") } else { format!("tools/{name}") }),
             dependencies: Vec::new(),
             library_targets: Vec::new(),
@@ -936,6 +949,8 @@ mod tests {
                 name: "craftbridge-core".into(),
                 id: "id1".into(),
                 source: None,
+                edition: "2024".into(),
+                target_editions: Vec::new(),
                 manifest_path: "/repo/rust/core/craftbridge-core/Cargo.toml".into(),
                 dependencies: vec![
                     dependency("serde", None),
@@ -952,6 +967,8 @@ mod tests {
                 name: "craftbridge-media".into(),
                 id: "id2".into(),
                 source: None,
+                edition: "2024".into(),
+                target_editions: Vec::new(),
                 manifest_path: "/repo/rust/core/craftbridge-media/Cargo.toml".into(),
                 dependencies: Vec::new(),
                 library_targets: Vec::new(),
@@ -976,5 +993,27 @@ mod tests {
     #[test]
     fn app_nouns_come_from_the_rows() {
         assert_eq!(app_nouns(ENTRIES), vec!["effects"]);
+    }
+
+    #[test]
+    fn a_core_name_carries_no_app_noun() {
+        let core = ENTRIES.iter().find(|row| row.name == "craftbridge-core").unwrap();
+        assert!(check_name_of(core, "craftbridge-media").is_empty(), "the tree's own core names pass");
+        let planted = check_name_of(core, "craftbridge-film-utils");
+        assert_eq!(planted.len(), 1, "{planted:?}");
+        assert!(planted[0].starts_with("x: craftbridge-film-utils:") && planted[0].contains("film") && planted[0].contains("serves them all"), "{planted:?}");
+        let whole_app = check_name_of(core, "craftbridge-effects");
+        assert_eq!(whole_app.len(), 1, "{whole_app:?}");
+        assert!(whole_app[0].contains("effects"), "{whole_app:?}");
+        // Cargo reads `_` as `-`, so the noun is a segment between either; and a noun in capitals is the noun.
+        for spelt in ["craftbridge-film_utils", "craftbridge-media_Effects", "craftbridge-FILM-codecs"] {
+            let named = check_name_of(core, spelt);
+            assert!(named.len() == 1 && named[0].contains("names no app"), "{spelt}: {named:?}");
+        }
+        assert!(check_name_of(core, "craftbridge-filmstrip").is_empty(), "a noun inside a longer word is no segment");
+        // The tool rule reads the same segments: an app's tool spelt with `_` is still that app's.
+        let tool = ENTRIES.iter().find(|row| row.name == "xtask").unwrap();
+        let film_tool = check_name_of(tool, "craftbridge-film_codegen");
+        assert!(film_tool.len() == 1 && film_tool[0].contains("a tool of the film app"), "{film_tool:?}");
     }
 }

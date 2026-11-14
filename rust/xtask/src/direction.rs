@@ -7,6 +7,10 @@
 //! takes: a local one is refused, because another folder's code would reach the build through a door
 //! neither the direction rule nor the licence check can see. The Gradle side of the same rule sits in
 //! `android/sdk/settings.gradle.kts`, where Gradle's own project graph answers the question.
+//!
+//! `swift package describe` answers what the dump cannot, SwiftPM having resolved each target: the folder
+//! it sits in, which rule 1's layout holds to `Sources/<name>` for every regular target, and the files it
+//! compiles, which every check must be able to read.
 
 use std::path::Path;
 use std::process::Command;
@@ -110,16 +114,37 @@ pub(crate) fn package_errors(package: &serde_json::Value) -> Vec<String> {
     errors
 }
 
-/// Run the check on the repository's Swift package: the direction of its targets' dependencies, and what
-/// SwiftPM builds that no check sees. A tree without one (a scratch tree) has nothing to ask.
+/// Run the check on the repository's Swift package: the direction of its targets' dependencies, where its
+/// shipping targets sit, and what SwiftPM builds that no check sees. A tree without one (a scratch tree)
+/// has nothing to ask.
 pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     let sdk = root.join("ios").join("sdk");
     let mut errors = dump_package(&sdk, FILE)?.map(|package| package_errors(&package)).unwrap_or_default();
     if let Some(targets) = describe_package(&sdk, FILE)? {
         let read = crate::scan::walk(&sdk, "")?.into_iter().map(|file| file.relative).collect();
+        errors.extend(placement_errors(&targets));
         errors.extend(target_errors(&targets, &read));
     }
     Ok(errors)
+}
+
+/// A regular target — the core's or a plugin's, the code that ships — sits at `Sources/<name>`, where
+/// AGENTS.md §1's layout puts the core beside each plugin. SwiftPM's resolved folder is the answer, not the
+/// manifest's `path:`: SwiftPM also finds a target with no `path:` in `Source/`, `src/` or `srcs/` when the
+/// package has no `Sources/`, so a manifest that sets no path still moves every target once the folder is
+/// renamed. A test target sits wherever its tests are (what SwiftPM compiles into it is test code, §3), and
+/// a binary target's folder is the vendored library itself.
+pub(crate) fn placement_errors(targets: &[SwiftTarget]) -> Vec<String> {
+    targets
+        .iter()
+        .filter(|target| target.kind == "library" && target.path != format!("Sources/{}", target.name))
+        .map(|target| {
+            format!(
+                "{FILE}: target `{}` sits in `{}`: a regular target sits at `Sources/<name>`, where the layout puts the core beside each plugin, moved by no `path:` and found in no other source folder",
+                target.name, target.path
+            )
+        })
+        .collect()
 }
 
 /// SwiftPM's own reading of the `Package.swift` in `package_dir`, or `None` where there is none (a
@@ -152,6 +177,9 @@ pub(crate) struct SwiftTarget {
     pub(crate) name: String,
     /// SwiftPM's type: `library` for a regular target, `test`, `executable`, `binary`, `macro`, …
     pub(crate) kind: String,
+    /// The folder SwiftPM resolved for it, relative to the package, as SwiftPM normalises it (no `./`, no
+    /// trailing `/`): the `path:` the manifest sets, or the default folder SwiftPM found.
+    pub(crate) path: String,
     /// The files it compiles, relative to the package.
     pub(crate) sources: Vec<String>,
     pub(crate) products: Vec<String>,
@@ -198,6 +226,7 @@ pub(crate) fn swift_targets(described: &serde_json::Value) -> Vec<SwiftTarget> {
                 name: target.get("name").and_then(serde_json::Value::as_str).unwrap_or_default().to_string(),
                 kind: target.get("type").and_then(serde_json::Value::as_str).unwrap_or_default().to_string(),
                 sources: strings(target, "sources").into_iter().map(|source| if path.is_empty() { source } else { format!("{path}/{source}") }).collect(),
+                path,
                 products: strings(target, "product_memberships"),
                 dependencies: strings(target, "target_dependencies"),
             }
@@ -276,6 +305,7 @@ pub(crate) fn published_packages(package: &serde_json::Value) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
 
     fn package(targets: &str) -> serde_json::Value {
         serde_json::from_str(&format!(r#"{{"targets": {targets}}}"#)).unwrap()
@@ -429,5 +459,67 @@ mod tests {
             r#"{"sourceControl": [{"identity": "uniffi", "location": {"remote": ["https://github.com/mozilla/uniffi.git"]}, "requirement": {"branch": ["main"]}}]}"#,
         );
         assert!(package_errors(&legal).is_empty(), "{:?}", package_errors(&legal));
+    }
+
+    /// The folders `swift package describe` printed (Swift 6.3) for scratch packages: two targets whose
+    /// `path:` (`./Sources/CraftBridge/`, `Sources/CraftBridge/../CraftBridgeFilm`) SwiftPM normalised to
+    /// their default folder, one moved by `path:`, one whose `path:` spells `Sources` in another case, and
+    /// the test and binary targets that keep folders of their own.
+    const PLACED: &str = r#"{"targets": [
+        {"name": "CraftBridge", "type": "library", "path": "Sources/CraftBridge", "sources": ["A.swift"]},
+        {"name": "CraftBridgeFilm", "type": "library", "path": "Sources/CraftBridgeFilm", "sources": ["C.swift"]},
+        {"name": "CraftBridgeEffects", "type": "library", "path": "Plugins/CraftBridgeEffects", "sources": ["B.swift"]},
+        {"name": "CraftBridgeAudio", "type": "library", "path": "sources/CraftBridgeAudio", "sources": ["D.swift"]},
+        {"name": "CraftBridgeEffectsTests", "type": "test", "path": "Checks/Effects", "sources": ["T.swift"]},
+        {"name": "CraftBridgeFFIBinary", "type": "binary", "path": "Frameworks/CraftBridgeFFI.xcframework"}
+    ]}"#;
+
+    #[test]
+    fn a_regular_target_sits_at_sources_and_nowhere_else() {
+        let errors = placement_errors(&swift_targets(&serde_json::from_str(PLACED).unwrap()));
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(errors.iter().any(|e| e.starts_with("ios/sdk/Package.swift: target `CraftBridgeEffects` sits in `Plugins/CraftBridgeEffects`")), "{errors:?}");
+        assert!(errors.iter().any(|e| e.starts_with("ios/sdk/Package.swift: target `CraftBridgeAudio` sits in `sources/CraftBridgeAudio`")), "{errors:?}");
+        assert!(errors.iter().all(|e| e.contains("Sources/<name>")), "{errors:?}");
+    }
+
+    /// A scratch package of the layout's shape, its core and one plugin, with `Package.swift` as given.
+    fn scratch_package(manifest_targets: &str) -> Scratch {
+        let scratch = Scratch::new("direction-placement");
+        for (folder, file) in [("CraftBridge", "CraftBridge.swift"), ("CraftBridgeEffects", "CraftBridgeEffects.swift")] {
+            scratch.write(&format!("ios/sdk/Sources/{folder}/{file}"), "public let placed = 1\n");
+        }
+        scratch.write(
+            "ios/sdk/Package.swift",
+            format!(
+                "// swift-tools-version: 6.0\nimport PackageDescription\nlet package = Package(\n    name: \"CraftBridge\",\n    products: [.library(name: \"CraftBridge\", targets: [\"CraftBridge\", \"CraftBridgeEffects\"])],\n    targets: [{manifest_targets}],\n)\n"
+            ),
+        );
+        scratch
+    }
+
+    /// The acceptance shape, asked of the real tool through the check that dumps and describes the package:
+    /// a plugin moved to `Plugins/` by `path:`, and every target moved with no `path:` at all by renaming
+    /// `Sources/` to a folder SwiftPM also searches. The default layout passes.
+    #[test]
+    fn a_target_moved_out_of_sources_fails_the_check_that_asks_swiftpm() {
+        let targets = ".target(name: \"CraftBridge\"), .target(name: \"CraftBridgeEffects\", dependencies: [\"CraftBridge\"])";
+        let scratch = scratch_package(targets);
+        let sdk = scratch.0.join("ios/sdk");
+        assert!(check(&scratch.0).unwrap().is_empty(), "the default layout");
+
+        let moved = scratch_package(&targets.replace("[\"CraftBridge\"])", "[\"CraftBridge\"], path: \"Plugins/CraftBridgeEffects\")"));
+        std::fs::create_dir_all(moved.0.join("ios/sdk/Plugins")).unwrap();
+        std::fs::rename(moved.0.join("ios/sdk/Sources/CraftBridgeEffects"), moved.0.join("ios/sdk/Plugins/CraftBridgeEffects")).unwrap();
+        let errors = check(&moved.0).unwrap();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].starts_with("ios/sdk/Package.swift: target `CraftBridgeEffects` sits in `Plugins/CraftBridgeEffects`"), "{errors:?}");
+
+        std::fs::rename(sdk.join("Sources"), sdk.join("src")).unwrap();
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        for name in ["CraftBridge", "CraftBridgeEffects"] {
+            assert!(errors.iter().any(|e| e.starts_with(&format!("ios/sdk/Package.swift: target `{name}` sits in `src/{name}`"))), "{errors:?}");
+        }
     }
 }
