@@ -1739,7 +1739,7 @@ impl Engine {
 <td><code>ENGINE_VERSION</code>, <code>ENGINE_PIN</code> constants for <code>info</code></td>
 </tr>
 </tbody></table>
-</div><p><strong>Reading the registry.</strong> <code>effectcraft_engine::command_specs()</code> gives every command&#39;s id, label, menu, shortcuts, <code>params</code> text and <code>journal</code> flag (<code>crates/<wbr>engine/<wbr>src/<wbr>cmd.rs:106-121</code>, <code>:175-181</code>). <code>params_schema(spec)</code> gives the accepted keys and which are required (<code>crates/<wbr>engine/<wbr>src/<wbr>cmd/<wbr>schema.rs:77-101</code>). The tool catalogue comes from <code>effectcraft_automation::tools::catalogue()</code> (<code>crates/<wbr>automation/<wbr>src/<wbr>tools.rs:93-95</code>).</p>
+</div><p><strong>Reading the registry.</strong> <code>effectcraft_engine::command_specs()</code> gives every command&#39;s id, label, menu, shortcuts, <code>params</code> text and <code>journal</code> flag (<code>crates/<wbr>engine/<wbr>src/<wbr>cmd.rs:106-121</code>, <code>:175-181</code>). <code>params_schema(spec)</code> gives the accepted keys and which are required (<code>crates/<wbr>engine/<wbr>src/<wbr>cmd/<wbr>schema.rs:77-101</code>). The tool catalogue comes from <code>effectcraft_automation::tools::catalogue()</code> (<code>crates/<wbr>automation/<wbr>src/<wbr>tools.rs:93-95</code>). The surface&#39;s <code>pin</code> is the commit Cargo builds for the pin, in full as <code>rust/<wbr>Cargo.lock</code> records it, whatever spelling <code>rust/<wbr>Cargo.toml</code> gives the pin, so a pin respelt in full or abbreviated leaves the surface as it was.</p>
 <p><strong>Type rules.</strong> The registry gives types only as prose in each key&#39;s piece of the <code>params</code> text (<code>evidence/<wbr>01-system-inventory.md</code> Finding 11). The generator maps a piece conservatively, and anything else stays a <code>JSONValue</code>, so a wrong guess can only be wider, never narrower:</p>
 <div class="table-wrap"><table>
 <thead>
@@ -1755,12 +1755,17 @@ impl Engine {
 <td><code>preserveFrameRate?: bool</code></td>
 </tr>
 <tr>
+<td><code>: string</code></td>
+<td><code>string</code></td>
+<td><code>query?: string</code></td>
+</tr>
+<tr>
 <td><code>: a|b|c</code> (bare words)</td>
 <td><code>enum</code> with those values</td>
 <td><code>renderer?: classic3D|advanced3D</code></td>
 </tr>
 <tr>
-<td><code>(s)</code>, <code>fps</code>, <code>px</code>, <code>(16–256)</code>, a number word</td>
+<td><code>(s)</code>, <code>fps</code>, <code>px</code>, <code>(16–256)</code>, a number word (<code>number</code>, <code>n</code>)</td>
 <td><code>number</code></td>
 <td><code>duration? (s)</code></td>
 </tr>
@@ -1770,7 +1775,12 @@ impl Engine {
 <td><code>position? [x,y]</code></td>
 </tr>
 <tr>
-<td><code>[r,g,b]|#hex</code></td>
+<td><code>[x,y,z]</code> / <code>[x, y, z]</code></td>
+<td><code>vec3</code></td>
+<td><code>eye? [x,y,z]</code></td>
+</tr>
+<tr>
+<td><code>[r,g,b]|#hex</code>, in either order</td>
 <td><code>color</code></td>
 <td><code>background? [r,g,b]|#hex</code></td>
 </tr>
@@ -1785,7 +1795,8 @@ impl Engine {
 <td><code>attributes as layer.setText</code></td>
 </tr>
 </tbody></table>
-</div><p><strong>Emitted code.</strong> For <code>layer.newText</code> the Swift is
+</div><p>A rule applies only when the piece says the type and nothing more: a value with a further alternative (<code>bool|null</code>, <code>[x,y]|null</code>, <code>[r,g,b]|#hex|false</code>, or a note that offers one, <code>(or display name)</code>) or text after the type that is not a note in parentheses stays <code>json</code>, and so does a key whose piece names several keys (<code>time? (s) | frame?</code>), since the text then does not say which of them a word describes. An enum lists values, and the prose writes a stand-in for a kind of value the same way (<code>output?: path|template</code> takes a file path or a template&#39;s name, <code>resolution?: full|half|third|quarter|scale</code> a number for <code>scale</code>), so a type&#39;s name, a number word, a unit, a reference word or a JSON literal (<code>bool</code>, <code>n</code>, <code>fps</code>, <code>id</code>, <code>null</code>), or a known stand-in (<code>path</code>, <code>template</code>, <code>timecode</code>, <code>frame</code>, <code>scale</code>), keeps the key <code>json</code>, even where another command lists the word as a value. The rules read only the prose, so where it reads two ways they keep the wider type: a typed key never refuses a value its piece describes.</p>
+<p><strong>Emitted code.</strong> For <code>layer.newText</code> the Swift is
 <code>extension EffectsEngine.LayerCommands { public func newText(text: String? = nil, name: String? = nil, position: Vec2? = nil, …, extra: [String: JSONValue] = [:]) async throws -&gt; JSONValue }</code>,
 which calls <code>request(&quot;exec&quot;, {&quot;command&quot;: &quot;layer.newText&quot;, &quot;params&quot;: {…}})</code>; Kotlin emits the matching <code>suspend fun</code>. Names follow the id (<code>renderQueue.setRender</code> → <code>renderQueue.setRender(…)</code>); a reserved word is escaped. <code>extra</code> passes keys the rules did not type, and the engine still validates every key (<code>check_params</code>).</p>
 <p><strong>Diff.</strong> <code>diff</code> compares two surfaces and lists added, removed and changed commands and keys (required-ness, type, enum values). Removing or renaming a command or a key, or making a key required, is <strong>breaking</strong>: exit code 2 and a report (§24).</p>

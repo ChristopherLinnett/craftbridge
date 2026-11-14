@@ -9,8 +9,8 @@
 //! tracked, because a comparison with the working tree alone would pass files that were never added or
 //! that a `.gitignore` hides.
 //!
-//! The registry is empty today; the first generator (the codegen's API surface and its Swift and Kotlin
-//! facades) registers itself here in the change that adds it.
+//! Every generator registers itself in [`generators`], in the change that adds it, so the gate regenerates
+//! and compares its files from that change on.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -32,18 +32,12 @@ pub(crate) struct Generator {
 
 /// The registry. Add a generator here when its files start being generated.
 pub(crate) fn generators() -> Vec<Generator> {
-    Vec::new()
+    vec![Generator { name: "effects-api-surface", output_dir: crate::effects_api::OUTPUT_DIR, generate: crate::effects_api::generate }]
 }
 
 /// Run `cargo xtask generate`, with or without `--check`.
 pub(crate) fn run(root: &Path, check: bool) -> ExitCode {
     let registry = generators();
-    if registry.is_empty() {
-        // Nothing is generated yet, so there is nothing to write and nothing to compare: that is not a
-        // failure, it is the state of the repository before the first generator lands.
-        println!("generate: no generators registered yet");
-        return ExitCode::SUCCESS;
-    }
     let problems = registry_problems(&registry);
     if !problems.is_empty() {
         for problem in problems {
@@ -491,12 +485,9 @@ mod tests {
     }
 
     #[test]
-    fn the_registry_is_empty_until_a_generator_lands() {
-        // The registry being empty is the repository's state today: `generate` and `generate --check`
-        // both say so and succeed.
-        let root = Scratch::new("empty");
-        assert!(generators().is_empty());
-        assert_eq!(code(run(&root.0, false)), 0);
-        assert_eq!(code(run(&root.0, true)), 0);
+    fn the_registry_is_safe_to_run_and_holds_the_effects_surface() {
+        let registry = generators();
+        assert!(registry_problems(&registry).is_empty(), "{:?}", registry_problems(&registry));
+        assert!(registry.iter().any(|generator| generator.name == "effects-api-surface" && generator.output_dir.ends_with("/generated")));
     }
 }
