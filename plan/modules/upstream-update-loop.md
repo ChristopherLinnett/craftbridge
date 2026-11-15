@@ -5,7 +5,7 @@
 
 ## 24. Upstream update loop design
 
-`tools/update-upstream.sh <upstream-commit>` takes a new official EffectCraft revision in one run (PD4, PD17, L9). It need not be automatic, only quick to take: it does the mechanical steps and names what a person must recheck. UP-9 builds steps 1 and 2 and uses them to set the first pin, so the generated tables are never written by hand even once; OPS-4 adds steps 3 to 6. Any GitHub call it makes names the ChristopherLinnett account (`GH_TOKEN=$(gh auth token --user ChristopherLinnett)`), never the machine's active login.
+`tools/update-upstream.sh <upstream-commit>` takes a new official EffectCraft revision in one run (PD4, PD17, L9). It need not be automatic, only quick to take: it does the mechanical steps and names what a person must recheck. UP-9 builds steps 1 and 2 and uses them to set the first pin, so the generated tables are never written by hand even once; OPS-4 adds steps 3 to 7. Any GitHub call it makes names the ChristopherLinnett account (`GH_TOKEN=$(gh auth token --user ChristopherLinnett)`), never the machine's active login.
 
 1. **Fetch** storytold/effectcraft and read the new revision's `Cargo.toml` and `Cargo.lock`.
 2. **Pins:** write the new `rev` and EffectCraft's FilmCraft revision into `[workspace.dependencies]` of `rust/Cargo.toml`; regenerate `[patch.crates-io]` and `[profile.release]` from upstream; start `Cargo.lock` from upstream's and resolve CraftBridge's own crates (D-21).
@@ -13,9 +13,10 @@
 4. **Regenerate:** `cargo xtask generate` (the API surface and both facades); `craftbridge-effects-codegen diff` against the previous surface.
 5. **Gate:** `tools/ci.sh` (desktop conformance against the new revision's CLI, mobile type-checks, duplicate-crate check).
 6. **Record:** append to `docs/upstream-updates.md`: from and to revisions, the adaptations named and how each was resolved, commands added, changed and removed, the gate result.
+7. **Versions:** name every version in `android/sdk/gradle/libs.versions.toml` and the Gradle wrapper that has a newer release, for a person to take, each in a change of its own. This is where library versions are checked: the gate's Lint leaves `GradleDependency` and `AndroidGradlePluginVersion` off, because a release elsewhere is no fault of the change it gates (AGENTS §10).
 
 **States.** Up to date · updated cleanly (commit ready) · adaptations to recheck (the run completes and lists them; the update merges once each is rechecked) · breaking API change (exit 2; the next release is a major version) · gate failure (stops with the failing scenarios).
 
 **Edge cases.** Upstream adds a public interface that does what an adaptation does: the adaptation moves onto it in that update (§15). Upstream adds a CLI flag or method: AD3 lists the CLI's flag code, so the script names it, and the corpus gains a scenario. A FilmCraft revision change: taken from EffectCraft's `Cargo.toml`; the duplicate-crate check proves one copy of `filmcraft-codecs` (D-13).
 
-**Tests.** A dry run against the current pin produces no changes; a fixture surface with a removed command makes `diff` exit 2; a fixture revision that changes a file an adaptation lists names that adaptation.
+**Tests.** A dry run against the current pin produces no changes; a fixture surface with a removed command makes `diff` exit 2; a fixture revision that changes a file an adaptation lists names that adaptation; a catalog version behind its latest release is named.
