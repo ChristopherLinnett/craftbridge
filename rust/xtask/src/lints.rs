@@ -10,10 +10,12 @@
 //! attribute (`#![allow(…)]`, also when it is spread over lines or nested in `cfg_attr`, and `#[allow(…)]`
 //! on a `mod`, which covers the whole module); not clippy's configuration, whose `allow-unwrap-types`
 //! lets `unwrap` and `expect` through on whole types and of which clippy reads only the file nearest a
-//! crate; and not Cargo's own configuration in `rust/.cargo/`, whose `rustflags` come after the table,
-//! whose profiles override the manifest's, whose compiler wrappers sit between Cargo and the compiler,
-//! whose target runners stand in for the test and xtask binaries, whose `[alias]` can stand in for
-//! `cargo clippy` or `cargo xtask`, and whose `[env]` reaches clippy; not a build script, which runs
+//! crate; not Cargo's configuration — the repository's, those above the checkout, the cargo home's — nor
+//! the environment, whose rustflags come after the table, whose profiles override the manifest's, whose
+//! compiler wrappers sit between Cargo and the compiler, whose target runners stand in for the test and
+//! xtask binaries, whose aliases can stand in for `cargo clippy` or `cargo xtask`, and whose `[env]`
+//! reaches clippy, all of which the `upstream` rule and `tools/env.sh` refuse against the one table of
+//! switches, `tools/refused-switches.tsv`; not a build script, which runs
 //! before the compiler takes the table and can hand it flags and cfgs through `cargo::rustc-env` and
 //! `cargo::rustc-cfg`, so a crate has one only when the layer table marks it; and not a file the compiler
 //! reads that no rule does, which the compiler's own dep-info decides (`cargo xtask compiled`, run by every
@@ -166,98 +168,11 @@ fn panic_violations(document: &toml::Value, name: &str) -> Vec<String> {
     errors
 }
 
-/// Check Cargo's configuration: no profile that aborts, no `rustflags` that set a lint level or a panic
-/// strategy, which would override what the workspace table and its profile say, no compiler wrapper, no
-/// alias that stands in for a command the gate runs, and no `[env]` entry for clippy, which reads its lint
-/// flags (`CLIPPY_ARGS`) and finds its configuration (`CLIPPY_CONF_DIR`) through the environment Cargo
-/// gives it.
-pub(crate) fn cargo_config_violations(source: &str, name: &str) -> Vec<String> {
-    let document = match parse(source, name) {
-        Ok(document) => document,
-        Err(errors) => return errors,
-    };
-    let mut errors = panic_violations(&document, name);
-    // The compiler binary and its wrappers are the toolchain's, not the repository's: a wrapper sits
-    // between Cargo and rustc (and clippy-driver) and can strip `-D warnings` and every denied lint
-    // before they arrive, exactly the bypass the rest of this check refuses.
-    if let Some(build) = document.get("build") {
-        for key in ["rustc", "rustc-wrapper", "rustc-workspace-wrapper"] {
-            if build.get(key).is_some() {
-                errors.push(format!("{name}: [build].{key} points the compiler or its wrapper at code no rule reads: the denied lints and `-D warnings` must reach rustc untouched"));
-            }
-        }
-    }
-    for (alias, value) in document.get("alias").and_then(toml::Value::as_table).into_iter().flatten() {
-        if let Some(violation) = alias_violation(alias, value) {
-            errors.push(format!("{name}: [alias].{alias} {violation}"));
-        }
-    }
-    for variable in document.get("env").and_then(toml::Value::as_table).into_iter().flatten().map(|(variable, _)| variable) {
-        if variable.starts_with("CLIPPY_") {
-            errors.push(format!(
-                "{name}: [env].{variable} reaches clippy: its lint flags and its configuration come only from rust/Cargo.toml and rust/clippy.toml"
-            ));
-        }
-    }
-    // What a configuration may not carry against the pin — `[patch]`, `paths`, a `[source]`
-    // replacement — is refused by the `upstream` rule, which reads every configuration Cargo reads
-    // for a build in `rust/`, this file included, with one mechanism (rust/xtask/src/upstream.rs).
-    let mut flag_lists: Vec<(String, &toml::Value)> = Vec::new();
-    if let Some(flags) = document.get("build").and_then(|build| build.get("rustflags")) {
-        flag_lists.push(("[build].rustflags".to_string(), flags));
-    }
-    for (target, table) in document.get("target").and_then(toml::Value::as_table).into_iter().flatten() {
-        if let Some(flags) = table.get("rustflags") {
-            flag_lists.push((format!("[target.{target}].rustflags"), flags));
-        }
-        if table.get("runner").is_some() {
-            errors.push(format!(
-                "{name}: [target.{target}].runner runs in place of every binary Cargo builds, so `cargo test` and the rule checks would pass having run nothing"
-            ));
-        }
-    }
-    for (key, flags) in flag_lists {
-        let tokens: Vec<String> = match flags {
-            toml::Value::String(line) => line.split_whitespace().map(str::to_string).collect(),
-            toml::Value::Array(items) => items.iter().filter_map(toml::Value::as_str).flat_map(str::split_whitespace).map(str::to_string).collect(),
-            _ => Vec::new(),
-        };
-        for token in tokens.iter().filter(|token| overrides_the_table(token)) {
-            errors.push(format!("{name}: {key} passes `{token}`: lint levels and the panic strategy come only from rust/Cargo.toml"));
-        }
-    }
-    errors
-}
-
-/// The cargo subcommands the gate runs that Cargo does not build in. Cargo ignores an alias named after
-/// one of its own commands, but an alias named after one of these runs in its place, with only a warning:
-/// `clippy = "test --no-run"` turns the lint stage into a build that reads no lint.
-const GATE_EXTERNAL_COMMANDS: &[&str] = &["clippy", "fmt", "deny"];
-
-/// What is wrong with one `[alias]` entry, if anything: it may not stand in for a command the gate runs,
-/// and `xtask`, the alias a person runs the rule checks through, must run the xtask package, or
-/// `cargo xtask rules` would pass having checked nothing (`xtask = "test --no-run"` reads `rules` as a test
-/// filter). The gate itself builds the package and runs its binary, which neither an alias nor a runner
-/// can stand in for.
-fn alias_violation(alias: &str, value: &toml::Value) -> Option<&'static str> {
-    if GATE_EXTERNAL_COMMANDS.contains(&alias) {
-        return Some("stands in for a command the gate runs, so the stage would run something else under its name");
-    }
-    let words: Vec<&str> = match value {
-        toml::Value::String(line) => line.split_whitespace().collect(),
-        toml::Value::Array(items) => items.iter().filter_map(toml::Value::as_str).collect(),
-        _ => Vec::new(),
-    };
-    let runs_xtask = words.first() == Some(&"run") && words.windows(2).any(|pair| matches!(pair, ["--package" | "-p", "xtask"]));
-    (alias == "xtask" && !runs_xtask).then_some("must run the xtask package, or `cargo xtask rules` checks nothing")
-}
-
-/// Is one `rustflags` token a lint level or a panic strategy? Levels are `-A`, `-W`, `--allow`, `--warn`,
-/// `--force-warn` and `--cap-lints`, each glued to its lint or followed by it; any of them can only lower
-/// what the table denies. A panic strategy appears as `panic=` after `-C` or `--codegen`.
-fn overrides_the_table(token: &str) -> bool {
-    ["-A", "-W", "--allow", "--warn", "--force-warn", "--cap-lints"].iter().any(|flag| token.starts_with(flag)) || token.contains("panic=")
-}
+// What a Cargo configuration may hold at all — aliases, runners, compilers and wrappers, flags,
+// profiles, and an `[env]` that reaches clippy — is refused by the `upstream` rule, which reads every
+// configuration a build in `rust/` takes (this file included) against one table of refused switches and
+// names file and key for each (rust/xtask/src/upstream.rs, tools/refused-switches.tsv); a second list of
+// the same switches here would only drift.
 
 /// Check clippy's configuration: `allow-unwrap-types` lets `unwrap()` and `expect()` through on every
 /// value of the types it lists, which switches the denied lints off for them. Its other settings that
@@ -438,11 +353,10 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
         );
     }
 
-    // The one Cargo configuration the gate's commands read; the machinery check refuses any other.
-    let config = root.join(machinery::CARGO_CONFIGURATION);
-    if config.is_file() {
-        errors.extend(cargo_config_violations(&scan::read_text(&config)?, machinery::CARGO_CONFIGURATION));
-    }
+    // Cargo's own configuration is judged by the `upstream` rule, which reads this file and every other
+    // configuration a build in `rust/` takes against the pin carriers and the one table of refused
+    // switches (rust/xtask/src/upstream.rs, tools/refused-switches.tsv); the machinery check keeps this
+    // the only committed one. Reading a second copy of those rules here would only drift from them.
 
     // Clippy reads its configuration from one file only, the one nearest a crate; the machinery check
     // refuses any copy that would be nearer elsewhere, so this check reads exactly the listed one.
@@ -593,39 +507,6 @@ panic = "unwind"
     }
 
     #[test]
-    fn cargo_configuration_may_not_override_the_table_or_the_profile() {
-        assert!(cargo_config_violations("[alias]\nxtask = \"run --package xtask --locked --quiet --\"\n", "c").is_empty());
-        let profile = cargo_config_violations("[profile.release]\npanic = \"abort\"\n", "c");
-        assert!(profile.iter().any(|e| e.contains("[profile.release]")), "{profile:?}");
-        let glued = cargo_config_violations("[build]\nrustflags = [\"-Aclippy::unwrap_used\"]\n", "c");
-        assert!(glued.iter().any(|e| e.contains("-Aclippy::unwrap_used")), "{glued:?}");
-        let spread = cargo_config_violations("[target.aarch64-linux-android]\nrustflags = \"--cap-lints warn -C panic=abort\"\n", "c");
-        assert_eq!(spread.len(), 2, "{spread:?}");
-        let harmless = cargo_config_violations("[build]\nrustflags = [\"-C\", \"link-arg=-Wl,-z,max-page-size=16384\"]\n", "c");
-        assert!(harmless.is_empty(), "{harmless:?}");
-        let clippy_env = cargo_config_violations(
-            "[env]\nCLIPPY_ARGS = { value = \"-Aclippy::unwrap_used\", force = true }\nCLIPPY_CONF_DIR = \"/elsewhere\"\nIPHONEOS_DEPLOYMENT_TARGET = \"17.0\"\n",
-            "c",
-        );
-        assert_eq!(clippy_env.len(), 2, "{clippy_env:?}");
-        assert!(clippy_env.iter().all(|e| e.contains("[env].CLIPPY_")), "{clippy_env:?}");
-        // A wrapper around rustc (or clippy-driver) strips the denied lints before they arrive.
-        let wrapper =
-            cargo_config_violations("[build]\nrustc-wrapper = \"./wrap.sh\"\nrustc-workspace-wrapper = \"./wrap.sh\"\nrustc = \"./fake-rustc\"\n", "c");
-        assert_eq!(wrapper.len(), 3, "{wrapper:?}");
-        // An alias named after an external command the gate runs runs in its place; `xtask` must run xtask.
-        // A runner stands in for every binary Cargo builds, the test binaries and xtask included.
-        let runner = cargo_config_violations("[target.aarch64-apple-darwin]\nrunner = \"true\"\n[target.'cfg(all())']\nrunner = [\"env\"]\n", "c");
-        assert!(runner.len() == 2 && runner.iter().all(|e| e.contains("].runner runs in place of every binary")), "{runner:?}");
-        let aliases = cargo_config_violations("[alias]\nxtask = \"test --no-run\"\nclippy = \"test --no-run\"\nfmt = [\"version\"]\nb = \"build\"\n", "c");
-        assert_eq!(aliases.len(), 3, "{aliases:?}");
-        assert!(aliases.iter().any(|e| e.contains("[alias].xtask must run the xtask package")), "{aliases:?}");
-        assert!(aliases.iter().any(|e| e.contains("[alias].clippy stands in")) && aliases.iter().any(|e| e.contains("[alias].fmt stands in")), "{aliases:?}");
-        assert!(cargo_config_violations("[alias]\nxtask = [\"run\", \"-p\", \"xtask\", \"--\"]\n", "c").is_empty(), "the list form of the gate's alias");
-        assert!(wrapper.iter().all(|e| e.contains("must reach rustc untouched")), "{wrapper:?}");
-    }
-
-    #[test]
     fn clippy_configuration_may_not_let_unwrap_through_on_a_type() {
         let ours = "allow-unwrap-in-tests = true\nallow-expect-in-tests = true\nallow-panic-in-tests = true\ncognitive-complexity-threshold = 30\n";
         assert!(clippy_config_violations(ours, "rust/clippy.toml").is_empty());
@@ -649,19 +530,6 @@ panic = "unwind"
     fn checked(copy: &crate::scratch::Scratch) -> Vec<String> {
         check(&copy.0)
             .unwrap_or_else(|failure| panic!("the lints check could not run on a copy of rust/ (a path outside rust/ is refused by rules: layers): {failure}"))
-    }
-
-    #[test]
-    fn a_cargo_configuration_planted_in_a_real_tree_is_caught() {
-        let copy = crate::scratch::rust_tree_copy("lints-config");
-        let config = copy.0.join(machinery::CARGO_CONFIGURATION);
-        let original = std::fs::read_to_string(&config).unwrap();
-        std::fs::write(&config, format!("{original}\n[build]\nrustflags = [\"-Aclippy::unwrap_used\"]\n")).unwrap();
-        let errors = checked(&copy);
-        assert_eq!(errors.len(), 1, "{errors:?}");
-        assert!(errors.iter().any(|e| e.starts_with("rust/.cargo/config.toml: [build].rustflags passes `-Aclippy::unwrap_used`")), "{errors:?}");
-        std::fs::write(&config, &original).unwrap();
-        assert!(checked(&copy).is_empty(), "the copy with the file restored is the clean tree");
     }
 
     #[test]

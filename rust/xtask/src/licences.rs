@@ -18,7 +18,7 @@
 //! tooling, without any build file naming them. Build plugins never ship, so they stay checked by
 //! name, from the catalog's `[plugins]`.
 
-use crate::scan;
+use crate::{pins, scan};
 use std::path::{Path, PathBuf};
 
 /// A declared licence for one Gradle library or SwiftPM package.
@@ -38,9 +38,6 @@ pub(crate) struct Used {
     pub(crate) source: String,
     pub(crate) kind: &'static str,
 }
-
-/// The Gradle version catalog, the one place the Android build names a library.
-const CATALOG: &str = "android/sdk/gradle/libs.versions.toml";
 
 /// How deep parentheses may nest before an expression is refused, so a malformed one cannot exhaust the
 /// stack; real licence expressions nest once or twice.
@@ -159,9 +156,8 @@ pub(crate) fn declarations(licences_source: Option<&str>, name: &str) -> Result<
 /// The `[libraries]` entries of a Gradle version catalog, in the three forms a catalog allows:
 /// `"group:artifact:version"`, `{ module = "group:artifact", version.ref = … }` and
 /// `{ group = "…", name = "…", … }`.
-pub(crate) fn gradle_libraries(catalog_source: &str, name: &str) -> Result<Vec<String>, String> {
-    let document = toml::from_str::<toml::Value>(catalog_source).map_err(|error| format!("{name}: is not valid TOML: {error}"))?;
-    let Some(libraries) = document.get("libraries").and_then(toml::Value::as_table) else { return Ok(Vec::new()) };
+pub(crate) fn gradle_libraries(catalog: &toml::Value, name: &str) -> Result<Vec<String>, String> {
+    let Some(libraries) = catalog.get("libraries").and_then(toml::Value::as_table) else { return Ok(Vec::new()) };
     let mut keys = Vec::new();
     for (alias, entry) in libraries {
         let module = match entry {
@@ -188,9 +184,8 @@ pub(crate) fn gradle_libraries(catalog_source: &str, name: &str) -> Result<Vec<S
 /// plugin id: its marker, `<id>:<id>.gradle.plugin`. A plugin never ships, but it runs in the build and
 /// arrives from a repository like any library, so its licence is declared like one; a plugin added to
 /// the catalog alone reaches the build through a root `alias(…) apply false` line.
-pub(crate) fn gradle_plugins(catalog_source: &str, name: &str) -> Result<Vec<String>, String> {
-    let document = toml::from_str::<toml::Value>(catalog_source).map_err(|error| format!("{name}: is not valid TOML: {error}"))?;
-    let Some(plugins) = document.get("plugins").and_then(toml::Value::as_table) else { return Ok(Vec::new()) };
+pub(crate) fn gradle_plugins(catalog: &toml::Value, name: &str) -> Result<Vec<String>, String> {
+    let Some(plugins) = catalog.get("plugins").and_then(toml::Value::as_table) else { return Ok(Vec::new()) };
     let mut keys = Vec::new();
     for (alias, entry) in plugins {
         let id = match entry {
@@ -264,13 +259,15 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
         .chain(swiftpm.iter().map(|(key, expression)| Declaration { key, expression, source: "tools/licences.toml", kind: "SwiftPM package" }))
         .collect();
 
+    // The Gradle version catalog, the one place the Android build names a library, read by the one reader
+    // of the pinned files (rust/xtask/src/pins.rs).
     let mut used = Vec::new();
-    if let Some(catalog) = read_optional(&root.join(CATALOG))? {
-        for key in gradle_libraries(&catalog, CATALOG)? {
-            used.push(Used { key, source: CATALOG.to_string(), kind: "library" });
+    if let Some(catalog) = pins::catalog(root)? {
+        for key in gradle_libraries(&catalog, pins::CATALOG)? {
+            used.push(Used { key, source: pins::CATALOG.to_string(), kind: "library" });
         }
-        for key in gradle_plugins(&catalog, CATALOG)? {
-            used.push(Used { key, source: CATALOG.to_string(), kind: "build plugin" });
+        for key in gradle_plugins(&catalog, pins::CATALOG)? {
+            used.push(Used { key, source: pins::CATALOG.to_string(), kind: "build plugin" });
         }
     }
     for module in gradle_resolved_modules(root)? {
@@ -410,6 +407,11 @@ mod tests {
         ALLOW.iter().map(|identifier| identifier.to_string()).collect()
     }
 
+    /// A catalog's text as the pins reader hands it to the licence check.
+    fn parsed(catalog: &str) -> toml::Value {
+        toml::from_str(catalog).unwrap()
+    }
+
     /// A manifest SwiftPM reads, taking one published package in the deprecated `name:url:` spelling the
     /// licence check once missed.
     const UNIFFI_MANIFEST: &str = "// swift-tools-version: 6.0\nimport PackageDescription\nlet package = Package(\n    name: \"Probe\",\n    dependencies: [.package(name: \"uniffi\", url: \"https://github.com/mozilla/uniffi.git\", from: \"0.32.0\")],\n    targets: []\n)\n";
@@ -425,7 +427,7 @@ mod tests {
             scratch.write("rust/deny.toml", format!("[licenses]\nversion = 2\nallow = {ALLOW:?}\n"));
             scratch.write("tools/licences.toml", licences);
             if !catalog.is_empty() {
-                scratch.write(CATALOG, catalog);
+                scratch.write(pins::CATALOG, catalog);
             }
             if !manifest.is_empty() {
                 scratch.write("ios/sdk/Package.swift", manifest);
@@ -570,9 +572,9 @@ plain = "net.java.dev.jna:jna:5.13.1"
 table = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 split = { group = "androidx.annotation", name = "annotation", version = "1.8.0" }
 "#;
-        let keys = gradle_libraries(catalog, "libs.versions.toml").unwrap();
+        let keys = gradle_libraries(&parsed(catalog), "libs.versions.toml").unwrap();
         assert_eq!(keys, vec!["androidx.annotation:annotation", "net.java.dev.jna:jna", "org.jetbrains.kotlinx:kotlinx-coroutines-core"]);
-        assert!(gradle_libraries("[libraries]\nbroken = { version.ref = \"x\" }\n", "c").is_err());
+        assert!(gradle_libraries(&parsed("[libraries]\nbroken = { version.ref = \"x\" }\n"), "c").is_err());
     }
 
     #[test]
@@ -580,10 +582,10 @@ split = { group = "androidx.annotation", name = "annotation", version = "1.8.0" 
         let catalog =
             "[plugins]\nandroid-library = { id = \"com.android.library\", version.ref = \"agp\" }\ncompose = \"org.jetbrains.kotlin.plugin.compose:2.4.21\"\n";
         assert_eq!(
-            gradle_plugins(catalog, "libs.versions.toml").unwrap(),
+            gradle_plugins(&parsed(catalog), "libs.versions.toml").unwrap(),
             ["com.android.library:com.android.library.gradle.plugin", "org.jetbrains.kotlin.plugin.compose:org.jetbrains.kotlin.plugin.compose.gradle.plugin"]
         );
-        assert!(gradle_plugins("[plugins]\nbroken = { version = \"1\" }\n", "c").is_err());
+        assert!(gradle_plugins(&parsed("[plugins]\nbroken = { version = \"1\" }\n"), "c").is_err());
         let repo = ScratchRepo::new("plugins", "[maven]\n", catalog, "");
         let errors = repo.errors();
         assert!(errors.len() == 2 && errors.iter().all(|e| e.contains("build plugin") && e.contains("has no licence")), "{errors:?}");
@@ -600,7 +602,7 @@ split = { group = "androidx.annotation", name = "annotation", version = "1.8.0" 
 
     #[test]
     fn a_missing_declaration_a_forbidden_licence_and_a_stale_entry_are_all_reported() {
-        let used = [Used { key: "net.java.dev.jna:jna".to_string(), source: CATALOG.to_string(), kind: "library" }];
+        let used = [Used { key: "net.java.dev.jna:jna".to_string(), source: pins::CATALOG.to_string(), kind: "library" }];
         let missing = compare(&used, &[], &allow());
         assert!(missing[0].contains("has no licence in tools/licences.toml"), "{missing:?}");
 

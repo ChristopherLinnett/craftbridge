@@ -1,7 +1,8 @@
 //! CraftBridge's rule checks and regeneration: `cargo xtask rules` and `cargo xtask generate`; the plan's
 //! views, `cargo xtask plan-views --check`, rebuilt from their sources and compared; the judgements
 //! `tools/ci.sh` hands over from the stages it runs, `cargo xtask skipped-tasks <gradle log>` and `cargo
-//! xtask compiled`; and the file lists its stages read, `cargo xtask files <kind>`.
+//! xtask compiled`; the file lists its stages read, `cargo xtask files <kind>`; and the pins the doctor
+//! and the gate read, `cargo xtask pins` and `cargo xtask swift-builds`.
 //!
 //! The rules in `AGENTS.md` that no compiler, formatter or linter already enforces are checked here,
 //! behind one command, so a change cannot merge with one broken. Each check lives in its own module: a
@@ -28,6 +29,7 @@ mod licences;
 mod lints;
 mod machinery;
 mod meta;
+mod pins;
 mod plan_views;
 mod prepush;
 mod report;
@@ -65,6 +67,8 @@ fn main() -> ExitCode {
         ["compiled"] => compiled::run(&root),
         ["upstream", "pin", rev] => upstream::run(&root, rev),
         ["swift-lint"] => swift_lint::run(&root),
+        ["pins"] => pins::run(&root),
+        ["swift-builds"] => pins::builds(&root),
         _ => {
             usage();
             ExitCode::from(2)
@@ -80,7 +84,9 @@ fn usage() {
     eprintln!("       cargo xtask files <swift|shell|duplicates>");
     eprintln!("       cargo xtask upstream pin <rev>   (through tools/update-upstream.sh: <rev> is a commit of official EffectCraft main)");
     eprintln!("       cargo <check|clippy|test> --message-format=json … | cargo xtask compiled");
-    eprintln!("       cargo xtask swift-lint")
+    eprintln!("       cargo xtask swift-lint");
+    eprintln!("       cargo xtask pins");
+    eprintln!("       cargo xtask swift-builds")
 }
 
 /// Run every check, print one line per failure and `ok` per clean check, and fail if any failed.

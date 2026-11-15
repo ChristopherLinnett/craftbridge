@@ -26,20 +26,56 @@ gap() { printf 'MISSING  %s\n         fix: %s\n' "$1" "$2"; missing=1; }
 note() { printf 'note     %s\n' "$1"; }
 has() { command -v "$1" >/dev/null 2>&1; }
 
-# Rust: the pinned toolchain and its mobile targets.
-if ! has rustup; then
-  gap "rustup" "install it from https://rustup.rs"
-elif ! rustup run "$CRAFTBRIDGE_RUST_CHANNEL" rustc --version >/dev/null 2>&1; then
-  # One fix for the toolchain and its targets, so a second run finds nothing left to do.
-  gap "Rust $CRAFTBRIDGE_RUST_CHANNEL" "rustup toolchain install $CRAFTBRIDGE_RUST_CHANNEL --component rustfmt,clippy --target $(printf '%s' "$CRAFTBRIDGE_RUST_TARGETS" | tr ' ' ',')"
-else
-  ok "Rust $(rustup run "$CRAFTBRIDGE_RUST_CHANNEL" rustc --version | cut -d' ' -f2)"
-  installed="$(rustup target list --installed --toolchain "$CRAFTBRIDGE_RUST_CHANNEL")"
-  for target in $CRAFTBRIDGE_RUST_TARGETS; do
-    if grep -qx "$target" <<<"$installed"; then ok "Rust target $target"; else gap "Rust target $target" "rustup target add --toolchain $CRAFTBRIDGE_RUST_CHANNEL $target"; fi
-  done
+# The environment first: a variable that switches what the gate's Rust tools check reaches the pins read
+# below as it reaches every cargo call of the gate, which refuses to run on any of them (tools/env.sh).
+refused="$(craftbridge_refused_environment)"
+if [ -n "$refused" ]; then
+  while IFS= read -r line; do gap "$line" "unset it: the gate runs the pinned toolchain as rust/Cargo.toml and rust/clippy.toml configure it"; done <<<"$refused"
 fi
-if has cargo-deny; then ok "cargo-deny $(cargo deny --version | cut -d' ' -f2)"; else gap "cargo-deny" "cargo install --locked cargo-deny"; fi
+# Rust: the toolchain rustup itself resolves in rust/ — rustup's own reader, rust/rust-toolchain.toml
+# included — and no other toolchain may stand over the pin: an override by environment variable or
+# directory reaches every cargo call of the gate, and a nightly or other toolchain changes which clippy
+# and rustfmt judge the code. The pins, then, are read by `cargo xtask pins` as soon as the toolchain
+# stands: one command parses both pin files (rust/xtask/src/pins.rs), and nothing reads the version
+# catalog before the Rust gaps above are closed.
+rust_toolchain=""
+pins_ok=0
+rust_status="$(craftbridge_toolchain_status)"
+case "$rust_status" in
+  ok\ *) rust_toolchain="${rust_status#ok }" ;;
+  no-rustup) gap "rustup" "install it from https://rustup.rs" ;;
+  missing) gap "the Rust toolchain pinned in rust/rust-toolchain.toml" "cd rust && rustup toolchain install: rustup reads that file itself — its channel, its components, its targets" ;;
+  override\ *)
+    line="${rust_status#override }"
+    case "$line" in
+      *RUSTUP_TOOLCHAIN*) fix="unset RUSTUP_TOOLCHAIN, and run outside any cargo +toolchain or rustup run, which set it: the build is made by the toolchain rust/rust-toolchain.toml pins" ;;
+      *directory\ override*) fix="cd rust && rustup override unset: the build is made by the toolchain rust/rust-toolchain.toml pins" ;;
+      *) fix="make rust/ resolve rust/rust-toolchain.toml again: no RUSTUP_TOOLCHAIN, no rustup override" ;;
+    esac
+    gap "Rust toolchain overridden ($line)" "$fix"
+    ;;
+esac
+if [ -n "$rust_toolchain" ]; then
+  ok "Rust $(rustup run "$rust_toolchain" rustc --version | cut -d' ' -f2) (rust/rust-toolchain.toml)"
+  # Cargo merges a .cargo at the repository root into this very command, so the pins would come from
+  # whatever an alias there names. The gate refuses the folder outright (tools/ci.sh); the doctor names it.
+  if [ -e "$CRAFTBRIDGE_ROOT/.cargo" ]; then
+    gap "no Cargo configuration at the repository root (found .cargo)" "move it away: Cargo merges it into every cargo stage of the gate and into the pins read here"
+  # Inside the gate the pins come from the xtask it built for this run (tools/ci.sh): a `cargo xtask`
+  # rebuilds rust/target/debug/xtask, and every cargo build replaces that file under whatever other run
+  # in this worktree is starting it. Run by hand, the doctor asks through the alias a person runs.
+  elif pins="$(if [ -n "${CRAFTBRIDGE_XTASK:-}" ]; then "$CRAFTBRIDGE_XTASK" pins; else cd "$CRAFTBRIDGE_ROOT/rust" && cargo xtask pins; fi 2>&1)"; then
+    craftbridge_load_pins <<<"$pins"
+    pins_ok=1
+    installed="$(rustup target list --installed --toolchain "$rust_toolchain")"
+    for target in $CRAFTBRIDGE_RUST_TARGETS; do
+      if grep -qx "$target" <<<"$installed"; then ok "Rust target $target"; else gap "Rust target $target" "rustup target add --toolchain $rust_toolchain $target"; fi
+    done
+  else
+    gap "the build pins in rust/rust-toolchain.toml and android/sdk/gradle/libs.versions.toml" "cargo xtask pins could not read them: $pins"
+  fi
+fi
+if has cargo-deny; then ok "cargo-deny $(cargo-deny --version | cut -d' ' -f2)"; else gap "cargo-deny" "cargo install --locked cargo-deny"; fi
 
 # Apple: the pinned Xcode, its iOS Simulator SDK and the formatter it ships.
 xcode="$(xcodebuild -version 2>/dev/null | sed -n 's/^Xcode //p' || true)"
@@ -56,9 +92,40 @@ else
 fi
 # Both iOS SDKs: the Swift stage reads the package as the device build compiles it as well as the
 # simulator build the swift_build stage makes.
+sim_sdk=0
 for sdk in "iphonesimulator:iOS Simulator SDK" "iphoneos:iOS device SDK"; do
-  if xcrun --sdk "${sdk%%:*}" --show-sdk-path >/dev/null 2>&1; then ok "${sdk#*:}"; else gap "${sdk#*:}" "Xcode > Settings > Components: install the iOS platform"; fi
+  if xcrun --sdk "${sdk%%:*}" --show-sdk-path >/dev/null 2>&1; then
+    ok "${sdk#*:}"
+    if [ "${sdk%%:*}" = iphonesimulator ]; then sim_sdk=1; fi
+  else
+    gap "${sdk#*:}" "Xcode > Settings > Components: install the iOS platform"
+  fi
 done
+# The iOS Simulator runtime: the SDK inside Xcode compiles for the simulator, but the runtime a simulator
+# boots is a separate download under Xcode 26, and xcodebuild builds the simulator slices the toolchain
+# names only with the runtime of its simulator SDK's version installed — the one `xcodebuild
+# -downloadPlatform iOS` fetches for the selected Xcode. simctl lists the runtimes CoreSimulator holds in
+# its JSON form, and plutil, macOS's own reader of property lists and JSON, reads each entry: an iOS
+# runtime simctl marks available, of the SDK's major and minor version, matches.
+if [ "$sim_sdk" = 1 ]; then
+  sdk_version="$(xcrun --sdk iphonesimulator --show-sdk-version 2>/dev/null | cut -d. -f1,2 || true)"
+  runtime=""
+  runtimes="$(mktemp)"
+  runtime_field() { plutil -extract "runtimes.$1.$2" raw -o - "$runtimes" 2>/dev/null || true; }
+  if xcrun simctl list --json runtimes >"$runtimes" 2>/dev/null; then
+    count="$(plutil -extract runtimes raw -o - "$runtimes" 2>/dev/null || echo 0)"
+    index=0
+    while [ "$index" -lt "$count" ]; do
+      if [ "$(runtime_field "$index" platform)" = iOS ] && [ "$(runtime_field "$index" isAvailable)" = true ] \
+        && [ "$(runtime_field "$index" version | cut -d. -f1,2)" = "$sdk_version" ]; then
+        runtime="$(runtime_field "$index" version)"
+      fi
+      index=$((index + 1))
+    done
+  fi
+  rm -f "$runtimes"
+  if [ -n "$runtime" ]; then ok "iOS Simulator runtime $runtime"; else gap "iOS Simulator runtime ${sdk_version:-?} for Xcode $CRAFTBRIDGE_XCODE" "xcodebuild -downloadPlatform iOS"; fi
+fi
 if xcrun --find swift-format >/dev/null 2>&1; then ok "swift-format $(xcrun swift-format --version)"; else gap "swift-format" "it ships with Xcode $CRAFTBRIDGE_XCODE; select that Xcode"; fi
 swiftlint_fix="install the pinned copy: curl -fsSL $CRAFTBRIDGE_SWIFTLINT_URL | tar -xz -C /usr/local/bin swiftlint && chmod +x /usr/local/bin/swiftlint"
 if has swiftlint && [ "$(swiftlint version)" = "$CRAFTBRIDGE_SWIFTLINT" ]; then
@@ -71,7 +138,7 @@ fi
 if xcrun --find sourcekit-lsp >/dev/null 2>&1; then ok "sourcekit-lsp"; else gap "sourcekit-lsp" "it ships with Xcode $CRAFTBRIDGE_XCODE; select that Xcode"; fi
 
 # Android: the SDK platform and build tools Gradle compiles against (both pinned in the version catalog),
-# and the JDK Gradle runs on.
+# and the JDK Gradle runs on — levels this doctor only knows once cargo xtask pins has read the catalog.
 # The fix for an SDK package: the SDK's own sdkmanager, told which SDK it installs into. Another one on
 # PATH (Homebrew's, say) ignores ANDROID_HOME and installs somewhere the build never looks.
 sdk_fix() {
@@ -83,29 +150,35 @@ sdk_fix() {
     printf 'install the Android SDK Command-line Tools (Android Studio > Settings > Android SDK > SDK Tools), then %s' "$install"
   fi
 }
-if [ -d "$ANDROID_HOME/platforms" ]; then
-  ok "Android SDK at $ANDROID_HOME"
-  # A platform is the pinned API level exactly, as its own source.properties gives it: the SDK names a
-  # minor-versioned platform `android-37.0` and an older one `android-36`, and a prefix of either
-  # (`android-370`, `android-37.1`) is another platform. The fix names the package the SDK's way: from API
-  # 37 on, with its minor version. With no platform installed the pattern stays unexpanded, and reading that
-  # missing path would end the script, so it is skipped.
-  platform_found=""
-  for properties in "$ANDROID_HOME"/platforms/*/source.properties; do
-    [ -f "$properties" ] || continue
-    level="$(sed -n 's/^AndroidVersion.ApiLevel=//p' "$properties" | tr -d '[:space:]')"
-    if [ "$level" = "$CRAFTBRIDGE_ANDROID_API" ] || [ "$level" = "$CRAFTBRIDGE_ANDROID_API.0" ]; then platform_found=1; fi
-  done
-  if [ "$CRAFTBRIDGE_ANDROID_API" -ge 37 ] 2>/dev/null; then platform_package="platforms;android-$CRAFTBRIDGE_ANDROID_API.0"; else platform_package="platforms;android-$CRAFTBRIDGE_ANDROID_API"; fi
-  if [ -n "$platform_found" ]; then ok "Android platform $CRAFTBRIDGE_ANDROID_API"; else gap "Android platform $CRAFTBRIDGE_ANDROID_API" "$(sdk_fix "$platform_package")"; fi
-  if [ -d "$ANDROID_HOME/build-tools/$CRAFTBRIDGE_ANDROID_BUILD_TOOLS" ]; then ok "Android build tools $CRAFTBRIDGE_ANDROID_BUILD_TOOLS"; else gap "Android build tools $CRAFTBRIDGE_ANDROID_BUILD_TOOLS" "$(sdk_fix "build-tools;$CRAFTBRIDGE_ANDROID_BUILD_TOOLS")"; fi
+if [ "$pins_ok" = 1 ]; then
+  if [ -d "$ANDROID_HOME/platforms" ]; then
+    ok "Android SDK at $ANDROID_HOME"
+    # A platform is the pinned API level exactly, as its own source.properties gives it: the SDK names a
+    # minor-versioned platform `android-37.0` and an older one `android-36`, and a prefix of either
+    # (`android-370`, `android-37.1`) is another platform. The fix names the package the SDK's way: from API
+    # 37 on, with its minor version. With no platform installed the pattern stays unexpanded, and reading that
+    # missing path would end the script, so it is skipped.
+    platform_found=""
+    for properties in "$ANDROID_HOME"/platforms/*/source.properties; do
+      [ -f "$properties" ] || continue
+      level="$(sed -n 's/^AndroidVersion.ApiLevel=//p' "$properties" | tr -d '[:space:]')"
+      if [ "$level" = "$CRAFTBRIDGE_ANDROID_API" ] || [ "$level" = "$CRAFTBRIDGE_ANDROID_API.0" ]; then platform_found=1; fi
+    done
+    if [ "$CRAFTBRIDGE_ANDROID_API" -ge 37 ] 2>/dev/null; then platform_package="platforms;android-$CRAFTBRIDGE_ANDROID_API.0"; else platform_package="platforms;android-$CRAFTBRIDGE_ANDROID_API"; fi
+    if [ -n "$platform_found" ]; then ok "Android platform $CRAFTBRIDGE_ANDROID_API"; else gap "Android platform $CRAFTBRIDGE_ANDROID_API" "$(sdk_fix "$platform_package")"; fi
+    if [ -d "$ANDROID_HOME/build-tools/$CRAFTBRIDGE_ANDROID_BUILD_TOOLS" ]; then ok "Android build tools $CRAFTBRIDGE_ANDROID_BUILD_TOOLS"; else gap "Android build tools $CRAFTBRIDGE_ANDROID_BUILD_TOOLS" "$(sdk_fix "build-tools;$CRAFTBRIDGE_ANDROID_BUILD_TOOLS")"; fi
+  else
+    gap "Android SDK (looked in $ANDROID_HOME)" "install Android Studio, or set ANDROID_HOME to an Android SDK"
+  fi
+  if [ -n "${CRAFTBRIDGE_JDK:-}" ]; then
+    ok "JDK $CRAFTBRIDGE_JDK_MAJOR at $CRAFTBRIDGE_JDK"
+  else
+    gap "JDK $CRAFTBRIDGE_JDK_MAJOR for Gradle" "brew install openjdk@$CRAFTBRIDGE_JDK_MAJOR (tools/env.sh finds Homebrew's keg), or point JAVA_HOME at a JDK $CRAFTBRIDGE_JDK_MAJOR (tools/env.sh also takes Android Studio's bundled JDK when it is that major)"
+  fi
 else
-  gap "Android SDK (looked in $ANDROID_HOME)" "install Android Studio, or set ANDROID_HOME to an Android SDK"
-fi
-if [ -n "${CRAFTBRIDGE_JDK:-}" ]; then
-  ok "JDK $CRAFTBRIDGE_JDK_MAJOR at $CRAFTBRIDGE_JDK"
-else
-  gap "JDK $CRAFTBRIDGE_JDK_MAJOR for Gradle" "brew install openjdk@$CRAFTBRIDGE_JDK_MAJOR (tools/env.sh finds Homebrew's keg), or point JAVA_HOME at a JDK $CRAFTBRIDGE_JDK_MAJOR (tools/env.sh also takes Android Studio's bundled JDK when it is that major)"
+  # The catalog's levels are read by `cargo xtask pins`, which needs the pinned toolchain; what it could not
+  # read cannot be checked, and the Rust gap above is the one to fix first. Nothing here read the catalog.
+  note "the catalog's Android levels were not checked: fix the Rust gaps above, which cargo xtask pins needs to read them"
 fi
 
 # Cargo merges a .cargo/config.toml (or .cargo/config) from every folder above the one it runs in, up to

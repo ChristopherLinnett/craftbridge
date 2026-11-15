@@ -1,6 +1,6 @@
 //! Rule 10 — the gate's own machinery holds one copy of each configuration.
 //!
-//! The gate's machinery (`tools/ci.sh`, `tools/env.sh`, `tools/hooks/`, `rust/xtask/`,
+//! The gate's machinery (`tools/ci.sh`, `tools/env.sh`, `tools/refused-switches.tsv`, `tools/hooks/`, `rust/xtask/`,
 //! `rust/.cargo/config.toml`, `android/sdk/settings.gradle.kts`, `android/sdk/gradle.properties`,
 //! `android/sdk/build-logic/`, and the one copy of each configuration listed below) decides what the gate
 //! checks, so it cannot guard itself: a change to one of those files is a gate change, which its pull
@@ -54,6 +54,7 @@ pub(crate) const CONFIGURATIONS: &[(&str, &[&str])] = &[
 const MACHINERY: &[&str] = &[
     "tools/ci.sh",
     "tools/env.sh",
+    "tools/refused-switches.tsv",
     "tools/hooks/",
     "rust/xtask/",
     CARGO_CONFIGURATION,
