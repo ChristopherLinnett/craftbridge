@@ -1,7 +1,10 @@
 # Licences of the dependencies Cargo does not see: Gradle modules and SwiftPM packages.
 # `cargo xtask rules` fails when any of these is missing here: a library or a build plugin (by its
-# marker module, `<id>:<id>.gradle.plugin`) named in android/sdk/gradle/libs.versions.toml; an external module Gradle resolves onto a library module's
-# release runtime classpath (the `runtimeLicences` task asks); a package named in a Package.swift;
+# marker module, `<id>:<id>.gradle.plugin`) named in android/sdk/gradle/libs.versions.toml; an external
+# module Gradle resolves onto a library module's release, unit-test or instrumented-test runtime
+# classpath (the `runtimeLicences` task asks), or onto the gate's own detekt tooling — the rule
+# project's compile, runtime and test classpaths and the analyser's own runtime (the
+# `gateToolLicences` task asks); a package named in a Package.swift;
 # or a pin in an ios/sdk/Package.resolved, once one exists. It also fails when an entry here is no
 # longer used.
 
@@ -17,5 +20,69 @@
 # What the Kotlin plugin puts on every module's runtime classpath: this ships inside the AAR.
 "org.jetbrains.kotlin:kotlin-stdlib" = "Apache-2.0"
 "org.jetbrains:annotations" = "Apache-2.0"
+# The detekt analyser the gate runs (plan D-28) and the pieces the build's own rules compile and test
+# against, with every module their resolution pulls in — read off each module's own POM. They run in the
+# build and in the rules' tests; nothing here ships inside an AAR.
+"dev.detekt:detekt-cli" = "Apache-2.0"
+"dev.detekt:detekt-api" = "Apache-2.0"
+"dev.detekt:detekt-core" = "Apache-2.0"
+"dev.detekt:detekt-kotlin-analysis-api" = "Apache-2.0"
+"dev.detekt:detekt-kotlin-analysis-api-standalone" = "Apache-2.0"
+"dev.detekt:detekt-metrics" = "Apache-2.0"
+"dev.detekt:detekt-parser" = "Apache-2.0"
+"dev.detekt:detekt-psi-utils" = "Apache-2.0"
+"dev.detekt:detekt-report-checkstyle" = "Apache-2.0"
+"dev.detekt:detekt-report-html" = "Apache-2.0"
+"dev.detekt:detekt-report-markdown" = "Apache-2.0"
+"dev.detekt:detekt-report-sarif" = "Apache-2.0"
+"dev.detekt:detekt-rules" = "Apache-2.0"
+"dev.detekt:detekt-rules-comments" = "Apache-2.0"
+"dev.detekt:detekt-rules-complexity" = "Apache-2.0"
+"dev.detekt:detekt-rules-coroutines" = "Apache-2.0"
+"dev.detekt:detekt-rules-empty-blocks" = "Apache-2.0"
+"dev.detekt:detekt-rules-exceptions" = "Apache-2.0"
+"dev.detekt:detekt-rules-naming" = "Apache-2.0"
+"dev.detekt:detekt-rules-performance" = "Apache-2.0"
+"dev.detekt:detekt-rules-potential-bugs" = "Apache-2.0"
+"dev.detekt:detekt-rules-style" = "Apache-2.0"
+"dev.detekt:detekt-test" = "Apache-2.0"
+"dev.detekt:detekt-test-utils" = "Apache-2.0"
+"dev.detekt:detekt-tooling" = "Apache-2.0"
+"dev.detekt:detekt-utils" = "Apache-2.0"
+"dev.drewhamilton.poko:poko-annotations" = "Apache-2.0"
+"dev.drewhamilton.poko:poko-annotations-jvm" = "Apache-2.0"
+"io.github.detekt.sarif4k:sarif4k" = "Apache-2.0"
+"io.github.detekt.sarif4k:sarif4k-jvm" = "Apache-2.0"
+"com.beust:jcommander" = "Apache-2.0"
+"com.github.ben-manes.caffeine:caffeine" = "Apache-2.0"
+"com.google.code.findbugs:jsr305" = "Apache-2.0"
+"com.google.errorprone:error_prone_annotations" = "Apache-2.0"
+"org.checkerframework:checker-qual" = "MIT"
+"org.jcommander:jcommander" = "Apache-2.0"
+"org.jetbrains.intellij.deps.kotlinx:kotlinx-coroutines-bom" = "Apache-2.0"
+"org.jetbrains.intellij.deps.kotlinx:kotlinx-coroutines-core" = "Apache-2.0"
+"org.jetbrains.intellij.deps.kotlinx:kotlinx-coroutines-core-jvm" = "Apache-2.0"
+"org.jetbrains.kotlin:kotlin-build-tools-api" = "Apache-2.0"
+"org.jetbrains.kotlin:kotlin-compiler" = "Apache-2.0"
+"org.jetbrains.kotlin:kotlin-reflect" = "Apache-2.0"
+"org.jetbrains.kotlin:kotlin-script-runtime" = "Apache-2.0"
+"org.jetbrains.kotlin:kotlin-scripting-common" = "Apache-2.0"
+"org.jetbrains.kotlin:kotlin-scripting-jvm" = "Apache-2.0"
+"org.jetbrains.kotlin:kotlin-stdlib-jdk7" = "Apache-2.0"
+"org.jetbrains.kotlin:kotlin-stdlib-jdk8" = "Apache-2.0"
+"org.jetbrains.kotlin:kotlin-test" = "Apache-2.0"
+# The rules' test runner: kotlin-test bound to Apache-2.0 TestNG, so no EPL-1.0 JUnit reaches the
+# tests' classpaths.
+"org.jetbrains.kotlin:kotlin-test-testng" = "Apache-2.0"
+"org.jetbrains.kotlinx:kotlinx-coroutines-bom" = "Apache-2.0"
+"org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm" = "Apache-2.0"
+"org.jetbrains.kotlinx:kotlinx-html-jvm" = "Apache-2.0"
+"org.jetbrains.kotlinx:kotlinx-serialization-bom" = "Apache-2.0"
+"org.jetbrains.kotlinx:kotlinx-serialization-core" = "Apache-2.0"
+"org.jetbrains.kotlinx:kotlinx-serialization-core-jvm" = "Apache-2.0"
+"org.jetbrains.kotlinx:kotlinx-serialization-json" = "Apache-2.0"
+"org.jetbrains.kotlinx:kotlinx-serialization-json-jvm" = "Apache-2.0"
+"org.snakeyaml:snakeyaml-engine" = "Apache-2.0"
+"org.testng:testng" = "Apache-2.0"
 
 [swiftpm]

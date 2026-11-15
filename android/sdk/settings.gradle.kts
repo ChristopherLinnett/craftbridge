@@ -2,13 +2,18 @@ import org.gradle.api.artifacts.ProjectDependency
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 
 pluginManagement {
-    includeBuild("build-logic")
     repositories {
         google()
         mavenCentral()
         gradlePluginPortal()
     }
 }
+
+// Included at the settings level rather than inside pluginManagement: the modules take the build's own
+// detekt rules on their rule classpath by coordinate, and only a settings-level inclusion substitutes
+// an included build's projects into ordinary dependencies — a pluginManagement inclusion substitutes
+// plugin ids alone.
+includeBuild("build-logic")
 
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
@@ -70,6 +75,10 @@ val gateWorkers =
         // The tests' Kotlin compiles under the same rules, so a warning in a test fails too.
         "compileDebugUnitTestSources" to listOf("compileDebugUnitTestKotlin"),
         "compileDebugAndroidTestSources" to listOf("compileDebugAndroidTestKotlin"),
+        // Each detekt run reads the packages written for its module from its namespace: without that
+        // task in the graph no component was checked.
+        "detektMain" to listOf("craftbridgeDetektConfig"),
+        "detektTest" to listOf("craftbridgeDetektConfig"),
     )
 gradle.taskGraph.whenReady {
     val scheduled = allTasks.map { it.path }.toSet()

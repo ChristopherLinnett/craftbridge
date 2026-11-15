@@ -485,13 +485,6 @@ pub(crate) fn strip_rust(source: &str) -> Vec<String> {
     strip(source, Language::Rust, Strings::Blank)
 }
 
-/// Kotlin source with comments and literal text blanked, the code inside templates kept.
-/// A `"""…"""` literal holds example code, which is exactly the text that would otherwise be reported,
-/// so its text is blanked whole.
-pub(crate) fn strip_clike(source: &str, language: Language) -> Vec<String> {
-    strip(source, language, Strings::Blank)
-}
-
 /// Kotlin source with comments blanked and every literal kept, char literals included: for a
 /// scanner that must read a literal's content, a quoted path in a build file say, while still ignoring
 /// everything a comment hides. A literal it kept is never mistaken for a comment, and a line holding a
@@ -659,30 +652,24 @@ mod tests {
     }
 
     #[test]
-    fn clike_stripper_blanks_comments_strings_and_raw_strings() {
-        let source = "// TODO(x)\nval s = \"TODO(y)\"\nval r = \"\"\"\nTODO(z)\n\"\"\"\nexitProcess(1)\n";
-        let stripped = strip_clike(source, Language::Kotlin);
-        assert_eq!(stripped.len(), 7);
-        for line in stripped.iter().take(5) {
-            assert!(!line.contains("TODO"), "{line}");
-        }
-        assert!(stripped[5].contains("exitProcess(1)"));
-    }
-
-    #[test]
     fn a_kotlin_char_literal_holding_a_quote_opens_no_string() {
-        let stripped = strip_clike("val quote = '\"'\nfun f(s: String?) = s!!.length\nval label = \"x\"\n", Language::Kotlin);
-        assert!(stripped[1].contains("!!"), "{}", stripped[1]);
+        // Read as the start of a string, `'"'` would open one running to the next quote on its line, and
+        // the comment between would be kept as that string's text.
+        let kept = strip_comments("val quote = '\"' // a note, \"x\"\nfun f(s: String?) = s!!.length\n", Language::Kotlin);
+        let lines: Vec<&str> = kept.lines().collect();
+        assert!(lines[0].contains("val quote") && !lines[0].contains("note"), "{kept}");
+        assert!(lines[1].contains("!!"), "{kept}");
     }
 
     #[test]
-    fn clike_stripper_nests_block_comments() {
+    fn a_kotlin_block_comment_nests() {
         // Kotlin block comments nest, so text after an inner `*/` is still commented out until the outer
         // one closes.
-        let stripped = strip_clike("/* a /* inner */ TODO() */ live\nexit(1)\n", Language::Kotlin);
-        assert!(!stripped[0].contains("TODO"), "still inside the outer comment: {}", stripped[0]);
-        assert!(stripped[0].contains("live"), "code after the outer `*/` is live: {}", stripped[0]);
-        assert!(stripped[1].contains("exit"));
+        let kept = strip_comments("/* a /* inner */ TODO() */ live\nexit(1)\n", Language::Kotlin);
+        let lines: Vec<&str> = kept.lines().collect();
+        assert!(!lines[0].contains("TODO"), "still inside the outer comment: {}", lines[0]);
+        assert!(lines[0].contains("live"), "code after the outer `*/` is live: {}", lines[0]);
+        assert!(lines[1].contains("exit"));
     }
 
     #[test]
@@ -705,21 +692,26 @@ mod tests {
 
     #[test]
     fn code_inside_a_kotlin_template_is_code() {
-        let source = "fun f(s: String?) = \"length ${s!!.length}\"\nval raw = \"\"\"${'$'}x \\${keep!!}\"\"\"\nval escaped = \"\\${not!!}\"\n";
-        let stripped = strip_clike(source, Language::Kotlin);
-        assert!(stripped[0].contains("s!!.length") && stripped[0].matches("length").count() == 1, "the text is blanked: {}", stripped[0]);
-        // A raw string has no escapes, so a backslash before `${` is text and the template is code.
-        assert!(stripped[1].contains("keep!!"), "{}", stripped[1]);
-        assert!(!stripped[2].contains("not!!"), "an escaped dollar opens no template: {}", stripped[2]);
+        // A template's code is code, so a comment there is blanked while the literal around it is kept. A
+        // raw string has no escapes, so a backslash before `${` is text and the template is code; in an
+        // ordinary string `\${` is an escaped dollar and opens no template.
+        let source = "val a = \"length ${s /* one */ .length}\"\nval b = \"\"\"\\${keep /* two */}\"\"\"\nval c = \"\\${not /* three */}\"\n";
+        let kept = strip_comments(source, Language::Kotlin);
+        let lines: Vec<&str> = kept.lines().collect();
+        assert!(lines[0].contains("length") && lines[0].contains(".length") && !lines[0].contains("one"), "{}", lines[0]);
+        assert!(lines[1].contains("keep") && !lines[1].contains("two"), "{}", lines[1]);
+        assert!(lines[2].contains("three"), "an escaped dollar opens no template: {}", lines[2]);
     }
 
     #[test]
     fn a_kotlin_unicode_char_escape_is_four_hex_digits() {
-        // Read the Rust way, `'\u0041'` would run on to the next `}` and blank the code between.
-        let source = "'\\u0041'.let(::plant)\nfun plant(c: Char) = afterEvaluate(::late)\nval close = '}'\n";
-        let stripped = strip_clike(source, Language::Kotlin);
-        assert!(stripped[0].contains(".let(::plant)") && !stripped[0].contains("0041"), "{}", stripped[0]);
-        assert!(stripped[1].contains("afterEvaluate"), "{}", stripped[1]);
+        // Read the Rust way, `'\u0041'` would run on to the next `}` and take what lies between as its
+        // text, a comment included, which would then be kept instead of blanked.
+        let source = "val a = '\\u0041' /* a note */ + '}'\nfun plant(c: Char) = afterEvaluate(::late)\n";
+        let kept = strip_comments(source, Language::Kotlin);
+        let lines: Vec<&str> = kept.lines().collect();
+        assert!(lines[0].contains("+ '}'") && !lines[0].contains("note"), "{}", lines[0]);
+        assert!(lines[1].contains("afterEvaluate"), "{}", lines[1]);
         // A char literal never spans a line, in either language that has them.
         assert!(strip_rust("let c = '\nunsafe {}\n").iter().any(|line| line.contains("unsafe")));
         assert!(strip_rust("let u = '\\u{41}';\nlet v = unsafe { 0 };\n")[1].contains("unsafe"));
@@ -772,8 +764,6 @@ mod tests {
             let length = 1 + next() % 24;
             let text: String = (0..length).map(|_| alphabet[next() % alphabet.len()]).collect();
             assert!(std::panic::catch_unwind(|| strip_rust(&text)).is_ok(), "strip_rust panicked on {text:?}");
-            let stripped = std::panic::catch_unwind(|| strip_clike(&text, Language::Kotlin));
-            assert!(stripped.is_ok(), "strip_clike panicked on {text:?}");
             let kept = std::panic::catch_unwind(|| strip_comments(&text, Language::Kotlin));
             assert!(kept.is_ok(), "strip_comments panicked on {text:?}");
         }

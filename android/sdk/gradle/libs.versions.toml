@@ -14,6 +14,11 @@ agp = "9.5.1"
 kotlin = "2.4.21"
 spotless = "8.11.0"
 ktlint = "1.8.0"
+# The detekt the gate runs. It carries its own Kotlin compiler for its analysis, so its line must be
+# built on the `kotlin` above: detekt 2.0, built on Kotlin 2.4, reads the stdlib the modules compile
+# against, which the 1.x line (Kotlin 2.0) cannot, and so resolves nothing from it. The 2.0 line ships
+# as pre-releases.
+detekt = "2.0.0-alpha.6"
 
 [plugins]
 android-library = { id = "com.android.library", version.ref = "agp" }
@@ -26,3 +31,14 @@ spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
 android-gradle-plugin = { module = "com.android.tools.build:gradle", version.ref = "agp" }
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
 spotless-gradle-plugin = { module = "com.diffplug.spotless:spotless-plugin-gradle", version.ref = "spotless" }
+# detekt's own pieces: the command-line tool the convention plugin launches per component, the API and
+# the suppression check the build's own rules in build-logic/detekt-rules compile against, and the test
+# fixtures they test with. The rules' tests run on TestNG: kotlin-test binds to JUnit 4 by default,
+# whose EPL-1.0 is on no branch of the allowlist (rust/deny.toml), and the licence check reads the
+# rules' own test classpaths as closely as a module's. kotlin-test-testng binds the same kotlin.test
+# assertions to Apache-2.0 TestNG, which is what useTestNG() in detekt-rules runs.
+detekt-cli = { module = "dev.detekt:detekt-cli", version.ref = "detekt" }
+detekt-api = { module = "dev.detekt:detekt-api", version.ref = "detekt" }
+detekt-core = { module = "dev.detekt:detekt-core", version.ref = "detekt" }
+detekt-test = { module = "dev.detekt:detekt-test", version.ref = "detekt" }
+kotlin-test-testng = { module = "org.jetbrains.kotlin:kotlin-test-testng", version.ref = "kotlin" }
