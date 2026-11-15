@@ -29,4 +29,4 @@ One Swift package in `ios/sdk/`, `Package.swift` at its top (PD19), iOS 17 (PD11
 
 **States.** Development (`ios/sdk/` by local path, the local XCFramework) · release (`craftbridge-swift` by URL, the XCFramework downloaded and checksum-verified by SwiftPM).
 
-**Tests.** Every target built for the iOS Simulator in the gate; the corpus in Swift Testing on the iPhone simulator (QA-2) and on the acceptance iPhone (QA-3).
+**Tests.** Every target built in Debug and Release for the iOS device and the iOS Simulator in the gate; the corpus in Swift Testing on the iPhone simulator (QA-2) and on the acceptance iPhone (QA-3).

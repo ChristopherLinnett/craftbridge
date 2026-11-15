@@ -1,0 +1,85 @@
+# The switches that would switch what the gate's Rust tools check, named once. A line is:
+#   Cargo configuration key <TAB> the environment variables Cargo reads that key from, space-separated
+#   <TAB> what the committed rust/.cargo/config.toml may still set under the key, or - <TAB> why refused.
+# The key holds `*` where any one name stands (a profile, a target, an alias, an [env] variable); the
+# variables are the names Cargo derives from the key (uppercase, dots and dashes as underscores), plus the
+# plain names the documentation lists beside the key (RUSTC for build.rustc, RUSTFLAGS for
+# build.rustflags). A line with no key (the leading field -) is an environment-only switch, one with no
+# variable (the second field -) a configuration-only one; a variable is capitals, digits and `_`, with one
+# `*` at most, the one form a shell glob and the Rust reader match alike. A key two lines name is refused
+# once, by the first. tools/env.sh reads this file to refuse the variables, and rust/xtask/src/upstream.rs
+# reads it to refuse the same switches written as keys in any Cargo configuration Cargo reads for a build
+# in rust/. The committed tree file may set the tree column of its key alone because that is what it holds
+# today and nothing else was ever decided for it: today that is the alias xtask, and only while its value
+# still runs the xtask package.
+#
+# Why a whole family and never a reading of the value, each settled by running it on the pinned toolchain
+# against code the gate refuses. No reading of a flag list is safe: a flag reaches rustc after the lint
+# table's (`--allow`, `--force-warn` and `--cap-lints` each silence a denied lint), `-C debug-assertions=on`
+# hides the code under `cfg(not(debug_assertions))` from the release lint, an `@file` names more flags,
+# and rustdoc hands the doctest harness its own (`--test-args=--skip=...` passes every doctest unrun). A
+# compiler, a wrapper in front of it, rustdoc or rustfmt named here is handed every call and decides what
+# reaches the pinned tool: a two-line wrapper appending `--cap-lints=allow` turns a clippy failure into a
+# pass, and the gate cannot tell it from a cache, so sccache is refused with them. A runner stands in for
+# every test binary (`true` passes them unrun), and a linker writes them (one that writes a passing script
+# passes them too). Any other key of a target table overrides a dependency's build script
+# ([target.<triple>.<links>]: an override that drops the cfg a dependency's build script sets turns a
+# failing test into a pass). A profile variable or table overrides rust/Cargo.toml's profiles
+# (debug-assertions on in release hides the same code). An [env] entry sets a variable for every process
+# the build starts, over the gate's own when forced: a forced PATH hands rustc another `cc` to link with,
+# and a forced CLIPPY_ARGS replaces the lint flags cargo clippy hands clippy. An alias stands in for a
+# command the gate runs (`clippy = "test --no-run"` lints nothing). A build target sends the gate's own
+# build of xtask to a <triple>/ folder inside the fresh build folder the run builds it in, where the gate,
+# which runs its binary from that folder's debug/, cannot find it (tools/env.sh unsets CARGO_BUILD_TARGET,
+# and tools/ci.sh runs only the xtask it built into that folder in that run). Another lockfile than
+# rust/Cargo.lock passes --locked while the build takes its graph. RUSTC_BOOTSTRAP, and cargo's own
+# __CARGO_TEST_CHANNEL_OVERRIDE_DO_NOT_USE_THIS, unlock the `-Z` flags and nightly configuration the
+# pinned stable toolchain refuses (`cargo -Z unstable-options locate-project` exits 101 on the pin, 0 with
+# either set); CARGO_UNSTABLE_* names a nightly feature; CLIPPY_CONF_DIR moves clippy to another
+# clippy.toml.
+#
+# Left out, the rest of Cargo 1.99's configuration reference and of the variables it documents, each for
+# its reason, run on the pinned toolchain where a run could tell:
+#   paths, [patch] and [source] are the upstream rule's carriers (configuration_carriers and
+#   environment_carriers in rust/xtask/src/upstream.rs), refused in every configuration and the
+#   environment; include is followed, and what it brings in is read as the file that includes it.
+#   build.target-dir and CARGO_TARGET_DIR: tools/env.sh sets the variable, which wins over every
+#   configuration. build.build-dir moves the intermediates, and cargo still reports every artifact, with
+#   its dep-info beside it, where the rules read them. build.dep-info-basedir rewrites the paths of that
+#   dep-info into ones the rules resolve back to rust/ or fail to find, never a quieter reading.
+#   build.warnings cannot lower a denied lint or the -D warnings every clippy stage passes (both still
+#   fail beside warnings = "allow"). build.jobs, build.incremental and CARGO_INCREMENTAL, the unused
+#   build.pipelining, CARGO_CACHE_RUSTC_INFO and resolver.incompatible-rust-versions (every gate
+#   resolution is pinned by --locked) change what a build costs, never what a check reads.
+#   [host] and [unstable] are read by a nightly cargo alone, or under the unlocks refused here: a host
+#   runner, linker and rustflags leave a failing check failing either way, and a profile-rustflags bites
+#   under no reading the gate can reach — the pinned stable cargo ignores the key, and honouring it takes
+#   one of those refused unlocks, which the gate refuses before anything it runs can read the key.
+#   http, net, registries, registry and credential-alias decide how and with whose credentials cargo
+#   fetches, and a fetch delivers only the commits and checksums rust/Cargo.lock names; cache, term,
+#   future-incompat-report, doc, cargo-new and install change what cargo cleans, prints or creates.
+#   CARGO_HOME moves the cargo home, whose configuration the rules read wherever it is; CARGO is set by
+#   cargo itself for everything it starts; CARGO_LOG, TERM, BROWSER, HTTPS_PROXY and HTTP_TIMEOUT change
+#   what cargo prints or how it fetches. Outside Cargo: CLIPPY_ARGS in the environment, which cargo clippy
+#   sets its own over (the [env] spelling of it is refused above), and CLIPPY_CONF_FILE, which clippy does
+#   not read.
+-	RUSTFMT	-	stands another program in for the pinned toolchain's own, or in front of it, in every call of the gate
+build.rustflags	RUSTFLAGS CARGO_BUILD_RUSTFLAGS CARGO_ENCODED_RUSTFLAGS	-	adds flags to every compiler or doctest call of the gate, after the ones rust/Cargo.toml sets
+build.rustdocflags	RUSTDOCFLAGS CARGO_BUILD_RUSTDOCFLAGS CARGO_ENCODED_RUSTDOCFLAGS	-	adds flags to every compiler or doctest call of the gate, after the ones rust/Cargo.toml sets
+build.rustc	RUSTC CARGO_BUILD_RUSTC	-	stands another program in for the pinned toolchain's own, or in front of it, in every call of the gate
+build.rustc-wrapper	RUSTC_WRAPPER CARGO_BUILD_RUSTC_WRAPPER	-	stands another program in for the pinned toolchain's own, or in front of it, in every call of the gate
+build.rustc-workspace-wrapper	RUSTC_WORKSPACE_WRAPPER CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER	-	stands another program in for the pinned toolchain's own, or in front of it, in every call of the gate
+build.rustdoc	RUSTDOC CARGO_BUILD_RUSTDOC	-	stands another program in for the pinned toolchain's own, or in front of it, in every call of the gate
+target.*.rustflags	CARGO_TARGET_*_RUSTFLAGS	-	adds flags to every compiler or doctest call of the gate, after the ones rust/Cargo.toml sets
+target.*.rustdocflags	CARGO_TARGET_*_RUSTDOCFLAGS	-	adds flags to every compiler or doctest call of the gate, after the ones rust/Cargo.toml sets
+target.*.runner	CARGO_TARGET_*_RUNNER	-	runs in place of every binary cargo builds, so the tests would pass having run nothing
+target.*.linker	CARGO_TARGET_*_LINKER	-	hands rustc another linker, which writes the binaries the gate runs, so the tests would pass having run nothing
+target.*.*	-	-	overrides a dependency's build script, or sets a target key the gate does not read, so it builds what the pinned dependencies do not
+profile.*	CARGO_PROFILE_*	-	overrides a profile rust/Cargo.toml sets, so the gate checks a build no app links
+build.target	CARGO_BUILD_TARGET	-	sends the gate's own build of xtask to a <triple>/ folder, where the gate cannot find the binary it built
+resolver.lockfile-path	CARGO_RESOLVER_LOCKFILE_PATH	-	builds against another Cargo.lock than the committed rust/Cargo.lock the rules judge: a copy at another revision passes --locked while everything builds from the copy, around the pin
+env.*	-	-	sets a variable for every process the build starts, over the gate's own when forced, so rustc could link with another cc or clippy run with other lint flags
+alias.*	CARGO_ALIAS_*	xtask	can stand in for a cargo command the gate runs
+-	RUSTC_BOOTSTRAP __CARGO_TEST_CHANNEL_OVERRIDE_DO_NOT_USE_THIS	-	unlocks the -Z flags and nightly configuration the pinned stable toolchain refuses
+-	CARGO_UNSTABLE_*	-	names a Cargo nightly feature
+-	CLIPPY_CONF_DIR	-	moves clippy to another clippy.toml than rust/clippy.toml
