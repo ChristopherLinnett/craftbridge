@@ -942,7 +942,7 @@
       "source": "evidence/04-craft-suite-shared-core.md",
       "status": "answered",
       "asked": "2026-11-12T07:27:48.840Z",
-      "answer": "The universal core lives in the plugin-port repository as its own crate and packages (artcraft-plugin-port/core, next to effectcraft/); it may be proposed to storytold/craft-libs later.",
+      "answer": "The universal core lives in the plugin-port repository as its own crate and packages (artcraft-plugin-port/core, next to effectcraft/).",
       "answeredAt": "2026-11-12T07:47:36.535Z",
       "pd": "PD10"
     },

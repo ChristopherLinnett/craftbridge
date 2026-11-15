@@ -161,8 +161,27 @@ fn build_files_outside_their_folders(root: &Path) -> Result<Vec<String>, String>
     Ok(errors)
 }
 
+/// Hand-written Java anywhere under `android/sdk`. The Android SDK is Kotlin (AGENTS.md §9), and its
+/// never-crash and JNI rules (§3, §4) are detekt rules over Kotlin's own syntax tree: a `.java` file
+/// would compile into the AAR beside the Kotlin, checked by none of them. Build output is skipped as
+/// everywhere (a Gradle-generated `build/` may hold Java), and the extension is matched without case
+/// because this machine's file system is, so a `Foo.Java` would compile for a case-insensitive compiler
+/// while a case-sensitive check looked away.
+fn hand_written_java(root: &Path) -> Result<Vec<String>, String> {
+    let sdk = root.join("android").join("sdk");
+    let mut errors = Vec::new();
+    for file in scan::walk(&sdk, "")?.into_iter().filter(|file| file.path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("java"))) {
+        errors.push(format!(
+            "{}: hand-written Java: the Android SDK is Kotlin, so its never-crash and JNI rules read Kotlin's own syntax tree and see none of this file",
+            crate::report::shown(root, &file.path)
+        ));
+    }
+    Ok(errors)
+}
+
 /// Run the layout check: the root, then `ios/` and `android/` when they exist, the code trees for a
-/// folder every rule would skip, and every file for a platform's build file outside that platform's folder.
+/// folder every rule would skip, every file for a platform's build file outside that platform's folder, and no
+/// hand-written Java under the Android SDK.
 pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     let mut errors = entries_violations(
         root,
@@ -178,6 +197,7 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     }
     errors.extend(hidden_package_folders(root)?);
     errors.extend(build_files_outside_their_folders(root)?);
+    errors.extend(hand_written_java(root)?);
     Ok(errors)
 }
 
@@ -320,6 +340,32 @@ mod tests {
         // plan/ is the plan kit's, and a tool's checkout under .build is build output: neither is code.
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].starts_with("ios/sdk/Sources/CraftBridge/node_modules: a node_modules folder"), "{errors:?}");
+    }
+
+    #[test]
+    fn hand_written_java_under_the_android_sdk_is_refused() {
+        let scratch = Scratch::new("java");
+        scratch.write("android/sdk/core/src/main/java/io/x/Plant.java", "class Plant {}\n");
+        scratch.write("android/sdk/effects/src/test/java/PlantTest.java", "class PlantTest {}\n");
+        // A case variant: a case-insensitive file system would hand it to the compiler in place of a
+        // `.java`, so the check must see it too.
+        scratch.write("android/sdk/core/src/main/java/Variant.Java", "class Variant {}\n");
+        // Build output is skipped as everywhere: Gradle writes Java there itself. A `build` counts as
+        // such only beside the Gradle file it belongs to, so the module's build file sits beside it.
+        scratch.write("android/sdk/core/build.gradle.kts", "");
+        scratch.write("android/sdk/core/build/generated/FromGradle.java", "class FromGradle {}\n");
+        // Kotlin is read by detekt, not here, and samples are not the SDK.
+        scratch.write("android/sdk/core/src/main/kotlin/Ok.kt", "package io.github.christopherlinnett.craftbridge.core\n");
+        scratch.write("android/samples/app/src/main/java/App.java", "class App {}\n");
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 3, "{errors:?}");
+        for path in [
+            "android/sdk/core/src/main/java/io/x/Plant.java",
+            "android/sdk/effects/src/test/java/PlantTest.java",
+            "android/sdk/core/src/main/java/Variant.Java",
+        ] {
+            assert!(errors.iter().any(|e| e.starts_with(&format!("{path}: hand-written Java"))), "{path}: {errors:?}");
+        }
     }
 
     #[test]
