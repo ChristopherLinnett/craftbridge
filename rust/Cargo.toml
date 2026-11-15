@@ -19,6 +19,9 @@ craftbridge-core-ffi = { path = "core/craftbridge-core-ffi" }
 craftbridge-effects = { path = "effects/craftbridge-effects" }
 
 # The workspace's external libraries: what the host tools use, and the few a shipped crate uses.
+# The codegen: `derive` gives the API surface file one definition, its Rust types, which the generator
+# writes and the diff reads back.
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.9"
 toml_edit = "0.25"
