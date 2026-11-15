@@ -15,6 +15,7 @@ Every artifact (the Rust crates, the Swift package and both Maven artifacts) sha
 - `craftbridge-effects-codegen surface`: the EffectCraft API surface at the pin (every command with its keys typed by the plan's type rules, and the tool catalogue), written to `generated/api-surface.json` by `cargo xtask generate`, which the gate regenerates and compares.
 - `craftbridge-core`: `Folders` and `Confinement` — the container and bundle read roots and the container write root an engine starts with, prepared for it — and `CraftError`, the one error every call over the native boundary fails with, with the plan's whole mapping of failures onto it.
 - `craftbridge-core`'s engine actor: the `CraftApp` trait an app plugin implements, one engine thread per engine answering its calls in order over oneshot channels, a panic inside any call answered as `Internal` with the session kept serving, and closing or dropping an engine ending its session and joining its thread.
+- `craftbridge-media`: `register(on)` puts CraftBridge's decoder factory in FilmCraft's decoder registry and sets the hardware-decoding switch, and `Fallback<D>` wraps a hardware decoder so that, on an error or an in-band parameter change, the stream continues in FilmCraft's software decoder from the last random-access sample (the one before it after an HEVC CRA) without skipping or repeating a picture.
 
 ### Changed
 
