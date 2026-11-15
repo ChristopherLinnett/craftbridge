@@ -1,0 +1,21 @@
+# What every detekt run of the gate is given first: written code, tests and generated bindings alike.
+# detekt treats a rule as off unless a profile switches it on, and validates every key: its own rule
+# sets against their defaults, this build's through the validator in the rule jar. A misspelt rule, or
+# one that does not say whether it runs, fails the run rather than going quiet. Whether validation
+# runs, and what it leaves out, is not these profiles' to say: the config written last for each run
+# turns it on with nothing excluded, and the last config wins, so no profile can turn it off or narrow
+# it. The package rule of AGENTS.md §9 holds for every file a module compiles; the convention plugin
+# hands each run the packages its files declare beside these profiles.
+
+# One line per finding, naming the file, line and rule; detekt's other console reports repeat them.
+console-reports:
+  exclude:
+    - 'ProjectStatisticsReport'
+    - 'ComplexityReport'
+    - 'NotificationReport'
+    - 'IssuesReport'
+    - 'FileBasedIssuesReport'
+
+craftbridge:
+  ModulePackageMismatch:
+    active: true

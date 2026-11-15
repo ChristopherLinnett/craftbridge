@@ -64,7 +64,7 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                 sourceSets
                     .getByName("main")
                     .kotlin.directories
-                    .add("src/generated/kotlin")
+                    .add(GENERATED_KOTLIN)
             }
 
             // AGP 9 compiles Kotlin itself and registers this extension for it.
@@ -75,6 +75,12 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                     allWarningsAsErrors.set(true)
                 }
             }
+
+            // detekt is the gate's Kotlin linter (plan D-28): the never-crash calls of AGENTS §3, the JNI
+            // confinement of §4, the package rule of §9 and the refusal of suppressions of §10 are its
+            // rules, read from Kotlin's own syntax tree rather than from text. As with Spotless and Lint
+            // the setup lives here once and no module build file names it.
+            configureDetekt()
 
             // A module's build file runs after this plugin and could set any rule above back, as a crate
             // could weaken its `[lints]` if the rule checks did not read them. So the rules are read again

@@ -3,10 +3,10 @@ package io.github.christopherlinnett.craftbridge.convention
 import com.diffplug.gradle.spotless.BaseKotlinExtension
 import com.diffplug.gradle.spotless.SpotlessExtension
 import com.diffplug.gradle.spotless.SpotlessTask
+import io.github.christopherlinnett.craftbridge.licences.LicenceListing
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
-import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.kotlin.dsl.configure
 
 /** The runtime classpaths whose modules the licence check reads: what ships, and what each kind of test runs with. */
@@ -149,17 +149,12 @@ class QualityConventionPlugin : Plugin<Project> {
                             // the allowlist, as cargo-deny does a crate's dev-dependencies. A library
                             // without one of these classpaths would add nothing and look clean, so its
                             // absence is an error rather than an empty answer.
-                            for (name in licenceClasspaths) {
-                                val classpath =
+                            val classpaths =
+                                licenceClasspaths.map { name ->
                                     library.configurations.findByName(name)
                                         ?: throw GradleException("${library.path} has no $name, so what it uses cannot be listed")
-                                classpath.incoming.resolutionResult.allComponents.forEach { component ->
-                                    val identifier = component.id
-                                    if (identifier is ModuleComponentIdentifier) {
-                                        modules += "${identifier.group}:${identifier.module}"
-                                    }
                                 }
-                            }
+                            LicenceListing.addResolvedModules(classpaths, modules)
                         }
                         modules.forEach { println(it) }
                     }
