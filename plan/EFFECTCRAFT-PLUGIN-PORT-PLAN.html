@@ -1321,7 +1321,7 @@ impl Engine {
 <th>ID</th>
 <th>Adaptation in CraftBridge</th>
 <th>Instead of</th>
-<th>Relies on (EffectCraft at <code>10376058</code>)</th>
+<th>Relies on (EffectCraft at <code>10376058</code>, FilmCraft at <code>d5ead4ba</code>)</th>
 <th>Task</th>
 </tr>
 </thead>
@@ -1373,6 +1373,13 @@ impl Engine {
 <td><code>FileExporter</code> alone, whose free-memory figure is empty on iOS and Android because <code>sysinfo::memory()</code> has no branch for either (<code>effectcraft: crates/<wbr>host/<wbr>src/<wbr>lib.rs:91-94</code>, <code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>system/<wbr>sysinfo.rs:142-168</code>), which leaves frames in flight bounded only by the thread count (<code>effectcraft: crates/<wbr>export/<wbr>src/<wbr>pipeline.rs:140-149</code>, <code>:171-176</code>)</td>
 <td><code>Exporter</code>, <code>ExportJob</code> (<code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>render_queue.rs:93-113</code>, <code>:22-46</code>), <code>FileExporter</code> (<code>effectcraft: crates/<wbr>host/<wbr>src/<wbr>lib.rs:25-89</code>), the export frame loop&#39;s thread count</td>
 <td>FX-1g, MED-3</td>
+</tr>
+<tr>
+<td>AD8</td>
+<td><code>craftbridge-media</code> registers its hardware decoder factory in FilmCraft&#39;s decoder registry, sets FilmCraft&#39;s hardware-decoding switch, and wraps each hardware decoder in <code>Fallback</code>, which follows <code>HybridDecoder</code>&#39;s behaviour in its own code: on an error or an in-band parameter change it switches to FilmCraft&#39;s software decoder and replays from the last restart sample (the one before it after an HEVC CRA), leaving out the pictures the caller has and putting the ones the hardware decoder still held in presentation order (§18)</td>
+<td><code>filmcraft_platform::register()</code>, which registers no decoder on iOS or Android (<code>filmcraft: crates/<wbr>platform/<wbr>src/<wbr>lib.rs:70-139</code>), and its <code>HybridDecoder</code> (<code>filmcraft: crates/<wbr>platform/<wbr>src/<wbr>hybrid.rs</code>), which <code>craftbridge-media</code> does not use: <code>filmcraft-platform</code> always depends on <code>filmcraft-export</code>, which brings its H.264 and FLAC encoders and FilmCraft&#39;s compositor, text, caption and audio crates, none of which a decoder needs, into the phone build (9 more crates in <code>craftbridge-effects-ffi</code>, 25 in the core&#39;s own graph, measured at <code>d5ead4ba</code>); the adaptation moves onto <code>HybridDecoder</code> if that dependency becomes optional</td>
+<td><code>register_video_decoder</code>, <code>software_video_decoder</code> (<code>filmcraft: crates/<wbr>codecs/<wbr>src/<wbr>lib.rs:99</code>, <code>:124</code>), <code>VideoDecoder</code> (<code>filmcraft: crates/<wbr>codecs/<wbr>src/<wbr>video.rs:19</code>), the hardware-decoding switch, counters and <code>StreamInfo</code> (<code>filmcraft: crates/<wbr>codecs/<wbr>src/<wbr>hw.rs:25-95</code>, <code>:141-206</code>), the GOP decode loop, which feeds a sample again after an error (<code>filmcraft: crates/<wbr>codecs/<wbr>src/<wbr>gop.rs:778-779</code>)</td>
+<td>MED-1a</td>
 </tr>
 </tbody></table>
 </div><p><strong>States.</strong></p>
@@ -1551,7 +1558,7 @@ impl Engine {
 <tr>
 <td><code>src/<wbr>fallback.rs</code></td>
 <td>NEW</td>
-<td><code>Fallback&lt;D&gt;</code>: a <code>VideoDecoder</code> that wraps a hardware decoder, keeps the samples since the last random-access point, and on a hardware error switches to <code>filmcraft_codecs::software_video_decoder(entry)</code> (<code>crates/<wbr>codecs/<wbr>src/<wbr>lib.rs:124-131</code>) and replays them</td>
+<td><code>Fallback&lt;D&gt;</code> (AD8): a <code>VideoDecoder</code> that wraps a hardware decoder, keeps the samples since the last random-access point (the one before it after an HEVC CRA), and on a hardware error or an in-band parameter change switches to <code>filmcraft_codecs::software_video_decoder(entry)</code> (<code>crates/<wbr>codecs/<wbr>src/<wbr>lib.rs:124-131</code>) and replays them, as FilmCraft&#39;s <code>HybridDecoder</code> does on the desktop (<code>crates/<wbr>platform/<wbr>src/<wbr>hybrid.rs</code>)</td>
 </tr>
 <tr>
 <td><code>src/<wbr>platform/<wbr>videotoolbox.rs</code></td>
@@ -1569,7 +1576,7 @@ impl Engine {
 <li>At engine start the core calls <code>register(true)</code> once per process (L8 allows turning it off later).</li>
 <li>When EffectCraft opens a movie, <code>filmcraft_codecs::make_video_decoder</code> asks the registered factories first (<code>crates/<wbr>codecs/<wbr>src/<wbr>lib.rs:112-120</code>).</li>
 <li>The CraftBridge factory parses the stream with <code>filmcraft_codecs::hw::NalStreamInfo::from_entry</code> (<code>crates/<wbr>codecs/<wbr>src/<wbr>hw.rs:235</code>) and asks the platform for a <strong>hardware</strong> decoder: <code>VTIsHardwareDecodeSupported</code> on iOS; on Android, a decoder whose name does not start with <code>c2.android.</code> or <code>OMX.google.</code> (the platform&#39;s software codecs).</li>
-<li>With one, it returns <code>Fallback&lt;VtDecoder&gt;</code> or <code>Fallback&lt;McDecoder&gt;</code>; without one, it returns <code>None</code> and FilmCraft&#39;s software decoder takes the stream. That decline path ran in the iOS Simulator, which has no hardware decoder, with a byte-identical result (<code>evidence/<wbr>03-device-feasibility.md</code> Finding 14).</li>
+<li>With one, it returns <code>Fallback&lt;VtDecoder&gt;</code> or <code>Fallback&lt;McDecoder&gt;</code>; without one, or when one cannot start, it returns <code>None</code> and FilmCraft&#39;s software decoder takes the stream: FilmCraft opens a stream with the first factory that answers, so the factory never answers an error (<code>crates/<wbr>codecs/<wbr>src/<wbr>lib.rs:112-120</code>). That decline path ran in the iOS Simulator, which has no hardware decoder, with a byte-identical result (<code>evidence/<wbr>03-device-feasibility.md</code> Finding 14).</li>
 <li>Frames are converted into the same <code>DecodedFrame</code> layout the software decoder produces for that stream (filmcraft <code>crates/<wbr>codecs/<wbr>src/<wbr>video.rs:19-55</code>), so EffectCraft&#39;s pipeline sees no difference.</li>
 </ol>
 <p><strong>Encoding.</strong> The first release exports through EffectCraft&#39;s pure-Rust encoders (PD12). Those encoders are internal to EffectCraft&#39;s export crate (<code>effectcraft: crates/<wbr>export/<wbr>src/<wbr>encode.rs:100-115</code>), so hardware encoding (W6, F1) lives in CraftBridge&#39;s exporter (AD7). For an H.264 or HEVC job with hardware encoding chosen, it runs the same item through <code>FileExporter</code> (<code>effectcraft: crates/<wbr>host/<wbr>src/<wbr>lib.rs:25-30</code>) as a Targa sequence and a WAV, handed to an in-memory sink and never written to disk: the sink receives each finished file, sequence frames from the render threads (<code>effectcraft: crates/<wbr>export/<wbr>src/<wbr>out.rs:8-10</code>), and Targa frames are uncompressed (<code>effectcraft: crates/<wbr>project/<wbr>src/<wbr>render_queue.rs:528-530</code>). The exporter puts the frames back in order, encodes them with <code>craftbridge-media</code>&#39;s VideoToolbox or MediaCodec encoder and the sound with the platform&#39;s AAC encoder, and writes the MP4 with the ISO BMFF writer EffectCraft&#39;s own export uses, tagged BT.709 limited range as EffectCraft tags its own (<code>effectcraft: crates/<wbr>export/<wbr>src/<wbr>encode.rs:22-58</code>). Every frame is still rendered by EffectCraft&#39;s pipeline, so its timing, colour and size rules apply unchanged.</p>

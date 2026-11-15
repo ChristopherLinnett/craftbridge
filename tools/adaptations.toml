@@ -10,7 +10,9 @@
 # change that alters what it relies on.
 #
 # File and line references name the revision the pin carries (see [workspace.dependencies] in
-# rust/Cargo.toml); item names are EffectCraft's, spelled as its sources spell them. `implements`
+# rust/Cargo.toml); item names are EffectCraft's, spelled as its sources spell them. An entry whose files
+# are another pinned repository's, FilmCraft's at the revision EffectCraft builds it at, names it in
+# `repository`; one without the key relies on EffectCraft's own files. `implements`
 # names the plan task that lands each adaptation's code (plan §15); entries are written here before
 # their code exists so the first pin's updates already recheck what the first release will carry.
 #
@@ -103,4 +105,26 @@ depends = [
   "Exporter, ExportJob (crates/engine/src/render_queue.rs:93-113, :22-46)",
   "FileExporter (crates/host/src/lib.rs:25-89)",
   "the export frame loop's thread count (crates/export/src/pipeline.rs:140-149)",
+]
+
+[[adaptation]]
+id = "AD8"
+crate = "craftbridge-media"
+file = "src/lib.rs and src/fallback.rs"
+repository = "storytold/filmcraft"
+implements = "MED-1a"
+summary = "Registers CraftBridge's hardware decoder factory in FilmCraft's decoder registry, which EffectCraft opens every movie through, sets FilmCraft's hardware-decoding switch and names the backend for FilmCraft's diagnostics. The factory declines a stream the platform has no hardware decoder for, or cannot start one for, which hands it to FilmCraft's software decoders, and never answers a start's error, which would leave the movie with no decoder; it counts a decline where FilmCraft's own factories count one, only when a decoder cannot start; a decoder it returns is wrapped in Fallback (src/fallback.rs), which follows HybridDecoder's behaviour in CraftBridge's own code: on an error, or a sample whose in-band parameters differ from the sample entry's, it switches to FilmCraft's software decoder for the stream and replays the samples since the last restart sample FilmCraft's stream parsers find (the one before it after an HEVC CRA), within HybridDecoder's bounds, decoding on past a replayed sample the software decoder rejects; it leaves out the pictures the caller already has, puts the ones the hardware decoder still held in presentation order, keeps no sample it returns an error for while it stays on hardware, since FilmCraft's decode loop feeds that sample again, and answers random-access and disposable samples from the stream as the software decoder does."
+replaces = "filmcraft_platform::register(), which registers no decoder on iOS and Android (crates/platform/src/lib.rs:70-139), and its HybridDecoder (crates/platform/src/hybrid.rs), which craftbridge-media does not use: filmcraft-platform always depends on filmcraft-export, which brings its H.264 and FLAC encoders and FilmCraft's compositor, text, caption and audio crates, none of which a decoder needs, into the phone build: 9 more crates in craftbridge-effects-ffi's graph and 25 in the core's own, measured at d5ead4ba. Move onto HybridDecoder if filmcraft-platform gates those dependencies behind a feature the phone build can leave off."
+depends = [
+  "register_video_decoder, video_decoder_registered, software_video_decoder (crates/codecs/src/lib.rs:99, :107, :124)",
+  "make_video_decoder, which opens a stream with the first factory that answers, an error included (crates/codecs/src/lib.rs:112-120)",
+  "CodecError and its Cancelled, Result (crates/codecs/src/lib.rs:55-67)",
+  "VideoDecoder, VideoDecoderFactory, DecodedFrame (crates/codecs/src/video.rs:19, :182, :9)",
+  "hw::set_hardware_decoding, hw::hardware_decoding, hw::set_hw_backend, hw::note_hw_frames, hw::note_hw_session, hw::note_hw_declined, hw::note_hw_fallback (crates/codecs/src/hw.rs:25, :30, :38, :78, :83, :88, :93)",
+  "hw::StreamInfo with is_irap, keeps_previous_restart, parameters_changed, is_random_access and is_disposable (crates/codecs/src/hw.rs:141, :160, :168, :177, :192, :200)",
+  "hw::NalStreamInfo::from_entry, hw::FrameStreamInfo::from_entry (crates/codecs/src/hw.rs:235, crates/codecs/src/hw_frame.rs:141)",
+  "SampleEntry, filmcraft-isobmff's re-export of craft_media::isobmff (crates/isobmff/src/lib.rs:7)",
+  "FilmCraft's own hardware factories' decline rule, which the factory follows: with the switch off, or a configuration record that does not parse, they answer None uncounted, and a decoder that cannot start answers None and counts the decline (crates/platform/src/lib.rs:196-209, :215-228, :234-247, :252-268). hw::HwStats's doc also lists the switch being Off among the counted declines (crates/codecs/src/hw.rs:55-56); no factory has counted it since the first, and note_hw_declined counts a stream a factory is responsible for (:87-88), so CraftBridge follows the code",
+  "the GOP decode loop, which moves past a sample only once it decoded and feeds it again after an error (crates/codecs/src/gop.rs:778-779)",
+  "HybridDecoder's replay bounds and replay-output cap, restart points, fallback, replay and merge (crates/platform/src/hybrid.rs:19-21, :24-26, :70-94, :105-113, :124-190, :200-202)",
 ]
