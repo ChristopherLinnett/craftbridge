@@ -168,6 +168,12 @@ stage_android() {
     (cd android/sdk && ./gradlew --no-daemon --continue --warning-mode=fail --console=plain "$@") | tee -a "$log"
   }
   gradle_build spotlessCheck || status=1
+  # detekt runs in a build of its own too, and its command line in a JVM of its own (plan D-28): its
+  # analysis starts the Kotlin compiler's IntelliJ core, which sets IntelliJ's JVM-wide settings as
+  # ktlint does, so it never shares a JVM with Lint. detektMain and detektTest are what
+  # craftbridge.android.library registers over every variant and every test component of a module, and
+  # the build's rule jar carries its own tests, run here beside the rules they check.
+  gradle_build detektMain detektTest :build-logic:detekt-rules:test || status=1
   gradle_build lint lintRelease assembleRelease compileDebugUnitTestSources compileDebugAndroidTestSources || status=1
   xtask skipped-tasks "$log" || status=1
   rm -f "$log"

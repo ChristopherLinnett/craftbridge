@@ -1,0 +1,22 @@
+# The never-crash bans of AGENTS.md §3, on the code a module ships — every source set but its tests,
+# which keep the shortcuts. Each banned call is matched by what it resolves to, so an import alias, a
+# qualified name, a typealias or a function reference is the same call; `!!` is banned as the
+# operator itself, whatever its operand's type.
+style:
+  ForbiddenMethodCall:
+    active: true
+    methods:
+      - value: 'kotlin.system.exitProcess'
+        reason: 'it ends the host app, which owns the process: fail with a documented exception (AGENTS.md §3)'
+      - value: 'kotlin.TODO'
+        reason: 'it is a stub that crashes when reached: fail with a documented exception (AGENTS.md §3)'
+      - value: 'java.lang.System.exit'
+        reason: 'it ends the host app, which owns the process: fail with a documented exception (AGENTS.md §3)'
+      - value: 'java.lang.Runtime.exit'
+        reason: 'it ends the host app, which owns the process: fail with a documented exception (AGENTS.md §3)'
+      - value: 'java.lang.Runtime.halt'
+        reason: 'it ends the host process without unwinding: fail with a documented exception (AGENTS.md §3)'
+
+craftbridge:
+  NotNullAssertion:
+    active: true
