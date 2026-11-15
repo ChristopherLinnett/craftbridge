@@ -504,6 +504,136 @@ fn environment_carriers(environment: impl IntoIterator<Item = (std::ffi::OsStrin
         .collect()
 }
 
+/// The one table of the switches the gate refuses, read by this rule and by `tools/env.sh`.
+const SWITCH_TABLE: &str = "tools/refused-switches.tsv";
+
+/// One line of [`SWITCH_TABLE`] as this rule reads it: the Cargo configuration key that writes the switch
+/// (dotted, `*` standing for any one name at that level; empty for an environment-only switch), the names
+/// a committed `rust/.cargo/config.toml` may still set under that key (`-`: none), and the reason the
+/// table carries. The line's variables are `tools/env.sh`'s to refuse; this reader only holds them to the
+/// form both readers match alike. Every field is filled, dashes and all, because a shell `read` over a
+/// tab-separated line collapses empty fields.
+struct Switch {
+    key: Vec<String>,
+    tree_ok: Vec<String>,
+    why: String,
+}
+
+/// The one table of refused switches, read from the repository. The table is the gate's own data, like
+/// `tools/adaptations.toml`: no official tool reads it, so these few lines are its whole reader, and
+/// `tools/env.sh` reads the same file for the environment side. A broken line fails rather than skips,
+/// because a skipped line would let through the very switch it was written to refuse; and a variable is
+/// written in the one form both readers match alike — capitals, digits and underscores, with at most one
+/// `*` — since a shell glob reads `?` and `[` where this reader reads them as letters.
+fn refused_switches(root: &Path) -> Result<Vec<Switch>, String> {
+    let source = std::fs::read_to_string(root.join(SWITCH_TABLE)).map_err(|error| format!("{SWITCH_TABLE}: cannot be read: {error}"))?;
+    let mut table = Vec::new();
+    for (number, line) in source.lines().enumerate() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        let Ok([key, variables, tree_ok, why]) = <[&str; 4]>::try_from(&fields[..]) else {
+            return Err(format!(
+                "{SWITCH_TABLE}: line {} holds {} tab-separated fields, not four: the switch it refuses cannot be trusted",
+                number + 1,
+                fields.len()
+            ));
+        };
+        let dashed = |field: &str| -> Vec<String> { if field == "-" { Vec::new() } else { field.split_whitespace().map(str::to_string).collect() } };
+        let variables = dashed(variables);
+        if (key == "-" && variables.is_empty()) || why.is_empty() {
+            return Err(format!(
+                "{SWITCH_TABLE}: line {} names neither a key nor a variable, or carries no reason: a dead line would let its switch pass unrefused",
+                number + 1
+            ));
+        }
+        if let Some(odd) = variables
+            .iter()
+            .find(|pattern| pattern.matches('*').count() > 1 || !pattern.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_' || c == '*'))
+        {
+            return Err(format!(
+                "{SWITCH_TABLE}: line {}: `{odd}` is no variable name both readers match alike: capitals, digits, `_` and one `*` at most",
+                number + 1
+            ));
+        }
+        table.push(Switch {
+            key: if key == "-" { Vec::new() } else { key.split('.').map(str::to_string).collect() },
+            tree_ok: dashed(tree_ok),
+            why: why.to_string(),
+        });
+    }
+    if table.is_empty() {
+        return Err(format!("{SWITCH_TABLE}: holds no switch line, so every refused switch would pass unrefused"));
+    }
+    Ok(table)
+}
+
+/// The keys a table key finds in one parsed configuration, spelled as the file spells them: `*` matches
+/// any one name at that level, so dotted keys, inline tables and separate tables all arrive alike —
+/// the same key is the same key however it is written, which is what Cargo compiles them to.
+fn spelled_keys(value: &toml::Value, segments: &[String], path: &mut Vec<String>, found: &mut Vec<String>) {
+    let Some((head, rest)) = segments.split_first() else {
+        found.push(path.join("."));
+        return;
+    };
+    let Some(table) = value.as_table() else { return };
+    for (name, child) in table {
+        if head != "*" && head != name {
+            continue;
+        }
+        path.push(name.clone());
+        if rest.is_empty() {
+            found.push(path.join("."));
+        } else {
+            spelled_keys(child, rest, path, found);
+        }
+        path.pop();
+    }
+}
+
+/// Does the value of the `xtask` alias still run the xtask package? The committed configuration keeps its
+/// alias only while it does: `cargo xtask rules` is how a person runs the rule checks, and an alias
+/// standing elsewhere (`xtask = "test --no-run"`, which reads `rules` as a test filter) would let those
+/// checks pass having run nothing.
+fn runs_xtask(value: &toml::Value) -> bool {
+    let words: Vec<&str> = match value {
+        toml::Value::String(line) => line.split_whitespace().collect(),
+        toml::Value::Array(items) => items.iter().filter_map(toml::Value::as_str).collect(),
+        _ => return false,
+    };
+    words.first() == Some(&"run") && words.windows(2).any(|pair| matches!(pair, ["--package" | "-p", "xtask"]))
+}
+
+/// The refused switches written as keys in one parsed configuration, each named by file and key with
+/// the reason of the first table line that names it: a catch-all line (`target.*.*`, `env.*`) after the
+/// lines for the keys it shares a table with refuses the rest of that table without naming a key twice.
+/// `committed` marks the repository's own configuration, which may keep the names its line lists as
+/// `tree_ok` — the names it holds today, nothing more — and keeps them nowhere else: an include reaches no
+/// further than the file that includes it.
+fn switch_errors(document: &toml::Value, name: &str, table: &[Switch], committed: bool) -> Vec<String> {
+    let mut errors = Vec::new();
+    let mut judged: BTreeSet<String> = BTreeSet::new();
+    for switch in table.iter().filter(|switch| !switch.key.is_empty()) {
+        let mut found = Vec::new();
+        spelled_keys(document, &switch.key, &mut Vec::new(), &mut found);
+        for key in found {
+            if !judged.insert(key.clone()) {
+                continue;
+            }
+            let leaf = key.rsplit('.').next().unwrap_or(&key);
+            if committed && switch.tree_ok.iter().any(|ok| ok == leaf) {
+                if key == "alias.xtask" && !document.get("alias").and_then(|aliases| aliases.get("xtask")).is_some_and(runs_xtask) {
+                    errors.push(format!("{name}: {key} must run the xtask package, or `cargo xtask rules` checks nothing"));
+                }
+                continue;
+            }
+            errors.push(format!("{name}: {key} {}", switch.why));
+        }
+    }
+    errors
+}
+
 /// The Cargo configuration of one folder whose `.cargo` Cargo probes: `.cargo/config` when it is
 /// there, because Cargo reads it instead of `.cargo/config.toml`, and `.cargo/config.toml` otherwise.
 fn configuration_of(folder: &Path) -> Option<PathBuf> {
@@ -600,16 +730,24 @@ fn configuration_files(root: &Path, home: Option<&Path>) -> Vec<PathBuf> {
     files
 }
 
-/// Every Cargo configuration a build inside `rust/` reads, checked for the carriers: the files
-/// [`configuration_files`] names and, followed wherever it leads, the files they `include`. A file
-/// reads once, so a cycle of includes ends where it begins. The other ways Cargo takes
-/// configuration are closed elsewhere: the gate's own cargo commands carry no `--config`, and no
-/// alias stands in for a built-in command; the environment is [`environment_carriers`]'; and a git
-/// `url.<base>.insteadOf` can redirect Cargo's own fetches only to deliver the commits the lock names
-/// — which [`lock_pin_errors`] holds to official ones — because the cache that decides which commits
-/// are official never reads the machine's git configuration ([`Cache::command`]).
+/// Every Cargo configuration a build inside `rust/` reads, checked for the carriers and for the refused
+/// switches written as keys: the files [`configuration_files`] names and, followed wherever it leads,
+/// the files they `include`. A file reads once, so a cycle of includes ends where it begins. The other
+/// ways Cargo takes configuration are closed elsewhere: the gate's own cargo commands carry no
+/// `--config`; the environment is [`environment_carriers`]' for the carriers and `tools/env.sh`'s for
+/// the table of switches; and a git `url.<base>.insteadOf` can redirect Cargo's own fetches only to
+/// deliver the commits the lock names — which [`lock_pin_errors`] holds to official ones — because the
+/// cache that decides which commits are official never reads the machine's git configuration
+/// ([`Cache::command`]).
 pub(crate) fn cargo_configuration_errors(root: &Path, home: Option<&Path>) -> Vec<String> {
     let mut errors = Vec::new();
+    let table = match refused_switches(root) {
+        Ok(table) => table,
+        Err(error) => return vec![error],
+    };
+    // The committed configuration is the file this repository ships in `rust/.cargo`, and the only one
+    // allowed the few keys it holds today (see [`switch_errors`]).
+    let committed = configuration_of(&root.join("rust"));
     let mut read: BTreeSet<PathBuf> = BTreeSet::new();
     let mut queue = configuration_files(root, home);
     while let Some(file) = queue.pop() {
@@ -632,6 +770,7 @@ pub(crate) fn cargo_configuration_errors(root: &Path, home: Option<&Path>) -> Ve
             }
         };
         errors.extend(configuration_carriers(&document, &name));
+        errors.extend(switch_errors(&document, &name, &table, committed.as_ref().is_some_and(|path| path == &file)));
         queue.extend(included_by(&file, &document, &mut errors));
     }
     errors
@@ -1158,10 +1297,19 @@ mod tests {
         assert!(replaced.len() == 1 && replaced[0].contains("[source]"), "{replaced:?}");
     }
 
+    /// The real table's bytes, so a scratch checkout reads exactly the switches the gate reads and a
+    /// test cannot drift from what is actually refused. Read from the repository as it stands, the way
+    /// the pins and lints tests read the doctor: a compiled-in copy would be a second copy of the table,
+    /// and the `compiled` rule refuses a non-`.rs` file a build reads.
+    fn switch_table() -> String {
+        std::fs::read_to_string(crate::repo_root().join(SWITCH_TABLE)).unwrap()
+    }
+
     /// A checkout under a scratch root, clean below and ready to be planted above.
     fn scratch_checkout(tag: &str) -> (Scratch, PathBuf) {
         let tree = Scratch::new(tag);
         tree.mkdir("checkout/rust");
+        tree.write(&format!("checkout/{SWITCH_TABLE}"), switch_table());
         let checkout = tree.0.join("checkout");
         (tree, checkout)
     }
@@ -1232,6 +1380,151 @@ mod tests {
         let errors = cargo_configuration_errors(&checkout, None);
         assert_eq!(errors.len(), 1, "the cycle ends where it begins, and a non-`.toml` include is refused unread: {errors:?}");
         assert!(errors[0].contains("notes.txt"), "{errors:?}");
+    }
+
+    #[test]
+    fn a_refused_switch_written_as_a_key_names_its_file_and_its_key() {
+        // The switches tools/env.sh refuses in the environment, written instead as keys in a configuration
+        // Cargo reads: every spelling a key has for Cargo is the same key here, because Cargo compiles
+        // them to the same value — a dotted one-liner, an inline table, a separate table, a cfg predicate.
+        let (tree, checkout) = scratch_checkout("upstream-switches-keys");
+        let home = tree.0.join("cargo-home");
+        tree.write("cargo-home/config.toml", "build.rustflags = \"--cap-lints=allow\"\n");
+        let errors = cargo_configuration_errors(&checkout, Some(&home));
+        assert!(errors.len() == 1 && errors[0].contains("cargo-home/config.toml") && errors[0].contains("build.rustflags"), "{errors:?}");
+        tree.write("cargo-home/config.toml", "build = { rustc = \"/bin/echo\" }\n[profile]\nrelease.opt-level = 3\n");
+        let errors = cargo_configuration_errors(&checkout, Some(&home));
+        assert!(errors.len() == 2 && errors.iter().any(|e| e.contains("build.rustc")) && errors.iter().any(|e| e.contains("profile.release")), "{errors:?}");
+        tree.write(
+            "cargo-home/config.toml",
+            "[target.'cfg(unix)']\nrunner = \"true\"\n[target.aarch64-apple-ios-sim]\nrustdocflags = [\"--test-args\", \"--skip\"]\n",
+        );
+        let errors = cargo_configuration_errors(&checkout, Some(&home));
+        assert!(
+            errors.len() == 2 && errors.iter().any(|e| e.contains("cfg(unix).runner")) && errors.iter().any(|e| e.contains("ios-sim.rustdocflags")),
+            "{errors:?}"
+        );
+        // An `[env]` table sets a variable for every process the build starts, over the gate's own when
+        // forced, so every entry is refused, whichever variable it names: a forced PATH hands rustc another
+        // `cc` to link the test binaries with, a forced CLIPPY_ARGS replaces clippy's lint flags, and no
+        // list of the variables those processes read is one the gate could keep.
+        tree.write(
+            "cargo-home/config.toml",
+            "[env]\nPATH = { value = \"/elsewhere/bin:/usr/bin:/bin\", force = true }\nCLIPPY_ARGS = { value = \"-Aclippy::unwrap_used__CLIPPY_HACKERY__\", force = true }\nIPHONEOS_DEPLOYMENT_TARGET = \"17.0\"\n",
+        );
+        let errors = cargo_configuration_errors(&checkout, Some(&home));
+        assert!(
+            errors.len() == 3 && ["env.PATH", "env.CLIPPY_ARGS", "env.IPHONEOS_DEPLOYMENT_TARGET"].iter().all(|key| errors.iter().any(|e| e.contains(key))),
+            "{errors:?}"
+        );
+        // A target's linker writes the binaries the gate runs, and every other key of a target table —
+        // a dependency's build-script override above all — is refused by the catch-all line, each key once.
+        tree.write(
+            "cargo-home/config.toml",
+            "[target.aarch64-apple-darwin]\nlinker = \"/elsewhere/cc\"\nrunner = \"true\"\n[target.aarch64-apple-darwin.rayon-core]\nrustc-cfg = []\n[target.x86_64-linux-android]\nar = \"/elsewhere/ar\"\n",
+        );
+        let errors = cargo_configuration_errors(&checkout, Some(&home));
+        assert!(
+            errors.len() == 4
+                && ["darwin.linker hands rustc another linker", "darwin.runner runs in place", "darwin.rayon-core overrides", "android.ar overrides"]
+                    .iter()
+                    .all(|said| errors.iter().any(|e| e.contains(said))),
+            "{errors:?}"
+        );
+        // A build target outside the tree sends the gate's own build of xtask to a <triple>/ folder,
+        // where the gate cannot find the binary it built.
+        tree.write("cargo-home/config.toml", "build.target = \"aarch64-apple-darwin\"\n");
+        let errors = cargo_configuration_errors(&checkout, Some(&home));
+        assert!(errors.len() == 1 && errors[0].contains("build.target"), "{errors:?}");
+        // An include carries a switch into the build from the file that holds it, and that file is named.
+        tree.write("cargo-home/config.toml", "include = [\"shared.toml\"]\n");
+        tree.write("cargo-home/shared.toml", "[alias]\nclippy = \"test --no-run\"\n");
+        let errors = cargo_configuration_errors(&checkout, Some(&home));
+        assert!(errors.len() == 1 && errors[0].contains("shared.toml") && errors[0].contains("alias.clippy"), "{errors:?}");
+    }
+
+    /// A lockfile path moves the build onto a Cargo.lock other than the committed rust/Cargo.lock the
+    /// rules judge: a copy of that lock at another revision passes --locked while everything builds
+    /// from the copy, around the pin. Both of Cargo's spellings of the key are the same key here.
+    #[test]
+    fn a_lockfile_path_written_as_a_key_names_its_file_and_its_key() {
+        let (tree, checkout) = scratch_checkout("upstream-lockfile-path-keys");
+        let home = tree.0.join("cargo-home");
+        tree.write("cargo-home/config.toml", "resolver.lockfile-path = \"/elsewhere/Cargo.lock\"\n");
+        let errors = cargo_configuration_errors(&checkout, Some(&home));
+        assert!(errors.len() == 1 && errors[0].contains("cargo-home/config.toml") && errors[0].contains("resolver.lockfile-path"), "{errors:?}");
+        tree.write("cargo-home/config.toml", "[resolver]\nlockfile-path = \"/elsewhere/Cargo.lock\"\n");
+        let errors = cargo_configuration_errors(&checkout, Some(&home));
+        assert!(errors.len() == 1 && errors[0].contains("resolver.lockfile-path"), "{errors:?}");
+        // Its variable written into an `[env]` table is refused with every other `[env]` entry.
+        tree.write("cargo-home/config.toml", "[env]\nCARGO_RESOLVER_LOCKFILE_PATH = \"/elsewhere/Cargo.lock\"\n");
+        let errors = cargo_configuration_errors(&checkout, Some(&home));
+        assert!(errors.len() == 1 && errors[0].contains("env.CARGO_RESOLVER_LOCKFILE_PATH"), "{errors:?}");
+    }
+
+    #[test]
+    fn the_committed_configuration_may_set_only_what_it_holds_today() {
+        // The exception for rust/.cargo/config.toml is exactly the names it holds today: the xtask alias,
+        // in either form, while it still runs the xtask package — nothing else from the table, in the
+        // committed file or anywhere Cargo else reads.
+        let (tree, checkout) = scratch_checkout("upstream-switches-committed");
+        let config = "checkout/rust/.cargo/config.toml";
+        tree.write(config, "[alias]\nxtask = \"run --package xtask --locked --quiet --\"\n");
+        assert!(cargo_configuration_errors(&checkout, None).is_empty());
+        tree.write(config, "[alias]\nxtask = [\"run\", \"-p\", \"xtask\", \"--\"]\n");
+        assert!(cargo_configuration_errors(&checkout, None).is_empty(), "the list form of the gate's alias");
+        tree.write(config, "[alias]\nxtask = \"test --no-run\"\n");
+        let errors = cargo_configuration_errors(&checkout, None);
+        assert!(errors.len() == 1 && errors[0].contains("alias.xtask must run the xtask package"), "{errors:?}");
+        tree.write(
+            config,
+            "[alias]\nxtask = \"run --package xtask --\"\nfmt = [\"version\"]\n[build]\nrustflags = [\"-C\", \"link-arg=-Wl,-z,max-page-size=16384\"]\n",
+        );
+        let errors = cargo_configuration_errors(&checkout, None);
+        assert!(
+            errors.len() == 2
+                && errors.iter().any(|e| e.starts_with("rust/.cargo/config.toml: alias.fmt"))
+                && errors.iter().any(|e| e.contains("build.rustflags")),
+            "a rustflags is refused as a key whatever it holds: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_broken_switch_table_refuses_to_judge_at_all() {
+        // Silence from the table would read as a clean machine: a missing or malformed table fails loudly.
+        let tree = Scratch::new("upstream-switches-table");
+        tree.mkdir("checkout/rust");
+        let checkout = tree.0.join("checkout");
+        let errors = cargo_configuration_errors(&checkout, None);
+        assert!(errors.len() == 1 && errors[0].contains("tools/refused-switches.tsv"), "{errors:?}");
+        tree.write(&format!("checkout/{SWITCH_TABLE}"), "# comment\nbuild.rustflags\tonly-one-field\n");
+        let errors = cargo_configuration_errors(&checkout, None);
+        assert!(errors.len() == 1 && errors[0].contains("line 2") && errors[0].contains("four"), "{errors:?}");
+        // A line that names nothing to refuse, and a variable a shell glob would read otherwise than this
+        // reader does, each stop the check rather than judge by a table the two readers disagree on.
+        tree.write(&format!("checkout/{SWITCH_TABLE}"), "-\t-\t-\tnothing named\n");
+        let errors = cargo_configuration_errors(&checkout, None);
+        assert!(errors.len() == 1 && errors[0].contains("names neither a key nor a variable"), "{errors:?}");
+        for pattern in ["CARGO_*_TARGET_*", "CARGO_PROFILE_?", "RUST[CF]"] {
+            tree.write(&format!("checkout/{SWITCH_TABLE}"), format!("-\t{pattern}\t-\twhy\n"));
+            let errors = cargo_configuration_errors(&checkout, None);
+            assert!(errors.len() == 1 && errors[0].contains(&format!("`{pattern}`")), "{errors:?}");
+        }
+    }
+
+    #[test]
+    fn a_cargo_configuration_planted_in_a_real_tree_is_caught() {
+        // Not a made-up checkout: the copy of the real rust/ reads clean as it stands, tree file
+        // included, and one refused switch planted into that real file is named by the same walk.
+        let copy = crate::scratch::rust_tree_copy("upstream-config-real");
+        std::fs::create_dir_all(copy.0.join("tools")).unwrap();
+        std::fs::write(copy.0.join(SWITCH_TABLE), switch_table()).unwrap();
+        assert!(cargo_configuration_errors(&copy.0, None).is_empty(), "the tree as it stands reads clean: pins, carriers, and switches alike");
+        let config = copy.0.join(crate::machinery::CARGO_CONFIGURATION);
+        let original = std::fs::read_to_string(&config).unwrap();
+        std::fs::write(&config, format!("{original}\n[build]\nrustflags = [\"-Aclippy::unwrap_used\"]\n")).unwrap();
+        let errors = cargo_configuration_errors(&copy.0, None);
+        assert!(errors.len() == 1 && errors[0].starts_with("rust/.cargo/config.toml: build.rustflags"), "{errors:?}");
     }
 
     #[test]

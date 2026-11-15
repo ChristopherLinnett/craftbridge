@@ -618,48 +618,6 @@ fn flatten_symbols(items: &[Value], into: &mut Vec<Symbol>) {
     }
 }
 
-/// The Apple slices the native library is built for, as the Rust toolchain names them, and how the Swift
-/// package is built for each: the target triple's architecture and environment, the SDK and how a message
-/// names it. The Swift package is compiled only for the slices its binary target links, so the slices the
-/// toolchain lists (`rust/rust-toolchain.toml`) are the destinations the analysis reads, whatever processor
-/// the machine running the gate has. A slice of the toolchain's this table does not know stops the stage
-/// rather than going unread.
-const APPLE_SLICES: &[(&str, &str, &str, &str, &str)] = &[
-    ("aarch64-apple-ios", "arm64", "", "iphoneos", "iOS device"),
-    ("aarch64-apple-ios-sim", "arm64", "-simulator", "iphonesimulator", "iOS Simulator"),
-    ("x86_64-apple-ios", "x86_64", "-simulator", "iphonesimulator", "Intel iOS Simulator"),
-];
-
-/// The toolchain's targets, read from `rust/rust-toolchain.toml`: the one list of what the native library is
-/// built for.
-const TOOLCHAIN: &str = "rust/rust-toolchain.toml";
-
-/// The Apple targets the toolchain lists, each with its row of [`APPLE_SLICES`].
-fn apple_slices(root: &Path) -> Result<Vec<&'static (&'static str, &'static str, &'static str, &'static str, &'static str)>, String> {
-    let source = std::fs::read_to_string(root.join(TOOLCHAIN)).map_err(|error| format!("{TOOLCHAIN}: {error}"))?;
-    let toolchain = toml::from_str::<toml::Value>(&source).map_err(|error| format!("{TOOLCHAIN}: is not valid TOML: {error}"))?;
-    let targets: Vec<&str> = toolchain
-        .get("toolchain")
-        .and_then(|table| table.get("targets"))
-        .and_then(toml::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(toml::Value::as_str)
-        .filter(|target| target.contains("-apple-"))
-        .collect();
-    if targets.is_empty() {
-        return Err(format!("{TOOLCHAIN}: lists no Apple target, so the Swift package ships for no destination the analysis could read"));
-    }
-    targets
-        .into_iter()
-        .map(|target| {
-            APPLE_SLICES.iter().find(|slice| slice.0 == target).ok_or_else(|| {
-                format!("{TOOLCHAIN}: the native library is built for `{target}`, a slice the Swift analysis has no build for (rust/xtask/src/swift_lint.rs)")
-            })
-        })
-        .collect()
-}
-
 /// One build of the package that ships: the slice it builds for and the SwiftPM configuration it compiles
 /// with, Debug and Release for each slice. An `#if` whose condition differs between these compiles different
 /// code, and the gate reads every branch a shipping build compiles with the server resolving it; what none of
@@ -701,13 +659,13 @@ impl Build {
             .ok_or_else(|| format!("{MANIFEST}: names no iOS version for the analysis to build against"))?
             .to_string();
         let mut builds = Vec::new();
-        for (_, architecture, environment, sdk_name, destination) in apple_slices(root)? {
-            let sdk = xcrun_sdk(sdk_name)?;
+        for slice in crate::pins::apple_slices(root)? {
+            let sdk = xcrun_sdk(slice.sdk)?;
             for configuration in ["debug", "release"] {
                 builds.push(Build {
-                    label: format!("{configuration} {destination}"),
+                    label: format!("{configuration} {}", slice.message),
                     configuration,
-                    triple: format!("{architecture}-apple-ios{version}{environment}"),
+                    triple: format!("{}-apple-ios{version}{}", slice.architecture, slice.environment),
                     sdk: sdk.clone(),
                 });
             }
@@ -1510,37 +1468,6 @@ mod tests {
         assert_eq!(merged_use(&[Use::Unknown, Use::Clear]), Use::Clear);
         assert_eq!(merged_use(&[Use::Unknown]), Use::Unknown);
         assert_eq!(merged_use(&[]), Use::Unknown);
-    }
-
-    #[test]
-    fn the_analysis_reads_the_slices_the_toolchain_builds_and_refuses_one_it_has_no_build_for() {
-        let shipped: Vec<(&str, &str, &str)> = apple_slices(&crate::repo_root()).unwrap().into_iter().map(|slice| (slice.1, slice.2, slice.3)).collect();
-        assert_eq!(shipped, [("arm64", "", "iphoneos"), ("arm64", "-simulator", "iphonesimulator")], "the device and the simulator, both arm64");
-        let scratch = crate::scratch::Scratch::new("apple-slices");
-        scratch.write(TOOLCHAIN, "[toolchain]\ntargets = [\"x86_64-apple-ios\", \"aarch64-linux-android\"]\n");
-        assert_eq!(
-            apple_slices(&scratch.0).unwrap().into_iter().map(|slice| slice.1).collect::<Vec<_>>(),
-            ["x86_64"],
-            "an Intel simulator slice is read as one"
-        );
-        scratch.write(TOOLCHAIN, "[toolchain]\ntargets = [\"aarch64-apple-ios\", \"aarch64-apple-tvos\"]\n");
-        assert!(apple_slices(&scratch.0).is_err_and(|error| error.contains("`aarch64-apple-tvos`")), "a slice with no build stops the stage");
-        scratch.write(TOOLCHAIN, "[toolchain]\ntargets = [\"aarch64-linux-android\"]\n");
-        assert!(apple_slices(&scratch.0).is_err(), "no Apple slice at all");
-    }
-
-    #[test]
-    fn the_doctor_checks_the_sdk_of_every_slice_row() {
-        // A missing SDK stops the stage with a message that sends the reader to tools/doctor.sh, so the
-        // doctor must check every SDK any row of the table could build against: a row added without its
-        // SDK in the doctor's loop would fail with a promise the doctor cannot keep.
-        let doctor = std::fs::read_to_string(crate::repo_root().join("tools/doctor.sh")).unwrap();
-        let mut sdks: Vec<&str> = APPLE_SLICES.iter().map(|slice| slice.3).collect();
-        sdks.sort_unstable();
-        sdks.dedup();
-        for sdk in sdks {
-            assert!(doctor.contains(&format!("\"{sdk}:")), "tools/doctor.sh checks no {sdk} SDK, which a row of APPLE_SLICES builds against");
-        }
     }
 
     #[test]

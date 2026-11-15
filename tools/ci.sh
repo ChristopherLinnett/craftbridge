@@ -49,7 +49,10 @@ listed() {
   fi
 }
 
-stage_doctor() { tools/doctor.sh --gate; }
+# The doctor reads the pins from this run's xtask, which the guard below has built before any stage, so it
+# rebuilds no binary another run may be starting; handed to the doctor alone, the path reaches no tree's
+# doctor but this one's.
+stage_doctor() { CRAFTBRIDGE_XTASK="$xtask_run/debug/xtask" tools/doctor.sh --gate; }
 stage_rust_fmt() { cargo_in_rust fmt --check; }
 # The rule checks are built with `cargo build` and their binary run here, not through the `cargo xtask`
 # alias or `cargo run`: a Cargo configuration can redefine an alias, and a `[target.<triple>].runner`
@@ -140,12 +143,33 @@ stage_swift_lint() {
   xtask swift-lint
 }
 stage_swift_build() {
+  # Every build the Swift package ships, in the list `cargo xtask swift-builds` prints from the same table
+  # the Swift checks read (rust/xtask/src/pins.rs): each configuration of each slice the toolchain file
+  # names, once for slices that share a destination, so a slice added there is built with no other edit,
+  # and there is no second list of slices to keep in step. A branch that compiles only in one
+  # configuration or only off the simulator — `#if !DEBUG`, `#if !targetEnvironment(simulator)` —
+  # compiles in one of these builds.
   # DIAGNOSE_MISSING_TARGET_DEPENDENCIES=YES_ERROR makes an import the package does not declare an
   # error. Without it a module an earlier build left in the derived data satisfies the import with only
   # a warning, so `CraftBridge` could import a plugin against AGENTS.md §2 and still build.
   # build-for-testing builds the test targets too, which the package scheme builds only for testing.
-  (cd ios/sdk && xcodebuild -scheme CraftBridge-Package -destination 'generic/platform=iOS Simulator' -derivedDataPath .build/xcode -quiet build build-for-testing \
-    DIAGNOSE_MISSING_TARGET_DEPENDENCIES=YES_ERROR)
+  local builds configuration destination status=0
+  builds="$(mktemp)"
+  if ! xtask swift-builds >"$builds"; then
+    rm -f "$builds"
+    return 1
+  fi
+  if [ ! -s "$builds" ]; then
+    echo "ci: no Swift builds to run" >&2
+    rm -f "$builds"
+    return 1
+  fi
+  while IFS=$'\t' read -r configuration destination; do
+    (cd ios/sdk && xcodebuild -scheme CraftBridge-Package -destination "$destination" -configuration "$configuration" -derivedDataPath .build/xcode -quiet build build-for-testing \
+      DIAGNOSE_MISSING_TARGET_DEPENDENCIES=YES_ERROR) || status=1
+  done <"$builds"
+  rm -f "$builds"
+  return "$status"
 }
 stage_android() {
   # A fresh JVM every run: ktlint keeps the .editorconfig files it has parsed for the life of the
@@ -239,6 +263,34 @@ for name in "$@"; do
   esac
 done
 if [ ${#selected[@]} -eq 0 ]; then selected=("${stages[@]}"); fi
+
+# The gate judges the change by one compiler set: the toolchain rust/rust-toolchain.toml pins, on stable
+# rules, with nothing in the environment switching what its tools check. rustup resolves rust/ to that pin
+# unless another toolchain stands over it — an environment variable, a rustup override, or a `+toolchain`
+# argument to a cargo or rustup the gate runs under, which reaches it as the variable — and each of those
+# reaches every cargo call the gate makes. The one variable naming the pin itself, which rustup hands to
+# every command it starts, is that toolchain and no override of it; tools/env.sh tells the two apart. The
+# pins themselves come from `cargo xtask pins`, the one reader of both pin files, run as every other xtask
+# command here is: built, then its binary run.
+rust_status="$(craftbridge_toolchain_status)"
+case "$rust_status" in
+  ok\ *) ;;
+  no-rustup) echo "ci: no rustup on PATH: install it from https://rustup.rs" >&2; exit 1 ;;
+  missing) echo "ci: the toolchain pinned in rust/rust-toolchain.toml is not installed: cd rust && rustup toolchain install" >&2; exit 1 ;;
+  override\ *) echo "ci: rust/ resolves an overridden toolchain, not the pin in rust/rust-toolchain.toml: ${rust_status#override }" >&2; exit 1 ;;
+esac
+refused="$(craftbridge_refused_environment)"
+if [ -n "$refused" ]; then
+  printf '%s\n' "$refused" | sed 's/^/ci: /' >&2
+  echo "ci: the gate runs the pinned toolchain as rust/Cargo.toml and rust/clippy.toml configure it: unset it and run again" >&2
+  exit 1
+fi
+if pins="$(xtask pins 2>&1)"; then
+  craftbridge_load_pins <<<"$pins"
+else
+  echo "ci: cargo xtask pins could not read rust/rust-toolchain.toml and android/sdk/gradle/libs.versions.toml: $pins" >&2
+  exit 1
+fi
 
 failed=()
 for name in "${selected[@]}"; do

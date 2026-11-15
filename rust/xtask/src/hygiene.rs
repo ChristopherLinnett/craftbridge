@@ -67,6 +67,7 @@ const NAMES: &[&str] = &[
     "shellcheckrc",
     ".ignore",
     "licences.toml",
+    "refused-switches.tsv",
     ".cargo",
 ];
 
