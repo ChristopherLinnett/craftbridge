@@ -420,7 +420,7 @@ try await card.set(&quot;Photo&quot;, media: photoURL)        // sam.jpg
 <tr>
 <td>PD10</td>
 <td>Core location</td>
-<td>The core lives in the CraftBridge repository as its own crates and packages, beside the EffectCraft plugin inside each platform folder (<code>rust/<wbr>core/<wbr></code> beside <code>rust/<wbr>effects/<wbr></code>, <code>CraftBridge</code> beside <code>CraftBridgeEffects</code>, <code>:core</code> beside <code>:effects</code>); it may be proposed to storytold/craft-libs later.</td>
+<td>The core lives in the CraftBridge repository as its own crates and packages, beside the EffectCraft plugin inside each platform folder (<code>rust/<wbr>core/<wbr></code> beside <code>rust/<wbr>effects/<wbr></code>, <code>CraftBridge</code> beside <code>CraftBridgeEffects</code>, <code>:core</code> beside <code>:effects</code>).</td>
 <td>§15</td>
 </tr>
 <tr>
@@ -2574,11 +2574,6 @@ which calls <code>request(&quot;exec&quot;, {&quot;command&quot;: &quot;layer.ne
 <td>F4</td>
 <td>Zero-copy Android footage once wgpu imports AHardwareBuffers (gfx-rs/wgpu#2320)</td>
 <td>CORE</td>
-</tr>
-<tr>
-<td>F5</td>
-<td>Proposing <code>craftbridge-core</code> to storytold/craft-libs (PD10)</td>
-<td>ChristopherLinnett</td>
 </tr>
 </tbody></table>
 </div><p><strong>Related work outside scope.</strong> storytold/effectcraft#1401 (the iOS desktop port) adds iOS to <code>platform_dir</code>, which CraftBridge does not call: AD1 passes its folders explicitly. storytold/effectcraft#2846 (how the Android entry point carries <code>unsafe</code>) does not affect CraftBridge, whose <code>unsafe</code> lives in its own repository. storytold/effectcraft#1840 (hardware encoding on desktops) may give EffectCraft an encoder interface; the update that takes it moves AD7&#39;s hardware encoding onto that interface (upstream wins). storytold/effectcraft#1518 is the same limits class as §17&#39;s clamp, on the web build.</p>
