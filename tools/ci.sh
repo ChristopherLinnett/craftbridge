@@ -125,7 +125,7 @@ stage_plan_views() {
   xtask plan-views --check
 }
 stage_swift_format() {
-  # Generated Swift is UniFFI's and the generator's style, not ours; xtask checks it is untouched.
+  # Generated Swift included: it ships as written Swift does, so it meets the same rules.
   listed swift || return 1
   xcrun swift-format lint --strict --configuration ios/sdk/.swift-format "${files[@]}"
 }

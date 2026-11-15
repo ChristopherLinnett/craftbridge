@@ -1,4 +1,5 @@
-//! The generator behind `generated/api-surface.json`: the codegen binary, built and run by cargo.
+//! The generators behind `generated/api-surface.json` and the Swift facade: the codegen binary, built and
+//! run by cargo.
 //!
 //! The codegen links the pinned EffectCraft and reads its command registry at run time, and xtask may not
 //! depend on a host tool, so xtask asks cargo for the binary and runs it. The pin the surface records is
@@ -12,6 +13,9 @@ use std::process::Command;
 /// Where the surface lives: the folder of the crate that writes it.
 pub(crate) const OUTPUT_DIR: &str = "rust/effects/craftbridge-effects-codegen/generated";
 
+/// Where the Swift facade lives: the generated folder of the plugin's Swift target.
+pub(crate) const SWIFT_OUTPUT_DIR: &str = "ios/sdk/Sources/CraftBridgeEffects/Generated";
+
 /// The codegen's package, and the binary it builds.
 const CODEGEN: &str = "craftbridge-effects-codegen";
 
@@ -21,9 +25,18 @@ pub(crate) fn generate(out_dir: &Path) -> Result<(), String> {
     let manifest = crate::scan::read_text(&root.join("rust/Cargo.toml"))?;
     let pin = crate::upstream::pins_from_manifest(&manifest).map_err(|errors| errors.join("; "))?;
     let commit = crate::upstream::locked_effectcraft_commit(&crate::scan::read_text(&root.join("rust/Cargo.lock"))?, &pin)?;
-    let binary = build_codegen(&root.join("rust"))?;
-    let output =
-        Command::new(&binary).args(["surface", "--pin", &commit]).arg(out_dir).output().map_err(|error| format!("cannot run {}: {error}", binary.display()))?;
+    run_codegen(&["surface", "--pin", &commit], out_dir)
+}
+
+/// Write the Swift facade into `out_dir`.
+pub(crate) fn generate_swift(out_dir: &Path) -> Result<(), String> {
+    run_codegen(&["swift"], out_dir)
+}
+
+/// Build the codegen and run it with `args` and the output folder.
+fn run_codegen(args: &[&str], out_dir: &Path) -> Result<(), String> {
+    let binary = build_codegen(&crate::repo_root().join("rust"))?;
+    let output = Command::new(&binary).args(args).arg(out_dir).output().map_err(|error| format!("cannot run {}: {error}", binary.display()))?;
     if output.status.success() { Ok(()) } else { Err(format!("{CODEGEN} exited with {}: {}", output.status, String::from_utf8_lossy(&output.stderr).trim())) }
 }
 

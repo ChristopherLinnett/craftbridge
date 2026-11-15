@@ -5,6 +5,7 @@
 //! A field the schema marks optional defaults when absent, so an older file still reads; a field the
 //! schema requires is required here too, and a file without it is refused with the field named.
 
+use crate::types::KeyType;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -44,6 +45,19 @@ pub(crate) struct Key {
     pub(crate) values: Option<Vec<String>>,
     #[serde(default)]
     pub(crate) doc: String,
+}
+
+impl Key {
+    /// The key that carries the typed `key_type`: the file names the type as [`KeyType::name`] spells it
+    /// and holds an `enum`'s words in `values`, so every reader of a surface — the diff, a facade — finds
+    /// the type and its words the same one way, and a typed rule and its file shape cannot drift apart.
+    pub(crate) fn typed(name: &str, required: bool, key_type: &KeyType, doc: &str) -> Self {
+        let values = match key_type {
+            KeyType::Enum(words) => Some(words.clone()),
+            _ => None,
+        };
+        Key { name: name.to_string(), required, key_type: key_type.name().to_string(), values, doc: doc.to_string() }
+    }
 }
 
 /// One tool of the catalogue.
@@ -100,13 +114,27 @@ fn first_repeat<'a>(names: impl Iterator<Item = &'a str>) -> Option<&'a str> {
 }
 
 #[cfg(test)]
+impl Command {
+    /// A command as a test writes one, journalled and with no `params` text of its own: every test module
+    /// builds its commands here, so a field the surface gains is given its test value once.
+    pub(crate) fn of(id: &str, label: &str, keys: Vec<Key>) -> Self {
+        Command { id: id.to_string(), label: label.to_string(), params: "{}".to_string(), journal: true, keys }
+    }
+}
+
+#[cfg(test)]
+impl Key {
+    /// A key as a test writes one: its piece of the `params` text is its name and whether it may be left
+    /// out, which is all the type rules and the facade read from a piece.
+    pub(crate) fn of(name: &str, required: bool, key_type: KeyType) -> Self {
+        Key::typed(name, required, &key_type, &format!("{name}{}", if required { "" } else { "?" }))
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
-
-    fn command(id: &str, keys: Vec<Key>) -> Command {
-        Command { id: id.to_string(), label: "A label".to_string(), params: "{}".to_string(), journal: true, keys }
-    }
 
     fn key(name: &str) -> Key {
         Key { name: name.to_string(), required: false, key_type: "json".to_string(), values: None, doc: String::new() }
@@ -125,7 +153,7 @@ mod tests {
         let mut typed = key("mode");
         typed.key_type = "enum".to_string();
         typed.values = Some(vec!["on".to_string(), "off".to_string()]);
-        let original = surface(vec![command("a.first", vec![typed, key("plain")])], vec![tool("undo")]);
+        let original = surface(vec![Command::of("a.first", "A label", vec![typed, key("plain")])], vec![tool("undo")]);
         let text = original.render().unwrap();
         assert!(text.starts_with("{\n  \"app\": \"effectcraft\",\n  \"commands\": ["), "{text}");
         assert!(text.ends_with("}\n") && !text.ends_with("\n\n"));
@@ -157,13 +185,15 @@ mod tests {
 
     #[test]
     fn a_name_twice_is_refused() {
-        let twice = surface(vec![command("a", vec![]), command("a", vec![])], vec![]);
+        let twice = surface(vec![Command::of("a", "A label", vec![]), Command::of("a", "A label", vec![])], vec![]);
         assert!(twice.ensure_unique().unwrap_err().contains("`a`"));
         let tools = surface(vec![], vec![tool("t"), tool("t")]);
         assert!(tools.ensure_unique().unwrap_err().contains("two tools are named `t`"));
-        let keys = surface(vec![command("a", vec![key("k"), key("k")])], vec![]);
+        let keys = surface(vec![Command::of("a", "A label", vec![key("k"), key("k")])], vec![]);
         assert!(keys.ensure_unique().unwrap_err().contains("two keys named `k`"));
         assert!(Surface::parse(&twice.render().unwrap()).is_err(), "a file is checked as it is read");
-        assert!(surface(vec![command("a", vec![key("k")]), command("b", vec![key("k")])], vec![tool("t")]).ensure_unique().is_ok());
+        assert!(
+            surface(vec![Command::of("a", "A label", vec![key("k")]), Command::of("b", "A label", vec![key("k")])], vec![tool("t")]).ensure_unique().is_ok()
+        );
     }
 }

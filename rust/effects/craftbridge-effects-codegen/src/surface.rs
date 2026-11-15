@@ -7,7 +7,7 @@
 //! pinned engine and the pin, so a regeneration is byte for byte the file that was committed.
 
 use crate::model::{Command, Key, Surface, Tool};
-use crate::types::{KeyType, type_key};
+use crate::types::type_key;
 use effectcraft_automation::tools;
 use effectcraft_engine::commands::{accepted_params, params_schema};
 use effectcraft_engine::{CommandSpec, command_specs};
@@ -28,10 +28,25 @@ pub(crate) fn build(pin: &str) -> Result<Surface, String> {
     surface_of(pin, effectcraft_engine::project::APP_VERSION, command_specs(), tools::catalogue())
 }
 
-/// The surface of the given registry: kept apart from [`build`] so a test can hand it a registry of its own.
-fn surface_of(pin: &str, engine_version: &str, specs: &[CommandSpec], catalogue: &[tools::ToolDef]) -> Result<Surface, String> {
+/// Every command of the pinned engine, by id: the one reading of the registry that the surface file and
+/// every facade built on it share, so none of them reads the registry a second way. A registry that
+/// named one command twice is refused where each path takes its reading: [`Surface::ensure_unique`]
+/// writes the file, and a facade cannot hold a member twice — two commands of one id would be two
+/// methods of one name, which [`crate::facade`] refuses while naming both.
+pub(crate) fn commands() -> Vec<Command> {
+    commands_of(command_specs())
+}
+
+/// The commands of the given registry, by id.
+fn commands_of(specs: &[CommandSpec]) -> Vec<Command> {
     let mut commands = specs.iter().map(command_of).collect::<Vec<_>>();
     commands.sort_by(|left, right| left.id.cmp(&right.id));
+    commands
+}
+
+/// The surface of the given registry: kept apart from [`build`] so a test can hand it a registry of its own.
+fn surface_of(pin: &str, engine_version: &str, specs: &[CommandSpec], catalogue: &[tools::ToolDef]) -> Result<Surface, String> {
+    let commands = commands_of(specs);
     let mut tools = catalogue.iter().map(tool_of).collect::<Vec<_>>();
     tools.sort_by(|left, right| left.name.cmp(&right.name));
     let surface = Surface { app: "effectcraft".to_string(), engine_version: engine_version.to_string(), pin: pin.to_string(), commands, tools };
@@ -67,15 +82,7 @@ fn keys_of(spec: &CommandSpec) -> Vec<Key> {
             (key, piece.unwrap_or_default())
         })
         .collect();
-    pieces.iter().map(|(key, piece)| key_of(key, piece, required.contains(&key.as_str()), &type_key(key, piece))).collect()
-}
-
-fn key_of(name: &str, piece: &str, required: bool, key_type: &KeyType) -> Key {
-    let values = match key_type {
-        KeyType::Enum(values) => Some(values.clone()),
-        _ => None,
-    };
-    Key { name: name.to_string(), required, key_type: key_type.name().to_string(), values, doc: piece.to_string() }
+    pieces.iter().map(|(key, piece)| Key::typed(key, required.contains(&key.as_str()), &type_key(key, piece), piece)).collect()
 }
 
 fn tool_of(tool: &tools::ToolDef) -> Tool {

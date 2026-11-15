@@ -47,6 +47,24 @@ impl KeyType {
             Self::Json => "json",
         }
     }
+
+    /// Every type, an `enum` with no words of its own: what [`Self::named`] reads a name back against, so
+    /// each name is spelt once, in [`Self::name`].
+    const EVERY: [KeyType; 9] = [Self::Bool, Self::Number, Self::Str, Self::Enum(Vec::new()), Self::Vec2, Self::Vec3, Self::Color, Self::Ref, Self::Json];
+
+    /// The type a surface file names `name`, with `values` for its words when it gives any: [`Self::name`]
+    /// read back. A name no type bears, words beside any type but an `enum`, or an `enum` without its
+    /// words is a surface malformed just where a typed reader reads its type: the reason says which, so
+    /// the reader can refuse it by name rather than guess.
+    pub(crate) fn named(name: &str, values: Option<&[String]>) -> Result<KeyType, String> {
+        let Some(found) = Self::EVERY.into_iter().find(|each| each.name() == name) else { return Err(format!("no type is named `{name}`")) };
+        match (found, values) {
+            (Self::Enum(_), Some(words)) => Ok(Self::Enum(words.to_vec())),
+            (Self::Enum(_), None) => Err("an `enum` names its words, and this one names none".to_string()),
+            (_, Some(_)) => Err(format!("only an `enum` has words, but its type is `{name}`")),
+            (plain, None) => Ok(plain),
+        }
+    }
 }
 
 /// The words that name a type, and the type each names.
@@ -394,12 +412,21 @@ mod tests {
     }
 
     #[test]
+    fn every_type_reads_back_from_its_name_and_a_malformed_one_is_refused_saying_why() {
+        let words = ["a".to_string(), "b".to_string()];
+        for key_type in KeyType::EVERY {
+            let back = KeyType::named(key_type.name(), matches!(key_type, KeyType::Enum(_)).then_some(&words[..]));
+            assert_eq!(back, Ok(if matches!(key_type, KeyType::Enum(_)) { KeyType::Enum(words.to_vec()) } else { key_type.clone() }));
+        }
+        assert_eq!(KeyType::named("integer", None), Err("no type is named `integer`".to_string()));
+        assert_eq!(KeyType::named("enum", None), Err("an `enum` names its words, and this one names none".to_string()));
+        assert_eq!(KeyType::named("bool", Some(&words)), Err("only an `enum` has words, but its type is `bool`".to_string()));
+    }
+
+    #[test]
     fn every_type_has_the_name_the_schema_gives_it() {
-        let names: Vec<&str> =
-            [KeyType::Bool, KeyType::Number, KeyType::Str, words(&["a", "b"]), KeyType::Vec2, KeyType::Vec3, KeyType::Color, KeyType::Ref, KeyType::Json]
-                .iter()
-                .map(KeyType::name)
-                .collect();
+        // `EVERY` is what a name is read back against, so it is what must hold every name the schema gives.
+        let names: Vec<&str> = KeyType::EVERY.iter().map(KeyType::name).collect();
         assert_eq!(names, ["bool", "number", "string", "enum", "vec2", "vec3", "color", "ref", "json"]);
     }
 }

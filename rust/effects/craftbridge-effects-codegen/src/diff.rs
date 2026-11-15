@@ -354,10 +354,6 @@ mod tests {
         Key { values: Some(words.iter().map(|word| (*word).to_string()).collect()), ..key(name, false, "enum") }
     }
 
-    fn command(id: &str, keys: Vec<Key>) -> Command {
-        Command { id: id.to_string(), label: "A label".to_string(), params: "{}".to_string(), journal: true, keys }
-    }
-
     fn tool(name: &str, schema: Value) -> Tool {
         Tool { name: name.to_string(), description: "Does it.".to_string(), bridge_only: false, input_schema: schema }
     }
@@ -368,7 +364,8 @@ mod tests {
 
     /// The changes between a surface of one command and the same surface with `edit` applied to it.
     fn one_command(edit: impl FnOnce(&mut Command)) -> Vec<Change> {
-        let old = surface(vec![command("a.b", vec![key("one", false, "bool"), key("two", true, "string"), word_key("mode", &["on", "off"])])], vec![]);
+        let old =
+            surface(vec![Command::of("a.b", "A label", vec![key("one", false, "bool"), key("two", true, "string"), word_key("mode", &["on", "off"])])], vec![]);
         let mut new = old.clone();
         edit(new.commands.first_mut().unwrap());
         compare(&old, &new)
@@ -409,15 +406,15 @@ mod tests {
 
     #[test]
     fn the_same_surface_has_no_change() {
-        let same = surface(vec![command("a", vec![key("k", true, "bool")])], vec![tool("t", json!({}))]);
+        let same = surface(vec![Command::of("a", "A label", vec![key("k", true, "bool")])], vec![tool("t", json!({}))]);
         assert!(compare(&same, &same).is_empty());
         assert!(!is_breaking(&[]));
     }
 
     #[test]
     fn a_removed_command_or_tool_breaks_and_an_added_one_does_not() {
-        let both = surface(vec![command("a", vec![]), command("b", vec![])], vec![tool("t", json!({})), tool("u", json!({}))]);
-        let fewer = surface(vec![command("a", vec![])], vec![tool("t", json!({}))]);
+        let both = surface(vec![Command::of("a", "A label", vec![]), Command::of("b", "A label", vec![])], vec![tool("t", json!({})), tool("u", json!({}))]);
+        let fewer = surface(vec![Command::of("a", "A label", vec![])], vec![tool("t", json!({}))]);
         let removed = compare(&both, &fewer);
         assert_eq!(
             removed.iter().map(|c| (c.kind, c.subject.as_str(), c.verb, c.breaking)).collect::<Vec<_>>(),
@@ -463,10 +460,10 @@ mod tests {
         // The schema leaves `values` optional, so a file may list no words for a key at all:
         // then the rules read no shape there, and such a change breaks.
         assert_eq!(only(&one_command(|c| key_at(c, 2).values = None)), ("a.b:mode", Verb::Changed, "values [on,off] -> none", true));
-        let bare = surface(vec![command("a.b", vec![key("mode", false, "enum")])], vec![]);
-        let with_words = surface(vec![command("a.b", vec![word_key("mode", &["on", "off"])])], vec![]);
+        let bare = surface(vec![Command::of("a.b", "A label", vec![key("mode", false, "enum")])], vec![]);
+        let with_words = surface(vec![Command::of("a.b", "A label", vec![word_key("mode", &["on", "off"])])], vec![]);
         assert_eq!(only(&compare(&bare, &with_words)), ("a.b:mode", Verb::Changed, "values none -> [on,off]", true));
-        let plain = surface(vec![command("a.b", vec![key("mode", false, "json")])], vec![]);
+        let plain = surface(vec![Command::of("a.b", "A label", vec![key("mode", false, "json")])], vec![]);
         let mut on_json = plain.clone();
         on_json.commands.first_mut().unwrap().keys.first_mut().unwrap().values = Some(vec!["x".to_string()]);
         assert_eq!(only(&compare(&plain, &on_json)), ("a.b:mode", Verb::Changed, "values none -> [x]", true));
@@ -568,8 +565,8 @@ mod tests {
 
     #[test]
     fn the_report_is_sorted_one_line_per_change_and_ends_in_a_count() {
-        let old = surface(vec![command("b", vec![]), command("a", vec![key("k", false, "bool")])], vec![tool("t", json!({}))]);
-        let new = surface(vec![command("c", vec![]), command("a", vec![key("k", true, "bool")])], vec![]);
+        let old = surface(vec![Command::of("b", "A label", vec![]), Command::of("a", "A label", vec![key("k", false, "bool")])], vec![tool("t", json!({}))]);
+        let new = surface(vec![Command::of("c", "A label", vec![]), Command::of("a", "A label", vec![key("k", true, "bool")])], vec![]);
         let text = report(&compare(&old, &new));
         assert_eq!(
             text,
@@ -583,7 +580,10 @@ mod tests {
     fn text_from_a_surface_is_escaped_so_each_change_is_one_line_of_five_fields() {
         let odd = "a\tb\nc\rd";
         let old = surface(
-            vec![command(odd, vec![key(odd, false, odd), word_key("w", &[odd, "v"]), key("k", false, "bool")]), command("gone", vec![])],
+            vec![
+                Command::of(odd, "A label", vec![key(odd, false, odd), word_key("w", &[odd, "v"]), key("k", false, "bool")]),
+                Command::of("gone", "A label", vec![]),
+            ],
             vec![tool(odd, json!({"properties": {odd: {}}, "required": []}))],
         );
         let mut new = old.clone();
