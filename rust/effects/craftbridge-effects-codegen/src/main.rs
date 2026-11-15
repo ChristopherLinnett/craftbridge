@@ -3,18 +3,22 @@
 //!
 //! ```text
 //! craftbridge-effects-codegen surface --pin <commit> <out-dir>
+//! craftbridge-effects-codegen swift <out-dir>
 //! craftbridge-effects-codegen diff <old> <new>
 //! ```
 //!
-//! `surface` writes `api-surface.json` into `<out-dir>`. `diff` reads two surface files and lists, on
-//! standard output, the commands, keys and tools that were added, removed or changed (see [`diff`] for the
-//! lines and for what breaks an app). Its exit code is 0 when no change breaks an app, 2 when one does and
-//! 1 when a file cannot be read or parsed, or the report cannot be written, so that 2 means a breaking
-//! change and nothing else; a command line that is no command also exits 1.
+//! `surface` writes `api-surface.json` into `<out-dir>`, `swift` one Swift file for each command namespace.
+//! `diff` reads two surface files and lists, on standard output, the commands, keys and tools that were
+//! added, removed or changed (see [`diff`] for the lines and for what breaks an app). Its exit code is 0
+//! when no change breaks an app, 2 when one does and 1 when a file cannot be read or parsed, or the report
+//! cannot be written, so that 2 means a breaking change and nothing else; a command line that is no
+//! command also exits 1.
 
 mod diff;
+mod facade;
 mod model;
 mod surface;
+mod swift;
 mod types;
 
 use std::ffi::OsString;
@@ -39,9 +43,13 @@ fn run(args: &[OsString]) -> ExitCode {
                 .ok_or_else(|| format!("`{}` is no pin: a commit id is hexadecimal digits", pin.to_string_lossy()))
                 .and_then(|pin| write_surface(pin, Path::new(out_dir))),
         ),
+        [command, out_dir] if command == "swift" => report(write_swift(Path::new(out_dir))),
         [command, old, new] if command == "diff" => diff_files(Path::new(old), Path::new(new)),
         _ => {
-            say(std::io::stderr(), "usage: craftbridge-effects-codegen surface --pin <commit> <out-dir>\n       craftbridge-effects-codegen diff <old> <new>");
+            say(
+                std::io::stderr(),
+                "usage: craftbridge-effects-codegen surface --pin <commit> <out-dir>\n       craftbridge-effects-codegen swift <out-dir>\n       craftbridge-effects-codegen diff <old> <new>",
+            );
             ExitCode::FAILURE
         }
     }
@@ -103,6 +111,20 @@ fn write_surface(pin: &str, out_dir: &Path) -> Result<String, String> {
     Ok(format!("{} holds {} commands and {} tools; keys typed {counts}", file.display(), surface.commands.len(), surface.tools.len()))
 }
 
+/// Write the Swift facade of every command into `out_dir`, saying what it holds.
+fn write_swift(out_dir: &Path) -> Result<String, String> {
+    let commands = surface::commands();
+    let namespaces = facade::plan(&commands)?;
+    swift::check(&namespaces)?;
+    let files = swift::files(&namespaces);
+    std::fs::create_dir_all(out_dir).map_err(|error| format!("cannot create {}: {error}", out_dir.display()))?;
+    for (name, text) in &files {
+        let file = out_dir.join(name);
+        std::fs::write(&file, text).map_err(|error| format!("cannot write {}: {error}", file.display()))?;
+    }
+    Ok(format!("{} holds {} files with {} methods", out_dir.display(), files.len(), commands.len()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,6 +142,19 @@ mod tests {
         let text = std::fs::read_to_string(out.join(surface::FILE)).unwrap();
         assert!(text.starts_with("{\n") && text.ends_with("}\n"));
         assert_eq!(text, surface::build(surface::TEST_PIN).unwrap().render().unwrap());
+        let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn the_swift_is_written_one_file_for_each_namespace() {
+        let out = temp("swift");
+        let _ = std::fs::remove_dir_all(&out);
+        let done = write_swift(&out).unwrap();
+        let names: Vec<String> = std::fs::read_dir(&out).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert!(names.contains(&"LayerCommands.swift".to_string()) && names.contains(&"LayerMaskCommands.swift".to_string()), "{names:?}");
+        assert!(done.contains(&format!("{} files", names.len())), "{done}");
+        let text = std::fs::read_to_string(out.join("RenderQueueCommands.swift")).unwrap();
+        assert!(text.contains("public func setRender("), "{text}");
         let _ = std::fs::remove_dir_all(&out);
     }
 
@@ -142,9 +177,18 @@ mod tests {
         assert!(run(&line(&[b"surface", b"--pin", pin, folder])) == ExitCode::SUCCESS);
         assert!(out.join(surface::FILE).is_file());
         let _ = std::fs::remove_dir_all(&out);
-        for usage in
-            [&[b"surface" as &[u8], b"--pin", pin][..], &[b"surfaces", b"--pin", pin, folder], &[b"surface", b"--pins", pin, folder], &[b"diff", b"one"], &[]]
-        {
+        assert!(run(&line(&[b"swift", folder])) == ExitCode::SUCCESS);
+        assert!(out.join("LayerCommands.swift").is_file());
+        let _ = std::fs::remove_dir_all(&out);
+        for usage in [
+            &[b"surface" as &[u8], b"--pin", pin][..],
+            &[b"surfaces", b"--pin", pin, folder],
+            &[b"surface", b"--pins", pin, folder],
+            &[b"swift"],
+            &[b"swift", folder, b"more"],
+            &[b"diff", b"one"],
+            &[],
+        ] {
             assert!(run(&line(usage)) == ExitCode::FAILURE, "{usage:?} is no command, and 2 is for a breaking diff");
         }
         assert!(run(&line(&[b"surface", b"--pin", b"0123abc\xff", folder])) == ExitCode::FAILURE, "a pin that is not Unicode");
@@ -167,8 +211,7 @@ mod tests {
 
     /// A small surface with one thing of each kind a change can break, and a tool no app can call.
     fn fixture() -> model::Surface {
-        let command =
-            |id: &str, keys: Vec<model::Key>| model::Command { id: id.to_string(), label: id.to_string(), params: "{}".to_string(), journal: true, keys };
+        let command = |id: &str, keys: Vec<model::Key>| model::Command::of(id, id, keys);
         let tool = |name: &str, bridge_only: bool| model::Tool {
             name: name.to_string(),
             description: String::new(),
@@ -232,9 +275,7 @@ mod tests {
         type Edit = fn(&mut model::Surface);
         let compatible: [(&str, Edit); 8] = [
             ("nothing", |_| {}),
-            ("new-command", |s| {
-                s.commands.push(model::Command { id: "c.new".to_string(), label: String::new(), params: "{}".to_string(), journal: false, keys: vec![] })
-            }),
+            ("new-command", |s| s.commands.push(model::Command { journal: false, ..model::Command::of("c.new", "", vec![]) })),
             ("new-optional-key-last", |s| first_command(s).keys.push(key("fresh", false, "bool", None))),
             ("bridge-only-tool-removed", |s| s.tools.retain(|tool| !tool.bridge_only)),
             ("new-enum-word", |s| first_command(s).keys.get_mut(2).unwrap().values = Some(vec!["x".to_string(), "y".to_string(), "z".to_string()])),

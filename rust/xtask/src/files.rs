@@ -43,22 +43,20 @@ pub(crate) fn is_shell_script(path: &Path) -> bool {
 /// every file to these spellings).
 const COMPARED_EXTENSIONS: &[&str] = &["rs", "swift", "kt", "kts"];
 
-/// What one stage reads, as paths from the root, sorted. Generated code is the generator's and is checked
-/// by regenerating it, so no stage formats, lints or compares it.
+/// What one stage reads, as paths from the root, sorted. Generated code ships as written code does, so the
+/// formatters and linters read it too; only the duplicate check leaves it out, since a generator repeats
+/// one shape by design (AGENTS.md §5).
 pub(crate) fn listed(root: &Path, kind: &str) -> Result<Vec<String>, String> {
     let mut files = Vec::new();
     for tree in CODE_TREES {
         for file in scan::walk(&root.join(tree), "")? {
-            if crate::generated::in_generated(&file.components) {
-                continue;
-            }
             let shown = format!("{tree}/{}", file.relative);
             let extension = file.path.extension().and_then(|extension| extension.to_str()).unwrap_or_default();
             let shell = || shown != GRADLE_WRAPPER && is_shell_script(&file.path);
             let wanted = match kind {
                 "swift" => *tree == "ios" && extension == "swift",
                 "shell" => shell(),
-                "duplicates" => COMPARED_EXTENSIONS.contains(&extension) || shell(),
+                "duplicates" => !crate::generated::in_generated(&file.components) && (COMPARED_EXTENSIONS.contains(&extension) || shell()),
                 _ => return Err(format!("no file list `{kind}` (swift, shell, duplicates)")),
             };
             if wanted {
@@ -93,28 +91,36 @@ mod tests {
     }
 
     #[test]
-    fn every_stage_reads_the_rules_walk_and_no_build_output_or_generated_code() {
+    fn every_stage_reads_the_rules_walk_and_no_build_output_and_only_the_duplicate_check_skips_generated_code() {
         let scratch = Scratch::new("files");
         scratch.write("ios/sdk/Package.swift", "// swift-tools-version: 6.0\n");
         scratch.write("ios/sdk/Sources/CraftBridge/CraftBridge.swift", "\n");
         scratch.write("ios/sdk/Sources/CraftBridge/build/Inside.swift", "\n");
         scratch.write("ios/sdk/.build/checkouts/x/Out.swift", "\n");
-        scratch.write("ios/sdk/Sources/CraftBridgeFFI/Generated/Bindings.swift", "\n");
+        scratch.write("ios/sdk/Sources/CraftBridgeEffects/Generated/LayerCommands.swift", "\n");
         scratch.write("android/sdk/settings.gradle.kts", "\n");
         scratch.write("android/sdk/build/tmp/Out.kt", "\n");
         scratch.write("android/sdk/core/src/main/kotlin/x/build/Inside.kt", "\n");
+        scratch.write("android/sdk/effects/src/generated/kotlin/x/Layer.kt", "\n");
         scratch.write("android/sdk/gradlew", "#!/bin/sh\n");
         scratch.write("tools/ci.sh", "\n");
+        scratch.write("tools/generated/run.sh", "\n");
         scratch.write("tools/hooks/pre-push", "#!/usr/bin/env bash\n");
         scratch.write("conformance/run", "#!/usr/bin/env sh\n");
         scratch.write("rust/Cargo.toml", "\n");
         scratch.write("rust/target/debug/build/x/out/gen.rs", "\n");
         scratch.write("rust/core/x/src/lib.rs", "\n");
+        scratch.write("rust/core/x/src/generated/version.rs", "\n");
         assert_eq!(
             listed(&scratch.0, "swift").unwrap(),
-            ["ios/sdk/Package.swift", "ios/sdk/Sources/CraftBridge/CraftBridge.swift", "ios/sdk/Sources/CraftBridge/build/Inside.swift"]
+            [
+                "ios/sdk/Package.swift",
+                "ios/sdk/Sources/CraftBridge/CraftBridge.swift",
+                "ios/sdk/Sources/CraftBridge/build/Inside.swift",
+                "ios/sdk/Sources/CraftBridgeEffects/Generated/LayerCommands.swift",
+            ]
         );
-        assert_eq!(listed(&scratch.0, "shell").unwrap(), ["conformance/run", "tools/ci.sh", "tools/hooks/pre-push"]);
+        assert_eq!(listed(&scratch.0, "shell").unwrap(), ["conformance/run", "tools/ci.sh", "tools/generated/run.sh", "tools/hooks/pre-push"]);
         assert_eq!(
             listed(&scratch.0, "duplicates").unwrap(),
             [
