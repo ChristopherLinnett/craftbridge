@@ -14,11 +14,15 @@ import org.jetbrains.kotlin.gradle.tasks.AbstractKotlinCompile
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
 
 /**
- * The one Lint check no module runs. It reports that a newer AGP or Gradle exists, which depends on the
- * day, not on the change: it would fail the gate whenever either ships a release. The versions move
- * deliberately, in gradle/libs.versions.toml and the wrapper.
+ * The Lint checks no module runs: checks that only report that a newer version of something
+ * outside the change exists. `AndroidGradlePluginVersion` reports a newer AGP or Gradle, and
+ * `GradleDependency` a newer release of a library the build names; each of them fails the gate on
+ * the day its subject ships, not on the day the module changed. The versions move deliberately:
+ * the upstream update loop names each one with a newer release (plan §24), and it arrives in a change
+ * of its own through `gradle/libs.versions.toml` or the wrapper, where a review sees it (§5 keeps every
+ * version there once), not from Lint noticing a release.
  */
-private val dayDependentLintChecks = setOf("AndroidGradlePluginVersion")
+private val dayDependentLintChecks = setOf("AndroidGradlePluginVersion", "GradleDependency")
 
 /**
  * The compiler arguments AGP adds to a compilation itself: `-Xuse-inline-scopes-numbers` on the
@@ -38,6 +42,10 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
         with(target) {
             pluginManager.apply("com.android.library")
             pluginManager.apply(QualityConventionPlugin::class.java)
+            // AGP's tasks keep their outputs under folders they share, which Gradle's cleanup after a
+            // skipped task prunes, so the module's tasks take turns at its build folder: otherwise a
+            // module losing its last sources fails the build on some runs and not others.
+            takeTurnsAtBuildFolder()
 
             extensions.configure<LibraryExtension> {
                 compileSdk = catalogVersion("android-compileSdk").toInt()
@@ -81,6 +89,12 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
             // rules, read from Kotlin's own syntax tree rather than from text. As with Spotless and Lint
             // the setup lives here once and no module build file names it.
             configureDetekt()
+
+            // Every Kotlin and Java file a module keeps under `src` must be compiled by something: Spotless
+            // formats the written Kotlin there, so a file no compilation reads would be formatted but never
+            // type-checked. The compilations are the ones detekt reads, off AGP's variant API — one walk
+            // names them for both.
+            refuseUnreadSources()
 
             // A module's build file runs after this plugin and could set any rule above back, as a crate
             // could weaken its `[lints]` if the rule checks did not read them. So the rules are read again

@@ -203,30 +203,32 @@ internal fun Project.configureDetekt() {
             reportFile.set(layout.buildDirectory.file("craftbridge-detekt/$name.md"))
         }
 
-    androidComponents.onVariants { variant ->
-        val name = "detekt" + variant.name.replaceFirstChar(Char::uppercaseChar)
-        // Written code is what the never-crash checks were written for; the generated bindings change
-        // through their generator instead (§6), as the Spotless exclusion has it.
-        val code =
-            register(
-                name,
-                variant,
-                "written code",
-                { it != generated },
-                listOf(base, written, shipped),
-                CraftbridgeDetektConfig::writtenConfig,
-            )
-        val bindings =
-            register(
-                "${name}Bindings",
-                variant,
-                "generated bindings",
-                { it == generated },
-                listOf(base),
-                CraftbridgeDetektConfig::bindingsConfig,
-            )
-        mainChecks.configure { dependsOn(code, bindings) }
-        for (nested in variant.nestedComponents) {
+    forEachComponent(
+        main = { variant ->
+            val name = "detekt" + variant.name.replaceFirstChar(Char::uppercaseChar)
+            // Written code is what the never-crash checks were written for; the generated bindings change
+            // through their generator instead (§6), as the Spotless exclusion has it.
+            val code =
+                register(
+                    name,
+                    variant,
+                    "written code",
+                    { it != generated },
+                    listOf(base, written, shipped),
+                    CraftbridgeDetektConfig::writtenConfig,
+                )
+            val bindings =
+                register(
+                    "${name}Bindings",
+                    variant,
+                    "generated bindings",
+                    { it == generated },
+                    listOf(base),
+                    CraftbridgeDetektConfig::bindingsConfig,
+                )
+            mainChecks.configure { dependsOn(code, bindings) }
+        },
+        test = { nested ->
             val test =
                 register(
                     "detekt" + nested.name.replaceFirstChar(Char::uppercaseChar),
@@ -237,8 +239,8 @@ internal fun Project.configureDetekt() {
                     CraftbridgeDetektConfig::writtenConfig,
                 )
             testChecks.configure { dependsOn(test) }
-        }
-    }
+        },
+    )
 }
 
 private fun Project.aggregate(
