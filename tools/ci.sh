@@ -16,18 +16,9 @@ unset $(git rev-parse --local-env-vars 2>/dev/null)
 source "$(dirname "$0")/env.sh"
 cd "$CRAFTBRIDGE_ROOT"
 
-# rustup selects the pinned toolchain from rust/rust-toolchain.toml only inside rust/. Cargo merges a
-# .cargo/config.toml from every folder above the one it runs in, so a configuration at the repository root
-# reaches every cargo stage: its `runner` would stand in for the test and rule binaries, which would then
-# pass having run nothing, before the rules that refuse the folder could run. So no cargo stage runs
-# while the root holds one; rust/.cargo is the one configuration the rules read.
-cargo_in_rust() {
-  if [ -e .cargo ]; then
-    echo "ci: .cargo at the repository root: Cargo would merge it into every cargo stage; the one Cargo configuration is rust/.cargo/config.toml" >&2
-    return 1
-  fi
-  (cd rust && cargo "$@")
-}
+# Every cargo command the stages run goes through env.sh's `craftbridge_cargo`, the one guarded cargo:
+# rustup selects the pinned toolchain from rust/rust-toolchain.toml only inside rust/, and no cargo runs
+# while the repository root holds a Cargo configuration that every stage would merge (tools/env.sh).
 
 # The files a stage hands its tool, one per line into the caller's `files`: the rules' own walk chooses
 # them (`cargo xtask files`, rust/xtask/src/files.rs), so every stage reads exactly what the rules read and
@@ -50,23 +41,15 @@ listed() {
 }
 
 stage_doctor() { tools/doctor.sh --gate; }
-stage_rust_fmt() { cargo_in_rust fmt --check; }
-# The rule checks are built with `cargo build` and their binary run here, not through the `cargo xtask`
-# alias or `cargo run`: a Cargo configuration can redefine an alias, and a `[target.<triple>].runner`
-# replaces whatever binary `cargo run` (and `cargo test`) would start, so either would pass these stages
-# having checked nothing. `cargo build` runs no runner, and env.sh fixes where it builds; the rules then
-# report the alias or the runner. Building xtask compiles none of the workspace's own crates, so no build
-# script of theirs runs before `rules` has judged whether it may exist.
+stage_rust_fmt() { craftbridge_cargo fmt --check; }
 # Every cargo build replaces the binary in its target folder, even one with nothing to rebuild, so a second
 # gate running in this worktree would replace the binary this one is starting, which is then killed or not
-# found. So each run builds xtask once into a target folder of its own: `build.build-dir` keeps the
-# intermediate artifacts in env.sh's target folder, where every stage shares them, and only the binary
-# lands in the run's folder, which nothing else writes. Each later stage starts that same file.
+# found. So this run builds xtask once into a folder of its own (tools/env.sh), where nothing else writes;
+# each later stage starts that same file.
 xtask_run="$(mktemp -d "${TMPDIR:-/tmp}/craftbridge-xtask.XXXXXX")"
 trap 'rm -rf "$xtask_run"' EXIT
 build_xtask() {
-  [ -x "$xtask_run/debug/xtask" ] ||
-    CARGO_BUILD_BUILD_DIR="$CARGO_TARGET_DIR" cargo_in_rust build --package xtask --locked --quiet --target-dir "$xtask_run"
+  [ -x "$xtask_run/debug/xtask" ] || craftbridge_xtask_build "$xtask_run"
 }
 xtask() {
   build_xtask || return 1
@@ -78,7 +61,7 @@ xtask() {
 # the pipe, its build would wait on the build lock while cargo, blocked on the full pipe, held it.
 compiling() {
   build_xtask || return 1
-  cargo_in_rust "$@" | "$xtask_run/debug/xtask" compiled
+  craftbridge_cargo "$@" | "$xtask_run/debug/xtask" compiled
 }
 # --all-features: code behind a feature is code that ships to whoever turns the feature on. What ships is
 # linted with every never-crash lint; the tests' build takes back the two that name the panicking calls
@@ -91,6 +74,19 @@ stage_rust_clippy() {
   return "$status"
 }
 stage_rust_test() { compiling test --workspace --locked --message-format=json; }
+# The desktop conformance corpus against the EffectCraft command line (plan §28). Its own stage, after the
+# Rust tests: it needs the runner built and the tests of the code that compares green first, and the oracle
+# is an EffectCraft build of its own (tools/oracle.sh: minutes cold, a second warm), which the Rust stages
+# have no use for, so `tools/ci.sh conformance` runs it alone. The runner starts from the run's own folder,
+# as xtask does: another gate's workspace-wide test build rebuilds its binary in the shared folder while
+# this one could be starting it.
+stage_conformance() {
+  local oracle
+  oracle="$(tools/oracle.sh)" || return 1
+  CARGO_BUILD_BUILD_DIR="$CARGO_TARGET_DIR" compiling build --package craftbridge-effects-conformance \
+    --locked --message-format=json --target-dir "$xtask_run" || return 1
+  "$xtask_run/debug/craftbridge-effects-conformance" --oracle "$oracle"
+}
 stage_rust_mobile() {
   local target profile status=0
   # The default members are the libraries an app links; the host tools never run on a phone. Clippy, not
@@ -105,7 +101,7 @@ stage_rust_mobile() {
   done
   return "$status"
 }
-stage_rust_deny() { cargo_in_rust deny --locked check licenses bans sources; }
+stage_rust_deny() { craftbridge_cargo deny --locked check licenses bans sources; }
 stage_rules() { xtask rules; }
 stage_generated() { xtask generate --check; }
 # The plan's views, weighed by their bytes rather than their times: the kit's own builders rebuild them
@@ -220,7 +216,7 @@ stage_duplicates() {
 
 # `rules` runs before every cargo stage that compiles the workspace: what it reads needs no build, and a
 # build script runs as soon as cargo compiles its crate.
-stages=(doctor rules rust_fmt rust_clippy rust_test rust_mobile rust_deny generated plan_views swift_format swift_build swift_lint android shell duplicates)
+stages=(doctor rules rust_fmt rust_clippy rust_test conformance rust_mobile rust_deny generated plan_views swift_format swift_build swift_lint android shell duplicates)
 # The stage groups the decision and plan §15 name: Rust and Swift are each several stages.
 group_rust=(rust_fmt rust_clippy rust_test rust_mobile rust_deny)
 group_swift=(swift_format swift_build swift_lint)

@@ -1,21 +1,21 @@
 //! Rule 10 — the gate's own machinery holds one copy of each configuration.
 //!
-//! The gate's machinery (`tools/ci.sh`, `tools/env.sh`, `tools/hooks/`, `rust/xtask/`,
-//! `rust/.cargo/config.toml`, `android/sdk/settings.gradle.kts`, `android/sdk/gradle.properties`,
-//! `android/sdk/build-logic/`, and the one copy of each configuration listed below) decides what the gate
-//! checks, so it cannot guard itself: a change to one of those files is a gate change, which its pull
-//! request names and its review checks for weakened rules. What a check can enforce is the other half:
-//! that each configuration stays the only copy. A tool reads its configuration from the folder of what it
-//! checks and the folders above it, so a second copy somewhere in the tree is read for the code below it
-//! and not beside others, and the gate would then run two rule sets while printing the name of one. Every
-//! configuration the gate's tools read therefore sits at exactly one path here; a second copy of any of
-//! them, a Cargo configuration anywhere but `rust/.cargo/config.toml`, and a tool configuration the gate
-//! keeps none of ([`REFUSED`]: shellcheck's rc files, the `.ignore` and nested `.gitignore` files jscpd
-//! honours, jscpd's ignore markers, and SourceKit-LSP's `.sourcekit-lsp` folder), and a second
-//! `gradle.properties` under `android/sdk`, fail the gate. Names are compared exactly: `rules: hygiene`
-//! refuses every other spelling of each name here (a `CLIPPY.toml`, or a `rustfmt.toml` spelt with a long
-//! s, which a case-insensitive disk opens under the plain name), so a copy can only sit here under its own
-//! name.
+//! The gate's machinery (`tools/ci.sh`, `tools/env.sh`, `tools/oracle.sh`, `tools/hooks/`, `rust/xtask/`,
+//! `rust/effects/craftbridge-effects-conformance/`, `rust/.cargo/config.toml`,
+//! `android/sdk/settings.gradle.kts`, `android/sdk/gradle.properties`, `android/sdk/build-logic/`, and the
+//! one copy of each configuration listed below) decides what the gate checks, so it cannot guard itself: a
+//! change to one of those files is a gate change, which its pull request names and its review checks for
+//! weakened rules. What a check can enforce is the other half: that each configuration stays the only
+//! copy. A tool reads its configuration from the folder of what it checks and the folders above it, so a
+//! second copy somewhere in the tree is read for the code below it and not beside others, and the gate
+//! would then run two rule sets while printing the name of one. Every configuration the gate's tools read
+//! therefore sits at exactly one path here; a second copy of any of them, a Cargo configuration anywhere
+//! but `rust/.cargo/config.toml`, and a tool configuration the gate keeps none of ([`REFUSED`]:
+//! shellcheck's rc files, the `.ignore` and nested `.gitignore` files jscpd honours, jscpd's ignore
+//! markers, and SourceKit-LSP's `.sourcekit-lsp` folder), and a second `gradle.properties` under
+//! `android/sdk`, fail the gate. Names are compared exactly: `rules: hygiene` refuses every other spelling
+//! of each name here (a `CLIPPY.toml`, or a `rustfmt.toml` spelt with a long s, which a case-insensitive
+//! disk opens under the plain name), so a copy can only sit here under its own name.
 
 use crate::scan;
 use std::path::Path;
@@ -54,8 +54,10 @@ pub(crate) const CONFIGURATIONS: &[(&str, &[&str])] = &[
 const MACHINERY: &[&str] = &[
     "tools/ci.sh",
     "tools/env.sh",
+    "tools/oracle.sh",
     "tools/hooks/",
     "rust/xtask/",
+    "rust/effects/craftbridge-effects-conformance/",
     CARGO_CONFIGURATION,
     "android/sdk/settings.gradle.kts",
     GRADLE_PROPERTIES,
@@ -362,11 +364,12 @@ mod tests {
     }
 
     /// AGENTS.md §10 and plan §15 name the machinery for people in one paragraph each; these lists are
-    /// what the gate holds them to. A path added here and not there is one list split in two, so each
-    /// paragraph's list must name every machinery path and every listed configuration, and the paragraph
-    /// every other name a tool reads a configuration under and every file the gate refuses outright. The
-    /// list is read alone: the paragraph names some paths a second time in its rules, and a path dropped
-    /// from the list would still be found there.
+    /// what the gate holds them to. A path added on one side and not the other is one list split in two,
+    /// so each paragraph's list names exactly the machinery paths and the listed configurations — a path
+    /// only the paragraph names is one dropped here — and the paragraph every other name a tool reads a
+    /// configuration under and every file the gate refuses outright. The list is read alone: the
+    /// paragraph names some paths a second time in its rules, and a path dropped from the list would still
+    /// be found there.
     #[test]
     fn agents_and_the_plan_name_every_machinery_path() {
         let documents = [
@@ -379,8 +382,13 @@ mod tests {
             let start = paragraph.find(list_from).unwrap_or_else(|| panic!("{document}: no {list_from:?}")) + list_from.len();
             let end = paragraph.get(start..).and_then(|rest| rest.find(list_to)).unwrap_or_else(|| panic!("{document}: no {list_to:?}")) + start;
             let list = paragraph.get(start..end).unwrap_or_default();
-            for path in MACHINERY.iter().copied().chain(CONFIGURATIONS.iter().map(|(path, _)| *path)) {
+            let kept: Vec<&str> = MACHINERY.iter().copied().chain(CONFIGURATIONS.iter().map(|(path, _)| *path)).collect();
+            for path in &kept {
                 assert!(list.contains(&format!("`{path}`")), "{document}'s machinery list does not name `{path}`");
+            }
+            // Every name the list sets in code is one of those paths: the odd pieces between backticks.
+            for named in list.split('`').skip(1).step_by(2) {
+                assert!(kept.contains(&named), "{document}'s machinery list names `{named}`, which machinery.rs does not");
             }
             let other_names = CONFIGURATIONS.iter().flat_map(|(path, names)| names.iter().filter(move |name| !path.ends_with(*name)));
             for name in other_names.chain(REFUSED.iter().map(|(name, _)| name)).chain([&SOURCEKIT_LSP_FOLDER]) {

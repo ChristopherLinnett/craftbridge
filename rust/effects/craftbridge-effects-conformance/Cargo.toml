@@ -8,7 +8,18 @@ rust-version.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+# A host tool may depend on anything. It decodes what an export wrote with EffectCraft's own media crate,
+# the registry CraftBridge's decoders register into, so a frame is decoded the way the engine decodes it.
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tempfile.workspace = true
+effectcraft-media.workspace = true
+effectcraft-time.workspace = true
+
+[dev-dependencies]
+image.workspace = true
 
 [lints]
 workspace = true

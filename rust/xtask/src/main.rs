@@ -64,6 +64,7 @@ fn main() -> ExitCode {
         ["files", kind] => files::run(&root, kind),
         ["compiled"] => compiled::run(&root),
         ["upstream", "pin", rev] => upstream::run(&root, rev),
+        ["upstream", "source"] => upstream::run_source(&root),
         ["swift-lint"] => swift_lint::run(&root),
         _ => {
             usage();
@@ -79,6 +80,7 @@ fn usage() {
     eprintln!("       cargo xtask skipped-tasks <gradle log>");
     eprintln!("       cargo xtask files <swift|shell|duplicates>");
     eprintln!("       cargo xtask upstream pin <rev>   (through tools/update-upstream.sh: <rev> is a commit of official EffectCraft main)");
+    eprintln!("       cargo xtask upstream source   (the official URL and the full commit the pin names on official main, for tools/oracle.sh)");
     eprintln!("       cargo <check|clippy|test> --message-format=json … | cargo xtask compiled");
     eprintln!("       cargo xtask swift-lint")
 }
