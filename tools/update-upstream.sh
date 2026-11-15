@@ -43,6 +43,11 @@ if [ "$#" -ne 1 ]; then
   exit 2
 fi
 
-# The writer of the tables builds from the workspace's own lock; the pin itself then runs the resolve.
-(cd rust && cargo build --quiet --package xtask)
-"$CARGO_TARGET_DIR/debug/xtask" upstream pin "$1"
+# The writer of the tables builds from the workspace's own lock, `--locked`, so the build itself never
+# rewrites the lock and a rerun on the same revision changes nothing; the pin itself then runs the resolve.
+# It is built into a folder of this run only, as the gate builds it: a concurrent build would replace the
+# shared binary this script is starting (tools/env.sh).
+xtask_run="$(mktemp -d "${TMPDIR:-/tmp}/craftbridge-upstream.XXXXXX")"
+trap 'rm -rf "$xtask_run"' EXIT
+craftbridge_xtask_build "$xtask_run"
+"$xtask_run/debug/xtask" upstream pin "$1"

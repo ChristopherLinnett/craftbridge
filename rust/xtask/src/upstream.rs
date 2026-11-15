@@ -181,21 +181,24 @@ const GENERATED_BY: &str = "# Written by tools/update-upstream.sh from the pinne
 /// say) in place: those are CraftBridge's choice. Cargo itself refuses a `path`, a `branch` or a `tag`
 /// beside the pin's `git` and `rev`, and whatever source an entry does resolve to, the lock check holds
 /// it to the pin. A newly written group of pins starts on a line of its own, so the hand-written entries
-/// above it and the generated ones below read apart.
+/// above it and the generated ones below read apart. An entry already there is edited in place: replacing
+/// it through `Table::insert` would reset its key's formatting, and with it the comment or blank line a
+/// person wrote above it, so a second run on the same revision would rewrite the file.
 fn set_pin(deps: &mut toml_edit::Table, name: &str, url: &str, rev: &str, blank_before: bool) {
-    let (existing, lead) = match deps.get(name).and_then(toml_edit::Item::as_value).and_then(toml_edit::Value::as_inline_table) {
-        Some(existing) => (existing.clone(), String::new()),
-        None => (toml_edit::InlineTable::new(), if blank_before { "\n" } else { "" }.to_string()),
+    let point = |inline: &mut toml_edit::InlineTable| {
+        inline.insert("git", toml_edit::Value::from(url.to_string()));
+        inline.insert("rev", toml_edit::Value::from(rev.to_string()));
+        inline.set_dotted(false);
     };
-    let mut inline = existing;
-    inline.insert("git", toml_edit::Value::from(url.to_string()));
-    inline.insert("rev", toml_edit::Value::from(rev.to_string()));
-    inline.set_dotted(false);
+    if let Some(existing) = deps.get_mut(name).and_then(toml_edit::Item::as_value_mut).and_then(toml_edit::Value::as_inline_table_mut) {
+        point(existing);
+        return;
+    }
+    let mut inline = toml_edit::InlineTable::new();
+    point(&mut inline);
     deps.insert(name, toml_edit::Item::Value(toml_edit::Value::InlineTable(inline)));
-    if !lead.is_empty()
-        && let Some(mut key) = deps.key_mut(name)
-    {
-        key.leaf_decor_mut().set_prefix(lead);
+    if blank_before && let Some(mut key) = deps.key_mut(name) {
+        key.leaf_decor_mut().set_prefix("\n");
     }
 }
 
@@ -985,6 +988,48 @@ pub(crate) fn run(root: &Path, rev: &str) -> std::process::ExitCode {
     }
 }
 
+/// The cache `tools/env.sh` names, or the failure that names its fix: the update script fetches the pinned
+/// revision into it and, on a tree that already holds that revision, writes nothing.
+fn pin_cache(rev: &str) -> Result<Cache, String> {
+    Cache::open().map_err(|error| {
+        format!("{error}; run tools/update-upstream.sh {rev}, which fetches the pinned revision and, on a tree that already holds it, writes nothing")
+    })
+}
+
+/// The full commit of the EffectCraft pin, held to official main: what the rule checks the workspace
+/// against and what the oracle is built from, so both resolve the pin the same one way.
+fn pinned_commit(cache: &Cache, pin: &Pin) -> Result<String, String> {
+    cache.official_commit(&pin.effectcraft_rev).map_err(|error| format!("rust/Cargo.toml pins EffectCraft at {}: {error}", pin.effectcraft_rev))
+}
+
+/// Where the pinned EffectCraft is built from, one line for the script that builds the command-line oracle
+/// (`tools/oracle.sh`): the official repository's URL and the full commit the pin names, resolved through
+/// the cache whose origin [`Cache::at`] holds to the official repository. So the oracle is the commit the
+/// workspace builds and the rule passes, the pin is written nowhere a second time, and no abbreviated id
+/// is left for Cargo to resolve by itself; a full commit Cargo already fetched for the workspace is found
+/// without asking the network.
+fn source(cache: &Cache, pin: &Pin) -> Result<String, String> {
+    Ok(format!("{} {}", app_url(effectcraft_app()?), pinned_commit(cache, pin)?))
+}
+
+/// `cargo xtask upstream source` as a command.
+pub(crate) fn run_source(root: &Path) -> std::process::ExitCode {
+    let line = crate::scan::read_text(&root.join("rust/Cargo.toml")).and_then(|text| {
+        let pin = pins_from_manifest(&text).map_err(|errors| errors.join("\n"))?;
+        source(&pin_cache(&pin.effectcraft_rev)?, &pin)
+    });
+    match line {
+        Ok(line) => {
+            println!("{line}");
+            std::process::ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("upstream: {error}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
 /// The `upstream` rule check. The pinned revision's manifest and lock are read from the read-only cache
 /// `tools/update-upstream.sh` maintains; a cache without the pin is a failure with a named fix, not a
 /// check that silently checked nothing.
@@ -1003,19 +1048,10 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
         }
     };
     let rev = &pin.effectcraft_rev;
-    let cache = match Cache::open() {
-        Ok(cache) => cache,
+    let (cache, full) = match pin_cache(rev).and_then(|cache| pinned_commit(&cache, &pin).map(|full| (cache, full))) {
+        Ok(found) => found,
         Err(error) => {
-            errors.push(format!(
-                "{error}; run tools/update-upstream.sh {rev}, which fetches the pinned revision and, on a tree that already holds it, writes nothing"
-            ));
-            return Ok(errors);
-        }
-    };
-    let full = match cache.official_commit(rev) {
-        Ok(full) => full,
-        Err(error) => {
-            errors.push(format!("rust/Cargo.toml pins EffectCraft at {rev}: {error}"));
+            errors.push(error);
             return Ok(errors);
         }
     };
@@ -1118,6 +1154,16 @@ mod tests {
             "tables the script has not written yet are findings: {missing:?}"
         );
         assert!(once.contains("craftbridge-core"), "what the script does not generate is kept: {once}");
+        // A comment or a blank line a person writes above a pin is theirs, and a rerun keeps it.
+        let annotated = once
+            .replace("\neffectcraft-engine = ", "\n# the tool's own dependencies end here\n\neffectcraft-engine = ")
+            .replace("\nfilmcraft-codecs = ", "\n\n# FilmCraft, at EffectCraft's own revision\nfilmcraft-codecs = ");
+        assert!(annotated.contains("# the tool's own") && annotated.contains("# FilmCraft, at"), "{annotated}");
+        assert_eq!(
+            annotated,
+            regenerate(&annotated, &upstream_manifest("d5ead4ba", "e7c3dda"), "10376058", "d5ead4ba").expect("the rerun parses"),
+            "a rerun keeps what surrounds a pin byte for byte"
+        );
     }
 
     #[test]
@@ -1306,6 +1352,20 @@ mod tests {
         assert!(Cache::at(scratch.0.clone()).is_err_and(|error| error.contains("someone/effectcraft")), "a fork's clone is no upstream cache");
         let empty = Scratch::new("upstream-cache-none");
         assert!(Cache::at(empty.0.clone()).is_err_and(|error| error.contains("no upstream cache")));
+    }
+
+    /// The oracle is built from the official repository at the full commit the pin names on official
+    /// main, the commit the rule holds the workspace to: never the abbreviated spelling for Cargo to
+    /// resolve by itself, and never a commit main does not reach.
+    #[test]
+    fn the_oracle_is_built_from_the_official_repository_at_the_pinned_commit() {
+        let (scratch, first) = official_scratch_cache("upstream-oracle");
+        let unmerged = commit(&scratch, Some(&first), "a pull request's head");
+        let cache = Cache::at(scratch.0.clone()).expect("a bare clone of the official repository");
+        let pin = |rev: &str| Pin { effectcraft_rev: rev.to_string(), filmcraft_rev: "d5ead4ba".to_string() };
+        assert_eq!(source(&cache, &pin(&first[..8])), Ok(format!("https://github.com/storytold/effectcraft {first}")));
+        let refused = source(&cache, &pin(&unmerged[..8])).expect_err("a commit main does not reach");
+        assert!(refused.contains("not on official main") && refused.contains("pins EffectCraft at"), "{refused}");
     }
 
     #[test]
