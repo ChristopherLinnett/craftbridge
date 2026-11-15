@@ -19,15 +19,19 @@ craftbridge-core-ffi = { path = "core/craftbridge-core-ffi" }
 craftbridge-effects = { path = "effects/craftbridge-effects" }
 
 # The workspace's external libraries: what the host tools use, and the few a shipped crate uses.
-# The codegen: `derive` gives the API surface file one definition, its Rust types, which the generator
-# writes and the diff reads back.
+# serde's `derive` gives a file format one definition, its Rust types: the API surface file, which the
+# codegen writes and its diff reads back, and the conformance corpus craftbridge-effects-conformance reads.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.9"
 toml_edit = "0.25"
 unicode-normalization = "0.1"
-# The core's write probe of a folder, and the scratch folders of its tests.
+# The core's write probe of a folder and the scratch folders of its tests;
+# craftbridge-effects-conformance runs each scenario in one.
 tempfile = "3"
+# `image` writes the PNGs craftbridge-effects-conformance's tests compare.
+image = { version = "0.25", default-features = false, features = ["png"] }
+
 effectcraft-engine = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
 effectcraft-host = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
 effectcraft-automation = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }

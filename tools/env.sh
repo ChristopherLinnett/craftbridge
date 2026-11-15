@@ -159,6 +159,33 @@ craftbridge_refused_environment() {
 export CARGO_TARGET_DIR="${CRAFTBRIDGE_PUSH_TARGET:-$CRAFTBRIDGE_ROOT/rust/target}"
 unset CARGO_BUILD_TARGET
 
+# Every cargo command the scripts run: in rust/, where rustup selects the pinned toolchain from
+# rust/rust-toolchain.toml, and never while the repository root holds a Cargo configuration. Cargo merges a
+# .cargo/config.toml from every folder above the one it runs in, so one at the root would reach every cargo
+# command: its `runner` would stand in for the test and rule binaries, its `[patch]` or `[source]` would
+# build another copy around the pin, and the gate would pass having checked nothing, before the rules that
+# refuse the folder could run. The one Cargo configuration is rust/.cargo/config.toml, which the rules read.
+craftbridge_cargo() {
+  if [ -e "$CRAFTBRIDGE_ROOT/.cargo" ]; then
+    echo "$(basename "$0" .sh): .cargo at the repository root: Cargo would merge it into every cargo build; the one Cargo configuration is rust/.cargo/config.toml" >&2
+    return 1
+  fi
+  (cd "$CRAFTBRIDGE_ROOT/rust" && cargo "$@")
+}
+# The rule checks are built with `cargo build` and their binary run by the caller, not through the
+# `cargo xtask` alias or `cargo run`: a Cargo configuration can redefine an alias, and a
+# `[target.<triple>].runner` replaces whatever binary `cargo run` (and `cargo test`) would start, so
+# either would pass having checked nothing. `cargo build` runs no runner, and CARGO_TARGET_DIR above
+# fixes where the intermediates build; the rules then report the alias or the runner. Building xtask
+# compiles none of the workspace's own crates, so no build script of theirs runs before `rules` has
+# judged whether it may exist. Every cargo build replaces the binary in its target folder, even one with
+# nothing to rebuild, so each caller names a folder of its own for the binary, which nothing else writes;
+# `build.build-dir` keeps the intermediate artifacts in the shared target folder, where every build
+# finds them.
+craftbridge_xtask_build() {
+  CARGO_BUILD_BUILD_DIR="$CARGO_TARGET_DIR" craftbridge_cargo build --package xtask --locked --quiet --target-dir "$1"
+}
+
 # The machine-local git cache of official EffectCraft, a bare clone: tools/update-upstream.sh fetches
 # official main into it, and the upstream rule only reads it. Outside the repository on purpose — a
 # fetch cache is not a source, and no build reads it.
