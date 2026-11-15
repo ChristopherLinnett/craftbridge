@@ -513,6 +513,7 @@ version = "0.1.0"
 dependencies = [
  "effectcraft-automation",
  "effectcraft-engine",
+ "serde",
  "serde_json",
 ]
 

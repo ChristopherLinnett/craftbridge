@@ -18,6 +18,10 @@ craftbridge-core = { path = "core/craftbridge-core" }
 craftbridge-core-ffi = { path = "core/craftbridge-core-ffi" }
 craftbridge-effects = { path = "effects/craftbridge-effects" }
 
+# The codegen: `derive` gives the API surface file one definition, its Rust types, which the generator
+# writes and the diff reads back.
+serde = { version = "1", features = ["derive"] }
+
 # xtask
 serde_json = "1"
 toml = "0.9"
