@@ -125,7 +125,7 @@ flowchart LR
 | PD7 | API shape | Two layers: a generated typed facade (one method per engine command with named parameters) and a generic `exec` / `run`; hand-written typed calls only for the fixed-shape operations (render, props, get, set, templates). | §21, §22, §23 |
 | PD8 | Frames | Three outputs: render into a layer or surface the developer passes in (frames stay on the GPU), a platform image (CVPixelBuffer, Bitmap or HardwareBuffer) and PNG bytes; no interface widgets. | §17 |
 | PD9 | Universal core | Two layers from the start: a universal core that knows nothing about EffectCraft, and the EffectCraft plugin that imports it; the core holds only what EffectCraft needs today. | §12, §16 |
-| PD10 | Core location | The core lives in the CraftBridge repository as its own crates and packages, beside the EffectCraft plugin inside each platform folder (`rust/core/` beside `rust/effects/`, `CraftBridge` beside `CraftBridgeEffects`, `:core` beside `:effects`); it may be proposed to storytold/craft-libs later. | §15 |
+| PD10 | Core location | The core lives in the CraftBridge repository as its own crates and packages, beside the EffectCraft plugin inside each platform folder (`rust/core/` beside `rust/effects/`, `CraftBridge` beside `CraftBridgeEffects`, `:core` beside `:effects`). | §15 |
 | PD11 | Platforms | iOS 17 and later (arm64 devices, arm64 simulators); Android 10 (API 29) and later on arm64-v8a, plus x86_64 for emulators; no 32-bit. | §22, §23, §28 |
 | PD12 | Video codecs | H.264 and HEVC (and AV1 where the device has it) decode through VideoToolbox on iOS and MediaCodec on Android, in front of the pure-Rust decoders, which stay the fallback; exports use EffectCraft's pure-Rust encoders in the first release, and hardware H.264 and HEVC encoding follows as an export option, built in CraftBridge's own exporter on EffectCraft's public `Exporter` interface. | §18, §19 |
 | PD13 | Scripts and plug-ins | Scripts and expressions run on both platforms; WebAssembly plug-ins load on Android always and on iOS only from files the host app bundles, behind a switch the host app can turn off. | §19 |
@@ -1104,7 +1104,6 @@ Estimates are in engineer-days; each wave's total in §11 is the sum of its task
 | F2 | Hosted CI for `tools/ci.sh` on GitHub-hosted runners, free once the repository is public; the repository becomes public when it starts (PD3) | ChristopherLinnett |
 | F3 | A smaller library: build only the EffectCraft crates and features CraftBridge calls | UP |
 | F4 | Zero-copy Android footage once wgpu imports AHardwareBuffers (gfx-rs/wgpu#2320) | CORE |
-| F5 | Proposing `craftbridge-core` to storytold/craft-libs (PD10) | ChristopherLinnett |
 
 **Related work outside scope.** storytold/effectcraft#1401 (the iOS desktop port) adds iOS to `platform_dir`, which CraftBridge does not call: AD1 passes its folders explicitly. storytold/effectcraft#2846 (how the Android entry point carries `unsafe`) does not affect CraftBridge, whose `unsafe` lives in its own repository. storytold/effectcraft#1840 (hardware encoding on desktops) may give EffectCraft an encoder interface; the update that takes it moves AD7's hardware encoding onto that interface (upstream wins). storytold/effectcraft#1518 is the same limits class as §17's clamp, on the web build.
 
