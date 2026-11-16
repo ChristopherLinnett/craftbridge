@@ -346,26 +346,16 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn key(name: &str, required: bool, key_type: &str) -> Key {
-        Key { name: name.to_string(), required, key_type: key_type.to_string(), values: None, doc: String::new() }
-    }
-
-    fn word_key(name: &str, words: &[&str]) -> Key {
-        Key { values: Some(words.iter().map(|word| (*word).to_string()).collect()), ..key(name, false, "enum") }
-    }
-
-    fn tool(name: &str, schema: Value) -> Tool {
-        Tool { name: name.to_string(), description: "Does it.".to_string(), bridge_only: false, input_schema: schema }
-    }
-
-    fn surface(commands: Vec<Command>, tools: Vec<Tool>) -> Surface {
-        Surface { app: "effectcraft".to_string(), engine_version: "1".to_string(), pin: "0123abcd".to_string(), commands, tools }
-    }
-
     /// The changes between a surface of one command and the same surface with `edit` applied to it.
     fn one_command(edit: impl FnOnce(&mut Command)) -> Vec<Change> {
-        let old =
-            surface(vec![Command::of("a.b", "A label", vec![key("one", false, "bool"), key("two", true, "string"), word_key("mode", &["on", "off"])])], vec![]);
+        let old = Surface::of(
+            vec![Command::of(
+                "a.b",
+                "A label",
+                vec![Key::raw("one", false, "bool", None), Key::raw("two", true, "string", None), Key::raw("mode", false, "enum", Some(&["on", "off"]))],
+            )],
+            vec![],
+        );
         let mut new = old.clone();
         edit(new.commands.first_mut().unwrap());
         compare(&old, &new)
@@ -377,9 +367,9 @@ mod tests {
     }
 
     fn one_tool(edit: impl FnOnce(&mut Tool)) -> Vec<Change> {
-        let old = surface(
+        let old = Surface::of(
             vec![],
-            vec![tool(
+            vec![Tool::of(
                 "t",
                 json!({"type": "object", "properties": {"x": {"type": "integer", "description": "d"}, "y": {"type": "string"}}, "required": ["x"]}),
             )],
@@ -406,15 +396,30 @@ mod tests {
 
     #[test]
     fn the_same_surface_has_no_change() {
-        let same = surface(vec![Command::of("a", "A label", vec![key("k", true, "bool")])], vec![tool("t", json!({}))]);
+        let same = Surface::of(vec![Command::of("a", "A label", vec![Key::raw("k", true, "bool", None)])], vec![Tool::of("t", json!({}))]);
         assert!(compare(&same, &same).is_empty());
         assert!(!is_breaking(&[]));
     }
 
     #[test]
+    fn a_surface_whose_header_moved_has_no_change() {
+        // `Surface::of` gives every test the same header, so this test moves it on purpose: the app, the
+        // engine's version and the pin name the two surfaces, not the API an app calls.
+        let old = Surface::of(vec![Command::of("a", "A label", vec![Key::raw("k", true, "bool", None)])], vec![Tool::of("t", json!({}))]);
+        let mut moved = old.clone();
+        moved.app = "othercraft".to_string();
+        moved.engine_version = "9.9.9".to_string();
+        moved.pin = "fedcba98".to_string();
+        assert!(compare(&old, &moved).is_empty());
+    }
+
+    #[test]
     fn a_removed_command_or_tool_breaks_and_an_added_one_does_not() {
-        let both = surface(vec![Command::of("a", "A label", vec![]), Command::of("b", "A label", vec![])], vec![tool("t", json!({})), tool("u", json!({}))]);
-        let fewer = surface(vec![Command::of("a", "A label", vec![])], vec![tool("t", json!({}))]);
+        let both = Surface::of(
+            vec![Command::of("a", "A label", vec![]), Command::of("b", "A label", vec![])],
+            vec![Tool::of("t", json!({})), Tool::of("u", json!({}))],
+        );
+        let fewer = Surface::of(vec![Command::of("a", "A label", vec![])], vec![Tool::of("t", json!({}))]);
         let removed = compare(&both, &fewer);
         assert_eq!(
             removed.iter().map(|c| (c.kind, c.subject.as_str(), c.verb, c.breaking)).collect::<Vec<_>>(),
@@ -431,8 +436,8 @@ mod tests {
     #[test]
     fn a_key_that_is_gone_breaks_and_a_new_one_breaks_only_when_required() {
         assert_eq!(only(&one_command(|c| drop(c.keys.remove(0)))), ("a.b:one", Verb::Removed, "", true));
-        assert_eq!(only(&one_command(|c| c.keys.push(key("three", false, "bool")))), ("a.b:three", Verb::Added, "", false));
-        assert_eq!(only(&one_command(|c| c.keys.push(key("three", true, "bool")))), ("a.b:three", Verb::Added, "", true));
+        assert_eq!(only(&one_command(|c| c.keys.push(Key::raw("three", false, "bool", None)))), ("a.b:three", Verb::Added, "", false));
+        assert_eq!(only(&one_command(|c| c.keys.push(Key::raw("three", true, "bool", None)))), ("a.b:three", Verb::Added, "", true));
     }
 
     #[test]
@@ -449,10 +454,16 @@ mod tests {
 
     #[test]
     fn an_enum_word_that_is_gone_breaks_and_one_that_is_new_does_not() {
-        assert_eq!(only(&one_command(|c| *key_at(c, 2) = word_key("mode", &["on"]))), ("a.b:mode", Verb::Changed, "values -off", true));
-        assert_eq!(only(&one_command(|c| *key_at(c, 2) = word_key("mode", &["on", "off", "auto"]))), ("a.b:mode", Verb::Changed, "values +auto", false));
-        assert_eq!(only(&one_command(|c| *key_at(c, 2) = word_key("mode", &["on", "auto"]))), ("a.b:mode", Verb::Changed, "values -off +auto", true));
-        assert!(one_command(|c| *key_at(c, 2) = word_key("mode", &["off", "on"])).is_empty(), "the order of the words is no change");
+        assert_eq!(only(&one_command(|c| *key_at(c, 2) = Key::raw("mode", false, "enum", Some(&["on"])))), ("a.b:mode", Verb::Changed, "values -off", true));
+        assert_eq!(
+            only(&one_command(|c| *key_at(c, 2) = Key::raw("mode", false, "enum", Some(&["on", "off", "auto"])))),
+            ("a.b:mode", Verb::Changed, "values +auto", false)
+        );
+        assert_eq!(
+            only(&one_command(|c| *key_at(c, 2) = Key::raw("mode", false, "enum", Some(&["on", "auto"])))),
+            ("a.b:mode", Verb::Changed, "values -off +auto", true)
+        );
+        assert!(one_command(|c| *key_at(c, 2) = Key::raw("mode", false, "enum", Some(&["off", "on"]))).is_empty(), "the order of the words is no change");
     }
 
     #[test]
@@ -460,10 +471,10 @@ mod tests {
         // The schema leaves `values` optional, so a file may list no words for a key at all:
         // then the rules read no shape there, and such a change breaks.
         assert_eq!(only(&one_command(|c| key_at(c, 2).values = None)), ("a.b:mode", Verb::Changed, "values [on,off] -> none", true));
-        let bare = surface(vec![Command::of("a.b", "A label", vec![key("mode", false, "enum")])], vec![]);
-        let with_words = surface(vec![Command::of("a.b", "A label", vec![word_key("mode", &["on", "off"])])], vec![]);
+        let bare = Surface::of(vec![Command::of("a.b", "A label", vec![Key::raw("mode", false, "enum", None)])], vec![]);
+        let with_words = Surface::of(vec![Command::of("a.b", "A label", vec![Key::raw("mode", false, "enum", Some(&["on", "off"]))])], vec![]);
         assert_eq!(only(&compare(&bare, &with_words)), ("a.b:mode", Verb::Changed, "values none -> [on,off]", true));
-        let plain = surface(vec![Command::of("a.b", "A label", vec![key("mode", false, "json")])], vec![]);
+        let plain = Surface::of(vec![Command::of("a.b", "A label", vec![Key::raw("mode", false, "json", None)])], vec![]);
         let mut on_json = plain.clone();
         on_json.commands.first_mut().unwrap().keys.first_mut().unwrap().values = Some(vec!["x".to_string()]);
         assert_eq!(only(&compare(&plain, &on_json)), ("a.b:mode", Verb::Changed, "values none -> [x]", true));
@@ -473,14 +484,14 @@ mod tests {
     #[test]
     fn keys_in_another_order_or_a_new_key_before_one_the_command_had_break() {
         assert_eq!(only(&one_command(|c| c.keys.swap(0, 1))), ("a.b", Verb::Changed, "key order one,two,mode -> two,one,mode", true));
-        let first = one_command(|c| c.keys.insert(0, key("new", false, "bool")));
+        let first = one_command(|c| c.keys.insert(0, Key::raw("new", false, "bool", None)));
         assert_eq!(
             first.iter().map(|change| (change.subject.as_str(), change.detail.as_str(), change.breaking)).collect::<Vec<_>>(),
             [("a.b", "key order one,two,mode -> new,one,two,mode", true), ("a.b:new", "", false)],
             "a key put first takes the place a positional call gives the first key"
         );
-        assert!(is_breaking(&one_command(|c| c.keys.insert(2, key("new", false, "bool")))), "and one put between two of them");
-        assert!(!is_breaking(&one_command(|c| c.keys.push(key("new", false, "bool")))), "a key after all of them takes no place of theirs");
+        assert!(is_breaking(&one_command(|c| c.keys.insert(2, Key::raw("new", false, "bool", None)))), "and one put between two of them");
+        assert!(!is_breaking(&one_command(|c| c.keys.push(Key::raw("new", false, "bool", None)))), "a key after all of them takes no place of theirs");
         assert!(one_command(|c| drop(c.keys.remove(0))).iter().all(|change| change.kind == Kind::Key), "a key that is gone is judged on its own");
     }
 
@@ -501,19 +512,28 @@ mod tests {
     }
 
     #[test]
+    fn a_key_whose_doc_moved_has_no_change_of_its_own() {
+        // A key's `doc` is its piece of the command's `params` text, judged with the command and never as
+        // a change of its own. Every test builder fixes the piece the same on both sides, so this is the
+        // one test that moves it: a piece that moved while its text stands is no change an app sees.
+        let changes = one_command(|c| key_at(c, 0).doc = "another piece".to_string());
+        assert!(changes.is_empty(), "{changes:?}");
+    }
+
+    #[test]
     fn a_tool_that_became_bridge_only_breaks_and_one_that_stopped_does_not() {
         assert_eq!(only(&one_tool(|t| t.bridge_only = true)), ("t", Verb::Changed, "bridgeOnly false -> true", true));
-        let mut only_bridge = surface(vec![], vec![tool("t", json!({}))]);
+        let mut only_bridge = Surface::of(vec![], vec![Tool::of("t", json!({}))]);
         only_bridge.tools.first_mut().unwrap().bridge_only = true;
-        let open = surface(vec![], vec![tool("t", json!({}))]);
+        let open = Surface::of(vec![], vec![Tool::of("t", json!({}))]);
         assert_eq!(only(&compare(&only_bridge, &open)), ("t", Verb::Changed, "bridgeOnly true -> false", false));
     }
 
     #[test]
     fn nothing_that_becomes_of_a_tool_no_app_can_call_breaks() {
-        let mut old = surface(vec![], vec![tool("ui", json!({"type": "object", "properties": {"x": {"type": "integer"}}, "required": ["x"]}))]);
+        let mut old = Surface::of(vec![], vec![Tool::of("ui", json!({"type": "object", "properties": {"x": {"type": "integer"}}, "required": ["x"]}))]);
         old.tools.first_mut().unwrap().bridge_only = true;
-        assert_eq!(only(&compare(&old, &surface(vec![], vec![]))), ("ui", Verb::Removed, "", false));
+        assert_eq!(only(&compare(&old, &Surface::of(vec![], vec![]))), ("ui", Verb::Removed, "", false));
         let mut changed = old.clone();
         changed.tools.first_mut().unwrap().input_schema = json!({"type": "object", "properties": {}, "required": ["y"], "additionalProperties": false});
         let changes = compare(&old, &changed);
@@ -550,7 +570,7 @@ mod tests {
             (json!({"required": ["x"]}), json!({"required": ["x", 1]})),
             (json!({"properties": {}}), json!({"properties": true})),
         ] {
-            let changes = compare(&surface(vec![], vec![tool("t", was.clone())]), &surface(vec![], vec![tool("t", is.clone())]));
+            let changes = compare(&Surface::of(vec![], vec![Tool::of("t", was.clone())]), &Surface::of(vec![], vec![Tool::of("t", is.clone())]));
             assert!(is_breaking(&changes), "{was} -> {is}: {changes:?}");
         }
     }
@@ -565,8 +585,11 @@ mod tests {
 
     #[test]
     fn the_report_is_sorted_one_line_per_change_and_ends_in_a_count() {
-        let old = surface(vec![Command::of("b", "A label", vec![]), Command::of("a", "A label", vec![key("k", false, "bool")])], vec![tool("t", json!({}))]);
-        let new = surface(vec![Command::of("c", "A label", vec![]), Command::of("a", "A label", vec![key("k", true, "bool")])], vec![]);
+        let old = Surface::of(
+            vec![Command::of("b", "A label", vec![]), Command::of("a", "A label", vec![Key::raw("k", false, "bool", None)])],
+            vec![Tool::of("t", json!({}))],
+        );
+        let new = Surface::of(vec![Command::of("c", "A label", vec![]), Command::of("a", "A label", vec![Key::raw("k", true, "bool", None)])], vec![]);
         let text = report(&compare(&old, &new));
         assert_eq!(
             text,
@@ -579,19 +602,23 @@ mod tests {
     #[test]
     fn text_from_a_surface_is_escaped_so_each_change_is_one_line_of_five_fields() {
         let odd = "a\tb\nc\rd";
-        let old = surface(
+        let old = Surface::of(
             vec![
-                Command::of(odd, "A label", vec![key(odd, false, odd), word_key("w", &[odd, "v"]), key("k", false, "bool")]),
+                Command::of(
+                    odd,
+                    "A label",
+                    vec![Key::raw(odd, false, odd, None), Key::raw("w", false, "enum", Some(&[odd, "v"])), Key::raw("k", false, "bool", None)],
+                ),
                 Command::of("gone", "A label", vec![]),
             ],
-            vec![tool(odd, json!({"properties": {odd: {}}, "required": []}))],
+            vec![Tool::of(odd, json!({"properties": {odd: {}}, "required": []}))],
         );
         let mut new = old.clone();
         let edited = new.commands.first_mut().unwrap();
         edited.label = odd.to_string();
-        edited.keys = vec![key("k", false, "bool"), key(odd, false, "json"), word_key("w", &["v"])];
+        edited.keys = vec![Key::raw("k", false, "bool", None), Key::raw(odd, false, "json", None), Key::raw("w", false, "enum", Some(&["v"]))];
         new.commands.pop();
-        new.tools = vec![tool(odd, json!({"properties": {odd: {}}, "required": [odd]}))];
+        new.tools = vec![Tool::of(odd, json!({"properties": {odd: {}}, "required": [odd]}))];
         let changes = compare(&old, &new);
         let text = report(&changes);
         let lines: Vec<&str> = text.lines().collect();

@@ -199,35 +199,26 @@ mod tests {
         let _ = std::fs::remove_dir_all(OsString::from_vec(odd));
     }
 
-    fn key(name: &str, required: bool, key_type: &str, values: Option<&[&str]>) -> model::Key {
-        model::Key {
-            name: name.to_string(),
-            required,
-            key_type: key_type.to_string(),
-            values: values.map(|words| words.iter().map(|word| (*word).to_string()).collect()),
-            doc: String::new(),
-        }
-    }
-
     /// A small surface with one thing of each kind a change can break, and a tool no app can call.
     fn fixture() -> model::Surface {
         let command = |id: &str, keys: Vec<model::Key>| model::Command::of(id, id, keys);
-        let tool = |name: &str, bridge_only: bool| model::Tool {
-            name: name.to_string(),
-            description: String::new(),
-            bridge_only,
-            input_schema: serde_json::json!({"type": "object", "properties": {"x": {"type": "integer"}}, "required": []}),
-        };
-        model::Surface {
-            app: "effectcraft".to_string(),
-            engine_version: "1.0.0".to_string(),
-            pin: surface::TEST_PIN.to_string(),
-            commands: vec![
-                command("a.keep", vec![key("on", false, "bool", None), key("must", true, "string", None), key("mode", false, "enum", Some(&["x", "y"]))]),
+        let input = serde_json::json!({"type": "object", "properties": {"x": {"type": "integer"}}, "required": []});
+        let mut hidden = model::Tool::of("ui_click", input.clone());
+        hidden.bridge_only = true;
+        model::Surface::of(
+            vec![
+                command(
+                    "a.keep",
+                    vec![
+                        model::Key::raw("on", false, "bool", None),
+                        model::Key::raw("must", true, "string", None),
+                        model::Key::raw("mode", false, "enum", Some(&["x", "y"])),
+                    ],
+                ),
                 command("b.gone", vec![]),
             ],
-            tools: vec![tool("undo", false), tool("ui_click", true), tool("redo", false)],
-        }
+            vec![model::Tool::of("undo", input.clone()), hidden, model::Tool::of("redo", input)],
+        )
     }
 
     /// Run `diff` on the fixture and the fixture with `edit` applied, in files of their own.
@@ -258,11 +249,11 @@ mod tests {
             ("removed-tool", |s| drop(s.tools.pop())),
             ("key-became-required", |s| first_command(s).keys.first_mut().unwrap().required = true),
             ("key-type-changed", |s| first_command(s).keys.first_mut().unwrap().key_type = "json".to_string()),
-            ("new-required-key", |s| first_command(s).keys.push(key("fresh", true, "bool", None))),
+            ("new-required-key", |s| first_command(s).keys.push(model::Key::raw("fresh", true, "bool", None))),
             ("removed-enum-word", |s| first_command(s).keys.get_mut(2).unwrap().values = Some(vec!["x".to_string()])),
             ("removed-whole-word-list", |s| first_command(s).keys.get_mut(2).unwrap().values = None),
             ("keys-reordered", |s| first_command(s).keys.swap(0, 1)),
-            ("new-optional-key-first", |s| first_command(s).keys.insert(0, key("fresh", false, "bool", None))),
+            ("new-optional-key-first", |s| first_command(s).keys.insert(0, model::Key::raw("fresh", false, "bool", None))),
             ("tool-became-bridge-only", |s| s.tools.first_mut().unwrap().bridge_only = true),
         ];
         for (name, edit) in breaking {
@@ -276,14 +267,12 @@ mod tests {
         let compatible: [(&str, Edit); 8] = [
             ("nothing", |_| {}),
             ("new-command", |s| s.commands.push(model::Command { journal: false, ..model::Command::of("c.new", "", vec![]) })),
-            ("new-optional-key-last", |s| first_command(s).keys.push(key("fresh", false, "bool", None))),
+            ("new-optional-key-last", |s| first_command(s).keys.push(model::Key::raw("fresh", false, "bool", None))),
             ("bridge-only-tool-removed", |s| s.tools.retain(|tool| !tool.bridge_only)),
             ("new-enum-word", |s| first_command(s).keys.get_mut(2).unwrap().values = Some(vec!["x".to_string(), "y".to_string(), "z".to_string()])),
             ("key-became-optional", |s| first_command(s).keys.get_mut(1).unwrap().required = false),
             ("new-label", |s| first_command(s).label = "Other".to_string()),
-            ("new-tool", |s| {
-                s.tools.push(model::Tool { name: "zoom".to_string(), description: String::new(), bridge_only: false, input_schema: serde_json::json!({}) })
-            }),
+            ("new-tool", |s| s.tools.push(model::Tool::of("zoom", serde_json::json!({})))),
         ];
         for (name, edit) in compatible {
             assert!(exit_of_diff(name, edit) == ExitCode::SUCCESS, "{name}");

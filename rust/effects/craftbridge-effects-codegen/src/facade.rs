@@ -431,12 +431,11 @@ mod tests {
 
     #[test]
     fn a_key_whose_type_the_surface_spells_wrong_is_refused_naming_the_command_and_the_key() {
-        let shaped = |key_type: &str, values: Option<Vec<String>>| Key { key_type: key_type.to_string(), values, ..key("mode", KeyType::Json) };
         let refusal = |bad: Key| plan(&[command("layer.blur", vec![bad])]).err().unwrap_or_default();
         for (bad, why) in [
-            (shaped("integer", None), "no type is named `integer`"),
-            (shaped("enum", None), "an `enum` names its words"),
-            (shaped("bool", Some(vec!["on".to_string()])), "only an `enum` has words"),
+            (Key::raw("mode", false, "integer", None), "no type is named `integer`"),
+            (Key::raw("mode", false, "enum", None), "an `enum` names its words"),
+            (Key::raw("mode", false, "bool", Some(&["on"])), "only an `enum` has words"),
         ] {
             let error = refusal(bad);
             assert!(error.starts_with("command `layer.blur` key `mode`: ") && error.contains(why), "{error}");

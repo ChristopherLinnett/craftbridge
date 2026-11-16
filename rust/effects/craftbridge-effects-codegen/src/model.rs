@@ -129,6 +129,37 @@ impl Key {
     pub(crate) fn of(name: &str, required: bool, key_type: KeyType) -> Self {
         Key::typed(name, required, &key_type, &format!("{name}{}", if required { "" } else { "?" }))
     }
+
+    /// A key as its file spells it: its type a string, its words as given and no piece of `params` text.
+    /// It is what the diff's tests compare, and the only way to write the shapes [`Key::typed`] cannot
+    /// build: an `enum` with no words, a type string no rule reads, words beside a type that has none.
+    /// This is the one place a test writes a key's fields, so a field the surface gains is given its test
+    /// value once here, as [`Command::of`] does for commands.
+    pub(crate) fn raw(name: &str, required: bool, key_type: &str, values: Option<&[&str]>) -> Self {
+        let words = values.map(|list| list.iter().map(|word| (*word).to_string()).collect());
+        Key { name: name.to_string(), required, key_type: key_type.to_string(), values: words, doc: String::new() }
+    }
+}
+
+#[cfg(test)]
+impl Surface {
+    /// A surface as a test writes one: the app, the version and the pin, which no diff rule reads, stand
+    /// here, and the test writes only the commands and tools. Every test module builds its surfaces here,
+    /// so a field the surface gains is given its test value once, as [`Command::of`] does for commands.
+    pub(crate) fn of(commands: Vec<Command>, tools: Vec<Tool>) -> Self {
+        Surface { app: "effectcraft".to_string(), engine_version: "1.2.3".to_string(), pin: "0123abcd".to_string(), commands, tools }
+    }
+}
+
+#[cfg(test)]
+impl Tool {
+    /// A tool as a test writes one: no description of its own, and open to apps, which is the tool the
+    /// diff's rules on what an app loses judge; a test whose rule needs `bridgeOnly` says so on the tool
+    /// it built. Every test module builds its tools here, so a field the surface gains is given its test
+    /// value once, as [`Command::of`] does for commands.
+    pub(crate) fn of(name: &str, input_schema: Value) -> Self {
+        Tool { name: name.to_string(), description: String::new(), bridge_only: false, input_schema }
+    }
 }
 
 #[cfg(test)]
@@ -136,24 +167,13 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn key(name: &str) -> Key {
-        Key { name: name.to_string(), required: false, key_type: "json".to_string(), values: None, doc: String::new() }
-    }
-
-    fn surface(commands: Vec<Command>, tools: Vec<Tool>) -> Surface {
-        Surface { app: "effectcraft".to_string(), engine_version: "1.2.3".to_string(), pin: "0123abcd".to_string(), commands, tools }
-    }
-
-    fn tool(name: &str) -> Tool {
-        Tool { name: name.to_string(), description: String::new(), bridge_only: false, input_schema: json!({"type": "object"}) }
-    }
-
     #[test]
     fn a_surface_is_written_with_its_keys_sorted_and_read_back_whole() {
-        let mut typed = key("mode");
-        typed.key_type = "enum".to_string();
-        typed.values = Some(vec!["on".to_string(), "off".to_string()]);
-        let original = surface(vec![Command::of("a.first", "A label", vec![typed, key("plain")])], vec![tool("undo")]);
+        let mode = Key::typed("mode", false, &KeyType::Enum(vec!["on".to_string(), "off".to_string()]), "");
+        let original = Surface::of(
+            vec![Command::of("a.first", "A label", vec![mode, Key::typed("plain", false, &KeyType::Json, "")])],
+            vec![Tool::of("undo", json!({"type": "object"}))],
+        );
         let text = original.render().unwrap();
         assert!(text.starts_with("{\n  \"app\": \"effectcraft\",\n  \"commands\": ["), "{text}");
         assert!(text.ends_with("}\n") && !text.ends_with("\n\n"));
@@ -185,15 +205,18 @@ mod tests {
 
     #[test]
     fn a_name_twice_is_refused() {
-        let twice = surface(vec![Command::of("a", "A label", vec![]), Command::of("a", "A label", vec![])], vec![]);
+        let twice = Surface::of(vec![Command::of("a", "A label", vec![]), Command::of("a", "A label", vec![])], vec![]);
         assert!(twice.ensure_unique().unwrap_err().contains("`a`"));
-        let tools = surface(vec![], vec![tool("t"), tool("t")]);
+        let tools = Surface::of(vec![], vec![Tool::of("t", json!({"type": "object"})), Tool::of("t", json!({"type": "object"}))]);
         assert!(tools.ensure_unique().unwrap_err().contains("two tools are named `t`"));
-        let keys = surface(vec![Command::of("a", "A label", vec![key("k"), key("k")])], vec![]);
+        let json = Key::typed("k", false, &KeyType::Json, "");
+        let keys = Surface::of(vec![Command::of("a", "A label", vec![json.clone(), json.clone()])], vec![]);
         assert!(keys.ensure_unique().unwrap_err().contains("two keys named `k`"));
         assert!(Surface::parse(&twice.render().unwrap()).is_err(), "a file is checked as it is read");
-        assert!(
-            surface(vec![Command::of("a", "A label", vec![key("k")]), Command::of("b", "A label", vec![key("k")])], vec![tool("t")]).ensure_unique().is_ok()
+        let apart = Surface::of(
+            vec![Command::of("a", "A label", vec![json.clone()]), Command::of("b", "A label", vec![json])],
+            vec![Tool::of("t", json!({"type": "object"}))],
         );
+        assert!(apart.ensure_unique().is_ok());
     }
 }
