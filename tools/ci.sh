@@ -20,6 +20,8 @@ cd "$CRAFTBRIDGE_ROOT"
 # which `craftbridge_cargo` calls for rust/: rustup selects a pinned toolchain from the folder a command runs
 # in — rust/rust-toolchain.toml inside rust/, the lint library's own pin inside its folder — and no cargo
 # runs while the repository root holds a Cargo configuration that every stage would merge (tools/env.sh).
+# The one exception is the lint library's run, which `cargo xtask dylint` starts itself so the run holds
+# that check's shared lock (rust/xtask/src/lints.rs), in the same folder the guard chooses.
 
 # Cargo inside the lint library's folder, its messages through `cargo xtask compiled` like every other
 # compilation's: `in_library <cargo arguments>`. rustup reads a toolchain pin from the folder a command runs
@@ -85,10 +87,18 @@ compiling() {
 }
 # The lint library's run over the workspace, `lint_library <cargo check arguments>`. `cargo dylint` builds
 # the library with a plain `cargo build`, which would rewrite its Cargo.lock when the manifest has moved,
-# so the lock is read `--locked` first, as every other build here reads its own.
+# so the lock is read `--locked` first, as every other build here reads its own. The run goes through
+# `cargo xtask dylint` rather than `compiling`: that command holds the one file lock every run that builds
+# the lint library takes turns on (rust/xtask/src/lints.rs), so a workspace test running the library's
+# probe tests into this same build folder beside a gate never replaces what the gate is reading, nor the
+# other way about. The command starts its own cargo in rust/ and passes cargo's messages through whole,
+# so `xtask compiled` sees exactly what `compiling` handed it. Of the two things the guarded cargo adds, the
+# command runs in rust/ itself, and a Cargo configuration at the repository root is refused by the guarded
+# `cargo metadata` this function runs first, whichever stages the gate was given, so none reaches the run.
 lint_library() {
   craftbridge_cargo metadata --manifest-path "$CRAFTBRIDGE_LINT_LIBRARY/Cargo.toml" --locked --format-version 1 >/dev/null || return 1
-  compiling dylint --path "$CRAFTBRIDGE_LINT_LIBRARY" -- "$@"
+  build_xtask || return 1
+  "$xtask_run/debug/xtask" dylint --path "$CRAFTBRIDGE_LINT_LIBRARY" -- "$@" | "$xtask_run/debug/xtask" compiled
 }
 # --all-features: code behind a feature is code that ships to whoever turns the feature on. What ships is
 # linted with every never-crash lint; the tests' build takes back the two that name the panicking calls

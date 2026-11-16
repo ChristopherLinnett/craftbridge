@@ -132,8 +132,7 @@ fn check(root: &Path, dependencies: &Path) -> Result<usize, Vec<String>> {
 /// swept and made, so no sweep sees one made and not yet held.
 fn claim_scratch(cache: &Path) -> Result<(PathBuf, fs::File), String> {
     fs::create_dir_all(cache).map_err(|error| format!("could not create {}: {error}", cache.display()))?;
-    let folder = fs::File::open(cache).map_err(|error| format!("could not open {}: {error}", cache.display()))?;
-    folder.lock().map_err(|error| format!("could not lock {}: {error}", cache.display()))?;
+    let _folder = crate::filelock::hold(cache)?;
     let left = fs::read_dir(cache).map_err(|error| format!("{}: {error}", cache.display()))?;
     for entry in left {
         let entry = entry.map_err(|error| format!("{}: {error}", cache.display()))?;
@@ -141,7 +140,7 @@ fn claim_scratch(cache: &Path) -> Result<(PathBuf, fs::File), String> {
             continue;
         }
         let abandoned = match fs::File::open(entry.path().join(HELD)) {
-            Ok(lock) => lock.try_lock().is_ok(),
+            Ok(opened) => abandoned(&entry.path(), &opened).map_err(|error| format!("{}: {error}", entry.path().join(HELD).display()))?,
             // A scratch with no lock file is one its check is still making or already removing, which it
             // holds all the while; a check stopped in between leaves no more than an empty folder.
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
@@ -152,10 +151,16 @@ fn claim_scratch(cache: &Path) -> Result<(PathBuf, fs::File), String> {
         }
     }
     let scratch = crate::scratch::create_in(cache, SCRATCH_TAG)?;
-    let held = fs::File::create(scratch.join(HELD))
-        .and_then(|lock| lock.lock().map(|()| lock))
-        .map_err(|error| format!("could not hold {}: {error}", scratch.display()))?;
+    let held = crate::filelock::hold(&scratch.join(HELD))?;
     Ok((scratch, held))
+}
+
+/// Whether `scratch`, whose lock file was opened as `opened`, is one no check is using. A check removes the
+/// lock file before it lets the lock go, so a lock taken on a file no longer in the scratch was taken from
+/// a check that has just finished and removed its scratch, not from one that stopped: removing that scratch
+/// again would fail.
+fn abandoned(scratch: &Path, opened: &fs::File) -> std::io::Result<bool> {
+    Ok(crate::filelock::try_lock(opened)? && scratch.join(HELD).exists())
 }
 
 /// Remove a scratch with its lock file last, so that one stopped while it is removed still has its lock
@@ -331,7 +336,7 @@ mod tests {
     /// of them would show itself: the same plan, bytes apart.
     #[test]
     fn the_rebuild_reads_nothing_of_the_machine() {
-        let child = crate::scratch::rerun(
+        crate::scratch::rerun(
             "plan_views::tests::the_plan_rebuilt_on_another_machine",
             &[
                 ("TZ", OsStr::new("Pacific/Kiritimati")),
@@ -339,11 +344,7 @@ mod tests {
                 ("LANG", OsStr::new("tr_TR.UTF-8")),
                 ("NODE_OPTIONS", OsStr::new(ANOTHER_MACHINE)),
             ],
-        );
-        assert!(
-            child.status.success(),
-            "rebuilt with another clock, zone, language and listing order, the plan did not match:\n{}",
-            String::from_utf8_lossy(&child.stdout)
+            "rebuilt with another clock, zone, language and listing order, the plan did not match",
         );
     }
 
@@ -458,8 +459,11 @@ mod tests {
         let cache = dependencies().join(".cache");
         let (running, held) = claim_scratch(&cache).unwrap();
         let note = Scratch::new("plan-views-left-at");
-        let child = crate::scratch::rerun("plan_views::tests::a_check_stops_before_removing_its_scratch", &[(LEFT_AT, note.0.join("path").as_os_str())]);
-        assert!(child.status.success(), "the stopping check did not run:\n{}", String::from_utf8_lossy(&child.stdout));
+        crate::scratch::rerun(
+            "plan_views::tests::a_check_stops_before_removing_its_scratch",
+            &[(LEFT_AT, note.0.join("path").as_os_str())],
+            "the stopping check did not run",
+        );
         let stopped = PathBuf::from(fs::read_to_string(note.0.join("path")).unwrap());
         let unheld = crate::scratch::create_in(&cache, SCRATCH_TAG).unwrap();
         let (next, own) = claim_scratch(&cache).unwrap();
@@ -471,6 +475,18 @@ mod tests {
             remove_scratch(&scratch).unwrap();
             drop(lock);
         }
+    }
+
+    /// A check that finishes between a sweep opening its lock file and taking the lock has removed its
+    /// scratch and let the lock go: the sweep must not take it for one a stopped check left.
+    #[test]
+    fn a_check_that_finishes_while_a_sweep_looks_is_not_a_stopped_one() {
+        let (scratch, held) = claim_scratch(&dependencies().join(".cache")).unwrap();
+        let opened = fs::File::open(scratch.join(HELD)).unwrap();
+        assert!(!abandoned(&scratch, &opened).unwrap(), "the scratch of a running check was taken for a stopped one");
+        remove_scratch(&scratch).unwrap();
+        drop(held);
+        assert!(!abandoned(&scratch, &opened).unwrap(), "the scratch of a check that finished was taken for a stopped one");
     }
 
     /// A check that stops between claiming its scratch and removing it, run only by the test above: it

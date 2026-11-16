@@ -448,6 +448,62 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     Ok(errors)
 }
 
+/// Where a worktree's runs of the lint library build, its probe tests' and its gate's, the library and the
+/// probe crate both, so two runs at once there break each other three ways. Every run builds the library,
+/// and Cargo writes that build's plain copy afresh even when nothing changed, which the run then compares
+/// with the copy the driver loads: a run beside it can find the plain copy gone or half written. A build
+/// whose bytes differ, from sources edited meanwhile, is copied over the copy the driver loads, in place,
+/// and the system kills a driver of another run that still holds it. And Cargo knows a workspace's path
+/// crate by its place in the workspace and judges it by file times, so a probe crate of the same name and
+/// place that another run built after this run's sources were written is taken for this one's, with the
+/// other's files and paths. So every run holds the system's file lock on one file there, held by
+/// [`hold_dylint_lock`] from before its probe is written until it ends: the lock holds between processes,
+/// as a gate's stage and two test suites beside it are, and between the threads of one, and each probe's
+/// sources are newer than every build before them.
+pub(crate) const DYLINT_TARGET: &str = "rust/target";
+
+/// Take the one lock every run that builds in [`DYLINT_TARGET`] takes turns on: a file made in it, so the
+/// lock sits where those runs build. A pre-push gate builds in the hook's own folder instead, one gate at a
+/// time and beside no test, and its lock here costs it nothing. Hold the returned file for the whole run:
+/// bound to `_` it would be let go at once.
+pub(crate) fn hold_dylint_lock(root: &Path) -> Result<std::fs::File, String> {
+    let target = root.join(DYLINT_TARGET);
+    std::fs::create_dir_all(&target).map_err(|error| format!("could not create {}: {error}", target.display()))?;
+    crate::filelock::hold(&target.join("dylint-probe.lock"))
+}
+
+/// `cargo dylint <arguments>`, from the workspace's folder and holding [`hold_dylint_lock`]: the way
+/// `tools/ci.sh` runs it, so a stage and a workspace test's probe runs beside it never build over one
+/// another. The child owns the run's streams, so what cargo prints reaches the stage's pipe to
+/// `cargo xtask compiled` whole.
+pub(crate) fn run_dylint(root: &Path, arguments: &[&str]) -> std::process::ExitCode {
+    let _alone = match hold_dylint_lock(root) {
+        Ok(locked) => locked,
+        Err(failure) => {
+            eprintln!("xtask: {failure}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+    let running = std::process::Command::new(env!("CARGO")).arg("dylint").args(arguments).current_dir(root.join("rust")).spawn();
+    let status = match running.and_then(|mut running| running.wait()) {
+        Ok(status) => status,
+        Err(failure) => {
+            eprintln!("xtask: could not run cargo dylint: {failure}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+    match status.code() {
+        Some(0) => std::process::ExitCode::SUCCESS,
+        Some(code) => std::process::ExitCode::from(code.clamp(1, 255) as u8),
+        // Which signal says who ended it: the system kills a driver whose loaded library was rewritten
+        // under it, and an interrupt is somebody at the terminal.
+        None => {
+            eprintln!("xtask: cargo dylint was ended by {status}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -964,24 +1020,54 @@ panic = "unwind"
         [("Cargo.toml", "[package]\nname = \"probe\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\n"), ("src/lib.rs", source)]
     }
 
-    /// The probe tests share one library build in `rust/target`, and a `cargo dylint` run copies a fresh
-    /// build into `target/dylint/libraries` when it finds the library's sources newer than the copy. Two
-    /// runs racing a rebuild can have the driver dlopen a copy mid-write, so within one test process the
-    /// runs take turns; the gate's stages build the library before the tests, and one run at a time is
-    /// what a warm cache costs no differently.
-    static DYLINT: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     /// The same run over a tree of files written into a scratch folder, from the folder `run_in` inside it.
     fn dylint_over_tree(files: &[(&str, &str)], run_in: &str) -> (bool, String) {
         outcome(cargo_dylint(files, run_in, &[], &["--", "--workspace", "--all-features"]))
     }
 
     /// `cargo dylint` with the lint library over a tree of files, from the folder `run_in` inside it:
-    /// `command` before the library's `--path` and `rest` after it. The runs take turns.
+    /// `command` before the library's `--path` and `rest` after it. The lock is taken before the probe
+    /// is written and held until the run ends, as [`hold_dylint_lock`] says.
     fn cargo_dylint(files: &[(&str, &str)], run_in: &str, command: &[&str], rest: &[&str]) -> std::process::Output {
         let library = crate::repo_root().join(machinery::LINT_LIBRARY).to_string_lossy().into_owned();
-        let _alone = DYLINT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        cargo_in_scratch(files, run_in, &[&["dylint"], command, &["--path", library.as_str()], rest].concat(), "rust/target")
+        let _alone = hold_dylint_lock(&crate::repo_root()).expect("the probe runs take turns");
+        cargo_in_scratch(files, run_in, &[&["dylint"], command, &["--path", library.as_str()], rest].concat(), DYLINT_TARGET)
+    }
+
+    /// A stage and a suite's probe runs share [`DYLINT_TARGET`], so the stage's run takes the same lock:
+    /// while it is held, the command the stage runs waits. The command runs `dylint --version`, which
+    /// answers at once and builds nothing, so only the lock is weighed here.
+    #[test]
+    fn the_gate_run_takes_the_lock_the_probe_tests_take() {
+        let root = crate::repo_root();
+        let _alone = hold_dylint_lock(&root).unwrap();
+        let (ended, waited) = std::sync::mpsc::channel();
+        let running = std::thread::spawn(move || {
+            let code = run_dylint(&root, &["--version"]);
+            let _ = ended.send(code);
+        });
+        assert!(waited.recv_timeout(std::time::Duration::from_millis(500)).is_err(), "the gate's run came in while the lock was held");
+        drop(_alone);
+        // A run beside another waits for every probe run of that one before its own turn; the wait is
+        // bounded so a lock lost in some other code fails this test with its name, not the suite in
+        // silence.
+        let code = waited.recv_timeout(std::time::Duration::from_secs(600)).expect("the run takes the lock once it is let go");
+        assert_eq!(code, std::process::ExitCode::SUCCESS, "cargo dylint --version answers with success");
+        running.join().unwrap();
+    }
+
+    /// The stage fails on what the lint library refuses only because its command fails as its cargo does:
+    /// `cargo xtask compiled`, at the other end of the pipe, judges what the compilation read, not what the
+    /// lints said, so a command answering success over a failed cargo would let every refusal through. An
+    /// option cargo-dylint does not know fails before anything is built, so only the exit is weighed.
+    #[test]
+    fn the_gate_run_fails_as_its_cargo_does() {
+        let root = crate::repo_root();
+        let unknown = "--an-option-cargo-dylint-does-not-know";
+        let cargo = std::process::Command::new(env!("CARGO")).args(["dylint", unknown]).current_dir(root.join("rust")).output().unwrap();
+        let code = cargo.status.code().expect("cargo dylint ended by itself");
+        assert_ne!(code, 0, "cargo dylint took {unknown}: {}", String::from_utf8_lossy(&cargo.stderr));
+        assert_eq!(run_dylint(&root, &[unknown]), std::process::ExitCode::from(u8::try_from(code).unwrap()), "the gate's run answered other than its cargo");
     }
 
     /// Clippy's two index lints, as the gate forbids them, over the same kind of tree.

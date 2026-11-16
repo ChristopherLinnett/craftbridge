@@ -1,8 +1,9 @@
 //! CraftBridge's rule checks and regeneration: `cargo xtask rules` and `cargo xtask generate`; the plan's
 //! views, `cargo xtask plan-views --check`, rebuilt from their sources and compared; the judgements
-//! `tools/ci.sh` hands over from the stages it runs, `cargo xtask skipped-tasks <gradle log>` and `cargo
-//! xtask compiled`; the file lists its stages read, `cargo xtask files <kind>`; and the pins the doctor
-//! and the gate read, `cargo xtask pins` and `cargo xtask swift-builds`.
+//! `tools/ci.sh` hands over from the stages it runs, `cargo xtask skipped-tasks <gradle log>`,
+//! `cargo xtask compiled`, and the lint library's run under its lock, `cargo xtask dylint …`; the file
+//! lists its stages read, `cargo xtask files <kind>`; and the pins the doctor and the gate read,
+//! `cargo xtask pins` and `cargo xtask swift-builds`.
 //!
 //! The rules in `AGENTS.md` that no compiler, formatter or linter already enforces are checked here,
 //! behind one command, so a change cannot merge with one broken. Each check lives in its own module: a
@@ -18,6 +19,7 @@ mod compiled;
 mod direction;
 mod duplicates;
 mod effects_api;
+mod filelock;
 mod files;
 mod generate;
 mod generated;
@@ -75,6 +77,7 @@ fn main() -> ExitCode {
         ["skipped-tasks", log] => gradle_log::run(log),
         ["files", kind] => files::run(&root, kind),
         ["compiled"] => compiled::run(&root),
+        ["dylint", arguments @ ..] => lints::run_dylint(&root, arguments),
         ["upstream", "pin", rev] => upstream::run(&root, rev),
         ["upstream", "source"] => upstream::run_source(&root),
         ["swift-lint"] => swift_lint::run(&root),
@@ -96,6 +99,7 @@ fn usage() {
     eprintln!("       cargo xtask upstream pin <rev>   (through tools/update-upstream.sh: <rev> is a commit of official EffectCraft main)");
     eprintln!("       cargo xtask upstream source   (the official URL and the full commit the pin names on official main, for tools/oracle.sh)");
     eprintln!("       cargo <check|clippy|test> --message-format=json … | cargo xtask compiled");
+    eprintln!("       cargo xtask dylint <cargo-dylint arguments…>   (cargo dylint, taking turns on the lock every lint library run shares)");
     eprintln!("       cargo xtask swift-lint");
     eprintln!("       cargo xtask pins");
     eprintln!("       cargo xtask swift-builds")
