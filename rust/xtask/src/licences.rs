@@ -354,7 +354,8 @@ fn gradle_resolved_modules(root: &Path) -> Result<Vec<String>, String> {
             .collect();
         let reason = if reason.is_empty() {
             let noise: Vec<&str> = text.lines().filter(|line| !line.trim().is_empty()).collect();
-            noise[noise.len().saturating_sub(4)..].to_vec()
+            // The last four non-blank lines, or every one when there are fewer.
+            noise.iter().skip(noise.len().saturating_sub(4)).copied().collect()
         } else {
             reason
         };

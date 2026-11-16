@@ -1,10 +1,16 @@
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
+# Tests index slices, arrays and vectors freely (the refusal is for the code a shipping library runs on
+# input); clippy has no such setting for `exit` or `string_slice`, so tests neither stop the process nor
+# slice a string.
+allow-indexing-slicing-in-tests = true
 cognitive-complexity-threshold = 30
 # The never-crash calls again, by path: clippy's own lints for them do not look inside a `macro_rules!`
 # expansion or at a method taken as a value (`.map(Option::unwrap)`), and these do. They also name the
-# other ways to stop the process. Tests are linted apart with both lints allowed (tools/ci.sh), as the
+# other ways to stop the process, `exit` among them: clippy's `exit` lint passes any function called
+# `main` and every method, which these do not, and the C library's exits are the calls the Swift rule
+# refuses as `exit` and `abort`. Tests are linted apart with both lints allowed (tools/ci.sh), as the
 # `allow-*-in-tests` settings above allow the lints they shadow.
 disallowed-methods = [
     { path = "core::option::Option::unwrap", reason = "never crash: return the error (AGENTS.md §3)" },
@@ -13,9 +19,24 @@ disallowed-methods = [
     { path = "core::result::Result::expect", reason = "never crash: return the error (AGENTS.md §3)" },
     { path = "core::result::Result::unwrap_err", reason = "never crash: return the error (AGENTS.md §3)" },
     { path = "core::result::Result::expect_err", reason = "never crash: return the error (AGENTS.md §3)" },
+    { path = "std::process::exit", reason = "never crash: the engine keeps the document and returns an error (AGENTS.md §3)" },
     { path = "std::process::abort", reason = "never crash: the engine keeps the document and returns an error (AGENTS.md §3)" },
+    { path = "libc::exit", reason = "never crash: the engine keeps the document and returns an error (AGENTS.md §3)" },
+    { path = "libc::_exit", reason = "never crash: the engine keeps the document and returns an error (AGENTS.md §3)" },
+    { path = "libc::abort", reason = "never crash: the engine keeps the document and returns an error (AGENTS.md §3)" },
     { path = "std::panic::panic_any", reason = "never crash: return the error (AGENTS.md §3)" },
     { path = "std::panic::resume_unwind", reason = "never crash: return the error (AGENTS.md §3)" },
+    # Indexing spelled as a call instead of the `[]` operator resolves to these same trait methods, and
+    # clippy resolves a path through the impls and aliases to the trait's own: every `v.index(i)`,
+    # `(Index::index)(v, i)` or captured `C::index` falls here, whatever the receiver's type. The `[]`
+    # operator itself belongs to clippy's index lints and the gate's lint library (AGENTS.md §3).
+    { path = "core::ops::Index::index", reason = "never crash: indexing panics on a missing key or index; use get() (AGENTS.md §3)" },
+    { path = "core::ops::IndexMut::index_mut", reason = "never crash: indexing panics on a missing key or index; use get() (AGENTS.md §3)" },
+    # A process is not owed UTF-8: one argument or variable that is not valid Unicode panics these
+    # iterators mid-iteration. The `_os` accessors hand over every item whole, so the tool can report
+    # the offending one and keep going (AGENTS.md §3).
+    { path = "std::env::args", reason = "never crash: a non-Unicode argument panics this iterator; read std::env::args_os and report the argument (AGENTS.md §3)" },
+    { path = "std::env::vars", reason = "never crash: a non-Unicode variable panics this iterator; read std::env::vars_os and skip or report it (AGENTS.md §3)" },
 ]
 disallowed-macros = [
     { path = "core::panic", reason = "never crash: return the error (AGENTS.md §3)" },

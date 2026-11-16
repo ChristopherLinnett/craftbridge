@@ -520,6 +520,10 @@ fn stray_manifests(rust_dir: &Path, root: &Path, members: &[Crate]) -> Result<Ve
         .into_iter()
         .filter(|file| file.path.file_name().is_some_and(|name| name == "Cargo.toml"))
         .filter(|file| std::fs::canonicalize(&file.path).is_ok_and(|path| !known.contains(&path)))
+        // The gate's lint library is the one package under `rust/` outside the workspace: `cargo dylint`
+        // builds it in the stages that run it, and the rules read its sources (AGENTS.md §3, §10). Its
+        // manifest alone is named, so any other package off the workspace graph is still refused.
+        .filter(|file| file.path != root.join(crate::machinery::LINT_LIBRARY).join("Cargo.toml"))
         .map(|file| {
             format!("{}: a Cargo package that is no workspace member: no stage compiles it and no rule reads it", crate::report::shown(root, &file.path))
         })
@@ -533,6 +537,12 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     let crates = crate::meta::read(&rust_dir, crate::meta::Graph::Workspace)?;
     let mut errors = table_errors(ENTRIES);
     errors.extend(local_packages_outside(&crate::meta::read(&rust_dir, crate::meta::Graph::Resolved)?, root));
+    // The gate's lint library is a workspace of its own the gate compiles: a local package its graph holds,
+    // a workspace crate by path included, would bring code in no rule reads as its, the same way.
+    let library_dir = root.join(crate::machinery::LINT_LIBRARY);
+    if library_dir.join("Cargo.toml").is_file() {
+        errors.extend(local_packages_outside(&crate::meta::read(&library_dir, crate::meta::Graph::Resolved)?, root));
+    }
     errors.extend(stray_manifests(&rust_dir, root, &crates)?);
     let inputs = inputs_from(&crates, &rust_dir, root);
     for input in &inputs {
@@ -707,8 +717,34 @@ mod tests {
         let copy = crate::scratch::rust_tree_copy("layers-stray");
         copy.write("rust/misc/stray/Cargo.toml", "[package]\nname = \"film-stray\"\nversion = \"0.1.0\"\nedition = \"2024\"\n");
         copy.write("rust/misc/stray/src/lib.rs", "\n");
+        // The copy carries the lint library, the one package outside the workspace the rule exempts.
+        assert!(copy.0.join(crate::machinery::LINT_LIBRARY).join("Cargo.toml").is_file(), "the copy holds the lint library");
         let errors = check(&copy.0).unwrap();
         assert_eq!(errors, ["rust/misc/stray/Cargo.toml: a Cargo package that is no workspace member: no stage compiles it and no rule reads it"]);
+    }
+
+    /// The gate's lint library is a workspace of its own, and a local package its graph holds — a
+    /// workspace crate by path, here — is refused as one in the workspace's graph is.
+    #[test]
+    fn a_local_package_in_the_lint_library_s_graph_is_refused() {
+        let copy = crate::scratch::rust_tree_copy("layers-library-path");
+        let manifest = copy.0.join(crate::machinery::LINT_LIBRARY).join("Cargo.toml");
+        let original = std::fs::read_to_string(&manifest).unwrap();
+        let with_path = original.replacen("[lib]", "[dependencies]\ncraftbridge-core = { path = \"../core/craftbridge-core\" }\n\n[lib]", 1);
+        std::fs::write(&manifest, with_path).unwrap();
+        // The rules read the graph `--locked`, so the copy's lock is brought up to date first, offline, from
+        // what the workspace's own build already fetched.
+        let locked = std::process::Command::new(env!("CARGO"))
+            .args(["metadata", "--format-version", "1", "--offline"])
+            .current_dir(manifest.parent().unwrap())
+            .output()
+            .unwrap();
+        assert!(locked.status.success(), "{}", String::from_utf8_lossy(&locked.stderr));
+        let errors = check(&copy.0).unwrap();
+        assert!(
+            errors.iter().any(|e| e.starts_with("rust/core/craftbridge-core/Cargo.toml: craftbridge-core is a local package outside the workspace, asked for by rust/never-crash-lints/Cargo.toml")),
+            "{errors:?}"
+        );
     }
 
     #[test]

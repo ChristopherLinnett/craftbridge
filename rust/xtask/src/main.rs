@@ -55,7 +55,16 @@ fn repo_root() -> PathBuf {
 }
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    // `args_os`, never `args`: one argument that is not valid Unicode panics the UTF-8 iterator
+    // mid-iteration (AGENTS.md §3). The `_os` items are collected into `String`s, and a non-Unicode
+    // one ends the run with a line naming it, not with a panic.
+    let args: Vec<String> = match std::env::args_os().skip(1).map(std::ffi::OsString::into_string).collect::<Result<Vec<_>, _>>() {
+        Ok(args) => args,
+        Err(argument) => {
+            eprintln!("xtask: argument `{}` is not valid Unicode; nothing ran", argument.to_string_lossy());
+            return ExitCode::from(2);
+        }
+    };
     let root = repo_root();
     // Every argument is matched whole: a misspelt `--check` must not quietly become a run that writes.
     match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {

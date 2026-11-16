@@ -1,0 +1,7 @@
+# The nightly this library compiles against, and the components dylint builds a lint library and its
+# driver with; `cargo dylint` checks the workspace with it too. It is read only for commands run in this
+# folder: the workspace's own toolchain is rust/rust-toolchain.toml. clippy is here because the gate lints
+# this library with it, on this toolchain (AGENTS.md §3, §10).
+[toolchain]
+channel = "nightly-2026-08-20"
+components = ["llvm-tools-preview", "rustc-dev", "clippy"]

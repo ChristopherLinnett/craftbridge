@@ -1,0 +1,65 @@
+# The gate's own never-crash lints that clippy has no lint for (AGENTS.md §3), as a dylint library:
+# `cargo dylint` builds it with the nightly its rust-toolchain.toml pins and runs it over the workspace,
+# which stays on its own stable pin. It speaks the compiler's internals, so it is no workspace member and
+# keeps its own workspace table; only `cargo dylint` and the gate's clippy run build it.
+# It inherits its edition and licence the way a workspace member does, from its own workspace table
+# below, which carries the repository's; it carries no version, since it is no artifact (AGENTS.md §11).
+[package]
+name = "never-crash-lints"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# The library is gate machinery, so the gate lints it as it lints the workspace's own crates (AGENTS.md
+# §3): clippy runs over it, on the library's own toolchain, under this table. Cargo shares a lint table
+# only within one workspace, so the table is written again here, and a test of xtask's, which the gate's
+# `rust_test` stage runs, fails on any difference from the workspace's own, which stays the one definition.
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+# The repository's edition and licence, as rust/Cargo.toml's `[workspace.package]` states them: Cargo
+# shares a workspace table only within one workspace, so they are written again here, and a test of
+# xtask's, which the gate's `rust_test` stage runs, fails on any difference.
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.lints.rust]
+# `deny`, not `forbid`: the UniFFI scaffolding and the platform modules need `allow`, which
+# `forbid` would refuse. Where `allow(unsafe_code)` may appear is checked by `cargo xtask rules`.
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+# Never crash (the Craft house rules): no panicking shortcuts outside tests, no stopping the process, and
+# no unchecked index into a slice, array or vector (`indexing_slicing`) or a string (`string_slice`, which
+# `indexing_slicing` leaves to it). Those with no item-level exception are `forbid`, so the compiler itself
+# refuses every `allow` of them, however it is spelt and wherever the file sits; tests keep `unwrap`,
+# `expect`, `panic!` and indexing through rust/clippy.toml's `allow-*-in-tests`. `expect_used` stays
+# `deny` for its one exception, an item-level allow on a provably infallible literal.
+unwrap_used = "forbid"
+expect_used = "deny"
+panic = "forbid"
+unimplemented = "forbid"
+todo = "forbid"
+unreachable = "forbid"
+exit = "forbid"
+indexing_slicing = "forbid"
+string_slice = "forbid"
+undocumented_unsafe_blocks = "deny"
+# The same calls by path (rust/clippy.toml), which also reach a macro's expansion and a method taken as a
+# value; `deny`, because an item's `.expect("…")` on a provably infallible literal allows both.
+disallowed_methods = "deny"
+disallowed_macros = "deny"
+# EffectCraft's own workspace lints, so CraftBridge's code meets the bar EffectCraft's does. `dbg_macro`
+# is denied where EffectCraft only warns: a `dbg!` left in a library prints into the host app's log.
+cognitive_complexity = "deny"
+too_many_arguments = "deny"
+wildcard_imports = "deny"
+dbg_macro = "deny"
+needless_range_loop = "allow"
+type_complexity = "allow"
+
+[workspace]

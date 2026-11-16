@@ -16,9 +16,19 @@ unset $(git rev-parse --local-env-vars 2>/dev/null)
 source "$(dirname "$0")/env.sh"
 cd "$CRAFTBRIDGE_ROOT"
 
-# Every cargo command the stages run goes through env.sh's `craftbridge_cargo`, the one guarded cargo:
-# rustup selects the pinned toolchain from rust/rust-toolchain.toml only inside rust/, and no cargo runs
-# while the repository root holds a Cargo configuration that every stage would merge (tools/env.sh).
+# Every cargo command the stages run goes through env.sh's one guarded cargo, `craftbridge_cargo_in <dir>`,
+# which `craftbridge_cargo` calls for rust/: rustup selects a pinned toolchain from the folder a command runs
+# in — rust/rust-toolchain.toml inside rust/, the lint library's own pin inside its folder — and no cargo
+# runs while the repository root holds a Cargo configuration that every stage would merge (tools/env.sh).
+
+# Cargo inside the lint library's folder, its messages through `cargo xtask compiled` like every other
+# compilation's: `in_library <cargo arguments>`. rustup reads a toolchain pin from the folder a command runs
+# in, and the library's pin is its nightly, so this cargo runs there, through the same guarded
+# `craftbridge_cargo_in`, and clippy finds rust/clippy.toml by its own search upward.
+in_library() {
+  build_xtask || return 1
+  craftbridge_cargo_in "$CRAFTBRIDGE_LINT_LIBRARY" "$@" | "$xtask_run/debug/xtask" compiled
+}
 
 # The files a stage hands its tool, one per line into the caller's `files`: the rules' own walk chooses
 # them (`cargo xtask files`, rust/xtask/src/files.rs), so every stage reads exactly what the rules read and
@@ -44,7 +54,14 @@ listed() {
 # rebuilds no binary another run may be starting; handed to the doctor alone, the path reaches no tree's
 # doctor but this one's.
 stage_doctor() { CRAFTBRIDGE_XTASK="$xtask_run/debug/xtask" tools/doctor.sh --gate; }
-stage_rust_fmt() { craftbridge_cargo fmt --check; }
+# The workspace's own crates, and the gate's lint library, which is no workspace member and so is outside
+# the workspace's `cargo fmt`: the same rustfmt and the same configuration file, through its own manifest.
+stage_rust_fmt() {
+  local status=0
+  craftbridge_cargo fmt --check || status=1
+  craftbridge_cargo fmt --check --manifest-path "$CRAFTBRIDGE_LINT_LIBRARY/Cargo.toml" || status=1
+  return "$status"
+}
 # Every cargo build replaces the binary in its target folder, even one with nothing to rebuild, so a second
 # gate running in this worktree would replace the binary this one is starting, which is then killed or not
 # found. So this run builds xtask once into a folder of its own (tools/env.sh), where nothing else writes;
@@ -66,14 +83,42 @@ compiling() {
   build_xtask || return 1
   craftbridge_cargo "$@" | "$xtask_run/debug/xtask" compiled
 }
+# The lint library's run over the workspace, `lint_library <cargo check arguments>`. `cargo dylint` builds
+# the library with a plain `cargo build`, which would rewrite its Cargo.lock when the manifest has moved,
+# so the lock is read `--locked` first, as every other build here reads its own.
+lint_library() {
+  craftbridge_cargo metadata --manifest-path "$CRAFTBRIDGE_LINT_LIBRARY/Cargo.toml" --locked --format-version 1 >/dev/null || return 1
+  compiling dylint --path "$CRAFTBRIDGE_LINT_LIBRARY" -- "$@"
+}
 # --all-features: code behind a feature is code that ships to whoever turns the feature on. What ships is
 # linted with every never-crash lint; the tests' build takes back the two that name the panicking calls
 # by path, as rust/clippy.toml's `allow-*-in-tests` take back the lints they shadow.
+# The lint library's run refuses the `[]` only the type checker can name — on a map, a `VecDeque`, a type
+# with an `Index` of its own — which no clippy lint reads and `disallowed-methods` cannot name as an
+# operator: the gate's lint library (rust/never-crash-lints) adds it as a forbid lint. `cargo dylint` builds
+# the library with the nightly the library's own rust-toolchain.toml pins and checks the same shipping
+# targets clippy's first run lints with that compiler; the workspace's own toolchain and flags are
+# untouched. Tests are outside, as clippy's `allow-*-in-tests` keep their indexing: this run compiles no
+# test target. The library is gate machinery written in Rust, so it is held as the workspace is: the same
+# two clippy runs over its targets, under the workspace's table its manifest carries (AGENTS.md §3), and
+# its own lint over what it ships.
+# The shipping targets, which clippy's first run and the lint library's run read: `"${shipping[@]}"`.
+shipping=(--workspace --lib --bins --examples --all-features --locked --message-format=json)
+# Clippy's two runs through one cargo runner: `clippy_runs compiling` for the workspace, `clippy_runs
+# in_library` for the lint library.
+clippy_runs() {
+  local run="$1" status=0
+  "$run" clippy "${shipping[@]}" -- -D warnings || status=1
+  "$run" clippy --workspace --tests --benches --all-features --locked --message-format=json -- -D warnings \
+    -A clippy::disallowed_methods -A clippy::disallowed_macros || status=1
+  return "$status"
+}
 stage_rust_clippy() {
   local status=0
-  compiling clippy --workspace --lib --bins --examples --all-features --locked --message-format=json -- -D warnings || status=1
-  compiling clippy --workspace --tests --benches --all-features --locked --message-format=json -- -D warnings \
-    -A clippy::disallowed_methods -A clippy::disallowed_macros || status=1
+  clippy_runs compiling || status=1
+  lint_library "${shipping[@]}" || status=1
+  clippy_runs in_library || status=1
+  lint_library --manifest-path "$CRAFTBRIDGE_LINT_LIBRARY/Cargo.toml" "${shipping[@]}" || status=1
   return "$status"
 }
 stage_rust_test() { compiling test --workspace --locked --message-format=json; }
@@ -95,16 +140,25 @@ stage_rust_mobile() {
   # The default members are the libraries an app links; the host tools never run on a phone. Clippy, not
   # a bare check: the platform modules compile only for the phones, so the never-crash lints and the
   # SAFETY comments are only checked on them here, in the release profile apps link as well as the dev
-  # one, since code under `cfg(not(debug_assertions))` exists only in the first. Every target is checked
-  # even after one fails, so one run names each target that is broken.
+  # one, since code under `cfg(not(debug_assertions))` exists only in the first; the lint library's run
+  # follows each clippy run for the same reason. Every target is checked even after one fails, so one run
+  # names each target that is broken.
   for target in $CRAFTBRIDGE_RUST_TARGETS; do
     for profile in dev release; do
       compiling clippy --locked --all-features --target "$target" --profile "$profile" --message-format=json -- -D warnings || status=1
+      lint_library --locked --all-features --target "$target" --profile "$profile" --message-format=json || status=1
     done
   done
   return "$status"
 }
-stage_rust_deny() { craftbridge_cargo deny --locked check licenses bans sources; }
+# The lint library's dependencies are built and run wherever the gate runs, outside the workspace's graph,
+# so they meet the same allowlist, bans and sources through its own manifest.
+stage_rust_deny() {
+  local status=0
+  craftbridge_cargo deny --locked check licenses bans sources || status=1
+  craftbridge_cargo deny --manifest-path "$CRAFTBRIDGE_LINT_LIBRARY/Cargo.toml" --locked check licenses bans sources || status=1
+  return "$status"
+}
 stage_rules() { xtask rules; }
 stage_generated() { xtask generate --check; }
 # The plan's views, weighed by their bytes rather than their times: the kit's own builders rebuild them
@@ -267,14 +321,20 @@ if [ ${#selected[@]} -eq 0 ]; then selected=("${stages[@]}"); fi
 # reaches every cargo call the gate makes. The one variable naming the pin itself, which rustup hands to
 # every command it starts, is that toolchain and no override of it; tools/env.sh tells the two apart. The
 # pins themselves come from `cargo xtask pins`, the one reader of both pin files, run as every other xtask
-# command here is: built, then its binary run.
-rust_status="$(craftbridge_toolchain_status)"
-case "$rust_status" in
-  ok\ *) ;;
-  no-rustup) echo "ci: no rustup on PATH: install it from https://rustup.rs" >&2; exit 1 ;;
-  missing) echo "ci: the toolchain pinned in rust/rust-toolchain.toml is not installed: cd rust && rustup toolchain install" >&2; exit 1 ;;
-  override\ *) echo "ci: rust/ resolves an overridden toolchain, not the pin in rust/rust-toolchain.toml: ${rust_status#override }" >&2; exit 1 ;;
-esac
+# command here is: built, then its binary run. The gate's lint library builds and is linted with the nightly
+# its own folder pins, which rustup reads there, so that folder is held to its pin the same way.
+pinned_toolchain() {
+  local dir="${1#"$CRAFTBRIDGE_ROOT"/}" status
+  status="$(craftbridge_toolchain_status_in "$1")"
+  case "$status" in
+    ok\ *) ;;
+    no-rustup) echo "ci: no rustup on PATH: install it from https://rustup.rs" >&2; exit 1 ;;
+    missing) echo "ci: the toolchain pinned in $dir/rust-toolchain.toml is not installed: cd $dir && rustup toolchain install" >&2; exit 1 ;;
+    override\ *) echo "ci: $dir/ resolves an overridden toolchain, not the pin in $dir/rust-toolchain.toml: ${status#override }" >&2; exit 1 ;;
+  esac
+}
+pinned_toolchain "$CRAFTBRIDGE_ROOT/rust"
+pinned_toolchain "$CRAFTBRIDGE_LINT_LIBRARY"
 refused="$(craftbridge_refused_environment)"
 if [ -n "$refused" ]; then
   printf '%s\n' "$refused" | sed 's/^/ci: /' >&2

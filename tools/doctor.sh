@@ -40,7 +40,7 @@ fi
 # catalog before the Rust gaps above are closed.
 rust_toolchain=""
 pins_ok=0
-rust_status="$(craftbridge_toolchain_status)"
+rust_status="$(craftbridge_toolchain_status_in "$CRAFTBRIDGE_ROOT/rust")"
 case "$rust_status" in
   ok\ *) rust_toolchain="${rust_status#ok }" ;;
   no-rustup) gap "rustup" "install it from https://rustup.rs" ;;
@@ -76,6 +76,46 @@ if [ -n "$rust_toolchain" ]; then
   fi
 fi
 if has cargo-deny; then ok "cargo-deny $(cargo-deny --version | cut -d' ' -f2)"; else gap "cargo-deny" "cargo install --locked cargo-deny"; fi
+# The mobile targets of one toolchain: `rust_targets <toolchain> <how the toolchain is named here>`.
+rust_targets() {
+  local installed target
+  installed="$(rustup target list --installed --toolchain "$1")"
+  for target in $CRAFTBRIDGE_RUST_TARGETS; do
+    if grep -qx "$target" <<<"$installed"; then ok "$2 target $target"; else gap "$2 target $target" "rustup target add --toolchain $1 $target"; fi
+  done
+}
+dylint_fix="cargo install --locked cargo-dylint@$CRAFTBRIDGE_DYLINT"
+if has cargo-dylint && [ "$(cargo-dylint dylint --version)" = "cargo-dylint $CRAFTBRIDGE_DYLINT" ]; then
+  ok "cargo-dylint $CRAFTBRIDGE_DYLINT"
+elif has cargo-dylint; then
+  gap "cargo-dylint $CRAFTBRIDGE_DYLINT (found: $(cargo-dylint dylint --version))" "$dylint_fix"
+else
+  gap "cargo-dylint $CRAFTBRIDGE_DYLINT" "$dylint_fix"
+fi
+# The lint library `cargo dylint` runs over the workspace (AGENTS.md §3) builds with the nightly its own
+# rust-toolchain.toml pins, which rustup reads in the library's folder, and the gate runs clippy over the
+# library there: rustup's answer in that folder is the library's toolchain only when it comes from that
+# pin, as in rust/ (tools/env.sh). `rustup toolchain install` run there installs it with the components the
+# file lists; the mobile targets are the workspace's, which the library's phone runs check too.
+if has rustup; then
+  lint_library="${CRAFTBRIDGE_LINT_LIBRARY#"$CRAFTBRIDGE_ROOT"/}"
+  lint_status="$(craftbridge_toolchain_status_in "$CRAFTBRIDGE_LINT_LIBRARY")"
+  case "$lint_status" in
+    ok\ *)
+      lint_toolchain="${lint_status#ok }"
+      ok "lint library toolchain $lint_toolchain ($lint_library/rust-toolchain.toml)"
+      rust_targets "$lint_toolchain" "lint library toolchain"
+      # clippy is one of the components the library's pin lists and the folder's install brings.
+      if rustup component list --installed --toolchain "$lint_toolchain" | grep -q '^clippy-'; then
+        ok "lint library toolchain clippy"
+      else
+        gap "clippy on the lint library toolchain" "(cd $lint_library && rustup toolchain install)"
+      fi
+      ;;
+    missing) gap "the lint library's toolchain ($lint_library/rust-toolchain.toml)" "(cd $lint_library && rustup toolchain install)" ;;
+    *) gap "lint library toolchain overridden (${lint_status#override })" "(cd $lint_library && rustup override unset): the library builds with the toolchain $lint_library/rust-toolchain.toml pins" ;;
+  esac
+fi
 
 # Apple: the pinned Xcode, its iOS Simulator SDK and the formatter it ships.
 xcode="$(xcodebuild -version 2>/dev/null | sed -n 's/^Xcode //p' || true)"

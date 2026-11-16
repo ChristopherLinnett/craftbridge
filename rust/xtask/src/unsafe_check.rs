@@ -2,15 +2,18 @@
 //!
 //! Hand-written `unsafe` is the one place the language stops helping, so it is confined to a platform
 //! module of a crate the layer table marks as a platform crate: one small, reviewable surface per
-//! platform instead of a keyword that can appear anywhere. The two tolerances are deliberate and
-//! narrow — UniFFI's generated scaffolding needs `unsafe_code` off for a whole `-ffi` crate, and a
-//! `mod platform` declaration needs it off to let its module contain blocks. Anything else is reported.
+//! platform instead of a keyword that can appear anywhere. The three tolerances are deliberate and
+//! narrow — UniFFI's generated scaffolding needs `unsafe_code` off for a whole `-ffi` crate, a
+//! `mod platform` declaration needs it off to let its module contain blocks, and the gate's own lint
+//! library (`AGENTS.md §10`) exports its two dylint entry points by symbol name, which an edition-2024
+//! attribute written with this keyword (`#[unsafe(no_mangle)]`) is the only way to write and an item-level
+//! allowance beside it the only level that lets it compile. Anything else is reported.
 //!
 //! Scanning happens on stripped text (comments and literals blanked, line numbers kept), so a keyword
 //! quoted in a comment or a doc block is not a violation, and a real one is not missed because a string
 //! ended early.
 
-use crate::{attributes, layers, report, scan};
+use crate::{attributes, layers, machinery, report, scan};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -19,6 +22,39 @@ const UNSAFE_CODE: &str = "unsafe_code";
 
 /// The one module of a platform crate that may switch it off.
 const PLATFORM_MODULE: &str = "platform";
+
+/// The two items a dylint library exports by symbol name, the names the driver looks them up by, and the
+/// one attribute that exports them: the only place outside a platform module this keyword may be written.
+const DYLINT_EXPORTS: &[&str] = &["dylint_version", "register_lints"];
+const EXPORT_ATTRIBUTE: &str = "unsafe(no_mangle)";
+
+/// Is this crate the gate's lint library? Its folder is the last component of the machinery path.
+fn is_lint_library(crate_name: &str) -> bool {
+    machinery::LINT_LIBRARY.trim_end_matches('/').rsplit('/').next().is_some_and(|folder| folder == crate_name)
+}
+
+/// Does the item starting at `from` export one of the two dylint entry points, a function by that name?
+fn is_dylint_export(text: &str, from: usize) -> bool {
+    attributes::declared_item(text, from, "fn").is_some_and(|name| DYLINT_EXPORTS.contains(&name))
+}
+
+/// The lines of `text` with the keyword of each `#[unsafe(no_mangle)]` on a dylint export blanked, byte
+/// for byte so every column stays where it was: the rule then counts every other `unsafe`, the same
+/// attribute on any other item included.
+fn without_dylint_exports(text: &str) -> Vec<String> {
+    let mut bytes = text.as_bytes().to_vec();
+    for (content, item) in attributes::outer_attributes_holding(text, EXPORT_ATTRIBUTE) {
+        if !is_dylint_export(text, item) {
+            continue;
+        }
+        if let Some(keyword) = scan::find(&bytes, content.start, b"unsafe").filter(|at| *at < content.end)
+            && let Some(span) = bytes.get_mut(keyword..keyword + "unsafe".len())
+        {
+            span.fill(b'_');
+        }
+    }
+    String::from_utf8(bytes).unwrap_or_else(|_| text.to_string()).split('\n').map(str::to_string).collect()
+}
 
 /// One `.rs` file, reduced to what this rule reads.
 pub(crate) struct RustFile<'a> {
@@ -41,16 +77,18 @@ pub(crate) fn check_file(file: &RustFile<'_>) -> Vec<String> {
     let entry = layers::entry(file.crate_name);
     let platform_crate = entry.is_some_and(|entry| entry.platform);
     let ffi_crate = entry.is_some_and(|entry| entry.ffi);
+    let lint_library = is_lint_library(file.crate_name);
     let in_platform_module = file.components.starts_with(&["src", PLATFORM_MODULE]);
     let mut errors = Vec::new();
 
-    for (index, line) in file.lines.iter().enumerate() {
+    let text = file.lines.join("\n");
+    let lines = if lint_library { without_dylint_exports(&text) } else { file.lines.to_vec() };
+    for (index, line) in lines.iter().enumerate() {
         if scan::count_whole_word(line, "unsafe", true, true) > 0 && !(in_platform_module && platform_crate) {
             errors.push(format!("{}:{}: unsafe outside a platform module", file.path, index + 1));
         }
     }
 
-    let text = file.lines.join("\n");
     for allowance in attributes::allowances(&text) {
         // A lint a macro fills in may be this one, so it is read as this one.
         if !allowance.lints.iter().any(|lint| lint == UNSAFE_CODE || lint == attributes::UNREADABLE) {
@@ -66,8 +104,12 @@ pub(crate) fn check_file(file: &RustFile<'_>) -> Vec<String> {
             if !(ffi_crate && file.is_lib_root) {
                 errors.push(format!("{at} crate-wide belongs only to an -ffi crate's own src/lib.rs"));
             }
-        } else if !(platform_crate && module == Some(PLATFORM_MODULE) && file.is_lib_root) {
-            errors.push(format!("{at} belongs only on a platform crate's `mod {PLATFORM_MODULE}` declaration in its src/lib.rs"));
+        } else if let Some(module) = module {
+            if !(platform_crate && module == PLATFORM_MODULE && file.is_lib_root) {
+                errors.push(format!("{at} belongs only on a platform crate's `mod {PLATFORM_MODULE}` declaration in its src/lib.rs"));
+            }
+        } else if !(lint_library && is_dylint_export(&text, allowance.after)) {
+            errors.push(format!("{at} on one item belongs only to the gate's lint library, on its two dylint exports"));
         }
     }
     errors
@@ -220,13 +262,51 @@ mod tests {
         ] {
             assert!(media_lib(declaration).is_empty(), "{declaration:?}: {:?}", media_lib(declaration));
         }
-        for elsewhere in
-            ["fn f() {}\n#[allow(unsafe_code)]\nfn g() {}\n", "#[allow(unsafe_code)]\nmod platformkit;\n", "#[allow(unsafe_code)]\nmod other;\nmod platform;\n"]
-        {
+        // An allowance on a module that is not the platform one, and an allowance on one item, which is
+        // the lint library's shape and nobody else's.
+        assert!(media_lib("fn f() {}\n#[allow(unsafe_code)]\nfn g() {}\n").iter().any(|e| e.contains("one item")));
+        for elsewhere in ["#[allow(unsafe_code)]\nmod platformkit;\n", "#[allow(unsafe_code)]\nmod other;\nmod platform;\n"] {
             assert!(media_lib(elsewhere).iter().any(|e| e.contains("mod platform")), "{elsewhere:?}");
         }
         let wrong_crate = plugin_lib("#[allow(unsafe_code)]\npub mod platform;\n");
         assert!(!wrong_crate.is_empty(), "{wrong_crate:?}");
+    }
+
+    /// The gate's own lint library exports its two dylint entry points by symbol name, as dylint loads
+    /// a library by name: those two items write the keyword's attribute form and allow the lint beside
+    /// it, and the library has that tolerance and no other.
+    #[test]
+    fn the_lint_library_writes_the_keyword_only_for_its_dylint_exports() {
+        let exports = [
+            "#[allow(unsafe_code)]\n#[unsafe(no_mangle)]\npub extern \"C\" fn dylint_version() -> *mut std::os::raw::c_char { }\n",
+            "#[unsafe(no_mangle)]\n#[allow(unsafe_code)]\npub fn register_lints(_sess: &Session, store: &mut LintStore) { }\n",
+            "#[allow(unsafe_code)] #[unsafe ( no_mangle )]\npub extern \"C\"\nfn dylint_version() { }\n",
+        ];
+        for export in exports {
+            assert!(lib_of("never-crash-lints", export).is_empty(), "{export:?}: {:?}", lib_of("never-crash-lints", export));
+        }
+
+        // The two exports are the tolerance's whole extent: the same attribute and allowance on any other
+        // item, an unsafe block, any other unsafe attribute, and a crate-wide allowance are each still
+        // reported in this crate as in any other.
+        for other_item in [
+            "#[allow(unsafe_code)]\n#[unsafe(no_mangle)]\npub extern \"C\" fn planted_symbol() { }\n",
+            "#[allow(unsafe_code)]\n#[unsafe(no_mangle)]\npub static DYLINT_VERSION: u8 = 0;\n",
+            "#[allow(unsafe_code)]\n#[unsafe(no_mangle)]\npub extern \"C\" fn dylint_version_too() { }\n",
+        ] {
+            let errors = lib_of("never-crash-lints", other_item);
+            assert!(errors.iter().any(|e| e.ends_with(":2: unsafe outside a platform module")), "{other_item:?}: {errors:?}");
+            assert!(errors.iter().any(|e| e.contains("on its two dylint exports")), "{other_item:?}: {errors:?}");
+        }
+        let allowed_elsewhere = lib_of("never-crash-lints", "#[allow(unsafe_code)]\nfn helper() { }\n");
+        assert!(allowed_elsewhere.iter().any(|e| e.contains("on its two dylint exports")), "{allowed_elsewhere:?}");
+        let block = "fn f() {\n    unsafe { }\n}\n";
+        assert!(lib_of("never-crash-lints", block).iter().any(|e| e.ends_with(":2: unsafe outside a platform module")), "{block:?}");
+        let other = "#![allow(unsafe_code)]\n#[unsafe(export_name = \"x\")]\nfn f() {}\n";
+        assert_eq!(lib_of("never-crash-lints", other).len(), 2, "{other:?}");
+        // And the exports' shape belongs to no other crate: the keyword count does not save it either.
+        let elsewhere = plugin_lib("#[allow(unsafe_code)]\n#[unsafe(no_mangle)]\npub extern \"C\" fn dylint_version() { }\n");
+        assert!(elsewhere.iter().any(|e| e.contains("one item")) && elsewhere.iter().any(|e| e.contains("unsafe outside")), "{elsewhere:?}");
     }
 
     #[test]
@@ -326,7 +406,7 @@ mod tests {
             assert!(errors.iter().any(|e| e.contains(":1:") && e.contains("crate-wide")), "{spelling:?}: {errors:?}");
         }
         let outer = lib_of("craftbridge-media", "# [allow(r#unsafe_code)]\nfn f() {}\n");
-        assert!(outer.iter().any(|e| e.contains("belongs only on a platform crate's `mod platform`")), "{outer:?}");
+        assert!(outer.iter().any(|e| e.contains("one item")), "{outer:?}");
         // A lint a macro fills in may be `unsafe_code`; an attribute forwarded onto one item is not a level.
         let macro_lint = lib_of("craftbridge-media", "macro_rules! m { ($l:ident) => { #![allow($l)] }; }\n");
         assert!(!macro_lint.is_empty(), "{macro_lint:?}");

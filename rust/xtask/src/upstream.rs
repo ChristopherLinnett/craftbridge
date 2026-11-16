@@ -216,7 +216,10 @@ fn transplant(ours: &mut toml_edit::DocumentMut, upstream: &toml_edit::DocumentM
                     child.decor_mut().set_prefix(format!("\n{GENERATED_BY}"));
                 }
             }
-            ours[key] = item;
+            // The gate refuses `[]` on a type with its own `Index`, since it cannot tell the ones that
+            // insert a missing key from the ones that panic on it; this is the insert toml_edit's `[]`
+            // makes, written as one (AGENTS.md §3).
+            *ours.as_table_mut().entry(key).or_insert(toml_edit::Item::None) = item;
         }
         None => {
             ours.as_table_mut().remove(key);
@@ -237,10 +240,10 @@ fn transplant_release(ours: &mut toml_edit::DocumentMut, upstream: &toml_edit::D
             if !ours.get("profile").is_some_and(toml_edit::Item::is_table) {
                 let mut profile = toml_edit::Table::new();
                 profile.set_implicit(true);
-                ours["profile"] = toml_edit::Item::Table(profile);
+                *ours.as_table_mut().entry("profile").or_insert(toml_edit::Item::None) = toml_edit::Item::Table(profile);
             }
             if let Some(profile) = ours.get_mut("profile").and_then(toml_edit::Item::as_table_mut) {
-                profile["release"] = release;
+                *profile.entry("release").or_insert(toml_edit::Item::None) = release;
             }
         }
         None => {
@@ -319,7 +322,11 @@ pub(crate) fn generated_table_errors(ours: &str, regenerated: &str) -> Vec<Strin
         let theirs = flatten_entries(read(&written, table, sub).as_ref());
         let extra: Vec<String> = mine.keys().filter(|entry| !theirs.contains_key(entry.as_str())).cloned().collect();
         let missing: Vec<String> = theirs.keys().filter(|entry| !mine.contains_key(entry.as_str())).cloned().collect();
-        let changed: Vec<String> = mine.keys().filter(|entry| theirs.get(entry.as_str()).is_some_and(|value| value != &mine[*entry])).cloned().collect();
+        let changed: Vec<String> = mine
+            .iter()
+            .filter(|(entry, value)| theirs.get(entry.as_str()).is_some_and(|theirs| theirs != *value))
+            .map(|(entry, _)| entry.to_string())
+            .collect();
         if extra.is_empty() && missing.is_empty() && changed.is_empty() {
             continue;
         }
@@ -1341,7 +1348,8 @@ mod tests {
         point_main_at(&scratch, &second);
         crate::git::output(&scratch.0, &["--git-dir=.", "update-ref", "refs/pull/1/head", &unmerged]).unwrap();
         let cache = Cache::at(scratch.0.clone()).expect("a bare clone of the official repository");
-        assert_eq!(cache.official_commit(&second[..8]).as_deref(), Ok(second.as_str()), "an abbreviated id of main's tip");
+        let abbreviated = second.get(..8).unwrap();
+        assert_eq!(cache.official_commit(abbreviated).as_deref(), Ok(second.as_str()), "an abbreviated id of main's tip");
         assert_eq!(cache.official_commit(&first).as_deref(), Ok(first.as_str()), "a commit main reaches, in full");
         let refused = cache.official_commit(&unmerged).expect_err("a commit main does not reach");
         assert!(refused.contains("not on official main"), "{refused}");
@@ -1363,8 +1371,8 @@ mod tests {
         let unmerged = commit(&scratch, Some(&first), "a pull request's head");
         let cache = Cache::at(scratch.0.clone()).expect("a bare clone of the official repository");
         let pin = |rev: &str| Pin { effectcraft_rev: rev.to_string(), filmcraft_rev: "d5ead4ba".to_string() };
-        assert_eq!(source(&cache, &pin(&first[..8])), Ok(format!("https://github.com/storytold/effectcraft {first}")));
-        let refused = source(&cache, &pin(&unmerged[..8])).expect_err("a commit main does not reach");
+        assert_eq!(source(&cache, &pin(first.get(..8).unwrap())), Ok(format!("https://github.com/storytold/effectcraft {first}")));
+        let refused = source(&cache, &pin(unmerged.get(..8).unwrap())).expect_err("a commit main does not reach");
         assert!(refused.contains("not on official main") && refused.contains("pins EffectCraft at"), "{refused}");
     }
 
@@ -1623,8 +1631,9 @@ mod tests {
         // eight characters, already holds what the same revision's script writes and says so.
         let (scratch, only) = official_scratch_cache("upstream-rev-text");
         let cache = Cache::at(scratch.0.clone()).expect("a bare clone of the official repository");
-        let abbreviated = workspace_manifest(&only[..8], "d5ead4ba");
-        assert_eq!(rev_text(&abbreviated, &only, &only, &cache), only[..8], "a rerun by the full id takes the tree's own spelling");
+        let eight = only.get(..8).unwrap();
+        let abbreviated = workspace_manifest(eight, "d5ead4ba");
+        assert_eq!(rev_text(&abbreviated, &only, &only, &cache), eight, "a rerun by the full id takes the tree's own spelling");
         assert_eq!(rev_text(&abbreviated, &only, &only, &cache).len(), 8, "the lock's source strings stay as they are");
         let in_full = workspace_manifest(&only, "d5ead4ba");
         assert_eq!(rev_text(&in_full, &only, &only, &cache), only, "a tree written in full stays in full");

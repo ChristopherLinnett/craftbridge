@@ -54,16 +54,21 @@ filmcraft-isobmff = { git = "https://github.com/storytold/filmcraft", rev = "d5e
 unsafe_code = "deny"
 
 [workspace.lints.clippy]
-# Never crash (the Craft house rules): no panicking shortcuts outside tests. The five with no exception
-# are `forbid`, so the compiler itself refuses every `allow` of them, however it is spelt and wherever
-# the file sits; tests keep `unwrap`, `expect` and `panic!` through rust/clippy.toml's `allow-*-in-tests`.
-# `expect_used` stays `deny` for its one exception, an item-level allow on a provably infallible literal.
+# Never crash (the Craft house rules): no panicking shortcuts outside tests, no stopping the process, and
+# no unchecked index into a slice, array or vector (`indexing_slicing`) or a string (`string_slice`, which
+# `indexing_slicing` leaves to it). Those with no item-level exception are `forbid`, so the compiler itself
+# refuses every `allow` of them, however it is spelt and wherever the file sits; tests keep `unwrap`,
+# `expect`, `panic!` and indexing through rust/clippy.toml's `allow-*-in-tests`. `expect_used` stays
+# `deny` for its one exception, an item-level allow on a provably infallible literal.
 unwrap_used = "forbid"
 expect_used = "deny"
 panic = "forbid"
 unimplemented = "forbid"
 todo = "forbid"
 unreachable = "forbid"
+exit = "forbid"
+indexing_slicing = "forbid"
+string_slice = "forbid"
 undocumented_unsafe_blocks = "deny"
 # The same calls by path (rust/clippy.toml), which also reach a macro's expansion and a method taken as a
 # value; `deny`, because an item's `.expect("…")` on a provably infallible literal allows both.

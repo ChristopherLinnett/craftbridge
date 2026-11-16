@@ -36,7 +36,11 @@
 # __CARGO_TEST_CHANNEL_OVERRIDE_DO_NOT_USE_THIS, unlock the `-Z` flags and nightly configuration the
 # pinned stable toolchain refuses (`cargo -Z unstable-options locate-project` exits 101 on the pin, 0 with
 # either set); CARGO_UNSTABLE_* names a nightly feature; CLIPPY_CONF_DIR moves clippy to another
-# clippy.toml.
+# clippy.toml. Dylint's family names the driver's folder (with a `DYLINT_DRIVER_PATH` the drivers are not
+# in, the run fails outright, and another folder's driver is another toolchain's judgements), the library
+# list `DYLINT_LIBS`, the flags and configuration the pass reads, and whether dependencies register lints
+# at all, and it was settled on the pinned cargo-dylint release: run over a probe holding the map index the
+# library refuses, the gate's library passes it under `DYLINT_RUSTFLAGS="-A collection_indexing"`.
 #
 # Left out, the rest of Cargo 1.99's configuration reference and of the variables it documents, each for
 # its reason, run on the pinned toolchain where a run could tell:
@@ -83,3 +87,4 @@ alias.*	CARGO_ALIAS_*	xtask	can stand in for a cargo command the gate runs
 -	RUSTC_BOOTSTRAP __CARGO_TEST_CHANNEL_OVERRIDE_DO_NOT_USE_THIS	-	unlocks the -Z flags and nightly configuration the pinned stable toolchain refuses
 -	CARGO_UNSTABLE_*	-	names a Cargo nightly feature
 -	CLIPPY_CONF_DIR	-	moves clippy to another clippy.toml than rust/clippy.toml
+-	DYLINT_*	-	hands dylint's driver which folder it runs from, which lint libraries it loads, what flags and configuration the lint pass reads, and whether dependencies register lints at all, so the gate's lint library run could check less than the table sets

@@ -1,21 +1,23 @@
 //! Rule 3 and rule 10 — the inherited, unweakened lint table, and `panic = "unwind"`.
 //!
 //! Never crash outranks everything except not losing work, so the panicking shortcuts are denied once
-//! in the workspace manifest and every crate inherits them; the five with no exception are `forbid`,
+//! in the workspace manifest and every crate inherits them; the ones with no exception are `forbid`,
 //! which makes the compiler itself refuse any `allow` of them, however spelt. The rule is only real if
 //! nothing can weaken it: not the inheriting table (`[lints]` must say `workspace = true` and nothing else); not the
 //! workspace table itself, where a lint group allowed at a later priority (`clippy::restriction` holds
 //! every denied lint) switches them all off, and where a second key for the same lint (`unwrap-used`, or
-//! the former name `option_unwrap_used`) is passed to the compiler as well; not a crate or module
+//! the former name `option_unwrap_used`) is passed to the compiler as well, and where an entry for a lint
+//! of the gate's lint library would outrank the `forbid` the library gives it; not a crate or module
 //! attribute (`#![allow(…)]`, also when it is spread over lines or nested in `cfg_attr`, and `#[allow(…)]`
 //! on a `mod`, which covers the whole module); not clippy's configuration, whose `allow-unwrap-types`
-//! lets `unwrap` and `expect` through on whole types and of which clippy reads only the file nearest a
-//! crate; not Cargo's configuration — the repository's, those above the checkout, the cargo home's — nor
-//! the environment, whose rustflags come after the table, whose profiles override the manifest's, whose
-//! compiler wrappers sit between Cargo and the compiler, whose target runners stand in for the test and
-//! xtask binaries, whose aliases can stand in for `cargo clippy` or `cargo xtask`, and whose `[env]`
-//! reaches clippy, all of which the `upstream` rule and `tools/env.sh` refuse against the one table of
-//! switches, `tools/refused-switches.tsv`; not a build script, which runs
+//! lets `unwrap` and `expect` through on whole types, whose `suppress-restriction-lint-in-const` lets an
+//! index through in a `const fn`, and of which clippy reads only the file nearest a crate; not Cargo's
+//! configuration — the repository's, those above the checkout, the cargo home's, whatever those `include`
+//! — nor the environment, whose rustflags come after the table, whose profiles override the manifest's,
+//! whose compiler wrappers sit between Cargo and the compiler, whose target runners stand in for the test
+//! and xtask binaries, whose aliases can stand in for `cargo clippy` or `cargo xtask`, and whose `[env]`
+//! reaches clippy or the lint library's driver, all of which the `upstream` rule and `tools/env.sh`
+//! refuse against the one table of switches, `tools/refused-switches.tsv`; not a build script, which runs
 //! before the compiler takes the table and can hand it flags and cfgs through `cargo::rustc-env` and
 //! `cargo::rustc-cfg`, so a crate has one only when the layer table marks it; and not a file the compiler
 //! reads that no rule does, which the compiler's own dep-info decides (`cargo xtask compiled`, run by every
@@ -30,15 +32,37 @@
 use crate::{attributes, machinery, scan};
 use std::path::Path;
 
-/// The clippy lints that forbid panicking, the two that name the same calls by path (and reach a macro's
-/// expansion and a method taken as a value), and the one that keeps every `unsafe` block documented.
-pub(crate) const DENIED_CLIPPY_LINTS: &[&str] =
-    &["unwrap_used", "expect_used", "panic", "unimplemented", "todo", "unreachable", "disallowed_methods", "disallowed_macros", "undocumented_unsafe_blocks"];
+/// The clippy lints that forbid panicking or stopping the process (an index is refused because it panics
+/// on a hostile number: `indexing_slicing` reads slices, arrays and vectors, and leaves strings to
+/// `string_slice`), the two that name the same calls by path (and reach a macro's expansion and a method
+/// taken as a value), and the one that keeps every `unsafe` block documented.
+pub(crate) const DENIED_CLIPPY_LINTS: &[&str] = &[
+    "unwrap_used",
+    "expect_used",
+    "panic",
+    "unimplemented",
+    "todo",
+    "unreachable",
+    "exit",
+    "indexing_slicing",
+    "string_slice",
+    "disallowed_methods",
+    "disallowed_macros",
+    "undocumented_unsafe_blocks",
+];
 
 /// The denied lints with no exception at all, which the table sets to `forbid`: the compiler then refuses
 /// every `allow` of them in any file it reads, which no reading of the source can promise. Tests keep
-/// `unwrap`, `expect` and `panic!` through clippy's own `allow-*-in-tests`, which a `forbid` does not touch.
-const FORBIDDEN_CLIPPY_LINTS: &[&str] = &["unwrap_used", "panic", "unimplemented", "todo", "unreachable"];
+/// `unwrap`, `expect`, `panic!` and indexing through clippy's own `allow-*-in-tests`, which a `forbid`
+/// does not touch; none exists for `exit` or `string_slice`, so tests neither stop the process nor slice
+/// a string, as shipping code does not.
+const FORBIDDEN_CLIPPY_LINTS: &[&str] = &["unwrap_used", "panic", "unimplemented", "todo", "unreachable", "exit", "indexing_slicing", "string_slice"];
+
+/// The lints of the gate's lint library (`rust/never-crash-lints`), which declares each at `forbid` itself.
+/// The workspace table may not name one: Cargo passes a table entry to the compiler as a command-line
+/// level, which outranks a lint's own default, so `collection_indexing = "allow"` beside
+/// `unknown_lints = "allow"` (the name is unknown to clippy's runs) would switch it off unseen.
+const LIBRARY_LINTS: &[&str] = &["collection_indexing"];
 
 /// The one denied lint an item may allow, on a provably infallible literal (AGENTS.md §3), and the lint
 /// that names the same `.expect` by path, which the item allows beside it and never alone.
@@ -134,6 +158,11 @@ pub(crate) fn workspace_manifest_violations(source: &str, name: &str) -> Vec<Str
             }
         }
     }
+    for (key, _) in LIBRARY_LINTS.iter().flat_map(|lint| entries_reaching(rust_lints, lint)) {
+        errors.push(format!(
+            "{name}: [workspace.lints.rust].{key} sets a level for a lint of the lint library rust/never-crash-lints, which forbids it itself: an entry here outranks that and can switch it off"
+        ));
+    }
     for (key, _) in entries_reaching(clippy_lints, "restriction").iter().filter(|(_, level)| !level_is_denied(Some(level))) {
         errors.push(format!("{name}: [workspace.lints.clippy].{key} below deny switches off every denied lint the group holds"));
     }
@@ -174,23 +203,30 @@ fn panic_violations(document: &toml::Value, name: &str) -> Vec<String> {
 // names file and key for each (rust/xtask/src/upstream.rs, tools/refused-switches.tsv); a second list of
 // the same switches here would only drift.
 
-/// Check clippy's configuration: `allow-unwrap-types` lets `unwrap()` and `expect()` through on every
-/// value of the types it lists, which switches the denied lints off for them. Its other settings that
-/// touch a denied lint allow it only in tests, or in code evaluated while compiling, where a panic is a
-/// build error rather than a crash, or say where a safety comment may sit. That one configuration is
-/// `rust/clippy.toml` alone: a second copy is the machinery check's to refuse, because clippy reads only
-/// the file nearest a crate and a copy would replace this one below it.
+/// Check clippy's configuration for the two settings that switch a denied lint off in shipping code:
+/// `allow-unwrap-types` lets `unwrap()` and `expect()` through on every value of the types it lists, and
+/// `suppress-restriction-lint-in-const` silences `indexing_slicing` in every const context, a `const fn`'s
+/// body among them, which also runs at run time on whatever index its caller passes. Its other settings
+/// that touch a denied lint allow it only in tests, or in code always evaluated while compiling, where a
+/// panic is a build error rather than a crash, or say where a safety comment may sit. Clippy reads each
+/// key under its one kebab-case spelling and refuses any other, so a key is read as written. That one
+/// configuration is `rust/clippy.toml` alone: a second copy is the machinery check's to refuse, because
+/// clippy reads only the file nearest a crate and a copy would replace this one below it.
 pub(crate) fn clippy_config_violations(source: &str, name: &str) -> Vec<String> {
     let document = match parse(source, name) {
         Ok(document) => document,
         Err(errors) => return errors,
     };
-    match document.get("allow-unwrap-types").and_then(toml::Value::as_array) {
-        Some(types) if !types.is_empty() => {
-            vec![format!("{name}: allow-unwrap-types lets unwrap() and expect() through on whole types, which the workspace denies")]
-        }
-        _ => Vec::new(),
+    let mut errors = Vec::new();
+    if document.get("allow-unwrap-types").and_then(toml::Value::as_array).is_some_and(|types| !types.is_empty()) {
+        errors.push(format!("{name}: allow-unwrap-types lets unwrap() and expect() through on whole types, which the workspace denies"));
     }
+    if document.get("suppress-restriction-lint-in-const").and_then(toml::Value::as_bool) == Some(true) {
+        errors.push(format!(
+            "{name}: suppress-restriction-lint-in-const silences indexing_slicing in a const fn, whose body also runs at run time on whatever index it is passed"
+        ));
+    }
+    errors
 }
 
 /// Does a package manifest inherit the workspace lints and nothing else?
@@ -268,7 +304,7 @@ fn target_tables(document: &toml::Value) -> Vec<(String, &toml::Value)> {
 /// attribute's `#`: `#![allow(…)]`, `#![expect(…)]`, `#![warn(…)]`, one of them inside `cfg_attr`, and the
 /// same as an outer attribute on a `mod`, which covers the whole module just as the inner one does. On
 /// any other single item only `expect_used` may be allowed, the one exception `AGENTS.md` §3 makes (a
-/// provably infallible literal); the five lints without one are `forbid` and the compiler refuses them
+/// provably infallible literal); the lints without one are `forbid` and the compiler refuses them
 /// anyway. The rule is "never crash outside tests", so `cfg_attr(test, …)` is not reported, and an
 /// attribute a macro merely forwards onto one item (`#[$attribute]`) is the forwarding idiom, not a level.
 pub(crate) fn weakened_crate_attributes(stripped_lines: &[String], name: &str) -> Vec<String> {
@@ -305,6 +341,17 @@ pub(crate) fn weakened_crate_attributes(stripped_lines: &[String], name: &str) -
 pub(crate) fn build_script_violations(name: &str, marked: bool, script: Option<&str>) -> Option<String> {
     let script = script.filter(|_| !marked)?;
     Some(format!("{name}: has a build script, `{script}`, which reaches the compiler around the lint table: only a crate the layer table marks may have one"))
+}
+
+/// The same refusal read through one `cargo metadata` package: Cargo's own answer to which file the
+/// manifest holds or names as its build script, refused unless the layer table marks the crate. Every
+/// crate the gate compiles answers here, the lint library among them: a crate with no row is no crate
+/// the table marks.
+fn package_build_script_violation(root: &Path, package: &crate::meta::Crate) -> Option<String> {
+    let shown = crate::report::shown(root, Path::new(&package.manifest_path));
+    let marked = crate::layers::entry(&package.name).is_some_and(|row| row.build);
+    let script = package.build_script.as_deref().map(|script| crate::report::shown(root, Path::new(script)));
+    build_script_violations(&shown, marked, script.as_deref())
 }
 
 /// The edition the workspace manifest declares for its crates to inherit, if it declares one. Cargo
@@ -365,18 +412,31 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
         errors.extend(clippy_config_violations(&scan::read_text(&clippy_config)?, machinery::CLIPPY_CONFIGURATION));
     }
 
-    for package in crate::meta::read(&rust_dir, crate::meta::Graph::Workspace)? {
-        let manifest = Path::new(&package.manifest_path);
-        let shown = crate::report::shown(root, manifest);
-        let source = scan::read_text(manifest)?;
-        errors.extend(package_lints_violations(&source, &shown));
-        errors.extend(package_edition_violations(&source, &shown));
-        if let Some(edition) = workspace_edition.as_deref() {
-            errors.extend(resolved_edition_violations(&shown, &package.edition, &package.target_editions, edition));
+    // Every crate the gate compiles is held to the same manifest rules: the workspace's members, and the
+    // gate's lint library, a workspace of its own whose manifest carries the workspace's tables as its own
+    // workspace's (the machinery's mirror test holds them equal) and whose crate inherits them as a member
+    // does. It has no row in the layer table, so no row marks it and it may have no build script at all.
+    let library_dir = root.join(machinery::LINT_LIBRARY);
+    let library_manifest = library_dir.join("Cargo.toml");
+    let mut workspaces = vec![(rust_dir.clone(), workspace_edition)];
+    if library_manifest.is_file() {
+        let library_source = scan::read_text(&library_manifest)?;
+        let library_shown = crate::report::shown(root, &library_manifest);
+        errors.extend(workspace_manifest_violations(&library_source, &library_shown));
+        workspaces.push((library_dir, declared_edition(&library_source)));
+    }
+    for (workspace_dir, edition) in workspaces {
+        for package in crate::meta::read(&workspace_dir, crate::meta::Graph::Workspace)? {
+            let manifest = Path::new(&package.manifest_path);
+            let shown = crate::report::shown(root, manifest);
+            let source = scan::read_text(manifest)?;
+            errors.extend(package_lints_violations(&source, &shown));
+            errors.extend(package_edition_violations(&source, &shown));
+            if let Some(edition) = edition.as_deref() {
+                errors.extend(resolved_edition_violations(&shown, &package.edition, &package.target_editions, edition));
+            }
+            errors.extend(package_build_script_violation(root, &package));
         }
-        let marked = crate::layers::entry(&package.name).is_some_and(|row| row.build);
-        let script = package.build_script.as_deref().map(|script| crate::report::shown(root, Path::new(script)));
-        errors.extend(build_script_violations(&shown, marked, script.as_deref()));
     }
 
     // A generator's output is checked by regenerating it, not here.
@@ -406,6 +466,9 @@ panic = "forbid"
 unimplemented = "forbid"
 todo = "forbid"
 unreachable = "forbid"
+exit = "forbid"
+indexing_slicing = "forbid"
+string_slice = "forbid"
 disallowed_methods = "deny"
 disallowed_macros = "deny"
 undocumented_unsafe_blocks = "deny"
@@ -481,6 +544,41 @@ panic = "unwind"
     }
 
     #[test]
+    fn the_table_sets_no_level_for_a_lint_of_the_lint_library() {
+        for entry in ["collection_indexing = \"allow\"", "collection-indexing = { level = \"warn\", priority = 1 }", "collection_indexing = \"forbid\""] {
+            let manifest = GOOD_MANIFEST.replace("unsafe_code = \"deny\"", &format!("unsafe_code = \"deny\"\n{entry}"));
+            let errors = workspace_manifest_violations(&manifest, "rust/Cargo.toml");
+            assert!(errors.len() == 1 && errors[0].contains("sets a level for a lint of the lint library"), "{entry}: {errors:?}");
+        }
+        let clippy_table = GOOD_MANIFEST.replace("unwrap_used = \"forbid\"", "unwrap_used = \"forbid\"\ncollection_indexing = \"allow\"");
+        assert!(
+            workspace_manifest_violations(&clippy_table, "rust/Cargo.toml").is_empty(),
+            "under clippy's table it names clippy::collection_indexing, no lint at all"
+        );
+    }
+
+    /// The rule above guards exactly the names in `LIBRARY_LINTS`, so a lint the library registers that
+    /// the list misses could be switched off by a `[workspace.lints.rust]` entry beside `unknown_lints`.
+    /// The list is a copy: the rule reads manifest text in a stage that builds no library, and the stable
+    /// xtask cannot link the library's nightly build. A test fails while the copy and its original differ,
+    /// as the library's manifest copies are kept in step in `machinery.rs`. The original is what the library
+    /// registers when the driver loads it, so the test asks dylint, which lists what the loaded library's
+    /// `register_lints` put in the lint store, however many calls make it and however they are spelt. A
+    /// lint only declared is not listed and needs no guard: the compiler knows it by no name, so no table
+    /// entry reaches it and it reports at its declared level.
+    #[test]
+    fn the_guard_names_every_lint_the_library_registers() {
+        let output = cargo_dylint(&probe(""), "", &["list"], &[]);
+        let listing = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "`cargo dylint list` failed: {}", String::from_utf8_lossy(&output.stderr));
+        let mut lines = listing.lines();
+        assert_eq!(lines.next(), Some(machinery::lint_library_name().as_str()), "dylint lists the library by name first:\n{listing}");
+        let registered = lines.filter_map(|line| line.split_whitespace().next()).map(str::to_owned).collect::<std::collections::BTreeSet<_>>();
+        let guarded = LIBRARY_LINTS.iter().map(|name| name.to_string()).collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(guarded, registered, "`LIBRARY_LINTS` and the lints the library registers differ:\n{listing}");
+    }
+
+    #[test]
     fn a_group_that_switches_the_denied_lints_off_is_named() {
         let allowed = GOOD_MANIFEST.replace("[profile.release]", "restriction = { level = \"allow\", priority = 1 }\n\n[profile.release]");
         let errors = workspace_manifest_violations(&allowed, "rust/Cargo.toml");
@@ -513,6 +611,16 @@ panic = "unwind"
         assert!(clippy_config_violations(&format!("{ours}allow-unwrap-types = []\n"), "rust/clippy.toml").is_empty(), "an empty list lets nothing through");
         let typed = clippy_config_violations(&format!("{ours}allow-unwrap-types = [\"core::option::Option\"]\n"), "rust/clippy.toml");
         assert!(typed.len() == 1 && typed[0].contains("allow-unwrap-types"), "{typed:?}");
+    }
+
+    #[test]
+    fn clippy_configuration_may_not_let_indexing_through_in_a_const_fn() {
+        let ours = std::fs::read_to_string(crate::repo_root().join(machinery::CLIPPY_CONFIGURATION)).unwrap();
+        assert!(clippy_config_violations(&ours, "rust/clippy.toml").is_empty(), "the repository's own configuration");
+        let off = clippy_config_violations(&format!("{ours}suppress-restriction-lint-in-const = false\n"), "rust/clippy.toml");
+        assert!(off.is_empty(), "the default, written out, suppresses nothing: {off:?}");
+        let on = clippy_config_violations(&format!("{ours}suppress-restriction-lint-in-const = true\n"), "rust/clippy.toml");
+        assert!(on.len() == 1 && on[0].starts_with("rust/clippy.toml: suppress-restriction-lint-in-const silences indexing_slicing"), "{on:?}");
     }
 
     #[test]
@@ -567,6 +675,60 @@ panic = "unwind"
         std::fs::write(&manifest, &original).unwrap();
         std::fs::remove_file(crate_dir.join("gen.rs")).unwrap();
         assert!(checked(&copy).is_empty());
+    }
+
+    #[test]
+    fn a_build_script_planted_in_the_lint_library_is_caught_though_no_row_marks_it() {
+        let copy = crate::scratch::rust_tree_copy("lints-library-build");
+        let library = copy.0.join(machinery::LINT_LIBRARY.trim_end_matches('/'));
+        let manifest = library.join("Cargo.toml");
+        let original = std::fs::read_to_string(&manifest).unwrap();
+        let script = "fn main() { println!(\"cargo::rustc-env=CLIPPY_ARGS=-Aclippy::unwrap_used__CLIPPY_HACKERY__\"); }\n";
+        // The library has no row in the layer table, so no row can mark it: a build.rs beside its manifest
+        // is refused, named as the library's own file.
+        std::fs::write(library.join("build.rs"), script).unwrap();
+        let errors = checked(&copy);
+        assert!(errors.len() == 1 && errors[0].contains("has a build script, `rust/never-crash-lints/build.rs`"), "{errors:?}");
+        // `build = false` turns that detection off, so the file is no build script — as for a member.
+        std::fs::write(&manifest, original.replacen("[package]", "[package]\nbuild = false", 1)).unwrap();
+        assert!(checked(&copy).is_empty(), "{:?}", checked(&copy));
+        std::fs::write(&manifest, &original).unwrap();
+        std::fs::remove_file(library.join("build.rs")).unwrap();
+        // One `package.build` names, answered by the same read of Cargo's own through the library's
+        // metadata.
+        std::fs::write(library.join("gen.rs"), script).unwrap();
+        std::fs::write(&manifest, original.replacen("[package]", "[package]\nbuild = \"gen.rs\"", 1)).unwrap();
+        let errors = checked(&copy);
+        assert!(errors.len() == 1 && errors[0].contains("`rust/never-crash-lints/gen.rs`"), "{errors:?}");
+        std::fs::write(&manifest, &original).unwrap();
+        std::fs::remove_file(library.join("gen.rs")).unwrap();
+        assert!(checked(&copy).is_empty(), "the copy with everything restored is the clean tree: {:?}", checked(&copy));
+    }
+
+    /// The library's crate meets the members' manifest rules through the same functions: it inherits its
+    /// workspace's edition and lint table, no target of it pins an edition, and its own table is as strong
+    /// as the members' table must be.
+    #[test]
+    fn the_lint_library_is_held_to_the_members_manifest_rules() {
+        let copy = crate::scratch::rust_tree_copy("lints-library-manifest");
+        let manifest = copy.0.join(machinery::LINT_LIBRARY).join("Cargo.toml");
+        let original = std::fs::read_to_string(&manifest).unwrap();
+        assert!(checked(&copy).is_empty(), "the library as it is meets the rules: {:?}", checked(&copy));
+        let pinned = original.replacen("edition.workspace = true", "edition = \"2021\"", 1).replacen(
+            "crate-type = [\"cdylib\"]",
+            "crate-type = [\"cdylib\"]\nedition = \"2021\"",
+            1,
+        );
+        std::fs::write(&manifest, pinned).unwrap();
+        let errors = checked(&copy);
+        for expected in ["does not inherit the workspace edition", "`[lib]` sets an edition of its own", "compiles under edition \"2021\""] {
+            assert!(errors.iter().any(|e| e.starts_with("rust/never-crash-lints/Cargo.toml: ") && e.contains(expected)), "{expected}: {errors:?}");
+        }
+        std::fs::write(&manifest, original.replacen("exit = \"forbid\"", "exit = \"warn\"", 1)).unwrap();
+        let weak = checked(&copy);
+        assert!(weak.iter().any(|e| e.starts_with("rust/never-crash-lints/Cargo.toml: [workspace.lints.clippy].exit must be deny or forbid")), "{weak:?}");
+        std::fs::write(&manifest, &original).unwrap();
+        assert!(checked(&copy).is_empty(), "the copy restored is the clean tree");
     }
 
     #[test]
@@ -788,6 +950,183 @@ panic = "unwind"
         assert_eq!(weakened("#![allow(clippy::disallowed_macros)]\n").len(), 1);
         assert_eq!(weakened("#![allow(clippy::all)]\n").len(), 1, "all holds style, which holds the calls by path");
         assert!(weakened("#![cfg_attr(test, allow(clippy::disallowed_methods))]\n").is_empty());
+    }
+
+    /// The lint library, run the way the gate runs it (`cargo dylint`, with the library's own nightly) over
+    /// a scratch crate: the gate's stages pass whatever the library compiles to, so only this proves the
+    /// lint fires, is `forbid` against every `allow`, and leaves `get()` and clippy's own index lints alone.
+    fn dylint_over(source: &str) -> (bool, String) {
+        dylint_over_tree(&probe(source), "")
+    }
+
+    /// A probe package of one library file, a workspace of its own.
+    fn probe(source: &str) -> [(&'static str, &str); 2] {
+        [("Cargo.toml", "[package]\nname = \"probe\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\n"), ("src/lib.rs", source)]
+    }
+
+    /// The probe tests share one library build in `rust/target`, and a `cargo dylint` run copies a fresh
+    /// build into `target/dylint/libraries` when it finds the library's sources newer than the copy. Two
+    /// runs racing a rebuild can have the driver dlopen a copy mid-write, so within one test process the
+    /// runs take turns; the gate's stages build the library before the tests, and one run at a time is
+    /// what a warm cache costs no differently.
+    static DYLINT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// The same run over a tree of files written into a scratch folder, from the folder `run_in` inside it.
+    fn dylint_over_tree(files: &[(&str, &str)], run_in: &str) -> (bool, String) {
+        outcome(cargo_dylint(files, run_in, &[], &["--", "--workspace", "--all-features"]))
+    }
+
+    /// `cargo dylint` with the lint library over a tree of files, from the folder `run_in` inside it:
+    /// `command` before the library's `--path` and `rest` after it. The runs take turns.
+    fn cargo_dylint(files: &[(&str, &str)], run_in: &str, command: &[&str], rest: &[&str]) -> std::process::Output {
+        let library = crate::repo_root().join(machinery::LINT_LIBRARY).to_string_lossy().into_owned();
+        let _alone = DYLINT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        cargo_in_scratch(files, run_in, &[&["dylint"], command, &["--path", library.as_str()], rest].concat(), "rust/target")
+    }
+
+    /// Clippy's two index lints, as the gate forbids them, over the same kind of tree.
+    fn clippy_over_tree(files: &[(&str, &str)], run_in: &str) -> (bool, String) {
+        let lints = ["-A", "warnings", "-D", "clippy::indexing_slicing", "-D", "clippy::string_slice"];
+        cargo_over_tree(files, run_in, &[&["clippy", "--workspace", "--all-features", "--"], &lints[..]].concat(), "rust/target/clippy-probe")
+    }
+
+    /// Whether a run passed, and what it reported on stderr, where cargo and the compiler write.
+    fn outcome(output: std::process::Output) -> (bool, String) {
+        (output.status.success(), String::from_utf8_lossy(&output.stderr).into_owned())
+    }
+
+    /// Cargo's run over a tree of files, as `cargo_in_scratch` runs it, told by its `outcome`.
+    fn cargo_over_tree(files: &[(&str, &str)], run_in: &str, arguments: &[&str], target: &str) -> (bool, String) {
+        outcome(cargo_in_scratch(files, run_in, arguments, target))
+    }
+
+    /// Cargo, the one that built xtask, run with `arguments` over a tree of files written into a scratch
+    /// folder, from the folder `run_in` inside it, building into `target` under the repository.
+    fn cargo_in_scratch(files: &[(&str, &str)], run_in: &str, arguments: &[&str], target: &str) -> std::process::Output {
+        let scratch = crate::scratch::Scratch::new("lint-library");
+        for (path, text) in files {
+            scratch.write(path, text);
+        }
+        std::process::Command::new(env!("CARGO"))
+            .args(arguments)
+            .current_dir(scratch.0.join(run_in))
+            .env("CARGO_TARGET_DIR", crate::repo_root().join(target))
+            .output()
+            .expect("cargo and its `dylint` run: tools/doctor.sh names the releases the gate pins")
+    }
+
+    /// Clippy's index lints and the lint library divide every `[]` between them, so the gate reports each
+    /// once: never by both, and never by neither. Clippy reads slices, arrays, vectors, strings, and a
+    /// collection held by value whose `get` returns what the index yields; the library reads the rest.
+    #[test]
+    fn clippy_and_the_lint_library_report_each_index_once() {
+        let source = "use std::collections::{BTreeMap, HashMap, VecDeque};\n\
+             pub struct WithGet(pub Vec<u8>);\n\
+             impl WithGet {\n    pub fn get(&self, at: usize) -> Option<&u8> {\n        self.0.get(at)\n    }\n}\n\
+             impl std::ops::Index<usize> for WithGet {\n    type Output = u8;\n    fn index(&self, at: usize) -> &u8 {\n        self.0.get(at).unwrap_or(&0)\n    }\n}\n\
+             pub fn a(v: &[u8], i: usize) -> u8 { v[i] }\n\
+             pub fn b(v: [u8; 4], i: usize) -> u8 { v[i] }\n\
+             pub fn c(v: &Vec<u8>, i: usize) -> u8 { v[i] }\n\
+             pub fn d(s: &str, i: usize) -> &str { &s[i..] }\n\
+             pub fn e(s: &String, i: usize) -> &str { &s[..i] }\n\
+             pub fn f(m: &HashMap<u8, u8>, k: u8) -> u8 { m[&k] }\n\
+             pub fn g(m: HashMap<u8, u8>, k: u8) -> u8 { m[&k] }\n\
+             pub fn h(m: &mut BTreeMap<u8, u8>) -> u8 { m[&1] }\n\
+             pub fn i(m: BTreeMap<u8, u8>) -> u8 { m[&1] }\n\
+             pub fn j(d: &VecDeque<u8>, i: usize) -> u8 { d[i] }\n\
+             pub fn k(mut d: VecDeque<u8>, i: usize) -> u8 { d[i] = 1; d[0] }\n\
+             pub fn l(w: &WithGet) -> u8 { w[0] }\n\
+             pub fn m(w: WithGet) -> u8 { w[0] }\n\
+             pub fn n(m: Box<HashMap<u8, u8>>) -> u8 { m[&1] }\n\
+             pub fn o<T: std::ops::Index<usize, Output = u8>>(t: T) -> u8 { t[0] }\n";
+        let (_, library) = dylint_over_tree(&probe(source), "");
+        let (_, clippy) = clippy_over_tree(&probe(source), "");
+        let reported = |output: &str, line: usize| output.matches(&format!("--> src/lib.rs:{line}:")).count();
+        for line in 14..=28 {
+            let (by_clippy, by_library) = (reported(&clippy, line), reported(&library, line));
+            let expected = if line == 24 { 2 } else { 1 };
+            assert_eq!(by_clippy + by_library, expected, "line {line}: clippy {by_clippy}, the library {by_library}\n{clippy}\n{library}");
+        }
+    }
+
+    /// A `[]` a macro writes is refused when the macro is the workspace's — this crate's own, or one another
+    /// workspace crate exports, reported at its call, a slice's and a string's included since clippy reads
+    /// none inside another crate's macro — and not when it is a package's from outside the workspace, which
+    /// Cargo compiles in that package's own folder as it does every dependency.
+    #[test]
+    fn the_lint_library_refuses_a_workspace_macro_s_index_and_not_a_dependency_s() {
+        let pick = "#[macro_export]\nmacro_rules! pick {\n    ($map:expr, $key:expr) => {\n        $map[$key]\n    };\n}\n";
+        let package = |name: &str, more: &str| format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n{more}");
+        let (passed, output) = dylint_over_tree(
+            &[
+                ("workspace/Cargo.toml", "[workspace]\nresolver = \"3\"\nmembers = [\"exporter\", \"user\"]\n"),
+                ("workspace/exporter/Cargo.toml", &package("exporter", "")),
+                ("workspace/exporter/src/lib.rs", pick),
+                ("outside/Cargo.toml", &package("outside", "\n[workspace]\n")),
+                ("outside/src/lib.rs", pick),
+                (
+                    "workspace/user/Cargo.toml",
+                    &package("user", "\n[dependencies]\nexporter = { path = \"../exporter\" }\noutside = { path = \"../../outside\" }\n"),
+                ),
+                (
+                    "workspace/user/src/lib.rs",
+                    "use std::collections::HashMap;\nmacro_rules! own_pick {\n    ($map:expr, $key:expr) => {\n        $map[$key]\n    };\n}\n\
+                     pub fn exported(m: &HashMap<u8, u8>) -> u8 {\n    exporter::pick!(m, &1)\n}\n\
+                     pub fn own(m: &HashMap<u8, u8>) -> u8 {\n    own_pick!(m, &1)\n}\n\
+                     pub fn from_outside(m: &HashMap<u8, u8>) -> u8 {\n    outside::pick!(m, &1)\n}\n\
+                     pub fn exported_slice(v: &[u8]) -> u8 {\n    exporter::pick!(v, 1)\n}\n\
+                     pub fn exported_str(s: &str) -> &str {\n    &exporter::pick!(s, 1..)\n}\n\
+                     pub fn own_slice(v: &[u8]) -> u8 {\n    own_pick!(v, 1)\n}\n\
+                     pub fn outside_slice(v: &[u8]) -> u8 {\n    outside::pick!(v, 1)\n}\n",
+                ),
+            ],
+            "workspace",
+        );
+        assert!(!passed, "{output}");
+        assert_eq!(
+            output.matches("can panic on a missing key or index").count(),
+            4,
+            "the exported and the crate's own macro's map index, and the exported macro's slice and string index; not the outside one's, nor the own macro's slice index, which clippy reads: {output}"
+        );
+        assert!(output.contains("--> user/src/lib.rs:8:5"), "the exported macro's index is reported at its call: {output}");
+        assert!(output.contains("--> user/src/lib.rs:4:9"), "the crate's own macro's index is reported in it: {output}");
+        // Clippy's index lints read nothing inside another crate's macro, so the library refuses a slice's
+        // and a string's `[]` there.
+        assert!(output.contains("`[]` on `[u8]`") && output.contains("--> user/src/lib.rs:17:5"), "the exported macro's slice index: {output}");
+        assert!(output.contains("`[]` on `str`") && output.contains("--> user/src/lib.rs:20:6"), "the exported macro's string slice: {output}");
+    }
+
+    #[test]
+    fn the_lint_library_refuses_a_map_index_however_it_is_allowed_and_passes_get() {
+        let refused = dylint_over(
+            "use std::collections::{BTreeMap, HashMap, VecDeque};\nuse std::ops::Index;\n\
+             pub struct Own;\nimpl Index<u8> for Own {\n    type Output = u8;\n    fn index(&self, _: u8) -> &u8 {\n        &0\n    }\n}\n\
+             pub fn hash(m: &HashMap<u8, u8>) -> u8 {\n    m[&1]\n}\n\
+             pub fn tree(m: &BTreeMap<u8, u8>) -> u8 {\n    m[&1]\n}\n\
+             pub fn deque_read(d: &VecDeque<u8>) -> u8 {\n    d[1]\n}\n\
+             pub fn deque_write(d: &mut VecDeque<u8>) {\n    d[1] = 2;\n}\n\
+             pub fn own(o: &Own) -> u8 {\n    o[1]\n}\n\
+             pub fn generic<T: Index<usize, Output = u8>>(t: &T) -> u8 {\n    t[1]\n}\n",
+        );
+        assert!(!refused.0, "{}", refused.1);
+        assert_eq!(refused.1.matches("can panic on a missing key or index").count(), 6, "each of the six index sites: {}", refused.1);
+        for indexed in ["HashMap<u8, u8>", "BTreeMap<u8, u8>", "VecDeque<u8>", "Own", "T"] {
+            assert!(refused.1.contains(&format!("`[]` on `{indexed}`")) || refused.1.contains(&format!("::{indexed}`")), "{indexed}: {}", refused.1);
+        }
+        for allowance in ["#![allow(collection_indexing)]", "#![cfg_attr(all(), allow(collection_indexing))]", "#![expect(collection_indexing)]"] {
+            let allowed = dylint_over(&format!("{allowance}\npub fn hash(m: &std::collections::HashMap<u8, u8>) -> u8 {{\n    m[&1]\n}}\n"));
+            assert!(
+                !allowed.0 && allowed.1.contains("incompatible with previous forbid"),
+                "{allowance}: the lint is forbid, so no allowance compiles: {}",
+                allowed.1
+            );
+        }
+        let passed = dylint_over(
+            "use std::collections::{BTreeMap, HashMap, VecDeque};\n\
+             pub fn gets(h: &HashMap<u8, u8>, t: &BTreeMap<u8, u8>, d: &VecDeque<u8>) -> Option<u8> {\n    Some(h.get(&1)? + t.get(&1)? + d.get(1)?)\n}\n\
+             pub fn slices(v: &[u8], a: [u8; 2], w: &Vec<u8>, s: &str) -> (u8, u8, u8, usize) {\n    (v[0], a[1], w[0], s[1..].len())\n}\n",
+        );
+        assert!(passed.0, "`get()` is the rule, and slice, array, vector and string indexing are clippy's to refuse: {}", passed.1);
     }
 
     #[test]
