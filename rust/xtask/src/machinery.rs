@@ -37,7 +37,12 @@ const DENY_CONFIGURATION: &str = "rust/deny.toml";
 /// also in a `.cargo` folder) it finds from there up, which would widen the one allowlist without it; ktlint
 /// merges every `.editorconfig` from a Kotlin file up to the root's, so the root's is its configuration and
 /// a nested one rewrites it for the code below; and the licence rule of AGENTS §8 is only one rule while
-/// `licences.toml` is one file.
+/// `licences.toml` is one file. rustup reads the toolchain pin from the nearest folder that holds one, from
+/// the folder a command runs in up, under `rust-toolchain.toml` or the older `rust-toolchain` (the one it
+/// reads when both sit in one folder), so a second copy switches which clippy and rustfmt the gate
+/// commands get; and every Gradle version — ktlint and Spotless included — is once in the
+/// build's own catalog (AGENTS §5), so a second `libs.versions.toml` anywhere is a second source of the
+/// versions the Kotlin checks run under, `build-logic` included.
 pub(crate) const CONFIGURATIONS: &[(&str, &[&str])] = &[
     (CLIPPY_CONFIGURATION, CLIPPY_CONFIGURATION_NAMES),
     ("rust/rustfmt.toml", &["rustfmt.toml", ".rustfmt.toml"]),
@@ -46,7 +51,25 @@ pub(crate) const CONFIGURATIONS: &[(&str, &[&str])] = &[
     ("ios/sdk/.swiftlint.yml", &[".swiftlint.yml"]),
     ("tools/licences.toml", &["licences.toml"]),
     (".editorconfig", &[".editorconfig"]),
+    ("rust/rust-toolchain.toml", &["rust-toolchain.toml", "rust-toolchain"]),
+    ("android/sdk/gradle/libs.versions.toml", &["libs.versions.toml"]),
 ];
+
+/// The gate's lint library (AGENTS.md §3), which `cargo dylint` builds and runs over the workspace: a
+/// package of its own beside the workspace, since it compiles against the compiler's internals.
+pub(crate) const LINT_LIBRARY: &str = "rust/never-crash-lints/";
+
+/// The library's own toolchain pin, the nightly its compiler internals are written against: rustup reads
+/// it only for a command run in the library's folder, which holds no workspace code, so it switches no
+/// tool the gate runs over the workspace, and it is the one other `rust-toolchain.toml` the tree holds.
+fn lint_library_toolchain() -> String {
+    format!("{LINT_LIBRARY}rust-toolchain.toml")
+}
+
+/// The library's name as dylint names its build, `lib<name>@<toolchain>`: the package name with `_`.
+pub(crate) fn lint_library_name() -> String {
+    LINT_LIBRARY.trim_end_matches('/').rsplit('/').next().unwrap_or_default().replace('-', "_")
+}
 
 /// Every file and folder of the gate's machinery (AGENTS.md §10) besides the configurations above: the
 /// list the docs test holds both rule paragraphs to, so neither can drop a path the other keeps. The
@@ -60,6 +83,7 @@ const MACHINERY: &[&str] = &[
     "tools/hooks/",
     "rust/xtask/",
     "rust/effects/craftbridge-effects-conformance/",
+    LINT_LIBRARY,
     CARGO_CONFIGURATION,
     "android/sdk/settings.gradle.kts",
     GRADLE_PROPERTIES,
@@ -135,7 +159,7 @@ fn second_gradle_properties(shown: &str, folders: &[String]) -> Option<String> {
 /// `shown` is the path as the gate prints it.
 pub(crate) fn second_copy(shown: &str, name: &str, folders: &[String]) -> Option<String> {
     if let Some(configuration) = listed_configuration(name) {
-        return (shown != configuration).then(|| second_copy_message(shown, configuration));
+        return (shown != configuration && shown != lint_library_toolchain()).then(|| second_copy_message(shown, configuration));
     }
     if folders.last().is_some_and(|folder| folder == CARGO_FOLDER) && CARGO_CONFIGURATION_NAMES.contains(&name) {
         if shown == CARGO_CONFIGURATION {
@@ -244,6 +268,17 @@ mod tests {
             ("tools/other/licences.toml", "[allow]\n"),
             // ktlint merges every .editorconfig up to the root's.
             ("rust/core/craftbridge-core/.editorconfig", "[*.kt]\nktlint_standard = disabled\n"),
+            // rustup reads the toolchain pin under either name, from the folder it runs in and above, and
+            // the older name in place of the listed file beside it.
+            ("rust/core/craftbridge-core/rust-toolchain.toml", "[toolchain]\nchannel = \"nightly\"\n"),
+            ("ios/sdk/rust-toolchain", "nightly\n"),
+            ("rust/rust-toolchain", "nightly\n"),
+            // The lint library's own pin is the one other `rust-toolchain.toml`; the older name beside it
+            // would be read in its place.
+            ("rust/never-crash-lints/rust-toolchain", "nightly\n"),
+            // Every Gradle version is once in the build's own catalog, build-logic's build too.
+            ("android/sdk/build-logic/gradle/libs.versions.toml", "[versions]\nktlint = \"0.0.1\"\n"),
+            ("android/samples/app/gradle/libs.versions.toml", "[versions]\nktlint = \"0.0.1\"\n"),
         ];
         // cargo-deny merges these into the licence configuration, widening the one allowlist.
         let exceptions = [
@@ -269,7 +304,7 @@ mod tests {
             std::fs::remove_file(copy.0.join(path)).unwrap();
         }
         // The rust/ tree copy already carries rust/clippy.toml, rustfmt.toml and deny.toml at their
-        // listed paths; with only those, the check is clean.
+        // listed paths, and the lint library's own toolchain pin; with only those, the check is clean.
         assert!(check(&copy.0).unwrap().is_empty(), "the copies are what the errors were");
     }
 
@@ -396,6 +431,46 @@ mod tests {
             for name in other_names.chain(REFUSED.iter().map(|(name, _)| name)).chain([&SOURCEKIT_LSP_FOLDER]) {
                 assert!(paragraph.contains(&format!("`{name}`")), "{document}'s machinery paragraph does not name `{name}`");
             }
+        }
+    }
+
+    /// The workspace's manifest and the lint library's own, read for the tests that compare what the
+    /// workspace states with what the library, standing outside it, carries of the same.
+    fn manifests() -> (toml::Value, toml::Value) {
+        let read = |path: &str| -> toml::Value { toml::from_str(&std::fs::read_to_string(crate::repo_root().join(path)).unwrap()).unwrap() };
+        (read("rust/Cargo.toml"), read(&format!("{LINT_LIBRARY}Cargo.toml")))
+    }
+
+    /// The library is no workspace member, so it cannot inherit the workspace's tables the members inherit;
+    /// the gate holds its crate to the members' rules all the same (AGENTS.md §3), and the way it can is
+    /// that the library's own manifest carries the tables as its own workspace's and inherits them the
+    /// members' way. Each copy is one definition written out again, and this test is what keeps it so: the
+    /// lint table whole, and each `[workspace.package]` key the library carries (its edition and licence,
+    /// never the release version, which is the workspace's alone), must match; and the library's `[package]`
+    /// writes no version of its own, so the release version sits in no second file whichever table asked.
+    #[test]
+    fn the_lint_library_carries_the_workspace_tables() {
+        let (workspace, library) = manifests();
+        let table = |document: &toml::Value, name: &str| document.get("workspace").and_then(|workspace| workspace.get(name)).cloned();
+        let expected = table(&workspace, "lints");
+        assert!(expected.is_some(), "the workspace states its lint table");
+        assert_eq!(table(&library, "lints"), expected, "the lint library carries the workspace's lint table as its own workspace's");
+        let carried = table(&library, "package").and_then(|package| package.as_table().cloned()).unwrap_or_default();
+        for key in ["edition", "license"] {
+            assert!(carried.contains_key(key), "the lint library carries the workspace's {key}");
+        }
+        assert!(!carried.contains_key("version"), "the release version is written only in rust/Cargo.toml");
+        // A version can be carried under the library's own `[package]` too, and one held there is the
+        // release version written in a second file just as much (AGENTS.md §11): neither table of the
+        // library's manifest may write a version at all, so neither can hold the release one.
+        let own = library.get("package").and_then(|package| package.as_table().cloned()).unwrap_or_default();
+        assert!(
+            !own.contains_key("version"),
+            "the lint library's [package] must carry no version either: {LINT_LIBRARY}Cargo.toml writes one, and the release version is written only in rust/Cargo.toml"
+        );
+        let stated = table(&workspace, "package");
+        for (key, value) in &carried {
+            assert_eq!(stated.as_ref().and_then(|package| package.get(key)), Some(value), "the lint library's [workspace.package].{key}");
         }
     }
 

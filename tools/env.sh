@@ -47,24 +47,41 @@ craftbridge_load_pins() {
 # rustup before 1.28.1 does not know the variable and installs as it always did.
 export RUSTUP_AUTO_INSTALL=0
 
-# What toolchain rustup resolves inside rust/, which is where it reads rust/rust-toolchain.toml: rustup
-# itself says the one line `cargo xtask pins` cannot, because a pin's file is the toolchain only when no
-# other toolchain stands over it. `ok <toolchain>` is that case; the rest name what does. A `+toolchain`
-# argument is one of those: given to cargo or rustup, it reaches every command run under it, the gate's
-# included, as RUSTUP_TOOLCHAIN, which is how rustup then names it. One spelling of that variable is no
-# other toolchain though: rustup hands the toolchain it resolved to every command it starts, so each test
-# `cargo test` runs, and each gate such a test runs, inherits a RUSTUP_TOOLCHAIN naming that toolchain —
-# the pin itself whenever rust/ chose it. A variable naming the very toolchain the file alone resolves to
-# therefore passes for the pin; one naming any other toolchain, a `+toolchain` naming any other, and a
-# rustup directory override all stand over the pin and are named back. The answer is rustup's last line, so
-# the `info:` lines of an install by a rustup too old for RUSTUP_AUTO_INSTALL cannot pass for it.
-craftbridge_toolchain_status() {
-  local line pin file_line
+# A command run in a folder, under the toolchain rustup resolves there: `craftbridge_in <dir> <command…>`.
+# rustup reads the pin of the folder a command runs in, unless RUSTUP_TOOLCHAIN stands over it, and it
+# hands the toolchain it resolved to every command it starts as that variable. The one variable the gate
+# and the doctor let through names rust/'s pin (craftbridge_toolchain_status_in says why), which is no pin
+# in any other folder: there it would stand over that folder's own, the gate's lint library's nightly, so a
+# command run outside rust/ runs without it.
+craftbridge_in() {
+  local dir="$1"
+  shift
+  if [ "$dir" -ef "$CRAFTBRIDGE_ROOT/rust" ]; then
+    (cd "$dir" && "$@")
+  else
+    (cd "$dir" && env -u RUSTUP_TOOLCHAIN "$@")
+  fi
+}
+
+# What toolchain rustup resolves in a folder with a pin, `craftbridge_toolchain_status_in <dir>`, which is
+# where it reads `<dir>/rust-toolchain.toml`: rustup itself says the one line `cargo xtask pins` cannot,
+# because a pin's file is the toolchain only when no other toolchain stands over it. `ok <toolchain>` is
+# that case; the rest name what does. A `+toolchain` argument is one of those: given to cargo or rustup, it
+# reaches every command run under it, the gate's included, as RUSTUP_TOOLCHAIN, which is how rustup then
+# names it. One spelling of that variable is no other toolchain though: rustup hands the toolchain it
+# resolved to every command it starts, so each test `cargo test` runs, and each gate such a test runs,
+# inherits a RUSTUP_TOOLCHAIN naming that toolchain — the pin itself whenever rust/ chose it. A variable
+# naming the very toolchain the file alone resolves to therefore passes for the pin; one naming any other
+# toolchain, a `+toolchain` naming any other, and a rustup directory override all stand over the pin and are
+# named back. The answer is rustup's last line, so the `info:` lines of an install by a rustup too old for
+# RUSTUP_AUTO_INSTALL cannot pass for it.
+craftbridge_toolchain_status_in() {
+  local dir="$1" line pin file_line
   if ! command -v rustup >/dev/null 2>&1; then
     echo no-rustup
     return
   fi
-  if ! line="$(cd "$CRAFTBRIDGE_ROOT/rust" && rustup show active-toolchain 2>&1)"; then
+  if ! line="$(craftbridge_in "$dir" rustup show active-toolchain 2>&1)"; then
     # rustup names what chose the toolchain it lacks. Only the toolchain file is the pin missing: a
     # variable or a directory override naming a toolchain this machine lacks still stands over the pin,
     # and installing what rustup then resolves would install that other toolchain, not the pin.
@@ -76,13 +93,13 @@ craftbridge_toolchain_status() {
     return
   fi
   line="${line##*$'\n'}"
-  pin="$(cd "$CRAFTBRIDGE_ROOT/rust" && pwd -P)/rust-toolchain.toml"
+  pin="$(cd "$dir" && pwd -P)/rust-toolchain.toml"
   case "$line" in
     *"(overridden by '$pin')") echo "ok ${line%% *}"; return ;;
     *"(overridden by environment variable RUSTUP_TOOLCHAIN)")
       # Take the variable off and ask rustup again: when the file then chooses exactly the toolchain the
       # variable named, the variable names the pin, and the build is the pin's build.
-      if file_line="$(cd "$CRAFTBRIDGE_ROOT/rust" && env -u RUSTUP_TOOLCHAIN rustup show active-toolchain 2>&1)"; then
+      if file_line="$(craftbridge_in "$dir" env -u RUSTUP_TOOLCHAIN rustup show active-toolchain 2>&1)"; then
         file_line="${file_line##*$'\n'}"
         if [ "$file_line" = "${line%% *} (overridden by '$pin')" ]; then
           echo "ok ${line%% *}"
@@ -146,6 +163,12 @@ craftbridge_refused_environment() {
   return 0
 }
 
+# The gate's lint library (AGENTS.md §3), which `cargo dylint` builds with the nightly its own
+# rust-toolchain.toml pins and runs over the workspace, and the cargo-dylint release that runs it. The gate
+# pins the release: one can change how a library is built and driven, so an upgrade is an edit here and a
+# fresh gate run, never a silent surprise.
+export CRAFTBRIDGE_LINT_LIBRARY="$CRAFTBRIDGE_ROOT/rust/never-crash-lints"
+export CRAFTBRIDGE_DYLINT="6.4.0"
 # Each worktree builds into its own rust/target: a machine-wide CARGO_TARGET_DIR would share one target
 # folder between worktrees, whose gates would then reuse each other's artifacts. A machine-wide
 # CARGO_BUILD_TARGET would send the host build of xtask to a <triple>/ folder, where the gate, which
@@ -159,18 +182,27 @@ craftbridge_refused_environment() {
 export CARGO_TARGET_DIR="${CRAFTBRIDGE_PUSH_TARGET:-$CRAFTBRIDGE_ROOT/rust/target}"
 unset CARGO_BUILD_TARGET
 
-# Every cargo command the scripts run: in rust/, where rustup selects the pinned toolchain from
-# rust/rust-toolchain.toml, and never while the repository root holds a Cargo configuration. Cargo merges a
-# .cargo/config.toml from every folder above the one it runs in, so one at the root would reach every cargo
-# command: its `runner` would stand in for the test and rule binaries, its `[patch]` or `[source]` would
-# build another copy around the pin, and the gate would pass having checked nothing, before the rules that
-# refuse the folder could run. The one Cargo configuration is rust/.cargo/config.toml, which the rules read.
-craftbridge_cargo() {
+# Every cargo command the scripts run, and never while the repository root holds a Cargo configuration.
+# Cargo merges a .cargo/config.toml from every folder above the one it runs in, so one at the root would
+# reach every cargo command: its `runner` would stand in for the test and rule binaries, its `[patch]` or
+# `[source]` would build another copy around the pin, and the gate would pass having checked nothing,
+# before the rules that refuse the folder could run. The one Cargo configuration is rust/.cargo/config.toml,
+# which the rules read. rustup selects a toolchain pin from the folder a command runs in, so
+# `craftbridge_cargo_in` names that folder and runs there through `craftbridge_in`: `craftbridge_cargo` runs
+# in rust/, where the workspace's pin is rust/rust-toolchain.toml, while the gate's lint library runs in its
+# own folder, where its own pin is the nightly it names. The guard is the one definition, whichever folder
+# is chosen.
+craftbridge_cargo_in() {
+  local dir="$1"
+  shift
   if [ -e "$CRAFTBRIDGE_ROOT/.cargo" ]; then
     echo "$(basename "$0" .sh): .cargo at the repository root: Cargo would merge it into every cargo build; the one Cargo configuration is rust/.cargo/config.toml" >&2
     return 1
   fi
-  (cd "$CRAFTBRIDGE_ROOT/rust" && cargo "$@")
+  craftbridge_in "$dir" cargo "$@"
+}
+craftbridge_cargo() {
+  craftbridge_cargo_in "$CRAFTBRIDGE_ROOT/rust" "$@"
 }
 # The rule checks are built with `cargo build` and their binary run by the caller, not through the
 # `cargo xtask` alias or `cargo run`: a Cargo configuration can redefine an alias, and a

@@ -426,11 +426,11 @@ fn raw_string_end(bytes: &[u8], from: usize, quotes: usize, hashes: usize) -> us
 fn block_comment_end(bytes: &[u8], index: usize) -> usize {
     let mut i = index + 2;
     let mut depth = 1usize;
-    while i < bytes.len() {
-        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+    while let Some(byte) = bytes.get(i) {
+        if *byte == b'/' && bytes.get(i + 1) == Some(&b'*') {
             depth += 1;
             i += 2;
-        } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+        } else if *byte == b'*' && bytes.get(i + 1) == Some(&b'/') {
             depth -= 1;
             i += 2;
             if depth == 0 {

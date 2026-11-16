@@ -1,12 +1,13 @@
 //! Rule 3's "nor may code the rules never read", from the compiler: every file a workspace crate's
-//! compilation reads is one of that crate's own `.rs` files that the rules read.
+//! compilation reads, or the gate's lint library's, is one of that crate's own `.rs` files that the rules
+//! read.
 //!
 //! The compiler is the one reader that knows which files a crate is made of. `#[path]` and `include!` —
 //! under any name `use` gives it, split over lines, or assembled by a macro — and a target `path` into a
 //! folder the walk skips or out of `rust/` all show in the dep-info rustc writes beside each compilation.
-//! So every cargo stage of `tools/ci.sh` that compiles the workspace pipes cargo's JSON messages through
-//! `cargo xtask compiled`, which prints the diagnostics as cargo would and then reads the dep-info of each
-//! workspace unit cargo built: a file there that is not a `.rs` file inside the crate's own folder, found
+//! So every cargo stage of `tools/ci.sh` that compiles the workspace, or the lint library, pipes cargo's
+//! JSON messages through `cargo xtask compiled`, which prints the diagnostics as cargo would and then reads
+//! the dep-info of each such unit cargo built: a file there that is not a `.rs` file inside the crate's own folder, found
 //! by the walk every rule uses (or the lint configuration clippy records beside them), fails the stage,
 //! naming the file and the crate. That reaches code behind
 //! a feature, a target or a profile exactly where the stage compiles it, and refuses `include_str!` and
@@ -128,20 +129,25 @@ pub(crate) fn dep_info_files(text: &str) -> BTreeSet<String> {
 }
 
 /// Judge the files one crate's compilation read against the crate's own `.rs` files the rules read.
-/// Relative paths are rustc's, from the workspace root it runs in. Clippy also records the configuration
-/// it lints by, so a change to it lints again: the workspace manifest, which holds the lint table, the
-/// crate's own manifest and `rust/clippy.toml`. Those hold no code, and `rules: lints` reads each.
-pub(crate) fn judge(root: &Path, rust_dir: &Path, crate_name: &str, crate_dir: &Path, read: &BTreeSet<String>) -> Result<Vec<String>, String> {
-    let lint_configuration = [rust_dir.join("Cargo.toml"), crate_dir.join("Cargo.toml"), root.join(crate::machinery::CLIPPY_CONFIGURATION)];
+/// Relative paths are rustc's, from the root of the workspace the crate builds in (`workspace_dir`):
+/// `rust/` for the workspace's crates, the lint library's own folder for it. Clippy also records the
+/// configuration it lints by, so a change to it lints again: the workspace manifest, which holds the lint
+/// table, the crate's own manifest and `rust/clippy.toml`. Those hold no code, and `rules: lints` reads
+/// each. The lint library's run records the library it loads, as built by `cargo dylint` from the gate's
+/// own sources, which the rules read where they sit.
+pub(crate) fn judge(root: &Path, workspace_dir: &Path, crate_name: &str, crate_dir: &Path, read: &BTreeSet<String>) -> Result<Vec<String>, String> {
+    let lint_configuration = [workspace_dir.join("Cargo.toml"), crate_dir.join("Cargo.toml"), root.join(crate::machinery::CLIPPY_CONFIGURATION)];
     let own: BTreeSet<PathBuf> =
         scan::walk(crate_dir, ".rs")?.into_iter().map(|file| file.path).chain(lint_configuration).filter_map(|path| std::fs::canonicalize(path).ok()).collect();
+    let lint_library_builds = std::fs::canonicalize(root.join("rust").join("target")).ok().map(|target| target.join("dylint").join("libraries"));
     let mut errors = Vec::new();
     for file in read {
-        let path = rust_dir.join(file);
+        let path = workspace_dir.join(file);
         let resolved = std::fs::canonicalize(&path);
         let shown = crate::report::shown(root, resolved.as_deref().unwrap_or(&path));
         match resolved {
             Ok(canonical) if own.contains(&canonical) => {}
+            Ok(canonical) if lint_library_builds.as_deref().is_some_and(|builds| is_lint_library_build(&canonical, builds)) => {}
             Ok(_) => errors.push(format!(
                 "{shown}: {crate_name}'s compilation reads it, but it is not one of the crate's own .rs files the rules read (AGENTS.md §3): the code it holds is checked by no rule"
             )),
@@ -151,11 +157,28 @@ pub(crate) fn judge(root: &Path, rust_dir: &Path, crate_name: &str, crate_dir: &
     Ok(errors)
 }
 
-/// The errors of every workspace unit among `artifacts`.
+/// Is `path` the gate's lint library as `cargo dylint` builds it: under the workspace target folder's
+/// `dylint/libraries`, named `lib<name>@<toolchain>.<extension>`, the form dylint loads a library under?
+fn is_lint_library_build(path: &Path, builds: &Path) -> bool {
+    let prefix = format!("lib{}@", crate::machinery::lint_library_name());
+    path.starts_with(builds) && path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with(&prefix))
+}
+
+/// The errors of every unit among `artifacts` of a crate the rules read: the workspace's members, and
+/// the gate's lint library, which is a workspace of its own the gate compiles too. Each is judged from the
+/// root of the workspace it builds in.
 fn errors(root: &Path, rust_dir: &Path, artifacts: &[Artifact]) -> Result<Vec<String>, String> {
-    let members: BTreeMap<String, crate::meta::Crate> =
-        crate::meta::read(rust_dir, crate::meta::Graph::Workspace)?.into_iter().map(|package| (package.id.clone(), package)).collect();
-    let mut dep_infos: BTreeMap<PathBuf, &crate::meta::Crate> = BTreeMap::new();
+    let library_dir = root.join(crate::machinery::LINT_LIBRARY);
+    let mut members: BTreeMap<String, (crate::meta::Crate, PathBuf)> = BTreeMap::new();
+    for (workspace_dir, read) in [(rust_dir.to_path_buf(), true), (library_dir.clone(), library_dir.join("Cargo.toml").is_file())] {
+        if !read {
+            continue;
+        }
+        for package in crate::meta::read(&workspace_dir, crate::meta::Graph::Workspace)? {
+            members.insert(package.id.clone(), (package, workspace_dir.clone()));
+        }
+    }
+    let mut dep_infos: BTreeMap<PathBuf, &(crate::meta::Crate, PathBuf)> = BTreeMap::new();
     let mut errors = Vec::new();
     for artifact in artifacts {
         let Some(package) = members.get(&artifact.package_id) else { continue };
@@ -163,14 +186,14 @@ fn errors(root: &Path, rust_dir: &Path, artifacts: &[Artifact]) -> Result<Vec<St
             Some(dep_info) => {
                 dep_infos.insert(dep_info, package);
             }
-            None => errors.push(format!("{}: no dep-info beside {:?}, so what its compilation read is unknown", package.name, artifact.filenames)),
+            None => errors.push(format!("{}: no dep-info beside {:?}, so what its compilation read is unknown", package.0.name, artifact.filenames)),
         }
     }
     let mut seen = BTreeSet::new();
-    for (dep_info, package) in dep_infos {
+    for (dep_info, (package, workspace_dir)) in dep_infos {
         let text = std::fs::read_to_string(&dep_info).map_err(|error| format!("{}: {error}", dep_info.display()))?;
-        let crate_dir = Path::new(&package.manifest_path).parent().unwrap_or(rust_dir);
-        for error in judge(root, rust_dir, &package.name, crate_dir, &dep_info_files(&text))? {
+        let crate_dir = Path::new(&package.manifest_path).parent().unwrap_or(workspace_dir);
+        for error in judge(root, workspace_dir, &package.name, crate_dir, &dep_info_files(&text))? {
             if seen.insert(error.clone()) {
                 errors.push(error);
             }
@@ -257,6 +280,50 @@ mod tests {
         ] {
             assert!(errors.iter().any(|e| e.starts_with(refused)), "{refused}: {errors:?}");
         }
+    }
+
+    /// The lint library's run records the library dylint loads; that build of the gate's own sources is
+    /// the one file outside a crate it may read, and only where `cargo dylint` builds it, under its name.
+    #[test]
+    fn the_lint_library_dylint_loads_is_no_crate_code_but_a_look_alike_is() {
+        let scratch = Scratch::new("compiled-lint-library");
+        scratch.write("rust/Cargo.toml", "");
+        scratch.write("rust/core/x/Cargo.toml", "");
+        scratch.write("rust/core/x/src/lib.rs", "");
+        let builds = "target/dylint/libraries/nightly-2026-08-20-aarch64-apple-darwin/release";
+        let library = format!("{builds}/libnever_crash_lints@nightly-2026-08-20-aarch64-apple-darwin.dylib");
+        let other = format!("{builds}/libsomething_else@nightly-2026-08-20-aarch64-apple-darwin.dylib");
+        let elsewhere = "target/debug/libnever_crash_lints@nightly-2026-08-20-aarch64-apple-darwin.dylib".to_string();
+        for file in [&library, &other, &elsewhere] {
+            scratch.write(&format!("rust/{file}"), "");
+        }
+        let read: BTreeSet<String> = ["core/x/src/lib.rs".to_string(), library, other, elsewhere].into_iter().collect();
+        let errors = judge(&scratch.0, &scratch.0.join("rust"), "x", &scratch.0.join("rust/core/x"), &read).unwrap();
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(errors.iter().any(|e| e.contains("libsomething_else@")), "another library: {errors:?}");
+        assert!(errors.iter().any(|e| e.starts_with("rust/target/debug/libnever_crash_lints@")), "outside dylint's own folder: {errors:?}");
+    }
+
+    /// The lint library is a workspace of its own the gate compiles too, so a unit of it is judged like a
+    /// member's, from its own folder, where rustc runs for it: its own source passes, and any other file
+    /// its compilation reads is refused.
+    #[test]
+    fn the_lint_library_s_own_compilation_is_judged_from_its_own_folder() {
+        let root = crate::repo_root();
+        let library = crate::meta::read(&root.join(crate::machinery::LINT_LIBRARY), crate::meta::Graph::Workspace).unwrap();
+        let scratch = Scratch::new("compiled-library");
+        scratch.write("deps/never_crash_lints-1.d", "deps/libnever_crash_lints-1.rmeta: src/lib.rs Cargo.toml ../../README.md\n");
+        scratch.write("deps/libnever_crash_lints-1.rmeta", "");
+        let artifact = Artifact {
+            package_id: library[0].id.clone(),
+            target_name: "never-crash-lints".to_string(),
+            target_kinds: vec!["lib".to_string()],
+            filenames: vec![scratch.0.join("deps/libnever_crash_lints-1.rmeta").to_string_lossy().into_owned()],
+            executable: None,
+        };
+        let found = errors(&root, &root.join("rust"), &[artifact]).unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].starts_with("README.md: never-crash-lints's compilation reads it"), "{found:?}");
     }
 
     #[test]

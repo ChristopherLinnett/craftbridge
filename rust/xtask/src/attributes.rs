@@ -157,6 +157,13 @@ fn levels_in(body: &str) -> Vec<(&'static str, Vec<String>)> {
 /// and its `mod`, on the same line or spread over several. An attribute on a module applies to the whole
 /// module, so both rules that ask where an `allow` sits need this answer.
 pub(crate) fn declared_module(text: &str, from: usize) -> Option<&str> {
+    declared_item(text, from, "mod")
+}
+
+/// The name the item starting at `from` declares, when that item is the `keyword` kind of item (`mod`,
+/// `fn`): past further attributes, a visibility and, for a function, an `extern` ABI, as the compiler
+/// reads them between an attribute and its item.
+pub(crate) fn declared_item<'a>(text: &'a str, from: usize, keyword: &str) -> Option<&'a str> {
     let bytes = text.as_bytes();
     let mut at = skip_whitespace(bytes, from);
     while bytes.get(at) == Some(&b'#') && bytes.get(skip_whitespace(bytes, at + 1)) == Some(&b'[') {
@@ -168,12 +175,33 @@ pub(crate) fn declared_module(text: &str, from: usize) -> Option<&str> {
             at = skip_whitespace(bytes, matching(bytes, at, b'(', b')')? + 1);
         }
     }
-    if !word_at(text, at, "mod") {
+    if word_at(text, at, "extern") {
+        at = skip_whitespace(bytes, at + "extern".len());
+        // The ABI's string, blanked by the stripping but still between its quotes.
+        if bytes.get(at) == Some(&b'"') {
+            at = skip_whitespace(bytes, scan::find(bytes, at + 1, b"\"")? + 1);
+        }
+    }
+    if !word_at(text, at, keyword) {
         return None;
     }
-    let name = skip_whitespace(bytes, at + "mod".len());
+    let name = skip_whitespace(bytes, at + keyword.len());
     let end = (name..bytes.len()).find(|&offset| !scan::ident_byte(text, offset)).unwrap_or(bytes.len());
-    text.get(name..end).filter(|module| !module.is_empty())
+    text.get(name..end).filter(|item| !item.is_empty())
+}
+
+/// The outer attributes of stripped `text` that hold exactly `content`, whitespace aside (`unsafe(no_mangle)`,
+/// say): for each, the span of what it holds, and where the item it applies to begins.
+pub(crate) fn outer_attributes_holding(text: &str, content: &str) -> Vec<(std::ops::Range<usize>, usize)> {
+    attributes(text)
+        .into_iter()
+        .filter(|attribute| !attribute.inner)
+        .filter(|attribute| {
+            let body = text.get(attribute.open + 1..attribute.close).unwrap_or_default();
+            body.chars().filter(|c| !c.is_whitespace()).eq(content.chars())
+        })
+        .map(|attribute| (attribute.open + 1..attribute.close, attribute.close + 1))
+        .collect()
 }
 
 /// Is the whole word `word` at `at`?
