@@ -1009,7 +1009,7 @@ flowchart LR
 
 ## 31. Team task lists
 
-Estimates are in engineer-days; each wave's total in §11 is the sum of its tasks here. Every task names its acceptance. Each task is an issue in the CraftBridge project (https://github.com/users/ChristopherLinnett/projects/9) with its blockers linked, so the tasks ready to start are always visible; a task over two days is split there into sub-issues along its section's file table. Each issue merges into its wave's iteration branch (`iteration/w0`, …) once its review loop is clean (`AGENTS.md` §12), and the iteration branch reaches `main` through one pull request the owner approves.
+Estimates are in engineer-days; each wave's total in §11 is the sum of its tasks here. Every task names its acceptance. Each task is an issue in the CraftBridge project (https://github.com/users/ChristopherLinnett/projects/9) with its blockers linked, so the tasks ready to start are always visible; a task over two days is split there into sub-issues along its section's file table. Each issue merges into `main` as soon as its review loop is clean and the gate passes, with no approval to wait for, and closes with that merge (`AGENTS.md` §12); a wave orders the work on the board and has no branch of its own.
 
 <!-- @view tasks/ops.md -->
 **OPS: repository, release** (W0, W5)
