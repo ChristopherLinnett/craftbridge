@@ -10,7 +10,10 @@
 //! itself a gate change a reviewer sees.
 //!
 //! The files are read as text under a small line grammar, not as Kotlin: a Kotlin parser would accept
-//! any Kotlin a file can hold, and this rule is about what the files may hold at all. Anything the
+//! any Kotlin a file can hold, and this rule is about what the files may hold at all. Nothing here
+//! needs to know Kotlin's comment or string syntax, because the grammar allows one comment form only,
+//! a whole line starting with `//`; every other line must be one of the few statements listed, so a
+//! trailing comment, a block comment or a string holding `//` is simply a line the grammar refuses. Anything the
 //! grammar does not know fails, because a line this rule cannot read is a line nobody decided belongs
 //! in a build file. A Groovy `build.gradle` is refused too: Gradle reads it in place of the `.kts`
 //! file of the same project, and a rule that cannot read it cannot allow it.
@@ -177,6 +180,11 @@ fn entry_error(at: &str, line: &str, block: Inside, kind: Kind, module: Option<&
     }
 }
 
+/// Is a trimmed line a comment, as the grammar allows one: a whole line that starts with `//`?
+fn is_comment(line: &str) -> bool {
+    line.starts_with("//")
+}
+
 /// Read one build file's shape. `name` is how a message names the file; `module` is the folder whose
 /// name the namespace's last segment must repeat, `None` for the root file.
 fn violations(name: &str, source: &str, kind: Kind, module: Option<&str>) -> Vec<String> {
@@ -196,11 +204,12 @@ fn violations(name: &str, source: &str, kind: Kind, module: Option<&str>) -> Vec
     // around them, so one refused block is reported once and not again at every brace after it. A
     // refused line has already failed the file, so this only keeps the messages pointing at it.
     let mut refused_open = 0usize;
-    // Comments blanked, strings kept: the grammar reads a quoted path exactly as written, and a line
-    // hidden in a comment is nobody's statement — and nobody's hole.
-    for (index, stripped) in scan::strip_comments(source, scan::Language::Kotlin).lines().enumerate() {
-        let line = stripped.trim();
-        if line.is_empty() {
+    for (index, written) in source.lines().enumerate() {
+        let line = written.trim();
+        // A comment is a whole line that starts with `//`. No other comment form exists for the grammar,
+        // so none needs telling from code: a line that holds one beside a statement, or opens a block
+        // comment, is a line the grammar does not know and fails like any other.
+        if line.is_empty() || is_comment(line) {
             continue;
         }
         let at = format!("{name}:{}", index + 1);
@@ -262,9 +271,9 @@ fn violations(name: &str, source: &str, kind: Kind, module: Option<&str>) -> Vec
 /// here — a module whose file exists is still read by shape, and one that skips the convention plugin
 /// fails the settings guard at build time whatever this read.
 fn included_folders(settings: &Path) -> Result<Vec<String>, String> {
-    let text = scan::strip_comments(&scan::read_text(settings)?, scan::Language::Kotlin);
+    let text = scan::read_text(settings)?;
     let mut folders = Vec::new();
-    for line in text.lines() {
+    for line in text.lines().map(str::trim).filter(|line| !is_comment(line)) {
         let Some(from) = line.find("include(") else { continue };
         let rest = line.get(from + "include(".len()..).unwrap_or_default();
         let rest = rest.get(..rest.find(')').unwrap_or(rest.len())).unwrap_or(rest);
@@ -422,9 +431,9 @@ plugins {
 
     #[test]
     fn a_kotlin_char_literal_hides_nothing_from_the_grammar() {
-        // Read the Rust way, `'\u0041'` ran on to the next `}'` and blanked every line between, so the
-        // `afterEvaluate`, `gradle.` and `tasks` lines below passed unread. A char literal is kept, and a
-        // line holding one is no line the grammar allows.
+        // A scanner that took `'\u0041'` for a Rust lifetime would run on to the next `}'` and skip every
+        // line between, so the `afterEvaluate`, `gradle.` and `tasks` lines below would pass unread. No line
+        // is skipped here, and one holding a char literal is no line the grammar allows.
         let plant = "'\\u0041'.let(::plant)\n\nfun plant(c: Char) = afterEvaluate(::late)\n\nfun late(project: Project) = gradle.taskGraph.whenReady(::ready)\n\n\
                      fun ready(graph: org.gradle.api.execution.TaskExecutionGraph) = tasks.configureEach(::quiet)\n\nval close = '}'\n";
         let file = "android/sdk/core/build.gradle.kts";
@@ -519,6 +528,22 @@ plugins {
         assert!(commented.is_empty(), "{commented:?}");
         let quoted = module("android/sdk/effects/build.gradle.kts", &format!("{LEGAL_MODULE}val note = \"tasks\"\n"));
         assert!(quoted.iter().any(|e| e.starts_with("android/sdk/effects/build.gradle.kts:15:")), "{quoted:?}");
+    }
+
+    #[test]
+    fn a_comment_is_a_whole_line_starting_with_two_slashes_and_nothing_else() {
+        let line_comments = module("android/sdk/effects/build.gradle.kts", &format!("    // indented\n/// three slashes\n{LEGAL_MODULE}"));
+        assert!(line_comments.is_empty(), "{line_comments:?}");
+        // A comment beside a statement, or a block comment, is a line the grammar does not list, so it
+        // fails like any other: nothing here tells comments from code.
+        for (source, line) in [
+            (LEGAL_MODULE.replace("    api(project(\":core\"))", "    api(project(\":core\")) // the core"), 13),
+            (format!("{LEGAL_MODULE}/* tasks.register(\"x\") */\n"), 15),
+            (format!("{LEGAL_MODULE}/*\n// tasks.register(\"x\")\n*/\n"), 15),
+        ] {
+            let errors = module("android/sdk/effects/build.gradle.kts", &source);
+            assert!(errors.iter().any(|e| e.starts_with(&format!("android/sdk/effects/build.gradle.kts:{line}:"))), "{source:?}: {errors:?}");
+        }
     }
 
     #[test]

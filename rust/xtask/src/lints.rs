@@ -29,7 +29,8 @@
 //! weaker level is reported as missing. Both spellings of a level are accepted: the string form and the
 //! `{ level = "deny", priority = N }` table form.
 
-use crate::{attributes, machinery, scan};
+use crate::attributes::{self, Place};
+use crate::{machinery, rust_syntax, scan};
 use std::path::Path;
 
 /// The clippy lints that forbid panicking or stopping the process (an index is refused because it panics
@@ -69,13 +70,17 @@ const LIBRARY_LINTS: &[&str] = &["collection_indexing"];
 const ITEM_EXCEPTION: &str = "expect_used";
 const ITEM_EXCEPTION_BY_PATH: &str = "disallowed_methods";
 
-/// The clippy groups that hold the lints above, so switching a group off switches them off: `restriction`
-/// holds the never-crash lints, `style` (and `all`, which holds it) the two by path.
-const DENIED_CLIPPY_GROUPS: &[&str] = &["restriction", "style", "all"];
+/// The clippy group that holds the lints above, so switching it off switches them off.
+const RESTRICTION_GROUP: &str = "restriction";
 
-/// The groups of lints on by default, which `-D warnings` makes errors: a table entry that allows one
-/// switches off every lint in it at once.
+/// The groups of lints on by default, which `-D warnings` makes errors: allowing one switches off every
+/// lint in it at once, `style` (and `all`, which holds it) the two denied by path among them. They are the
+/// groups the pinned clippy's own `-W help` shows holding a lint on by default, and a test holds the list
+/// to that answer.
 const DEFAULT_CLIPPY_GROUPS: &[&str] = &["all", "correctness", "suspicious", "style", "complexity", "perf"];
+
+/// The compiler's group of every lint that warns, which `-D warnings` makes errors.
+const WARNINGS_GROUP: &str = "warnings";
 
 /// Former names of the denied lints, and the lint each now is. The compiler still applies a former name
 /// to the lint it became, with only a warning, so an `allow` under the old name is an `allow` of the lint.
@@ -114,14 +119,15 @@ fn level_is_denied(value: Option<&toml::Value>) -> bool {
     level_of(value).is_some_and(|level| level == "deny" || level == "forbid")
 }
 
-/// Does an attribute's lint item (`clippy::unwrap_used`, `clippy::restriction`) reach a denied lint? One
-/// a macro fills in might, so it does.
+/// Does an attribute's lint item (`clippy::unwrap_used`, `clippy::restriction`, `warnings`) reach a
+/// denied lint? One a macro fills in might, so it does.
 fn reaches_denied_lint(item: &str) -> bool {
     item == attributes::UNREADABLE
+        || item == WARNINGS_GROUP
         || item
             .strip_prefix("clippy::")
             .map(canonical_lint)
-            .is_some_and(|name| DENIED_CLIPPY_GROUPS.contains(&name.as_str()) || DENIED_CLIPPY_LINTS.contains(&name.as_str()))
+            .is_some_and(|name| name == RESTRICTION_GROUP || DEFAULT_CLIPPY_GROUPS.contains(&name.as_str()) || DENIED_CLIPPY_LINTS.contains(&name.as_str()))
 }
 
 /// Parse a TOML file, turning a parse failure into a named error rather than a panic or an `unwrap`.
@@ -163,10 +169,10 @@ pub(crate) fn workspace_manifest_violations(source: &str, name: &str) -> Vec<Str
             "{name}: [workspace.lints.rust].{key} sets a level for a lint of the lint library rust/never-crash-lints, which forbids it itself: an entry here outranks that and can switch it off"
         ));
     }
-    for (key, _) in entries_reaching(clippy_lints, "restriction").iter().filter(|(_, level)| !level_is_denied(Some(level))) {
+    for (key, _) in entries_reaching(clippy_lints, RESTRICTION_GROUP).iter().filter(|(_, level)| !level_is_denied(Some(level))) {
         errors.push(format!("{name}: [workspace.lints.clippy].{key} below deny switches off every denied lint the group holds"));
     }
-    let defaults = DEFAULT_CLIPPY_GROUPS.iter().map(|group| ("clippy", clippy_lints, *group)).chain(std::iter::once(("rust", rust_lints, "warnings")));
+    let defaults = DEFAULT_CLIPPY_GROUPS.iter().map(|group| ("clippy", clippy_lints, *group)).chain(std::iter::once(("rust", rust_lints, WARNINGS_GROUP)));
     for (tool, table, group) in defaults {
         for (key, _) in entries_reaching(table, group).iter().filter(|(_, level)| level_of(Some(level)) == Some("allow")) {
             errors.push(format!("{name}: [workspace.lints.{tool}].{key} = allow switches off every lint the group holds, which `-D warnings` makes errors"));
@@ -302,21 +308,34 @@ fn target_tables(document: &toml::Value) -> Vec<(String, &toml::Value)> {
 
 /// Every attribute that weakens a denied lint, directly or through its group, reported at the line of the
 /// attribute's `#`: `#![allow(…)]`, `#![expect(…)]`, `#![warn(…)]`, one of them inside `cfg_attr`, and the
-/// same as an outer attribute on a `mod`, which covers the whole module just as the inner one does. On
-/// any other single item only `expect_used` may be allowed, the one exception `AGENTS.md` §3 makes (a
-/// provably infallible literal); the lints without one are `forbid` and the compiler refuses them
-/// anyway. The rule is "never crash outside tests", so `cfg_attr(test, …)` is not reported, and an
-/// attribute a macro merely forwards onto one item (`#[$attribute]`) is the forwarding idiom, not a level.
-pub(crate) fn weakened_crate_attributes(stripped_lines: &[String], name: &str) -> Vec<String> {
-    let text = stripped_lines.join("\n");
+/// same as an outer attribute on a `mod`, which covers the whole module just as the inner one does, or on
+/// what a macro's tokens do not show, which may be one; and `rustfmt::skip` on a crate or a module, which
+/// switches formatting off for all of it. On any other single item only `expect_used` may be allowed, the
+/// one exception `AGENTS.md` §3 makes (a provably infallible literal) — never a group, which holds lints
+/// `-D warnings` makes errors; the lints without one are `forbid` and the compiler refuses them anyway,
+/// and `rustfmt::skip` on one item is legal. The rule is "never crash outside tests", so
+/// `cfg_attr(test, …)` is not reported, and an attribute a macro merely forwards onto one item from one
+/// its caller wrote (`#[$attribute]`) is the forwarding idiom, not a level: the caller's is read where
+/// the caller wrote it.
+pub(crate) fn weakened_crate_attributes(allowances: &[attributes::Allowance], name: &str) -> Vec<String> {
     let mut errors = Vec::new();
-    for allowance in attributes::allowances(&text).into_iter().filter(|allowance| !allowance.test_only) {
-        let (hash, place, item) = match (allowance.inner, attributes::declared_module(&text, allowance.after)) {
-            (true, _) => ("#!", String::new(), false),
-            (false, Some(module)) => ("#", format!(" on `mod {module}`"), false),
-            (false, None) if allowance.level == attributes::MACRO_ATTRIBUTE => continue,
-            (false, None) => ("#", " on one item".to_string(), true),
+    for allowance in allowances.iter().filter(|allowance| !allowance.test_only) {
+        let (hash, place, item) = match &allowance.place {
+            Place::Inner => ("#!", String::new(), false),
+            Place::Module(module) => ("#", format!(" on `mod {module}`"), false),
+            Place::Unknown => ("#", " on what a macro's tokens do not show, which may be a module,".to_string(), false),
+            Place::Function(_) | Place::Other if allowance.level == attributes::MACRO_ATTRIBUTE => continue,
+            Place::Function(_) | Place::Other => ("#", " on one item".to_string(), true),
         };
+        if allowance.level == attributes::FORMAT_SKIP {
+            if !item {
+                errors.push(format!(
+                    "{name}:{}: {hash}[{}]{place} switches formatting off for a whole crate or module: put it on the one item that needs it",
+                    allowance.line, allowance.level
+                ));
+            }
+            continue;
+        }
         let names: Vec<String> = allowance.lints.iter().filter_map(|lint| lint.strip_prefix("clippy::").map(canonical_lint)).collect();
         let excepted = |name: &str| item && (name == ITEM_EXCEPTION || (name == ITEM_EXCEPTION_BY_PATH && names.iter().any(|other| other == ITEM_EXCEPTION)));
         for lint in allowance.lints.iter().filter(|lint| reaches_denied_lint(lint)) {
@@ -442,8 +461,10 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     // A generator's output is checked by regenerating it, not here.
     for file in scan::walk(&rust_dir, ".rs")?.into_iter().filter(|file| !crate::generated::in_generated(&file.components)) {
         let shown = crate::report::shown(root, &file.path);
-        let stripped = scan::strip_rust(&scan::read_text(&file.path)?);
-        errors.extend(weakened_crate_attributes(&stripped, &shown));
+        match rust_syntax::read(&scan::read_text(&file.path)?, &shown) {
+            Ok(facts) => errors.extend(weakened_crate_attributes(&facts.allowances, &shown)),
+            Err(error) => errors.push(error),
+        }
     }
     Ok(errors)
 }
@@ -478,7 +499,140 @@ panic = "unwind"
 "#;
 
     fn weakened(source: &str) -> Vec<String> {
-        weakened_crate_attributes(&scan::strip_rust(source), "x.rs")
+        weakened_crate_attributes(&rust_syntax::read(source, "x.rs").unwrap().allowances, "x.rs")
+    }
+
+    #[test]
+    fn an_expect_used_a_macro_forwards_onto_a_module_it_writes_is_module_level() {
+        for source in [
+            "macro_rules! m { ($name:ident) => { #[allow(clippy::expect_used)] mod $name {} }; }\n",
+            "macro_rules! m { ($name:ident) => { #[allow(clippy::expect_used)] pub(crate) mod $name; }; }\n",
+            "macro_rules! m { ($(#[$a:meta])* mod $name:ident) => { #[allow(clippy::expect_used)] $(#[$a])* mod $name {} }; }\n",
+        ] {
+            let errors = weakened(source);
+            assert!(errors.iter().any(|e| e.contains("#[allow(clippy::expect_used)] on `mod $name`")), "{source:?}: {errors:?}");
+        }
+        assert!(
+            weakened("macro_rules! m { ($name:ident) => { #[allow(clippy::expect_used)] fn $name() {} }; }\n").is_empty(),
+            "on one function it is the exception"
+        );
+        // Where the tokens do not show what the attribute lands on, the macro's caller may hand it a
+        // module, so it is read as one.
+        for source in [
+            "macro_rules! m { ($i:item) => { #[allow(clippy::expect_used)] $i }; }\n",
+            "macro_rules! m { ($k:tt $n:ident) => { #[allow(clippy::expect_used)] $k $n {} }; }\n",
+            "macro_rules! m { ($(#[$a:meta])* $i:item) => { $(#[$a])* $i }; }\n",
+        ] {
+            let errors = weakened(source);
+            assert!(errors.len() == 1 && errors[0].contains("on what a macro's tokens do not show, which may be a module"), "{source:?}: {errors:?}");
+        }
+        // An attribute written in the call of a macro that takes its tokens apart lands where the macro
+        // puts it, which may be a module, whatever the call wrote it on.
+        for source in [
+            "macro_rules! m { ($p:tt $b:tt $($rest:tt)*) => { $($rest)* $p $b mod inner {} }; }\nm!(#[allow(clippy::expect_used)] fn z() {});\n",
+            "fn f() { thread_local! { #[allow(clippy::expect_used)] static X: u8 = 1; } }\n",
+            "macro_rules! m { ($p:tt $b:tt $($rest:tt)*) => { $($rest)* $p $b mod inner {} }; }\nmacro_rules! o { () => { m!(#[allow(clippy::expect_used)] fn z() {}); }; }\n",
+        ] {
+            let errors = weakened(source);
+            assert!(errors.len() == 1 && errors[0].contains("on what a macro's tokens do not show, which may be a module"), "{source:?}: {errors:?}");
+        }
+        // A level its caller passes bare, never written as an attribute, may be any level.
+        for source in
+            ["macro_rules! m { ($a:meta) => { #[cfg_attr(all(), $a)] mod inner {} }; }\n", "macro_rules! m { ($a:meta, $n:ident) => { #[$a] fn $n() {} }; }\n"]
+        {
+            assert_eq!(weakened(source).len(), 1, "{source:?}");
+        }
+        // The attribute's own name, or all of it, filled in from tokens is any level, whatever it sits on.
+        for source in [
+            "macro_rules! m { ($($a:tt)*) => { #[$($a)*] mod inner {} }; }\n",
+            "macro_rules! m { ($($a:tt)*) => { #[cfg_attr(all(), $($a)*)] mod inner {} }; }\n",
+            "macro_rules! m { ($n:ident $args:tt) => { #[$n $args] fn f() {} }; }\n",
+            "macro_rules! m { ($args:tt) => { #[allow $args] mod inner {} }; }\n",
+            "macro_rules! m { ($w:ident) => { #[rustfmt::$w] mod inner {} }; }\n",
+            "macro_rules! m { ($p:tt, $b:tt) => { $p $b mod inner {} }; }\nm!(#, [allow(clippy::expect_used)]);\n",
+        ] {
+            assert_eq!(weakened(source).len(), 1, "{source:?}");
+        }
+        // What a macro forwards or fills in beside a level it does not choose is no weakening.
+        assert!(
+            weakened("macro_rules! m { ($($d:ident),*) => { #[derive($($d),*)] struct S; }; ($c:expr) => { #[cfg(feature = $c)] #[doc = $c] fn f() {} }; }\n")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_level_spelt_with_a_raw_identifier_or_rustfmts_old_name_is_read() {
+        for source in [
+            "#![r#allow(clippy::expect_used)]\n",
+            "#[r#allow(clippy::all)]\nmod m {}\n",
+            "#[r#expect(warnings)]\nmod m {}\n",
+            "#![r#cfg_attr(not(test), r#warn(clippy::perf))]\n",
+            "#[r#rustfmt::r#skip]\nmod m {}\n",
+            "#![cfg_attr(rustfmt, rustfmt_skip)]\n",
+            "#[cfg_attr(rustfmt, rustfmt_skip)]\nmod m {}\n",
+        ] {
+            assert_eq!(weakened(source).len(), 1, "{source:?}");
+        }
+        assert!(weakened("#![r#cfg_attr(r#test, r#allow(clippy::all))]\n").is_empty(), "the tests' own, however spelt");
+    }
+
+    /// The default groups are clippy's own answer, not the gate's: `clippy-driver -W help` prints every
+    /// lint with its default level and every group with its lints, and a group holding a lint on by default
+    /// is one `-D warnings` makes errors. A toolchain whose clippy adds, drops or reshapes a group fails
+    /// here, rather than letting an allowance of a new group pass the rules.
+    #[test]
+    fn the_default_groups_are_the_ones_clippy_turns_on() {
+        let driver = std::path::Path::new(env!("CARGO")).with_file_name("clippy-driver");
+        let help = std::process::Command::new(&driver).args(["-W", "help"]).output().expect("the pinned toolchain's clippy-driver runs");
+        let text = format!("{}{}", String::from_utf8_lossy(&help.stdout), String::from_utf8_lossy(&help.stderr));
+        let (lints, groups) = text.split_once("Lint groups loaded by this crate:").expect("clippy-driver lists its groups");
+        let on: std::collections::BTreeSet<&str> = lints
+            .lines()
+            .filter_map(|line| {
+                let mut words = line.split_whitespace();
+                let (name, level) = (words.next()?, words.next()?);
+                (name.starts_with("clippy::") && level != "allow").then_some(name)
+            })
+            .collect();
+        let turned_on: std::collections::BTreeSet<&str> = groups
+            .lines()
+            .filter_map(|line| {
+                let (group, members) = line.trim().split_once(char::is_whitespace)?;
+                let group = group.strip_prefix("clippy::")?;
+                members.split(',').any(|lint| on.contains(lint.trim())).then_some(group)
+            })
+            .collect();
+        assert!(on.len() > 100, "clippy-driver printed its lints: {text}");
+        assert_eq!(turned_on, DEFAULT_CLIPPY_GROUPS.iter().copied().collect(), "the groups clippy turns on by default");
+    }
+
+    #[test]
+    fn every_default_group_the_warnings_group_and_rustfmt_skip_fail_at_a_root_and_on_a_module_and_pass_for_tests() {
+        for group in ["all", "correctness", "suspicious", "style", "complexity", "perf"] {
+            for level in ["allow", "expect", "warn"] {
+                for source in [
+                    format!("#![{level}(clippy::{group})]\n"),
+                    format!("#[{level}(clippy::{group})]\nmod m;\n"),
+                    format!("#[{level}(clippy::{group})]\nfn f() {{}}\n"),
+                ] {
+                    assert_eq!(weakened(&source).len(), 1, "{source:?}");
+                }
+            }
+            for source in [format!("#![cfg_attr(test, allow(clippy::{group}))]\n"), format!("#[cfg_attr(test, allow(clippy::{group}))]\nmod m;\n")] {
+                assert!(weakened(&source).is_empty(), "{source:?}");
+            }
+        }
+        for source in ["#![allow(warnings)]\n", "#[allow(warnings)]\nmod m;\n", "#[allow(warnings)]\nfn f() {}\n"] {
+            assert_eq!(weakened(source).len(), 1, "{source:?}");
+        }
+        assert!(weakened("#![cfg_attr(test, allow(warnings))]\n").is_empty() && weakened("#[cfg_attr(test, allow(warnings))]\nmod m;\n").is_empty());
+        for source in ["#![rustfmt::skip]\n", "#[rustfmt::skip]\nmod m;\n", "#[rustfmt::skip]\nmod m {}\n"] {
+            let errors = weakened(source);
+            assert!(errors.len() == 1 && errors[0].contains("rustfmt::skip"), "{source:?}: {errors:?}");
+        }
+        for source in ["#![cfg_attr(test, rustfmt::skip)]\n", "#[cfg_attr(test, rustfmt::skip)]\nmod m;\n", "#[rustfmt::skip]\nfn table() {}\n"] {
+            assert!(weakened(source).is_empty(), "{source:?}");
+        }
     }
 
     #[test]
@@ -909,9 +1063,10 @@ panic = "unwind"
         assert!(weakened("#![deny(missing_docs)]\n#![allow(clippy::needless_range_loop)]\n// #![allow(clippy::panic)]\nfn f() {}\n").is_empty());
         assert!(weakened("#![cfg_attr(test, allow(clippy::unwrap_used))]\n").is_empty(), "tests may unwrap");
         // On one item only `expect_used` may be allowed (AGENTS.md §3), and a macro forwarding attributes
-        // onto an item is the forwarding idiom.
+        // its caller wrote onto an item it writes is the forwarding idiom.
         assert!(weakened("#[allow(clippy::expect_used)]\nfn f() -> i32 { 1 }\n").is_empty());
-        assert!(weakened("macro_rules! m { ($(#[$a:meta])* $i:item) => { $(#[$a])* $i }; }\n").is_empty());
+        assert!(weakened("macro_rules! m { ($(#[$a:meta])* $v:vis struct $n:ident) => { $(#[$a])* $v struct $n; }; }\n").is_empty());
+        assert!(weakened("macro_rules! m { ($(#[$a:meta])* $v:vis fn $n:ident) => { $(#[$a])* $v fn $n() {} }; }\n").is_empty());
         assert!(weakened("#[allow(clippy::needless_range_loop)]\nfn f() {}\n").is_empty(), "a lint the workspace does not deny");
     }
 

@@ -6,6 +6,7 @@ Every artifact (the Rust crates, the Swift package and both Maven artifacts) sha
 
 ### Added
 
+- The gate reads Rust with `syn`: `unsafe` and lint attributes are found as the syntax tree holds them (a macro's body too), an unparsable file is reported by name, and `allow(warnings)`, an allowed default clippy group and `rustfmt::skip` on a crate or module fail `rules: lints`; the hand-written source stripper is gone.
 - The repository: its rules in `AGENTS.md`, the licences, and the plan of record in `plan/`.
 - `tools/doctor.sh`: checks every prerequisite of the build and prints the fix for each gap; `--gate` checks only what the gate needs.
 - The workspace skeleton (the Cargo workspace in `rust/`, the Swift package in `ios/sdk/`, the Gradle build in `android/sdk/`) and the gate, `tools/ci.sh`: formatters, linters, tests, `cargo xtask rules`, `cargo xtask generate --check` and `cargo xtask plan-views --check`, which rebuilds the plan's views from their sources and fails on any byte that differs bar the drawing in each diagram's SVG export; `tools/doctor.sh --install-hooks` runs it before every push.
