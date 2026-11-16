@@ -16,6 +16,10 @@ serde_json.workspace = true
 # A folder's write probe: a fresh name made only if nothing holds it, removed again, so two engines
 # starting at once never share one. The folder tests' scratch folders come from it too.
 tempfile.workspace = true
+# The core makes the GPU device itself, with adapter-clamped limits and a per-platform backend (plan §17).
+wgpu.workspace = true
+# Blocking on wgpu's adapter and device futures, as EffectCraft does (never a hand-written spin).
+pollster.workspace = true
 
 [lints]
 workspace = true

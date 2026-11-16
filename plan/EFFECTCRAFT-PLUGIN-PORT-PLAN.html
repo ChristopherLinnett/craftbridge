@@ -1408,6 +1408,13 @@ impl Engine {
 <td><code>download</code> and its <code>curl</code> spawn, and the two specs (<code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>analysis/<wbr>models.rs:639</code>, <code>:655</code>, <code>:714-718</code>, <code>:743-747</code>), the batch&#39;s step-id read and its refusal of a batch inside a batch (<code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>cmd/<wbr>batch.rs:14</code>, <code>:77-85</code>), the confinement&#39;s per-command refusal the wording mirrors (<code>effectcraft: crates/<wbr>automation/<wbr>src/<wbr>confine.rs:285-286</code>), the command scripts <code>file.runScript</code> reads from a file and runs itself, which the confinement withholds (<code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>cmd/<wbr>file_more.rs:515-549</code>)</td>
 <td>FX-1a</td>
 </tr>
+<tr>
+<td>AD12</td>
+<td><code>craftbridge-core</code> makes the GPU device itself (D-7, §17): <code>Backends::METAL</code> on iOS, <code>Backends::VULKAN</code> on Android, the host&#39;s backends on the desktop, never GL, and no environment variable choosing them; the limits <code>wgpu::Limits::default().or_worse_values_from(&amp;adapter.limits())</code>, with <code>max_texture_dimension_2d</code> capped at 16384 and <code>max_buffer_size</code> from the adapter, as the compositor takes those two; it answers <code>(adapter, device, queue)</code> for <code>Gpu::new</code>, and with no device the reason <code>info.gpu</code> reports, in the compositor&#39;s words, while every render runs on the CPU (L7)</td>
+<td><code>GpuContext::request()</code>, which takes any backend, or the ones <code>WGPU_BACKEND</code> names (the emulator&#39;s best adapter was its GL translator, with no compute shaders), and asks <code>wgpu::Limits::default()</code> for every other limit, which the iOS Simulator&#39;s Metal device refused for its 15 inter-stage shader variables (<code>effectcraft: crates/<wbr>gpu/<wbr>src/<wbr>context.rs:1403-1444</code>; <code>evidence/<wbr>03-device-feasibility.md</code> Findings 6–7)</td>
+<td><code>Gpu::new</code> (<code>effectcraft: crates/<wbr>gpu/<wbr>src/<wbr>lib.rs:162-166</code>), the two required limits of <code>GpuContext::request</code>, its no-adapter words and its power preference without <code>WGPU_POWER_PREF</code> (<code>effectcraft: crates/<wbr>gpu/<wbr>src/<wbr>context.rs:1430-1435</code>, <code>:1426</code>, <code>:340-347</code>), <code>device_descriptor</code>&#39;s memory hints (<code>effectcraft: crates/<wbr>gpu/<wbr>src/<wbr>context.rs:816-818</code>), the device name <code>GpuContext::new</code> gives (<code>effectcraft: crates/<wbr>gpu/<wbr>src/<wbr>context.rs:866</code>)</td>
+<td>CORE-2a</td>
+</tr>
 </tbody></table>
 </div><p><strong>States.</strong></p>
 <ul>
@@ -1534,7 +1541,7 @@ impl Engine {
 <p><strong>Edge cases.</strong> A second engine in the same app: allowed, each with its own session and thread; GPU devices are separate. A call after <code>close</code>: <code>Internal { &quot;engine is closed&quot; }</code>. A progress listener that throws (Swift) or raises (Kotlin): UniFFI reports it as an unexpected callback error; the core ignores it and the export continues.</p>
 <p><strong>Tests.</strong> Unit tests with a fake <code>CraftApp</code>: ordering (L1), calls waiting in order during an export (L3), cancel within one progress interval, panic → <code>Internal</code> with the session intact, the pending-export journal on restart.</p>
 <h2 id="17-gpu-and-frames-design">17. GPU and frames design<a class="anchor" href="#17-gpu-and-frames-design" aria-label="link">#</a></h2>
-<p><strong>The device.</strong> <code>craftbridge-core::gpu</code> creates the GPU device itself rather than letting the compositor pick one (<code>evidence/<wbr>03-device-feasibility.md</code> Findings 6–8):</p>
+<p><strong>The device.</strong> <code>craftbridge-core::gpu</code> creates the GPU device itself rather than letting the compositor pick one (AD12, <code>evidence/<wbr>03-device-feasibility.md</code> Findings 6–8):</p>
 <ul>
 <li><strong>Backend:</strong> <code>wgpu::Backends::METAL</code> on iOS, <code>wgpu::Backends::VULKAN</code> on Android. GL is never requested: the compositor needs compute shaders, which the emulator&#39;s GL lacked (<code>evidence/<wbr>03-device-feasibility.md</code> Finding 7).</li>
 <li><strong>Limits:</strong> <code>wgpu::Limits::default().or_worse_values_from(&amp;adapter.limits())</code>, with <code>max_texture_dimension_2d</code> capped at 16384 and <code>max_buffer_size</code> from the adapter, as the compositor does for those two (<code>crates/<wbr>gpu/<wbr>src/<wbr>context.rs:1430-1435</code>). This is the request that worked on the iOS Simulator&#39;s Metal device.</li>
@@ -2748,7 +2755,7 @@ which calls <code>request(&quot;exec&quot;, {&quot;command&quot;: &quot;layer.ne
 <tr>
 <td>M15</td>
 <td>EffectCraft engine, GPU, automation</td>
-<td><code>crates/<wbr>engine/<wbr>src/<wbr>{cmd,error}.rs</code>, <code>crates/<wbr>engine/<wbr>src/<wbr>cmd/<wbr>{schema,batch}.rs</code>, <code>crates/<wbr>engine/<wbr>src/<wbr>analysis/<wbr>models.rs</code>, <code>crates/<wbr>project/<wbr>src/<wbr>settings.rs</code>, <code>crates/<wbr>gpu/<wbr>src/<wbr>lib.rs</code>, <code>crates/<wbr>automation/<wbr>src/<wbr>{lib,backend,server,tools,confine}.rs</code></td>
+<td><code>crates/<wbr>engine/<wbr>src/<wbr>{cmd,error}.rs</code>, <code>crates/<wbr>engine/<wbr>src/<wbr>cmd/<wbr>{schema,batch}.rs</code>, <code>crates/<wbr>engine/<wbr>src/<wbr>analysis/<wbr>models.rs</code>, <code>crates/<wbr>project/<wbr>src/<wbr>settings.rs</code>, <code>crates/<wbr>gpu/<wbr>src/<wbr>{lib,context}.rs</code>, <code>crates/<wbr>automation/<wbr>src/<wbr>{lib,backend,server,tools,confine}.rs</code></td>
 <td>CHK</td>
 <td>§14, §17, §19, §21</td>
 </tr>
