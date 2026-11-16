@@ -4,14 +4,20 @@
 //! core runs it on its own thread, with the GPU device, folders, progress and cancellation.
 
 pub mod app;
+pub mod cancel;
 pub mod engine;
 pub mod error;
+pub mod export;
 pub mod folders;
 pub mod frames;
+#[cfg(test)]
+mod testing;
 
 pub use app::CraftApp;
+pub use cancel::CancelToken;
 pub use engine::Engine;
 pub use error::CraftError;
+pub use export::PROGRESS_INTERVAL;
 pub use frames::{FrameBytes, PixelFormat};
 
 /// The result of a runtime call: what the call answers, or the [`CraftError`] it failed with. The
