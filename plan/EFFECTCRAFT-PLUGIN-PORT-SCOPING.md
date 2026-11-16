@@ -521,7 +521,7 @@ Every row may also take external crates that are no Craft app's.
 | AD12 | `craftbridge-core` makes the GPU device itself (D-7, §17): `Backends::METAL` on iOS, `Backends::VULKAN` on Android, the host's backends on the desktop, never GL, and no environment variable choosing them; the limits `wgpu::Limits::default().or_worse_values_from(&adapter.limits())`, with `max_texture_dimension_2d` capped at 16384 and `max_buffer_size` from the adapter, as the compositor takes those two; it answers `(adapter, device, queue)` for `Gpu::new`, and with no device the reason `info.gpu` reports, in the compositor's words, while every render runs on the CPU (L7) | `GpuContext::request()`, which takes any backend, or the ones `WGPU_BACKEND` names (the emulator's best adapter was its GL translator, with no compute shaders), and asks `wgpu::Limits::default()` for every other limit, which the iOS Simulator's Metal device refused for its 15 inter-stage shader variables (`effectcraft: crates/gpu/src/context.rs:1403-1444`; `evidence/03-device-feasibility.md` Findings 6–7) | `Gpu::new` (`effectcraft: crates/gpu/src/lib.rs:162-166`), the two required limits of `GpuContext::request`, its no-adapter words and its power preference without `WGPU_POWER_PREF` (`effectcraft: crates/gpu/src/context.rs:1430-1435`, `:1426`, `:340-347`), `device_descriptor`'s memory hints (`effectcraft: crates/gpu/src/context.rs:816-818`), the device name `GpuContext::new` gives (`effectcraft: crates/gpu/src/context.rs:866`) | CORE-2a |
 
 **States.**
-- *Pinned*: `rev` is an official storytold/effectcraft commit; `info` reports it as `pin`.
+- *Pinned*: `rev` names an official storytold/effectcraft commit; `info` reports that commit in full as `pin` (§21).
 - *Update in progress*: the update script has moved the pin and named the adaptations whose EffectCraft code changed; the update merges once each named adaptation is rechecked and the gate passes (§24).
 
 **Edge cases.**
@@ -750,14 +750,14 @@ UniFFI 0.32 in proc-macro mode generates the Swift and Kotlin bindings (D-3). It
 
 | File | Change | What |
 |---|---|---|
-| `rust/effects/craftbridge-effects-codegen/src/main.rs` | NEW | `surface` (writes `api-surface.json`), `swift`, `kotlin`, `diff <old> <new>` |
+| `rust/effects/craftbridge-effects-codegen/src/main.rs` | NEW | `surface` (writes `api-surface.json`), `swift`, `kotlin`, `version` (writes the plugin's `version.rs`), `diff <old> <new>` |
 | `rust/effects/craftbridge-effects-codegen/src/types.rs` | NEW | the type rules below |
 | `rust/effects/craftbridge-effects-codegen/generated/api-surface.json` | NEW, generated | the API surface at the pin (schema in §14) |
 | `ios/sdk/Sources/CraftBridgeEffects/Generated/*.swift` | NEW, generated | one file per command namespace |
 | `android/sdk/effects/src/generated/kotlin/…/effects/*.kt` | NEW, generated | the same for Kotlin |
-| `rust/effects/craftbridge-effects/src/generated/version.rs` | NEW, generated | `ENGINE_VERSION`, `ENGINE_PIN` constants for `info` |
+| `rust/effects/craftbridge-effects/src/generated/version.rs` | NEW, generated | `ENGINE_VERSION` (the surface's `engineVersion`) and `ENGINE_PIN` (the surface's `pin`), the constants `info` reports |
 
-**Reading the registry.** `effectcraft_engine::command_specs()` gives every command's id, label, menu, shortcuts, `params` text and `journal` flag (`crates/engine/src/cmd.rs:106-121`, `:175-181`). `params_schema(spec)` gives the accepted keys and which are required (`crates/engine/src/cmd/schema.rs:77-101`). The tool catalogue comes from `effectcraft_automation::tools::catalogue()` (`crates/automation/src/tools.rs:93-95`). The surface's `pin` is the commit Cargo builds for the pin, in full as `rust/Cargo.lock` records it, whatever spelling `rust/Cargo.toml` gives the pin, so a pin respelt in full or abbreviated leaves the surface as it was.
+**Reading the registry.** `effectcraft_engine::command_specs()` gives every command's id, label, menu, shortcuts, `params` text and `journal` flag (`crates/engine/src/cmd.rs:106-121`, `:175-181`). `params_schema(spec)` gives the accepted keys and which are required (`crates/engine/src/cmd/schema.rs:77-101`). The tool catalogue comes from `effectcraft_automation::tools::catalogue()` (`crates/automation/src/tools.rs:93-95`). The surface's `pin`, and `info`'s through `ENGINE_PIN`, is the commit Cargo builds for the pin, in full as `rust/Cargo.lock` records it, whatever spelling `rust/Cargo.toml` gives the pin, so a pin respelt in full or abbreviated leaves both as they were; the CLI's `info` reports no pin that could spell it otherwise. The version both carry is the one the linked engine was built with (`effectcraft_engine::project::APP_VERSION`), the version the CLI's `info` reports.
 
 **Type rules.** The registry gives types only as prose in each key's piece of the `params` text (`evidence/01-system-inventory.md` Finding 11). The generator maps a piece conservatively, and anything else stays a `JSONValue`, so a wrong guess can only be wider, never narrower:
 

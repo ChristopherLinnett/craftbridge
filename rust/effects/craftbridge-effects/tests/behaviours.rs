@@ -13,22 +13,6 @@ fn request(app: &mut EffectCraftApp, method: &str, params: Value) -> Result<Valu
     app.request(method, params)
 }
 
-/// The EffectCraft revision the workspace manifest pins, read with the TOML parser Cargo itself
-/// reads the manifest with: the source this crate is built from, which `info` must name.
-fn pinned_revision() -> Result<String, String> {
-    let manifest = concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.toml");
-    let text = std::fs::read_to_string(manifest).map_err(|e| format!("the workspace manifest reads: {e}"))?;
-    let table: toml::Table = text.parse().map_err(|e| format!("the workspace manifest parses: {e}"))?;
-    table
-        .get("workspace")
-        .and_then(|workspace| workspace.get("dependencies"))
-        .and_then(|dependencies| dependencies.get("effectcraft-engine"))
-        .and_then(|engine| engine.get("rev"))
-        .and_then(toml::Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| "the manifest pins effectcraft-engine at a `rev`".to_string())
-}
-
 #[test]
 fn info_names_the_engine_its_version_and_the_builds_state() {
     let scratch = Scratch::new().expect("a scratch folder");
@@ -36,8 +20,8 @@ fn info_names_the_engine_its_version_and_the_builds_state() {
     let info = request(&mut app, "info", json!({})).expect("info answers");
     assert_eq!(info["engine"].as_str(), Some("effectcraft"));
     assert_eq!(info["version"].as_str(), Some(effectcraft_engine::project::APP_VERSION));
-    let pin = pinned_revision().expect("the workspace manifest names the pin");
-    assert_eq!(info["pin"].as_str(), Some(pin.as_str()), "info names the revision the workspace pins, so the two cannot drift");
+    let pin = info["pin"].as_str().expect("info names the pin");
+    assert!(pin.len() == 40 && pin.chars().all(|digit| matches!(digit, '0'..='9' | 'a'..='f')), "the pin is the full commit id: {pin}");
     assert!(info["commands"].as_u64().is_some_and(|n| n > 0));
     assert!(info["effects"].as_u64().is_some_and(|n| n > 0));
     assert!(info["project"].is_object());

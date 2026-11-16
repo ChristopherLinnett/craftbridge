@@ -22,10 +22,15 @@ pub(crate) const FILE: &str = "api-surface.json";
 #[cfg(test)]
 pub(crate) const TEST_PIN: &str = "0123abcd";
 
+/// The version of the pinned engine, as EffectCraft's own crates were built with it: the one reading of
+/// it, which the surface's `engineVersion` and the plugin's version constant share, so the two cannot
+/// name different versions.
+pub(crate) const ENGINE_VERSION: &str = effectcraft_engine::project::APP_VERSION;
+
 /// The surface of the pinned engine, `pin` being the commit the workspace's pin names.
 pub(crate) fn build(pin: &str) -> Result<Surface, String> {
     check_pin(pin)?;
-    surface_of(pin, effectcraft_engine::project::APP_VERSION, command_specs(), tools::catalogue())
+    surface_of(pin, ENGINE_VERSION, command_specs(), tools::catalogue())
 }
 
 /// Every command of the pinned engine, by id: the one reading of the registry that the surface file and
@@ -55,7 +60,7 @@ fn surface_of(pin: &str, engine_version: &str, specs: &[CommandSpec], catalogue:
 }
 
 /// The pin as the surface's schema states it: eight to forty lowercase hexadecimal digits.
-fn check_pin(pin: &str) -> Result<(), String> {
+pub(crate) fn check_pin(pin: &str) -> Result<(), String> {
     if (8..=40).contains(&pin.len()) && pin.chars().all(|digit| matches!(digit, '0'..='9' | 'a'..='f')) {
         Ok(())
     } else {

@@ -1,11 +1,13 @@
-//! The generators behind `generated/api-surface.json` and the Swift facade: the codegen binary, built and
-//! run by cargo.
+//! The generators behind `generated/api-surface.json`, the Swift facade and the plugin's version constants:
+//! the codegen binary, built and run by cargo.
 //!
 //! The codegen links the pinned EffectCraft and reads its command registry at run time, and xtask may not
 //! depend on a host tool, so xtask asks cargo for the binary and runs it. The pin the surface records is
 //! the commit Cargo builds for the pin `rust/Cargo.toml` writes, in full as `rust/Cargo.lock` records it,
 //! read by the upstream rule's own readers: the rule takes the pin in full or abbreviated, and the
-//! surface's schema wants at least eight digits, so the spelling never reaches the surface.
+//! surface's schema wants at least eight digits, so the spelling never reaches the surface. The version
+//! constants take the same full commit, and the codegen gives them the version of the engine it links, as
+//! it gives the surface, so neither is read from text.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -16,16 +18,27 @@ pub(crate) const OUTPUT_DIR: &str = "rust/effects/craftbridge-effects-codegen/ge
 /// Where the Swift facade lives: the generated folder of the plugin's Swift target.
 pub(crate) const SWIFT_OUTPUT_DIR: &str = "ios/sdk/Sources/CraftBridgeEffects/Generated";
 
+/// Where the plugin's version constants live: the generated folder of the plugin's own source.
+pub(crate) const VERSION_OUTPUT_DIR: &str = "rust/effects/craftbridge-effects/src/generated";
+
 /// The codegen's package, and the binary it builds.
 const CODEGEN: &str = "craftbridge-effects-codegen";
 
 /// Write the surface into `out_dir`.
 pub(crate) fn generate(out_dir: &Path) -> Result<(), String> {
-    let root = crate::repo_root();
+    run_codegen(&["surface", "--pin", &pinned_commit(&crate::repo_root())?], out_dir)
+}
+
+/// Write the version constants into `out_dir`.
+pub(crate) fn generate_version(out_dir: &Path) -> Result<(), String> {
+    run_codegen(&["version", "--pin", &pinned_commit(&crate::repo_root())?], out_dir)
+}
+
+/// The commit Cargo builds for the pin `rust/Cargo.toml` writes, in full.
+fn pinned_commit(root: &Path) -> Result<String, String> {
     let manifest = crate::scan::read_text(&root.join("rust/Cargo.toml"))?;
     let pin = crate::upstream::pins_from_manifest(&manifest).map_err(|errors| errors.join("; "))?;
-    let commit = crate::upstream::locked_effectcraft_commit(&crate::scan::read_text(&root.join("rust/Cargo.lock"))?, &pin)?;
-    run_codegen(&["surface", "--pin", &commit], out_dir)
+    crate::upstream::locked_effectcraft_commit(&crate::scan::read_text(&root.join("rust/Cargo.lock"))?, &pin)
 }
 
 /// Write the Swift facade into `out_dir`.
@@ -87,6 +100,11 @@ mod tests {
             r#"{"reason":"compiler-artifact","target":{"name":"craftbridge-effects-codegen","kind":["test"]},"executable":"/t/debug/deps/codegen-1"}"#;
         let artifacts = crate::compiled::read_messages(format!("{other_binary}\n{codegen_test}\n").as_bytes()).unwrap();
         assert_eq!(executable_of(&artifacts), None);
+    }
+
+    #[test]
+    fn the_version_constants_live_in_the_plugins_own_generated_folder() {
+        assert_eq!(VERSION_OUTPUT_DIR, "rust/effects/craftbridge-effects/src/generated");
     }
 
     #[test]

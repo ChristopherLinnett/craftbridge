@@ -16,6 +16,10 @@
 //! `Unsupported`, naming what was asked and the methods `request` answers.
 
 mod app;
+/// What the generator writes, one file to a module under `src/generated/`.
+mod generated {
+    pub(crate) mod version;
+}
 mod info;
 mod methods;
 mod plugins;

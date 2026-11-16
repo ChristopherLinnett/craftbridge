@@ -35,6 +35,7 @@ pub(crate) fn generators() -> Vec<Generator> {
     vec![
         Generator { name: "effects-api-surface", output_dir: crate::effects_api::OUTPUT_DIR, generate: crate::effects_api::generate },
         Generator { name: "effects-swift-facade", output_dir: crate::effects_api::SWIFT_OUTPUT_DIR, generate: crate::effects_api::generate_swift },
+        Generator { name: "effects-version", output_dir: crate::effects_api::VERSION_OUTPUT_DIR, generate: crate::effects_api::generate_version },
     ]
 }
 
@@ -488,10 +489,11 @@ mod tests {
     }
 
     #[test]
-    fn the_registry_is_safe_to_run_and_holds_the_effects_surface_and_its_swift_facade() {
+    fn the_registry_is_safe_to_run_and_holds_the_effects_surface_its_swift_facade_and_version_constants() {
         let registry = generators();
         assert!(registry_problems(&registry).is_empty(), "{:?}", registry_problems(&registry));
         assert!(registry.iter().any(|generator| generator.name == "effects-api-surface" && generator.output_dir.ends_with("/generated")));
         assert!(registry.iter().any(|generator| generator.name == "effects-swift-facade" && generator.output_dir.ends_with("/CraftBridgeEffects/Generated")));
+        assert!(registry.iter().any(|generator| generator.name == "effects-version" && generator.output_dir == crate::effects_api::VERSION_OUTPUT_DIR));
     }
 }
