@@ -19,7 +19,7 @@
 | M10 | Conformance | `rust/effects/craftbridge-effects-conformance`, `conformance/effects` | NEW | §28 |
 | M11 | Samples and guides | `ios/samples`, `android/samples`, `docs/` | NEW | §25 |
 | M12 | EffectCraft interfaces the adaptations use | `crates/engine/src/{lib,render_queue}.rs`, `crates/host/src/lib.rs`, `crates/text/src/fonts.rs`, `crates/render/src/{lib,opts}.rs`, `crates/media/src/probe.rs`, `crates/script/src/lib.rs` | CHK | §15, §19 |
-| M13 | EffectCraft CLI | `apps/effectcraft-cli/src/main.rs`, `apps/effectcraft-cli/src/template.rs` | CHK: the behaviour AD3–AD6 follow, and the oracle | §15, §28 |
+| M13 | EffectCraft CLI | `apps/effectcraft-cli/src/main.rs`, `apps/effectcraft-cli/src/template.rs` | CHK: the behaviour AD1, AD3–AD6, AD9 and AD10 follow, and the oracle | §15, §28 |
 | M14 | EffectCraft export | `crates/export/src/{out,encode,pipeline}.rs` | CHK | §15, §18 |
-| M15 | EffectCraft engine, GPU, automation | `crates/engine/src/cmd.rs`, `crates/engine/src/cmd/schema.rs`, `crates/gpu/src/lib.rs`, `crates/automation/src/{backend,server,tools,confine}.rs` | CHK | §14, §17, §19, §21 |
+| M15 | EffectCraft engine, GPU, automation | `crates/engine/src/{cmd,error}.rs`, `crates/engine/src/cmd/{schema,batch}.rs`, `crates/engine/src/analysis/models.rs`, `crates/project/src/settings.rs`, `crates/gpu/src/lib.rs`, `crates/automation/src/{lib,backend,server,tools,confine}.rs` | CHK | §14, §17, §19, §21 |
 | M16 | FilmCraft codecs | filmcraft `crates/codecs/src/{lib,hw,video}.rs` | CHK | §18 |
