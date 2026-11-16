@@ -64,24 +64,30 @@ impl Drop for Scratch {
     }
 }
 
-/// Run one test of this binary again, in a child process with `env` added: the way a hook starts the gate
-/// with git's variables set. A test cannot set them on its own process while other tests run beside it,
-/// and a child is the only way the code under test meets them as it would in a hook. The child test is
-/// `#[ignore]`d, so it runs only when started this way.
+/// Run one test of this binary again, in a child process with `env` added, and fail with `failure` unless
+/// it ran and passed: the way a hook starts the gate with git's variables set. A test cannot set them on
+/// its own process while other tests run beside it, and a child is the only way the code under test meets
+/// them as it would in a hook. The child test is `#[ignore]`d, so it runs only when started this way. The
+/// check is made here, so no caller can weigh the child by less than both of its streams.
 #[cfg(test)]
-pub(crate) fn rerun(test: &str, env: &[(&str, &std::ffi::OsStr)]) -> std::process::Output {
+#[track_caller]
+pub(crate) fn rerun(test: &str, env: &[(&str, &std::ffi::OsStr)], failure: &str) {
     let mut child = std::process::Command::new(std::env::current_exe().unwrap());
     child.args(["--exact", test, "--ignored", "--nocapture", "--test-threads=1"]);
     for (name, value) in env {
         child.env(name, value);
     }
     let output = child.output().unwrap();
-    // A rename can leave this name matching no test, and a run of no tests exits zero: the caller's
-    // assertion on the child's status would then pass having weighed nothing. The name must
-    // still name the one ignored child this helper exists to rerun.
     let ran = String::from_utf8_lossy(&output.stdout);
-    assert!(ran.contains("running 1 test"), "rerun named no test: {test}\n{ran}");
-    output
+    // The harness prints its progress to stdout, while a failed test writes its panic message to stderr,
+    // and a child that cannot start its test says why on stderr alone: either stream alone can leave the
+    // cause out.
+    let streams = format!("the child's stdout:\n{ran}\nthe child's stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+    // A rename can leave this name matching no test, and a run of no tests exits zero: the child's status
+    // would then pass having weighed nothing. The name must still name the one ignored child this helper
+    // exists to rerun.
+    assert!(ran.contains("running 1 test"), "rerun named no test: {test}\n{streams}");
+    assert!(output.status.success(), "{failure}\n{streams}");
 }
 
 /// A copy of this repository's `rust/` tree in which a violation can be planted without touching the

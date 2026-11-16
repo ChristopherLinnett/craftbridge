@@ -1214,7 +1214,7 @@ impl Engine {
 <tr>
 <td><code>rust/<wbr>xtask/<wbr></code></td>
 <td>NEW</td>
-<td><code>cargo xtask rules</code> (the rule checks of the gate), <code>cargo xtask generate</code> (every file a generator in this repository writes, the UniFFI bindings included), <code>cargo xtask plan-views --check</code> (the plan&#39;s views, rebuilt from their sources and compared), and the judgements and file lists the gate&#39;s stages hand over: <code>cargo xtask skipped-tasks</code> (Gradle&#39;s task outcomes), <code>cargo xtask compiled</code> (the files each compilation read) and <code>cargo xtask files</code> (what the shell, Swift-format and duplicate stages read)</td>
+<td><code>cargo xtask rules</code> (the rule checks of the gate), <code>cargo xtask generate</code> (every file a generator in this repository writes, the UniFFI bindings included), <code>cargo xtask plan-views --check</code> (the plan&#39;s views, rebuilt from their sources and compared), and the judgements and file lists the gate&#39;s stages hand over: <code>cargo xtask skipped-tasks</code> (Gradle&#39;s task outcomes), <code>cargo xtask compiled</code> (the files each compilation read), <code>cargo xtask dylint</code> (the lint library&#39;s run, taking turns on the one lock its probe tests take) and <code>cargo xtask files</code> (what the shell, Swift-format and duplicate stages read)</td>
 </tr>
 <tr>
 <td><code>ios/<wbr>sdk/<wbr></code></td>

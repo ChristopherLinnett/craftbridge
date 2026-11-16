@@ -313,11 +313,11 @@ mod tests {
         own.write(".gitignore", "/android/.idea/\n");
         own.write("android/.idea/workspace.xml", "<x/>\n");
         own.write("android/stray/notes.md", "x\n");
-        let child = crate::scratch::rerun(
+        crate::scratch::rerun(
             "layout::tests::child_checks_its_own_tree",
             &[("GIT_DIR", other.0.join(".git").as_os_str()), ("XTASK_LAYOUT_OWN", own.0.as_os_str())],
+            "the check in a hook's environment did not judge its own tree",
         );
-        assert!(child.status.success(), "{}", String::from_utf8_lossy(&child.stdout));
     }
 
     #[test]

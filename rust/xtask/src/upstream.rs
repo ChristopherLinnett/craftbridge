@@ -1701,7 +1701,7 @@ mod tests {
         let (scratch, _) = official_scratch_cache("upstream-cache-machine");
         let machine = Scratch::new("upstream-cache-machine-config");
         machine.write("gitconfig", "[url \"/elsewhere/effectcraft.git\"]\n\tinsteadOf = https://github.com/storytold/effectcraft\n");
-        let child = crate::scratch::rerun(
+        crate::scratch::rerun(
             "upstream::tests::child_opens_the_cache_past_a_machine_rewrite",
             &[
                 ("GIT_CONFIG_GLOBAL", machine.0.join("gitconfig").as_os_str()),
@@ -1711,8 +1711,8 @@ mod tests {
                 ("GIT_CONFIG_VALUE_0", std::ffi::OsStr::new("https://github.com/storytold/effectcraft")),
                 ("XTASK_UPSTREAM_CACHE_OWN", scratch.0.as_os_str()),
             ],
+            "the cache did not open past the machine's rewrite",
         );
-        assert!(child.status.success(), "{}", String::from_utf8_lossy(&child.stdout));
     }
 
     #[test]
