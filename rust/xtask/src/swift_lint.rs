@@ -29,7 +29,10 @@
 //!   leaves unclassified is the punctuation of a force unwrap, an implicitly unwrapped optional, an `init!` or
 //!   a key path's `!`; `try!` and `as!` are swift-format's (`NeverUseForceTry`, `NeverForceUnwrap`);
 //! * outside a `Platform/` folder, a pointer API by name, a binding to a C symbol, and a type name whose
-//!   alias chain ends at a pointer type, an alias of ours or of the SDK's;
+//!   alias chain ends at a pointer type, an alias of ours or of the SDK's; a generic parameter is no alias,
+//!   so one the compiler names a generic parameter of one of the package's own modules — the `Self` a
+//!   `where` clause narrows among them — passes though nothing declares it, while an alias the check
+//!   cannot read, as one from a module that ships without its source or a C header's `typedef`, still fails;
 //! * everywhere, a SwiftLint command, which switches SwiftLint's rules off, a swift-format ignore that
 //!   switches every rule off, reaches beyond one function or property, or gives no reason, and the test
 //!   frameworks swift-format exempts from its never-crash rules: XCTest anywhere, Swift Testing outside a
@@ -85,11 +88,34 @@ const SWIFTLINT_COMMAND: &str = "swiftlint:";
 /// class (an actor too), enum, interface (a protocol), object and struct.
 const REGION_KINDS: &[u64] = &[2, 3, 4, 5, 10, 11, 19, 23];
 
-/// The LSP symbol kind SourceKit-LSP gives a type alias.
-const ALIAS_KIND: u64 = 26;
+/// LSP's type-parameter symbol kind, which SourceKit-LSP gives two ways. Its document symbols give it to
+/// every declaration that names a type it does not define — an alias, an associated type, a generic
+/// parameter — so the walk reads a declaration of this kind as an alias. Its symbol information gives it
+/// only where the compiler reports a generic type parameter, `Self` among them, and reports an alias or an
+/// associated type with no kind at all.
+const TYPE_PARAMETER_KIND: u64 = 26;
 
 /// How many aliases deep a chain may go before the check stops trusting it.
 const ALIAS_DEPTH: usize = 8;
+
+/// Whether a `textDocument/symbolInfo` answer names only generic parameters of `modules`, the package's
+/// own source modules. The compiler declares some generic parameters itself — the `Self` of a protocol or
+/// of an extension narrowed with `where`, the parameter of a type that a constrained extension takes
+/// over — so a jump to their definition finds nothing, yet a generic parameter is no alias and reaches no
+/// pointer type. Both halves are the server's own word: the kind is the compiler's, and the module says
+/// the name is one of ours, whose every declaration the server holds. A name with no declaration in reach
+/// that is anything else stays unread: an alias from a module that ships without its source is placed at
+/// no declaration too, and is still an alias, so it must still fail.
+fn names_generic_parameters(answer: &Value, modules: &BTreeSet<String>) -> bool {
+    let Some(candidates) = answer.as_array() else {
+        return false;
+    };
+    !candidates.is_empty()
+        && candidates.iter().all(|candidate| {
+            candidate.get("kind").and_then(Value::as_u64) == Some(TYPE_PARAMETER_KIND)
+                && candidate.pointer("/systemModule/moduleName").and_then(Value::as_str).is_some_and(|module| modules.contains(module))
+        })
+}
 
 /// The empty alias set a walk from a use carries: only the set-builder's own pass matches right-hand-side
 /// names against names already known to reach a pointer; a walk that asks the server has the answers itself.
@@ -176,6 +202,8 @@ fn check(root: &Path) -> Result<Vec<String>, String> {
     let targets = crate::direction::describe_package(&package, MANIFEST)?.unwrap_or_default();
     let compiled: BTreeSet<String> = targets.iter().flat_map(|target| target.sources.iter()).map(|source| format!("{PACKAGE}/{source}")).collect();
     let tests: BTreeSet<String> = crate::direction::test_sources(&targets).into_iter().map(|source| format!("{PACKAGE}/{source}")).collect();
+    // A binary target is a module too, but one built from no source of ours, so nothing says what it declares.
+    let modules: BTreeSet<String> = targets.iter().filter(|target| !target.sources.is_empty()).map(|target| target.name.clone()).collect();
     let mut texts = Vec::new();
     for file in &files {
         let text = std::fs::read_to_string(canonical.join(file)).map_err(|error| format!("cannot read {file}: {error}"))?;
@@ -189,6 +217,7 @@ fn check(root: &Path) -> Result<Vec<String>, String> {
     let mut pointers: BTreeMap<(String, usize, usize), (String, Vec<Use>)> = BTreeMap::new();
     for build in Build::all(&canonical, &package)? {
         let mut server = LanguageServer::start(&package, build)?;
+        server.modules.clone_from(&modules);
         let mut read: Vec<(&str, String)> = Vec::new();
         for (file, text) in files.iter().zip(&texts) {
             let path = canonical.join(file);
@@ -553,6 +582,17 @@ impl Document {
             .map(|symbol| if symbol.kind == 3 { "an extension" } else { "a declaration that holds others (a type)" })
     }
 
+    /// The aliases declared at the position a jump to a definition lands on, or `None` where no Swift
+    /// declaration stands there: a C header, say, whose `typedef void *` the importer makes an alias of a
+    /// pointer type, so a walk that reads no declaration there has not read what the name is.
+    fn aliases_at(&self, position: (usize, usize)) -> Option<Vec<Symbol>> {
+        let named: Vec<&Symbol> = self.symbols.iter().filter(|symbol| symbol.name_start <= position && position <= symbol.name_end).collect();
+        if named.is_empty() {
+            return None;
+        }
+        Some(named.into_iter().filter(|symbol| symbol.kind == TYPE_PARAMETER_KIND).cloned().collect())
+    }
+
     /// The tokens between two positions, the first included.
     fn tokens_between(&self, from: (usize, usize), to: (usize, usize)) -> impl Iterator<Item = &Token> {
         self.tokens.iter().filter(move |token| token.position() >= from && token.position() < to)
@@ -720,6 +760,8 @@ struct LanguageServer {
     pointers: BTreeMap<(String, usize, usize), Option<bool>>,
     /// This repository's Swift files, as canonical paths: a declaration in one of them is ours.
     ours: BTreeSet<PathBuf>,
+    /// The modules SwiftPM builds from this package's own sources, each named as its target is.
+    modules: BTreeSet<String>,
 }
 
 impl LanguageServer {
@@ -759,6 +801,7 @@ impl LanguageServer {
             documents: BTreeMap::new(),
             pointers: BTreeMap::new(),
             ours: BTreeSet::new(),
+            modules: BTreeSet::new(),
         };
         let capabilities = object([
             (
@@ -916,7 +959,7 @@ impl LanguageServer {
             let mut grew = false;
             for (_, uri) in read {
                 let Ok(document) = self.document(uri) else { continue };
-                for symbol in document.symbols.iter().filter(|symbol| symbol.kind == ALIAS_KIND) {
+                for symbol in document.symbols.iter().filter(|symbol| symbol.kind == TYPE_PARAMETER_KIND) {
                     if self.right_hand_side_reaches_pointer(uri, &document, symbol, 0, &names) {
                         let line = document.lines.get(symbol.name_start.0).map(String::as_str).unwrap_or_default();
                         grew |= names.insert(line.get(byte_of(line, symbol.name_start.1)..byte_of(line, symbol.name_end.1)).unwrap_or_default().to_string());
@@ -960,7 +1003,7 @@ impl LanguageServer {
     }
 
     /// The memoised walk: `Some` when the chain was read to its end, `None` when the server could not say what
-    /// the name at `at` refers to.
+    /// the name at `at` refers to or the walk could not read the declaration it names.
     fn alias_verdict(&mut self, uri: &str, at: (usize, usize), depth: usize) -> Option<bool> {
         if depth >= ALIAS_DEPTH {
             return Some(true);
@@ -977,17 +1020,17 @@ impl LanguageServer {
     fn walk_alias(&mut self, uri: &str, at: (usize, usize), depth: usize) -> Option<bool> {
         let targets = locations(&self.request("textDocument/definition", position_params(uri, at), ANSWER_WAIT).ok()?);
         if targets.is_empty() {
-            return None;
+            // Nothing to jump to: either nothing declares the name, as with the `Self` of a protocol
+            // extension, which the compiler declares itself, or its declaration is out of the server's
+            // reach, as with an alias from a module that ships without its source. Only the server's
+            // word that the name is a generic parameter of ours tells the two apart; anything else keeps
+            // no verdict, which no build may call innocent.
+            let named = self.request("textDocument/symbolInfo", position_params(uri, at), ANSWER_WAIT).ok()?;
+            return names_generic_parameters(&named, &self.modules).then_some(false);
         }
         for (target, position) in targets {
             let declared = self.document(&target).ok()?;
-            let aliases: Vec<Symbol> = declared
-                .symbols
-                .iter()
-                .filter(|symbol| symbol.kind == ALIAS_KIND && symbol.name_start <= position && position <= symbol.name_end)
-                .cloned()
-                .collect();
-            for alias in aliases {
+            for alias in declared.aliases_at(position)? {
                 if self.right_hand_side_reaches_pointer(&target, &declared, &alias, depth, &NO_POINTER_ALIASES) {
                     return Some(true);
                 }
@@ -1468,6 +1511,70 @@ mod tests {
         assert_eq!(merged_use(&[Use::Unknown, Use::Clear]), Use::Clear);
         assert_eq!(merged_use(&[Use::Unknown]), Use::Unknown);
         assert_eq!(merged_use(&[]), Use::Unknown);
+    }
+
+    #[test]
+    fn only_a_generic_parameter_of_the_package_s_own_modules_passes_with_nothing_declaring_it() {
+        // The `symbolInfo` answers sourcekit-lsp 6.3.3 gives, in every build the stage reads, where
+        // `definition` has nothing to jump to; the fields the check reads are as the server sent them.
+        let ours: BTreeSet<String> = ["CraftBridge", "CraftBridgeEffects"].map(str::to_string).into();
+        let generic_parameter = |name: &str, module: &str, usr: &str| {
+            json!([{"name": name, "usr": usr, "kind": 26, "isSystem": false, "isDynamic": name == "Self", "receiverUsrs": [],
+                    "systemModule": {"moduleName": module}}])
+        };
+        // The compiler declares these itself: the `Self` of `extension JSONRepresentable where Self:
+        // RawRepresentable, RawValue == String`, the `Self` of an extension one module makes of another's
+        // protocol, and the parameter `Value` that `extension Box where Value == Int` takes over.
+        for (name, module, usr) in [
+            ("Self", "CraftBridge", "s:11CraftBridge17JSONRepresentablePAASYRzSS8RawValueSYRtzrlE4Selfxmfp"),
+            ("Self", "CraftBridgeEffects", "s:11CraftBridge8PointingP0aB7EffectsE4Selfxmfp"),
+            ("Value", "CraftBridge", "s:11CraftBridge3BoxVAASvRszlE5Valuexmfp"),
+        ] {
+            assert!(names_generic_parameters(&generic_parameter(name, module, usr), &ours), "{name} of {module} is a generic parameter, no alias");
+        }
+        // An alias from a module that ships without its source, `public typealias Handle =
+        // UnsafeMutableRawPointer` in a binary target: no declaration in reach either, and still an alias.
+        let binary_alias = json!([{"name": "Handle", "usr": "s:6Vendor6Handlea", "isSystem": false, "isDynamic": false, "receiverUsrs": [],
+                                   "systemModule": {"moduleName": "Vendor"}}]);
+        assert!(!names_generic_parameters(&binary_alias, &ours), "an alias the server cannot read must still fail");
+        // Each half alone is no clearance: an alias of ours whose declaration the server lost is still an
+        // alias, a server that marked a binary target's alias with the type-parameter kind still names a
+        // module of no source of ours, and a generic parameter no module claims is unplaced.
+        let mut lost = binary_alias.clone();
+        lost[0]["systemModule"]["moduleName"] = json!("CraftBridge");
+        assert!(!names_generic_parameters(&lost, &ours), "a name of ours that is no generic parameter may be an alias");
+        let mut marked = binary_alias.clone();
+        marked[0]["kind"] = json!(26);
+        assert!(!names_generic_parameters(&marked, &ours), "a module of no source of ours says nothing about what it declares");
+        let mut unplaced = generic_parameter("Self", "CraftBridge", "s:11CraftBridge8PointingPAAE4Selfxmfp");
+        unplaced[0].as_object_mut().unwrap().remove("systemModule");
+        assert!(!names_generic_parameters(&unplaced, &ours), "a name no module of ours claims is not known to be ours");
+        // Every candidate must be one: a reading that also offers an alias offers a pointer it cannot rule out.
+        let both = json!([generic_parameter("Self", "CraftBridge", "s:11CraftBridge8PointingPAAE4Selfxmfp")[0], binary_alias[0]]);
+        assert!(!names_generic_parameters(&both, &ours), "an alias among the candidates keeps the use unread");
+        assert!(!names_generic_parameters(&json!([]), &ours), "a name no answer places keeps no verdict, which is no clearance");
+        assert!(!names_generic_parameters(&Value::Null, &ours));
+    }
+
+    #[test]
+    fn a_jump_to_where_no_swift_declaration_stands_reads_nothing() {
+        // A jump lands on a declaration's name: an alias, whose right-hand side the walk then reads, or a
+        // type that is no alias. A C header the walk opens holds no Swift declaration at the place the
+        // server jumped to, so what the importer made of its `typedef` stays unread.
+        let swift = document(
+            "typealias Handle = Platform\nstruct Box {}\n",
+            &[],
+            json!([
+                {"kind": 26, "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 27}},
+                 "selectionRange": {"start": {"line": 0, "character": 10}, "end": {"line": 0, "character": 16}}},
+                {"kind": 23, "range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 13}},
+                 "selectionRange": {"start": {"line": 1, "character": 7}, "end": {"line": 1, "character": 10}}}
+            ]),
+        );
+        assert_eq!(swift.aliases_at((0, 10)).map(|aliases| aliases.len()), Some(1), "an alias is read");
+        assert_eq!(swift.aliases_at((1, 7)).map(|aliases| aliases.len()), Some(0), "a type that is no alias is no pointer alias");
+        let header = document("typedef void *Handle;\n", &[], json!([]));
+        assert!(header.aliases_at((0, 14)).is_none(), "no declaration read is no verdict");
     }
 
     #[test]
