@@ -238,6 +238,10 @@ done
 
 # The gate's other tools.
 if has shellcheck; then ok "shellcheck $(shellcheck --version | sed -n 's/^version: //p')"; else gap "shellcheck" "brew install shellcheck"; fi
+# The pre-push hook's tests start every push through perl, which sets the signals they interrupt it with
+# back to their defaults: no shell can for a signal it was started ignoring, as a background job's
+# SIGINT is, and Rust's std has no call that does.
+if has perl; then ok "perl $(perl -e 'printf "%vd", $^V') (starts the pre-push hook's test pushes)"; else gap "perl (starts the pre-push hook's test pushes)" "brew install perl"; fi
 node_major="$(node --version 2>/dev/null | sed -n 's/^v\([0-9]*\).*/\1/p' || true)"
 if [ -n "$node_major" ] && [ "$node_major" -ge 20 ] && has npx; then ok "Node.js $(node --version) (runs $CRAFTBRIDGE_JSCPD)"; else gap "Node.js 20 or later" "brew install node"; fi
 # The plan stage rebuilds the plan's views with the kit's own builders, on the same Node the line above
