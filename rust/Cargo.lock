@@ -480,8 +480,10 @@ name = "craftbridge-core"
 version = "0.1.0"
 dependencies = [
  "craftbridge-media",
+ "pollster",
  "serde_json",
  "tempfile",
+ "wgpu",
 ]
 
 [[package]]

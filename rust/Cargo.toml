@@ -31,6 +31,13 @@ unicode-normalization = "0.1"
 tempfile = "3"
 # `image` writes the PNGs craftbridge-effects-conformance's tests compare.
 image = { version = "0.25", default-features = false, features = ["png"] }
+# The core creates its wgpu device itself (plan §17, D-7). The version and features are exactly the
+# pinned EffectCraft workspace's, so one wgpu builds both and the device the core makes is of the type
+# the compositor's `Gpu::new` takes: with a second wgpu in the lock they would be two types, and the
+# hand-over would not compile.
+wgpu = { version = "30.0.1", features = ["fragile-send-sync-non-atomic-wasm"] }
+# The core blocks on wgpu's adapter and device futures with the executor EffectCraft blocks on.
+pollster = "1"
 
 effectcraft-engine = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
 effectcraft-host = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }

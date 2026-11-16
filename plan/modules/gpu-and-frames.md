@@ -5,7 +5,7 @@
 
 ## 17. GPU and frames design
 
-**The device.** `craftbridge-core::gpu` creates the GPU device itself rather than letting the compositor pick one (`evidence/03-device-feasibility.md` Findings 6–8):
+**The device.** `craftbridge-core::gpu` creates the GPU device itself rather than letting the compositor pick one (AD12, `evidence/03-device-feasibility.md` Findings 6–8):
 
 - **Backend:** `wgpu::Backends::METAL` on iOS, `wgpu::Backends::VULKAN` on Android. GL is never requested: the compositor needs compute shaders, which the emulator's GL lacked (`evidence/03-device-feasibility.md` Finding 7).
 - **Limits:** `wgpu::Limits::default().or_worse_values_from(&adapter.limits())`, with `max_texture_dimension_2d` capped at 16384 and `max_buffer_size` from the adapter, as the compositor does for those two (`crates/gpu/src/context.rs:1430-1435`). This is the request that worked on the iOS Simulator's Metal device.

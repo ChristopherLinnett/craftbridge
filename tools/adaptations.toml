@@ -177,3 +177,19 @@ depends = [
   "file.runScript, which runs the steps of a command script it reads from a file itself and which the confinement withholds as a command that runs scripts, so those steps never reach the engine (crates/engine/src/cmd/file_more.rs:515-549, crates/engine/src/cmd/scripts.rs:34-35)",
   "the download's only callers being its two command specs: no other command runs it (crates/engine/src/analysis/models.rs:720, :749)",
 ]
+
+[[adaptation]]
+id = "AD12"
+crate = "craftbridge-core"
+file = "src/gpu.rs"
+implements = "CORE-2a"
+summary = "The core makes the GPU device itself: the backend is picked per platform — Metal on iOS, Vulkan on Android, the host's on the desktop, GL never — and the requested limits are wgpu's defaults clamped to the adapter's, with max_texture_dimension_2d capped at 16384 and max_buffer_size taken from the adapter, as the compositor takes those two; the device answers (adapter, device, queue) for Gpu::new, and with no device it answers why in words info.gpu can report while every render runs on the CPU."
+replaces = "GpuContext::request()'s own instance and limits (crates/gpu/src/context.rs:1403-1444): it takes any backend, or the ones WGPU_BACKEND names — the emulator's best adapter was its GL translator, with no compute shaders — and asks wgpu::Limits::default() for every limit but those two, which the iOS Simulator's Metal device refused against its 15 inter-stage shader variables (plan/evidence/03-device-feasibility.md Findings 6 and 7, decision D-7). The compositor's own interface stays: the device enters Gpu::new the way the desktop app's does."
+depends = [
+  "Gpu::new, which takes a device the caller made (crates/gpu/src/lib.rs:162-166)",
+  "the adapter limits and the two required limits of GpuContext::request (crates/gpu/src/context.rs:1430-1435)",
+  "device_descriptor, whose memory hints the core's own descriptor mirrors (crates/gpu/src/context.rs:816-818)",
+  "the device name GpuContext::new gives, adapter and backend, which info.gpu spells alike (crates/gpu/src/context.rs:866)",
+  "the words GpuContext::request reports no adapter in, which the core's reason follows (crates/gpu/src/context.rs:1426)",
+  "the power preference GpuContext::request asks when WGPU_POWER_PREF is unset, which the core asks (crates/gpu/src/context.rs:340-347)",
+]

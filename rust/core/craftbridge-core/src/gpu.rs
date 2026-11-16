@@ -1,0 +1,355 @@
+//! The engine's GPU device (plan §17, decision D-7).
+//!
+//! The core creates the wgpu device itself rather than letting the compositor pick one, because
+//! the compositor's own request failed where the plugin runs: the iOS Simulator's Metal device
+//! offers fewer limits than `wgpu::Limits::default()` asks for, and the Android emulator's best
+//! adapter was its OpenGL ES translator, which has no compute shaders
+//! (`plan/evidence/03-device-feasibility.md` Findings 6–8). So the backend is chosen per platform
+//! — Metal on iOS, Vulkan on Android, the host's on the desktop — GL is never requested, and the
+//! requested limits are the defaults clamped to what the adapter offers.
+//!
+//! A device answers `(adapter, device, queue)` for the app crate to hand to
+//! `effectcraft_gpu::Gpu::new`; no device answers why, in words `info.gpu` can report, and every
+//! render then runs on the CPU (L7). A failed adapter or device request is that answer, never a
+//! panic.
+
+/// What the app asked for when it started the engine (plan §14). `Preferred` takes a GPU when
+/// there is one; `CpuOnly` never asks, and everything renders on the CPU (L7).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GpuChoice {
+    /// Ask the platform's backend for a device; fall back to the CPU only when there is none.
+    Preferred,
+    /// Render on the CPU without asking.
+    CpuOnly,
+}
+
+/// The platform the core picks GPU backends for. A build takes the one its target names, and the
+/// tests name each target, so every platform's pick is proven on the machine the tests run on while
+/// the gate's phone builds prove the code compiles for the phones.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Platform {
+    Ios,
+    Android,
+    /// Any other target, a desktop: its own backends, Metal on macOS.
+    Host,
+}
+
+impl Platform {
+    /// The platform this build was compiled for.
+    fn current() -> Platform {
+        Platform::of(std::env::consts::OS)
+    }
+
+    /// The platform of a target operating system, named as `std::env::consts::OS` names it (the
+    /// target's `target_os`; the iOS Simulator's is `ios`). A plain function of the name, rather than
+    /// a `cfg!` a host build always folds to `Host`, so the tests pin each phone's pick on the host.
+    fn of(os: &str) -> Platform {
+        match os {
+            "ios" => Platform::Ios,
+            "android" => Platform::Android,
+            _ => Platform::Host,
+        }
+    }
+
+    /// The wgpu backends to ask, never GL: the compositor needs compute shaders, which the
+    /// emulator's GL lacked (D-7, `plan/evidence/03-device-feasibility.md` Finding 7). On the
+    /// host the machine's own backends answer, minus GL, so a desktop test drives the same rule.
+    fn backends(self) -> wgpu::Backends {
+        match self {
+            Platform::Ios => wgpu::Backends::METAL,
+            Platform::Android => wgpu::Backends::VULKAN,
+            Platform::Host => wgpu::Backends::all().difference(wgpu::Backends::GL),
+        }
+    }
+}
+
+/// The engine's GPU: the device to render on, or the reason the render runs on the CPU instead
+/// (§17's *GPU attached* and *CPU only* states).
+#[derive(Debug)]
+pub enum GpuDevice {
+    /// A device on the platform's backend. `adapter`, `device` and `queue` go together to
+    /// `effectcraft_gpu::Gpu::new` when the engine attaches the GPU (§17).
+    Device {
+        /// The adapter the device was requested from; `info.gpu` names it.
+        adapter: wgpu::Adapter,
+        /// The logical device the compositor renders on.
+        device: wgpu::Device,
+        /// The queue that carries the device's work.
+        queue: wgpu::Queue,
+    },
+    /// No device — `CpuOnly` was chosen, no adapter answered, or the request failed. `reason` is
+    /// in words `info.gpu` can report, and every render runs on the CPU (L7).
+    CpuOnly {
+        /// Why there is no device, as `info.gpu` reports it.
+        reason: String,
+    },
+}
+
+impl GpuDevice {
+    /// Ask for the device the app's [`GpuChoice`] allows. This blocks until the adapter and
+    /// device futures answer, on the executor EffectCraft itself blocks on; call it on the
+    /// engine's own thread, not the app's UI thread.
+    #[must_use]
+    pub fn request(choice: GpuChoice) -> GpuDevice {
+        match choice {
+            GpuChoice::Preferred => on_backends(Platform::current().backends()),
+            GpuChoice::CpuOnly => GpuDevice::CpuOnly { reason: "the app asked for CPU-only rendering".to_string() },
+        }
+    }
+
+    /// What `info.gpu` reports (§14's `info`): `"<adapter> (<backend>)"` with a device, or the
+    /// reason the render is on the CPU. The device is named as the compositor names the device it
+    /// renders on, `Apple M5 Max (Metal)` (`effectcraft: crates/gpu/src/context.rs:866`), so
+    /// `info.gpu` and the compositor's own report spell one device alike.
+    #[must_use]
+    pub fn summary(&self) -> String {
+        match self {
+            GpuDevice::Device { adapter, .. } => {
+                let info = adapter.get_info();
+                format!("{} ({:?})", info.name, info.backend)
+            }
+            GpuDevice::CpuOnly { reason } => reason.clone(),
+        }
+    }
+
+    /// The trio for `effectcraft_gpu::Gpu::new`, or nothing while the render is on the CPU (§17).
+    /// `Gpu::new` takes the adapter by reference and the device and queue by value; wgpu's handles
+    /// are reference-counted, so the caller hands it clones and this device keeps its own.
+    #[must_use]
+    pub fn parts(&self) -> Option<(&wgpu::Adapter, &wgpu::Device, &wgpu::Queue)> {
+        match self {
+            GpuDevice::Device { adapter, device, queue } => Some((adapter, device, queue)),
+            GpuDevice::CpuOnly { .. } => None,
+        }
+    }
+}
+
+/// `max_texture_dimension_2d` is never asked above this, as the compositor caps it
+/// (`effectcraft: crates/gpu/src/context.rs:1430-1435`). A comp larger than the device's texture
+/// limit renders on the CPU for that comp — the compositor's own decline path (§17).
+const MAX_TEXTURE_DIMENSION_2D: u32 = 16_384;
+
+/// The limits to request from an adapter: `wgpu::Limits::default()` clamped to the adapter's, so
+/// a device that offers less than the default still answers (the iOS Simulator's Metal device
+/// offers 15 inter-stage shader variables against the default's 16), with the two limits the
+/// compositor takes from the adapter itself: `max_texture_dimension_2d` capped at
+/// [`MAX_TEXTURE_DIMENSION_2D`] and `max_buffer_size` as the adapter gives it (D-7, §17).
+fn required_limits(adapter_limits: &wgpu::Limits) -> wgpu::Limits {
+    wgpu::Limits {
+        max_texture_dimension_2d: adapter_limits.max_texture_dimension_2d.min(MAX_TEXTURE_DIMENSION_2D),
+        max_buffer_size: adapter_limits.max_buffer_size,
+        ..wgpu::Limits::default().or_worse_values_from(adapter_limits)
+    }
+}
+
+/// The device descriptor: the clamped limits and the memory-lean buffers, as the compositor's own
+/// request keeps them (`effectcraft: crates/gpu/src/context.rs:816-818`).
+fn device_descriptor(required_limits: wgpu::Limits) -> wgpu::DeviceDescriptor<'static> {
+    wgpu::DeviceDescriptor { label: Some("craftbridge core"), required_limits, memory_hints: wgpu::MemoryHints::MemoryUsage, ..Default::default() }
+}
+
+/// The instance asking exactly these backends. Deliberately not built `with_env()`: the backend is
+/// the choice this module makes per platform, and the environment must not switch it to GL.
+fn instance(backends: wgpu::Backends) -> wgpu::Instance {
+    wgpu::Instance::new(wgpu::InstanceDescriptor { backends, ..wgpu::InstanceDescriptor::new_without_display_handle() })
+}
+
+/// The device on the best adapter of `backends`, or the reason there is none: no adapter
+/// answered, or the device request failed. Both answers say why in words `info.gpu` can report,
+/// and the render runs on the CPU (L7).
+fn on_backends(backends: wgpu::Backends) -> GpuDevice {
+    let instance = instance(backends);
+    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        // The compositor's own pick when `WGPU_POWER_PREF` is unset: a discrete GPU, then an
+        // integrated one, above a virtual or a software one (`effectcraft: crates/gpu/src/context.rs:340-347`).
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        ..Default::default()
+    })) {
+        Ok(adapter) => adapter,
+        // wgpu's own error names each backend asked and why it gave none, as the compositor reports it.
+        Err(error) => {
+            return GpuDevice::CpuOnly { reason: format!("no adapter: {error}") };
+        }
+    };
+    let limits = required_limits(&adapter.limits());
+    open(adapter, limits)
+}
+
+/// The device on this adapter with these limits, asked of the adapter. A refused request — the
+/// limits more than it gives, the features more than it has — is the reason `info.gpu` reports
+/// and the CPU renders, never a panic (§17's *CPU only* state).
+fn open(adapter: wgpu::Adapter, required: wgpu::Limits) -> GpuDevice {
+    match pollster::block_on(adapter.request_device(&device_descriptor(required))) {
+        Ok((device, queue)) => GpuDevice::Device { adapter, device, queue },
+        Err(error) => GpuDevice::CpuOnly { reason: format!("no device on {}: {error}", adapter.get_info().name) },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The desktop request, which is what the acceptance runs: on this machine it must answer a
+    /// device, because Metal is there. It drives the whole production path — instance, adapter
+    /// pick, clamped limits, device request — so the clamping and the never-GL rule are proven on
+    /// a real device, and the phone code paths around them are the same code.
+    #[test]
+    fn desktop_request_answers_a_device_with_clamped_limits() {
+        let gpu = GpuDevice::request(GpuChoice::Preferred);
+        let Some((adapter, device, _queue)) = gpu.parts() else {
+            panic!("the host must answer a GPU adapter for this test to mean anything: {}", gpu.summary());
+        };
+        let adapter_limits = adapter.limits();
+        let device_limits = device.limits();
+        // Every limit is exactly what `required_limits` computes from the adapter — the clamp
+        // itself, end to end.
+        assert_eq!(device_limits, required_limits(&adapter_limits));
+        // The two limits the adapter supplies on its own (§17): `max_buffer_size` as given, and
+        // the texture dimension capped at 16384 (an adapter above the cap is clamped to it).
+        assert_eq!(device_limits.max_buffer_size, adapter_limits.max_buffer_size);
+        assert_eq!(device_limits.max_texture_dimension_2d, adapter_limits.max_texture_dimension_2d.min(16_384));
+        // GL was never requested: the instance asked only the host backends without it.
+        assert_ne!(adapter.get_info().backend, wgpu::Backend::Gl);
+    }
+
+    /// The clamp itself on numbers a real host may not offer: a simulator-like adapter with fewer
+    /// inter-stage variables than the default and a coarser storage-buffer alignment, more bind
+    /// groups and storage buffers than the default asks, a texture dimension above the cap, and a
+    /// buffer size the default would not ask for. A mutation of the cap, of the adapter buffer
+    /// size, of the clamp, or of the defaults it starts from fails this.
+    #[test]
+    fn limits_clamp_every_value_to_the_adapter_and_cap_the_two() {
+        let default = wgpu::Limits::default();
+        let adapter = wgpu::Limits {
+            max_inter_stage_shader_variables: 15,     // the iOS Simulator's shortfall (Finding 6)
+            min_storage_buffer_offset_alignment: 512, // an alignment worse than the default's 256
+            max_bind_groups: 8,                       // better than the default: not asked for
+            max_storage_buffers_per_shader_stage: 29, // the same
+            max_texture_dimension_2d: 163_840,        // above the cap
+            max_buffer_size: 64 << 30,                // 64 GiB, more than the default asks
+            ..default
+        };
+        let requested = required_limits(&adapter);
+        // Every limit at once: the default where the adapter offers more, the adapter's where it
+        // offers less, and the two the compositor takes from the adapter — the texture dimension
+        // capped at 16384, the number §17 fixes, written as a literal here so a mutation of the
+        // constant cannot agree with itself and hide, and the buffer size as the adapter gives it.
+        let expected = wgpu::Limits {
+            max_inter_stage_shader_variables: 15,
+            min_storage_buffer_offset_alignment: 512,
+            max_texture_dimension_2d: 16_384,
+            max_buffer_size: 64 << 30,
+            ..default
+        };
+        assert_eq!(requested, expected);
+        // An adapter under the cap keeps its own texture dimension.
+        let small = required_limits(&wgpu::Limits { max_texture_dimension_2d: 8192, ..default });
+        assert_eq!(small.max_texture_dimension_2d, 8192);
+        // Nothing requested exceeds its adapter.
+        assert!(requested.max_buffer_size <= adapter.max_buffer_size);
+        assert!(requested.max_texture_dimension_2d <= adapter.max_texture_dimension_2d);
+    }
+
+    /// `CpuOnly` never asks and answers the reason `info.gpu` can show.
+    #[test]
+    fn cpu_only_choice_answers_a_reason() {
+        let gpu = GpuDevice::request(GpuChoice::CpuOnly);
+        let GpuDevice::CpuOnly { reason } = &gpu else {
+            panic!("CpuOnly must not take a device");
+        };
+        assert!(reason.contains("CPU-only"), "reason reads: {reason}");
+        assert!(gpu.parts().is_none());
+        // The reason is exactly what `info.gpu` would report (§17: the CPU-only state shows it).
+        assert_eq!(gpu.summary(), reason.clone());
+    }
+
+    /// A request that finds no adapter answers the reason, not a panic — proven by asking a
+    /// backend set that can hold none, which runs the production no-adapter branch. The reason
+    /// carries wgpu's own error, which says why each backend gave none.
+    #[test]
+    fn no_adapter_answers_a_reason() {
+        let gpu = on_backends(wgpu::Backends::empty());
+        let GpuDevice::CpuOnly { reason } = &gpu else {
+            panic!("an empty backend set cannot answer a device: {}", gpu.summary());
+        };
+        let Err(error) = pollster::block_on(instance(wgpu::Backends::empty()).request_adapter(&Default::default())) else {
+            panic!("an empty backend set answered an adapter");
+        };
+        assert_eq!(reason, &format!("no adapter: {error}"));
+        assert_eq!(gpu.summary(), reason.clone());
+    }
+
+    /// A device request that fails answers the reason too, through the production `open`: the
+    /// adapter is real, the limits ask one above what it gives, and the answer is words the CPU
+    /// renders with, not a panic: the adapter's name and wgpu's own refusal.
+    #[test]
+    fn failed_device_request_answers_a_reason() {
+        let instance = instance(Platform::Host.backends());
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+            panic!("the host must have a non-GL adapter for this test to mean anything");
+        };
+        let mut too_much = required_limits(&adapter.limits());
+        // One above what the adapter gives. A physical device's texture dimension sits far under
+        // a `u32` overflow, and if one ever did not, the next assertion would say so.
+        too_much.max_texture_dimension_2d = adapter.limits().max_texture_dimension_2d + 1;
+        let Err(refusal) = pollster::block_on(adapter.request_device(&device_descriptor(too_much.clone()))) else {
+            panic!("limits above the adapter's must not build a device");
+        };
+        let name = adapter.get_info().name;
+        let gpu = open(adapter, too_much);
+        let GpuDevice::CpuOnly { reason } = &gpu else {
+            panic!("limits above the adapter's must not build a device");
+        };
+        assert_eq!(reason, &format!("no device on {name}: {refusal}"));
+        assert_eq!(gpu.summary(), reason.clone());
+    }
+
+    /// GL is never requested, on any platform (§17); each platform's one-word pick is pinned so a
+    /// mutation to any arm — or a dropped cap — fails here on the host.
+    #[test]
+    fn backends_are_metal_or_vulkan_and_never_gl() {
+        assert_eq!(Platform::Ios.backends(), wgpu::Backends::METAL);
+        assert_eq!(Platform::Android.backends(), wgpu::Backends::VULKAN);
+        assert_eq!(Platform::Host.backends(), wgpu::Backends::all().difference(wgpu::Backends::GL));
+        for platform in [Platform::Ios, Platform::Android, Platform::Host] {
+            assert!(!platform.backends().contains(wgpu::Backends::GL), "{platform:?} requested GL");
+        }
+    }
+
+    /// Each target the gate builds takes its own platform's pick: the phones by their
+    /// `target_os` names (the iOS device and Simulator are both `ios`, the two Android ABIs
+    /// `android`), and this host's build by its own name, so a swapped arm fails here on the host.
+    #[test]
+    fn each_target_takes_its_platform() {
+        assert_eq!(Platform::of("ios"), Platform::Ios);
+        assert_eq!(Platform::of("android"), Platform::Android);
+        assert_eq!(Platform::of("macos"), Platform::Host);
+        assert_eq!(Platform::current(), Platform::of(std::env::consts::OS));
+    }
+
+    /// With a device, `info.gpu` reads `"<adapter> (<backend>)"` (§17's GPU-attached state), the
+    /// backend spelt as the compositor names its device: `Metal`, `Vulkan`.
+    #[test]
+    fn summary_names_the_adapter_and_backend() {
+        let gpu = GpuDevice::request(GpuChoice::Preferred);
+        let GpuDevice::Device { adapter, .. } = &gpu else {
+            panic!("a desktop with no adapter: {}", gpu.summary());
+        };
+        let info = adapter.get_info();
+        let backend = match info.backend {
+            wgpu::Backend::Metal => "Metal",
+            wgpu::Backend::Vulkan => "Vulkan",
+            wgpu::Backend::Dx12 => "Dx12",
+            other => panic!("the host answered a backend a desktop never asks: {other:?}"),
+        };
+        assert_eq!(gpu.summary(), format!("{} ({backend})", info.name));
+    }
+
+    /// The engine hands a `GpuDevice` to its thread, so it must move between threads.
+    #[test]
+    fn gpu_device_is_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<GpuDevice>();
+        assert_send::<GpuChoice>();
+    }
+}
