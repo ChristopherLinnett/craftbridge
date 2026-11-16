@@ -1418,7 +1418,7 @@ impl Engine {
 </tbody></table>
 </div><p><strong>States.</strong></p>
 <ul>
-<li><em>Pinned</em>: <code>rev</code> is an official storytold/effectcraft commit; <code>info</code> reports it as <code>pin</code>.</li>
+<li><em>Pinned</em>: <code>rev</code> names an official storytold/effectcraft commit; <code>info</code> reports that commit in full as <code>pin</code> (§21).</li>
 <li><em>Update in progress</em>: the update script has moved the pin and named the adaptations whose EffectCraft code changed; the update merges once each named adaptation is rechecked and the gate passes (§24).</li>
 </ul>
 <p><strong>Edge cases.</strong></p>
@@ -1752,7 +1752,7 @@ impl Engine {
 <tbody><tr>
 <td><code>rust/<wbr>effects/<wbr>craftbridge-effects-codegen/<wbr>src/<wbr>main.rs</code></td>
 <td>NEW</td>
-<td><code>surface</code> (writes <code>api-surface.json</code>), <code>swift</code>, <code>kotlin</code>, <code>diff &lt;old&gt; &lt;new&gt;</code></td>
+<td><code>surface</code> (writes <code>api-surface.json</code>), <code>swift</code>, <code>kotlin</code>, <code>version</code> (writes the plugin&#39;s <code>version.rs</code>), <code>diff &lt;old&gt; &lt;new&gt;</code></td>
 </tr>
 <tr>
 <td><code>rust/<wbr>effects/<wbr>craftbridge-effects-codegen/<wbr>src/<wbr>types.rs</code></td>
@@ -1777,10 +1777,10 @@ impl Engine {
 <tr>
 <td><code>rust/<wbr>effects/<wbr>craftbridge-effects/<wbr>src/<wbr>generated/<wbr>version.rs</code></td>
 <td>NEW, generated</td>
-<td><code>ENGINE_VERSION</code>, <code>ENGINE_PIN</code> constants for <code>info</code></td>
+<td><code>ENGINE_VERSION</code> (the surface&#39;s <code>engineVersion</code>) and <code>ENGINE_PIN</code> (the surface&#39;s <code>pin</code>), the constants <code>info</code> reports</td>
 </tr>
 </tbody></table>
-</div><p><strong>Reading the registry.</strong> <code>effectcraft_engine::command_specs()</code> gives every command&#39;s id, label, menu, shortcuts, <code>params</code> text and <code>journal</code> flag (<code>crates/<wbr>engine/<wbr>src/<wbr>cmd.rs:106-121</code>, <code>:175-181</code>). <code>params_schema(spec)</code> gives the accepted keys and which are required (<code>crates/<wbr>engine/<wbr>src/<wbr>cmd/<wbr>schema.rs:77-101</code>). The tool catalogue comes from <code>effectcraft_automation::tools::catalogue()</code> (<code>crates/<wbr>automation/<wbr>src/<wbr>tools.rs:93-95</code>). The surface&#39;s <code>pin</code> is the commit Cargo builds for the pin, in full as <code>rust/<wbr>Cargo.lock</code> records it, whatever spelling <code>rust/<wbr>Cargo.toml</code> gives the pin, so a pin respelt in full or abbreviated leaves the surface as it was.</p>
+</div><p><strong>Reading the registry.</strong> <code>effectcraft_engine::command_specs()</code> gives every command&#39;s id, label, menu, shortcuts, <code>params</code> text and <code>journal</code> flag (<code>crates/<wbr>engine/<wbr>src/<wbr>cmd.rs:106-121</code>, <code>:175-181</code>). <code>params_schema(spec)</code> gives the accepted keys and which are required (<code>crates/<wbr>engine/<wbr>src/<wbr>cmd/<wbr>schema.rs:77-101</code>). The tool catalogue comes from <code>effectcraft_automation::tools::catalogue()</code> (<code>crates/<wbr>automation/<wbr>src/<wbr>tools.rs:93-95</code>). The surface&#39;s <code>pin</code>, and <code>info</code>&#39;s through <code>ENGINE_PIN</code>, is the commit Cargo builds for the pin, in full as <code>rust/<wbr>Cargo.lock</code> records it, whatever spelling <code>rust/<wbr>Cargo.toml</code> gives the pin, so a pin respelt in full or abbreviated leaves both as they were; the CLI&#39;s <code>info</code> reports no pin that could spell it otherwise. The version both carry is the one the linked engine was built with (<code>effectcraft_engine::project::APP_VERSION</code>), the version the CLI&#39;s <code>info</code> reports.</p>
 <p><strong>Type rules.</strong> The registry gives types only as prose in each key&#39;s piece of the <code>params</code> text (<code>evidence/<wbr>01-system-inventory.md</code> Finding 11). The generator maps a piece conservatively, and anything else stays a <code>JSONValue</code>, so a wrong guess can only be wider, never narrower:</p>
 <div class="table-wrap"><table>
 <thead>

@@ -4,15 +4,11 @@ use craftbridge_core::{CraftError, Result};
 use effectcraft_automation::Backend;
 use serde_json::Value;
 
+use crate::generated::version::{ENGINE_PIN, ENGINE_VERSION};
 use crate::methods::{empty_params, object, tool_json};
 
 /// The engine this plugin answers for, named as plan §21 spells it.
 const ENGINE: &str = "effectcraft";
-
-/// The EffectCraft revision the workspace pins, which is what this plugin builds. It is written here
-/// once, and the crate's tests hold `info`'s `pin` to the pin in the workspace manifest, so the two
-/// cannot drift; plan §21 has the generator write it into `src/generated/` instead.
-const ENGINE_PIN: &str = "10376058";
 
 /// `info`: `{engine, version, pin, commands, effects, project, activeComp, gpu, hardwareDecoding}`.
 ///
@@ -30,7 +26,7 @@ pub(crate) fn info(backend: &mut Backend, params: &Value) -> Result<Value> {
     let active_comp = tool_json(backend, "get_comp", &empty_params()).unwrap_or(Value::Null);
     Ok(object([
         ("engine", Value::from(ENGINE)),
-        ("version", Value::from(effectcraft_engine::project::APP_VERSION)),
+        ("version", Value::from(ENGINE_VERSION)),
         ("pin", Value::from(ENGINE_PIN)),
         ("commands", Value::from(effectcraft_engine::command_specs().len())),
         ("effects", Value::from(effectcraft_engine::effects::registry().len())),
