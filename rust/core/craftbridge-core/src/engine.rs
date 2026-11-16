@@ -3,15 +3,19 @@
 
 use crate::Result;
 use crate::app::CraftApp;
+use crate::cancel::CancelToken;
 use crate::error::CraftError;
+use crate::export::{self, ExportCall};
 use serde_json::Value;
+use std::collections::VecDeque;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle, ThreadId};
 
 /// The name every engine thread carries, so a thread listing of the host app shows the engine (plan §16).
-const THREAD_NAME: &str = "craftbridge-engine";
+/// Crate-visible so an export test checks its progress against this one name, not a copy of it.
+pub(crate) const THREAD_NAME: &str = "craftbridge-engine";
 
 /// The reason every call answers after [`Engine::close`], or loses the race to it.
 const CLOSED: &str = "engine is closed";
@@ -26,10 +30,20 @@ const PAYLOAD_PANICKED: &str = "a caught panic's payload panicked as it was drop
 
 /// A call to the engine thread and where to answer it. Each call carries its own answer channel,
 /// used once: the channel a call is answered on is that call's alone, so an answer cannot reach a
-/// waiting caller by mistake.
-enum Message {
+/// waiting caller by mistake. An export carries its payload as one `ExportCall`, so everything the
+/// export mechanism needs travels as one item and the export's own file owns it.
+pub(crate) enum Message {
     Request { method: String, params: Value, answer: Sender<Result<Value>> },
+    Export { call: ExportCall },
     Close,
+}
+
+impl Message {
+    /// A plain call of `method`, built once the engine gives it the channel its answer goes back on.
+    pub(crate) fn request(method: &str, params: Value) -> impl FnOnce(Sender<Result<Value>>) -> Message {
+        let method = method.to_string();
+        move |answer| Message::Request { method, params, answer }
+    }
 }
 
 /// A handle to one engine: its own thread, and its own session of a [`CraftApp`].
@@ -47,6 +61,12 @@ pub struct Engine {
     /// engine's own calls takes it and joins it while holding the lock, so a racing close returns only
     /// once the thread has stopped.
     thread: Mutex<Option<JoinHandle<Result<()>>>>,
+    /// Set once a close has begun. Every export reads it beside its caller's token, when it starts
+    /// and at each progress beat, so a close stops the export running and every export waiting
+    /// behind it as a cancel does (plan §16 behaviour 4). It is the engine's own flag rather than the
+    /// callers' tokens, which a caller may share with work on another engine that this close must
+    /// not stop.
+    closing: CancelToken,
     /// The engine thread's id, so a call from inside one of the engine's own calls is told apart.
     id: ThreadId,
 }
@@ -60,11 +80,15 @@ impl Engine {
     /// app crate's own `start` to judge, once the steps around this one exist.
     pub fn start<A: CraftApp + 'static>(app: A) -> Result<Engine> {
         let (inbox, incoming) = mpsc::channel();
+        let closing = CancelToken::new();
         let thread = thread::Builder::new()
             .name(THREAD_NAME.to_string())
-            .spawn(move || run(Box::new(app), incoming))
+            .spawn({
+                let closing = closing.clone();
+                move || run(Box::new(app), incoming, closing)
+            })
             .map_err(|error| CraftError::internal(format!("cannot start the engine thread: {error}")))?;
-        Ok(Engine { id: thread.thread().id(), inbox: Mutex::new(Some(inbox)), thread: Mutex::new(Some(thread)) })
+        Ok(Engine { id: thread.thread().id(), inbox: Mutex::new(Some(inbox)), thread: Mutex::new(Some(thread)), closing })
     }
 
     /// Make one call and wait for the engine's answer.
@@ -75,11 +99,38 @@ impl Engine {
     /// — this call never returns a panic and never stops the session. A call made from inside one of
     /// this engine's own calls is refused with `Internal` at once rather than waiting for itself.
     pub fn request(&self, method: &str, params: Value) -> Result<Value> {
+        answer_of(self.submit(Message::request(method, params))?)
+    }
+
+    /// Make one long call that reports progress and can be cancelled, and wait for the engine's
+    /// answer (plan §16, §19). It waits its turn as any call does, then runs on the app's
+    /// [`CraftApp::request_with_progress`]; while it runs the engine answers only progress, cancel
+    /// and `info` (plan §13, L3). Progress arrives on `on_progress`, on the engine thread, as the app
+    /// reports it, and a listener that fails is ignored, so a panicking listener never stops the
+    /// export (plan §16's edge case). A cancel is `cancel` set from any thread, needing no call to
+    /// the engine: the app is told to stop at its next report, and the call answers
+    /// [`CraftError::Cancelled`]; a token already set when the export's turn comes answers that
+    /// without running it. An `info` call made meanwhile is answered at the export's next report
+    /// with the state the app described when the export began. Every other call waits in the order
+    /// it was made until the export ends. A call made from inside one of this engine's own calls is
+    /// refused with `Internal` at once, as [`Engine::request`] does.
+    pub fn request_with_progress<F>(&self, method: &str, params: Value, on_progress: F, cancel: &CancelToken) -> Result<Value>
+    where
+        F: FnMut(u64, u64, Option<f64>) + Send + 'static,
+    {
+        answer_of(self.submit(ExportCall::message(method, params, on_progress, cancel))?)
+    }
+
+    /// Hand one call to the engine thread and take the channel its answer comes back on: the one
+    /// way every call reaches the engine. A call from inside one of this engine's own calls is
+    /// refused with `Internal` at once rather than waiting for itself, and one after close is
+    /// refused without waiting for the engine.
+    pub(crate) fn submit(&self, message: impl FnOnce(Sender<Result<Value>>) -> Message) -> Result<Receiver<Result<Value>>> {
         if self.on_engine_thread() {
             return Err(CraftError::internal(REENTERED));
         }
         let Some(inbox) = lock(&self.inbox).clone() else { return Err(closed()) };
-        call_on(&inbox, method, params)
+        hand_over(&inbox, message)
     }
 
     /// Stop the engine: stop the thread after the calls already accepted, end the session, and join
@@ -89,10 +140,13 @@ impl Engine {
     /// other close `Ok`, each only once the thread has stopped. The exception is a close from inside
     /// one of the engine's own calls, which cannot wait for that call to end: it refuses new calls
     /// and answers `Ok` at once, and the thread stops when the call ends. A call still running is
-    /// finished before the thread stops, so close waits for it. A call handed to the engine before
-    /// the close is answered first, in order; one that races the close is either answered whole or
-    /// refused with `engine is closed`, never left waiting on a dead engine; and once any close has
-    /// returned, every call is refused.
+    /// finished before the thread stops, so close waits for it, bar an export: a close stops the
+    /// export running and every export waiting as a cancel does, so the wait is the running one's
+    /// next progress report, not its whole length, and a waiting one answers `Cancelled` without
+    /// running (plan §16 behaviour 4). Any other call handed to the engine before the close is
+    /// answered first, in order; one that races the close is either answered whole or refused with
+    /// `engine is closed`, never left waiting on a dead engine; and once any close has returned,
+    /// every call is refused.
     pub fn close(&self) -> Result<()> {
         // The inbox goes first, so new calls are refused from here on. Close queues behind the calls
         // already accepted, so they are all answered first, and dropping this sender after it
@@ -101,6 +155,10 @@ impl Engine {
         if let Some(inbox) = inbox {
             let _ = inbox.send(Message::Close);
         }
+        // Every export stops as a cancel stops it (plan §16 behaviour 4), so the join below waits for
+        // the running one's next progress report, not its end. Set once `Close` is queued, so a call
+        // sent by anyone who sees the engine closing lands behind it and is refused.
+        self.closing.cancel();
         // A close from inside one of the engine's own calls cannot wait for that call to end, and a
         // thread joining itself panics: the thread stops once the call ends, and a close or drop from
         // outside joins it.
@@ -120,6 +178,20 @@ impl Engine {
     }
 }
 
+#[cfg(test)]
+impl Engine {
+    /// Whether a close has begun, by which point its `Close` is queued and every export stops.
+    pub(crate) fn is_closing(&self) -> bool {
+        self.closing.is_cancelled()
+    }
+
+    /// A sender for the inbox, as a caller holds one it took before a close took the inbox, for
+    /// the tests of a call that races a close.
+    pub(crate) fn racer(&self) -> Option<Sender<Message>> {
+        lock(&self.inbox).clone()
+    }
+}
+
 impl Drop for Engine {
     /// A handle dropped without `close` closes: an unjoined thread would end the session at some
     /// later time, after the app has let go of what the session borrowed from it.
@@ -131,19 +203,25 @@ impl Drop for Engine {
 /// The value behind `mutex`. Poisoning can only come from a panic while the lock was held, and none
 /// of the engine's locks holds more than an `Option` of a channel or thread handle, which a panic
 /// cannot leave half-written, so the poisoned guard is used rather than losing the engine.
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Hand one call to the engine through `inbox` and wait for its answer.
+/// Hand one call to the engine through `inbox`, giving it the channel its answer comes back on.
 ///
 /// A call the engine stopped before running lost its race to a close: it is refused with `engine is
 /// closed` and never answered as though it ran, so a write that never happened cannot read as done.
-/// The send fails when the engine had already stopped, and the wait fails when a close ran ahead of
-/// the call in the queue and the engine dropped it unrun.
-fn call_on(inbox: &Sender<Message>, method: &str, params: Value) -> Result<Value> {
+/// This send fails when the engine had already stopped; [`answer_of`] fails when a close ran ahead
+/// of the call in the queue and the engine dropped it unrun.
+fn hand_over(inbox: &Sender<Message>, message: impl FnOnce(Sender<Result<Value>>) -> Message) -> Result<Receiver<Result<Value>>> {
     let (answer, waiting) = mpsc::channel();
-    inbox.send(Message::Request { method: method.to_string(), params, answer }).map_err(|_| closed())?;
+    inbox.send(message(answer)).map_err(|_| closed())?;
+    Ok(waiting)
+}
+
+/// Wait for the answer to a call [`hand_over`] handed over; a call the engine dropped unrun is
+/// refused with `engine is closed`.
+fn answer_of(waiting: Receiver<Result<Value>>) -> Result<Value> {
     waiting.recv().map_err(|_| closed())?
 }
 
@@ -151,9 +229,13 @@ fn call_on(inbox: &Sender<Message>, method: &str, params: Value) -> Result<Value
 /// end the session. Answers with how the session's drop went.
 ///
 /// One call at a time, in inbox order, because the session is reached only here (plan §16, L1). The
-/// loop ends at `Close` or when every handle has dropped the inbox.
-fn run(mut app: Box<dyn CraftApp>, incoming: Receiver<Message>) -> Result<()> {
-    while let Ok(message) = incoming.recv() {
+/// loop ends at `Close` or when every handle has dropped the inbox. While an export runs, calls
+/// that arrive are taken into `pending` at the export's beats, in order, and run from there before
+/// anything made after them (plan §13, L3); `pending` is why the loop takes its next message from
+/// it before it waits on the inbox.
+fn run(mut app: Box<dyn CraftApp>, incoming: Receiver<Message>, closing: CancelToken) -> Result<()> {
+    let mut pending: VecDeque<Message> = VecDeque::new();
+    while let Some(message) = next_message(&mut pending, &incoming) {
         match message {
             Message::Close => break,
             Message::Request { method, params, answer } => {
@@ -163,13 +245,26 @@ fn run(mut app: Box<dyn CraftApp>, incoming: Receiver<Message>) -> Result<()> {
                 // answered normally.
                 let _ = answer.send(answered);
             }
+            Message::Export { call } => export::run_export(&mut *app, call, export::EngineSide { inbox: &incoming, pending: &mut pending, closing: &closing }),
         }
     }
-    // Calls queued behind the close are refused now, not after the session's drop has run.
+    // Calls queued behind the close are refused now, not after the session's drop has run: those
+    // still in the inbox, and those an export's beats took out of it, which wait in `pending`.
+    // Their callers read the disconnect as `engine is closed`.
     drop(incoming);
+    drop(pending);
     // The session's drop is app code too, so it runs behind the same guard as a call: a panic there
     // is the close's answer rather than a thread that died outside its guard.
     guarded(move || drop(app))
+}
+
+/// The message to run next: one kept waiting during an export first, in the order it arrived, and
+/// otherwise the next the inbox holds.
+fn next_message(pending: &mut VecDeque<Message>, incoming: &Receiver<Message>) -> Option<Message> {
+    match pending.pop_front() {
+        Some(message) => Some(message),
+        None => incoming.recv().ok(),
+    }
 }
 
 /// Run `work` behind the never-crash boundary (AGENTS §3): a panic that unwinds out of it becomes
@@ -179,7 +274,7 @@ fn run(mut app: Box<dyn CraftApp>, incoming: Receiver<Message>) -> Result<()> {
 /// keep the session as the panic left it — the document is kept, not rolled back — as EffectCraft's
 /// own guard does. Only an unwinding panic can be caught: one raised while another unwinds, by a
 /// destructor in the app's own cleanup, is an abort Rust itself makes, before any guard runs.
-fn guarded<T>(work: impl FnOnce() -> T) -> Result<T> {
+pub(crate) fn guarded<T>(work: impl FnOnce() -> T) -> Result<T> {
     panic::catch_unwind(AssertUnwindSafe(work)).map_err(|caught| {
         // Reading the payload drops it, and its drop is app code as well, run after the guard above
         // has returned: one that panics again is caught here, and what it panicked with is leaked
@@ -199,52 +294,34 @@ fn closed() -> CraftError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{DEADLINE, Gate, close_begun, eventually, queue_call, recv};
     use serde_json::json;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, OnceLock, Weak};
-    use std::time::{Duration, Instant};
 
     /// The fake app the runtime is proven on: it keeps a session (a value, plus a log of the calls
     /// it ran in the order it ran them, which is the engine's ordering made visible), and it can be
-    /// told to panic, to block until the test releases it, to call its own engine, or to drop
-    /// slowly or with a panic.
+    /// told to panic, to block until the test releases it, to call its own engine, or to hold its
+    /// drop until the test releases it or to panic in it.
     struct FakeApp {
         log: Vec<String>,
         value: i64,
         shared: Arc<Shared>,
-        drop_slowly: bool,
+        hold_drop: bool,
         drop_panicking: bool,
     }
 
-    /// What the test and its fake app share. `entered` says the blocking call has reached the app,
-    /// `released` lets it end, `dropped` says the session has ended, and `engine` is the app's own
-    /// engine, held weakly so the session does not keep its own engine alive. Waits are polled with
-    /// a deadline, so a broken engine fails the test instead of hanging the suite.
+    /// What the test and its fake app share. `entered` opens when the blocking call has reached the
+    /// app and `released` lets it end; `drop_entered` opens when the session's drop has begun and
+    /// `drop_released` lets a held drop end; `dropped` says the session has ended; and `engine` is
+    /// the app's own engine, held weakly so the session does not keep its own engine alive.
     struct Shared {
-        entered: AtomicBool,
-        released: AtomicBool,
+        entered: Gate,
+        released: Gate,
+        drop_entered: Gate,
+        drop_released: Gate,
         dropped: AtomicBool,
         engine: OnceLock<Weak<Engine>>,
-    }
-
-    impl Shared {
-        fn release(&self) {
-            self.released.store(true, Ordering::SeqCst);
-        }
-        /// Whether `entered` came true within the deadline.
-        fn wait_entered(&self) -> bool {
-            self.wait_for(&self.entered)
-        }
-        fn wait_for(&self, flag: &AtomicBool) -> bool {
-            let deadline = Instant::now() + Duration::from_secs(10);
-            while !flag.load(Ordering::SeqCst) {
-                if Instant::now() > deadline {
-                    return false;
-                }
-                thread::sleep(Duration::from_millis(1));
-            }
-            true
-        }
     }
 
     /// A panic payload whose own drop panics again.
@@ -259,12 +336,14 @@ mod tests {
     impl FakeApp {
         fn new() -> (FakeApp, Arc<Shared>) {
             let shared = Arc::new(Shared {
-                entered: AtomicBool::new(false),
-                released: AtomicBool::new(false),
+                entered: Gate::default(),
+                released: Gate::default(),
+                drop_entered: Gate::default(),
+                drop_released: Gate::default(),
                 dropped: AtomicBool::new(false),
                 engine: OnceLock::new(),
             });
-            (FakeApp { log: Vec::new(), value: 0, shared: shared.clone(), drop_slowly: false, drop_panicking: false }, shared)
+            (FakeApp { log: Vec::new(), value: 0, shared: shared.clone(), hold_drop: false, drop_panicking: false }, shared)
         }
 
         fn own_engine(&self) -> Result<Arc<Engine>> {
@@ -294,15 +373,16 @@ mod tests {
                 // Blocks the engine thread until the test releases it; fails the test (an error,
                 // not a hang) if the release never comes.
                 "wait" => {
-                    self.shared.entered.store(true, Ordering::SeqCst);
-                    if self.shared.wait_for(&self.shared.released) { Ok(Value::Null) } else { Err(CraftError::internal("never released")) }
+                    self.shared.entered.open();
+                    if self.shared.released.wait() { Ok(Value::Null) } else { Err(CraftError::internal("never released")) }
                 }
                 "thread" => Ok(Value::from(thread::current().name().unwrap_or("<unnamed>").to_string())),
                 "thread_id" => Ok(Value::from(format!("{:?}", thread::current().id()))),
                 "reenter" => self.own_engine()?.request("echo", Value::Null),
+                "reenter_progress" => self.own_engine()?.request_with_progress("echo", Value::Null, |_, _, _| {}, &CancelToken::new()),
                 "close_self" => self.own_engine()?.close().map(|()| Value::Null),
-                "drop_slowly" => {
-                    self.drop_slowly = true;
+                "hold_drop" => {
+                    self.hold_drop = true;
                     Ok(Value::Null)
                 }
                 "drop_panicking" => {
@@ -316,8 +396,9 @@ mod tests {
 
     impl Drop for FakeApp {
         fn drop(&mut self) {
-            if self.drop_slowly {
-                thread::sleep(Duration::from_millis(100));
+            self.shared.drop_entered.open();
+            if self.hold_drop {
+                let _ = self.shared.drop_released.wait();
             }
             self.shared.dropped.store(true, Ordering::SeqCst);
             if self.drop_panicking {
@@ -330,37 +411,20 @@ mod tests {
         engine.request(method, Value::Null)
     }
 
-    /// Run `work` against an engine that is busy: a `wait` call has reached the app, and the test
-    /// lets it end only 200 ms after `work` begins. Anything that answers without waiting for the
-    /// call in flight — a queued call, or a close that skipped its join — answers inside `work`,
-    /// long before the release, and the check after it says so.
-    fn with_engine_busy(engine: &Engine, shared: &Shared, work: impl FnOnce()) {
-        thread::scope(|scope| {
-            let blocked = scope.spawn(|| call(engine, "wait"));
-            assert!(shared.wait_entered(), "the blocked call never reached the app");
-            scope.spawn(|| {
-                thread::sleep(Duration::from_millis(200));
-                shared.release();
-            });
-            work();
-            assert!(shared.released.load(Ordering::SeqCst), "the engine answered while it was still inside the blocked call");
-            blocked.join().unwrap().unwrap();
-        });
+    /// One plain call through a sender a caller already holds, as [`Engine::request`] makes it.
+    fn call_on(inbox: &Sender<Message>, method: &str, params: Value) -> Result<Value> {
+        hand_over(inbox, Message::request(method, params)).and_then(answer_of)
     }
 
-    /// Start `work` on a thread of its own and return once it has had time to hand its call to the
-    /// engine: the thread says when `work` is about to begin, and the 25 ms after that cover the
-    /// few steps from there to the handover, so calls started one after another reach the engine
-    /// in the order they were started.
-    fn spawn_settled<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> JoinHandle<T> {
-        let (starting, started) = mpsc::channel();
-        let handle = thread::spawn(move || {
-            let _ = starting.send(());
-            work()
-        });
-        let _ = started.recv_timeout(Duration::from_secs(10));
-        thread::sleep(Duration::from_millis(25));
-        handle
+    /// Make the engine busy: a `wait` call that has reached the app and stays there until the test
+    /// opens `released`, and the handle of the thread that made it. Nothing lets it end on a timer,
+    /// so a call answered, or a close or drop returned, before the test opened the gate did so
+    /// without waiting for the call in flight, however slowly the machine runs.
+    fn busy(engine: &Arc<Engine>, shared: &Shared) -> JoinHandle<Result<Value>> {
+        let waiting = engine.clone();
+        let blocked = thread::spawn(move || call(&waiting, "wait"));
+        assert!(shared.entered.wait(), "the blocked call never reached the app");
+        blocked
     }
 
     /// Every call runs on the engine's own thread — the one named `craftbridge-engine` — and each
@@ -425,17 +489,13 @@ mod tests {
     fn calls_queued_behind_a_running_call_run_in_the_order_they_were_made() {
         let (app, shared) = FakeApp::new();
         let engine = Arc::new(Engine::start(app).unwrap());
-        let mut queued = Vec::new();
-        with_engine_busy(&engine, &shared, || {
-            for n in 0..4 {
-                let engine = engine.clone();
-                queued.push(spawn_settled(move || engine.request("echo", json!({ "n": n }))));
-            }
-            // The last call is made here, so the work ends only once the engine has answered it.
-            assert_eq!(engine.request("echo", json!({ "n": 4 })).unwrap(), json!({ "n": 4 }));
-        });
-        for (n, caller) in queued.into_iter().enumerate() {
-            assert_eq!(caller.join().unwrap().unwrap(), json!({ "n": n }));
+        let blocked = busy(&engine, &shared);
+        let queued: Vec<_> = (0..5).map(|n| queue_call(&engine, "echo", json!({ "n": n }))).collect();
+        assert!(queued.iter().all(|answer| answer.try_recv().is_err()), "a queued call was answered while the engine was inside the running call");
+        shared.released.open();
+        assert_eq!(blocked.join().unwrap(), Ok(Value::Null));
+        for (n, answer) in queued.iter().enumerate() {
+            assert_eq!(recv(answer), Ok(json!({ "n": n })), "the call queued {n} was answered as something else");
         }
         let echoes = (0..5).map(|n| format!("echo {}", json!({ "n": n })));
         let expected: Vec<String> = std::iter::once("wait null".to_string()).chain(echoes).chain(std::iter::once("log null".to_string())).collect();
@@ -512,13 +572,13 @@ mod tests {
     #[test]
     fn close_waits_for_the_call_in_flight() {
         let (app, shared) = FakeApp::new();
-        let engine = Engine::start(app).unwrap();
-        with_engine_busy(&engine, &shared, || {
-            let began = Instant::now();
-            let closed = engine.close();
-            assert!(began.elapsed() >= Duration::from_millis(150), "close answered before the call in flight ended");
-            assert!(closed.is_ok(), "close answered {closed:?}");
-        });
+        let engine = Arc::new(Engine::start(app).unwrap());
+        let blocked = busy(&engine, &shared);
+        let closer = close_begun(&engine);
+        assert!(!closer.is_finished(), "close answered before the call in flight ended");
+        shared.released.open();
+        assert_eq!(closer.join().unwrap(), Ok(()));
+        assert_eq!(blocked.join().unwrap(), Ok(Value::Null), "the call in flight was not finished before the thread stopped");
         assert_eq!(call(&engine, "echo"), Err(closed()), "the engine answered after it was closed");
     }
 
@@ -529,42 +589,54 @@ mod tests {
     fn a_close_racing_calls_and_a_close_answers_each_as_close_promises() {
         let (app, shared) = FakeApp::new();
         let engine = Arc::new(Engine::start(app).unwrap());
-        let mut racers = None;
-        with_engine_busy(&engine, &shared, || {
-            let (queuing, closing) = (engine.clone(), engine.clone());
-            let queued = spawn_settled(move || queuing.request("echo", json!({ "n": 1 })));
-            let first_close = spawn_settled(move || closing.close());
-            assert_eq!(call(&engine, "echo"), Err(closed()));
-            assert!(!shared.released.load(Ordering::SeqCst), "a call made after close waited for the engine");
-            assert_eq!(engine.close(), Ok(()));
-            assert!(shared.dropped.load(Ordering::SeqCst), "a second close returned before the session ended");
-            racers = Some((queued, first_close));
-        });
-        let (queued, first_close) = racers.unwrap();
-        assert_eq!(queued.join().unwrap(), Ok(json!({ "n": 1 })), "a call handed over before the close was not answered whole");
+        let blocked = busy(&engine, &shared);
+        // Handed over before the close begins, so it is queued ahead of `Close`.
+        let queued = queue_call(&engine, "echo", json!({ "n": 1 }));
+        let first_close = close_begun(&engine);
+        // Answered while the engine is still inside the call in flight, so it never waited for it.
+        let (answer, refused) = mpsc::channel();
+        let refusing = engine.clone();
+        thread::spawn(move || answer.send(call(&refusing, "echo")));
+        assert_eq!(recv(&refused), Err(closed()));
+        assert!(!blocked.is_finished(), "a call made after close waited for the engine");
+        // What the second close saw of the session as it returned.
+        let (closing, seen) = (engine.clone(), shared.clone());
+        let second_close = thread::spawn(move || (closing.close(), seen.dropped.load(Ordering::SeqCst)));
+        shared.released.open();
+        assert_eq!(second_close.join().unwrap(), (Ok(()), true), "a second close returned before the session ended");
+        assert_eq!(recv(&queued), Ok(json!({ "n": 1 })), "a call handed over before the close was not answered whole");
         assert_eq!(first_close.join().unwrap(), Ok(()));
+        assert_eq!(blocked.join().unwrap(), Ok(Value::Null));
     }
 
     /// A call that loses its race to a close is refused with `engine is closed`, never answered as
     /// though it ran. The racer holds the sender it took before the close took the inbox:
-    /// - a call it queues behind the close is refused as soon as the engine stops, before the
-    ///   session's slow drop has ended, and the sender it still holds does not keep the engine
+    /// - a call it queues behind the close is refused as soon as the engine stops, while the
+    ///   session's drop is still held, and the sender it still holds does not keep the engine
     ///   running;
     /// - a call it sends once the engine has stopped is refused at once.
     #[test]
     fn a_call_that_loses_its_race_to_close_is_refused_never_answered() {
         let (app, shared) = FakeApp::new();
         let engine = Arc::new(Engine::start(app).unwrap());
-        call(&engine, "drop_slowly").unwrap();
-        let racer = lock(&engine.inbox).clone().unwrap();
-        let mut closing = None;
-        with_engine_busy(&engine, &shared, || {
-            let engine = engine.clone();
-            closing = Some(spawn_settled(move || engine.close()));
-            assert_eq!(call_on(&racer, "value_set", json!({ "v": 1 })), Err(closed()), "a call queued behind the close");
-            assert!(!shared.dropped.load(Ordering::SeqCst), "a call queued behind the close waited for the session's drop");
-        });
-        assert_eq!(closing.unwrap().join().unwrap(), Ok(()));
+        call(&engine, "hold_drop").unwrap();
+        let racer = engine.racer().unwrap();
+        let blocked = busy(&engine, &shared);
+        let closer = close_begun(&engine);
+        // Handed over from this thread once the close has begun and before the call in flight is
+        // let go, so it is queued behind the `Close` before the engine can stop, however slowly
+        // either side runs. Its answer is taken the way a public call takes its own, so what this
+        // proves is the refusal the caller gets, `engine is closed`; on a thread of its own only so
+        // a broken engine fails at the deadline instead of hanging the suite.
+        let raced = hand_over(&racer, Message::request("value_set", json!({ "v": 1 }))).unwrap();
+        let waiter = thread::spawn(move || answer_of(raced));
+        shared.released.open();
+        assert!(eventually(|| waiter.is_finished()), "a call queued behind the close was never refused");
+        assert_eq!(waiter.join().unwrap(), Err(closed()), "a call queued behind the close was not refused with `engine is closed`");
+        assert!(!shared.dropped.load(Ordering::SeqCst), "a call queued behind the close waited for the session's drop");
+        shared.drop_released.open();
+        assert_eq!(closer.join().unwrap(), Ok(()));
+        assert_eq!(blocked.join().unwrap(), Ok(Value::Null));
         assert_eq!(call_on(&racer, "value_set", json!({ "v": 2 })), Err(closed()), "a call sent after the engine stopped");
     }
 
@@ -574,11 +646,15 @@ mod tests {
     fn dropping_the_engine_ends_the_session_before_the_drop_returns() {
         let (app, shared) = FakeApp::new();
         let engine = Engine::start(app).unwrap();
-        // A session whose drop takes a while, so a drop that left the thread to end on its own
-        // would return long before the session ended.
-        call(&engine, "drop_slowly").unwrap();
-        drop(engine);
-        assert!(shared.dropped.load(Ordering::SeqCst), "the engine's drop returned while its session was still running");
+        // A session whose drop is held, so a handle's drop that left the thread to end on its own
+        // would have returned while the session's drop is still running.
+        call(&engine, "hold_drop").unwrap();
+        let dropper = thread::spawn(move || drop(engine));
+        assert!(shared.drop_entered.wait(), "the session's drop never began");
+        assert!(!dropper.is_finished(), "the engine's drop returned while its session was still running");
+        shared.drop_released.open();
+        dropper.join().unwrap();
+        assert!(shared.dropped.load(Ordering::SeqCst));
     }
 
     /// A panic in the session's own drop is caught like a panic in a call: the close answers it as
@@ -606,12 +682,26 @@ mod tests {
         let (answering, answered) = mpsc::channel();
         let reentering = engine.clone();
         thread::spawn(move || answering.send(reentering.request("reenter", Value::Null)));
-        let reentered = answered.recv_timeout(Duration::from_secs(10));
+        let reentered = answered.recv_timeout(DEADLINE);
         assert_eq!(reentered, Ok(Err(CraftError::Internal { message: REENTERED.to_string() })));
         assert_eq!(call(&engine, "close_self"), Ok(Value::Null));
         assert_eq!(call(&engine, "echo"), Err(closed()));
         assert_eq!(engine.close(), Ok(()));
         assert!(shared.dropped.load(Ordering::SeqCst));
+    }
+
+    /// A `request_with_progress` from inside one of the engine's own calls is refused at once too:
+    /// the export would wait behind the call that made it, which waits behind it.
+    #[test]
+    fn an_export_call_from_inside_the_engines_own_calls_is_refused() {
+        let (app, shared) = FakeApp::new();
+        let engine = Arc::new(Engine::start(app).unwrap());
+        assert!(shared.engine.set(Arc::downgrade(&engine)).is_ok());
+        let (answering, answered) = mpsc::channel();
+        let reentering = engine.clone();
+        thread::spawn(move || answering.send(reentering.request("reenter_progress", Value::Null)));
+        assert_eq!(answered.recv_timeout(DEADLINE), Ok(Err(CraftError::Internal { message: REENTERED.to_string() })));
+        engine.close().unwrap();
     }
 
     /// A caller that stopped waiting costs the engine nothing: its call still runs, in order, and
@@ -622,7 +712,7 @@ mod tests {
         let engine = Engine::start(app).unwrap();
         let (answer, waiting) = mpsc::channel();
         drop(waiting);
-        let inbox = lock(&engine.inbox).clone().unwrap();
+        let inbox = engine.racer().unwrap();
         inbox.send(Message::Request { method: "value_set".to_string(), params: json!({ "v": 9 }), answer }).unwrap();
         assert_eq!(call(&engine, "value_get"), Ok(Value::from(9)));
     }
