@@ -3,7 +3,7 @@
 //! like every helper of a test in this repository, so the unwraps sit in the `#[test]` functions,
 //! where the lint rules let them.
 
-use craftbridge_core::{CraftError, Result, folders::Folders};
+use craftbridge_core::{CraftError, PixelFormat, Result, folders::Folders};
 use craftbridge_effects::EffectCraftApp;
 
 pub struct Scratch {
@@ -41,3 +41,6 @@ impl Scratch {
         EffectCraftApp::new(&self.folders)
     }
 }
+
+/// Every format a frame is answered in, for the tests that hold each rule to all of them.
+pub const EVERY_FORMAT: [PixelFormat; 3] = [PixelFormat::Png, PixelFormat::Rgba8Straight, PixelFormat::Bgra8Premultiplied];

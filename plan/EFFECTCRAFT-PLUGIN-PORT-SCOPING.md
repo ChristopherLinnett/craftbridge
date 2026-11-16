@@ -372,10 +372,12 @@ Platform handles live in `craftbridge-core-ffi`'s platform modules (§20): `atta
 
 | Field | Type | Required | Rule |
 |---|---|---|---|
-| `comp` | id \| name \| `"-"` | no | default the active comp |
-| `time` / `frame` | seconds / frame number | no, one of | `frame` ÷ the comp's frame rate; default the current time |
-| `maxSide` / `scale` | px / factor | no, one of | `scale` × the comp's long side; 0 = full size |
+| `comp` | id \| name \| `"-"` | no | default the active comp; a string of digits is an id, as `--comp` reads it |
+| `time` / `frame` | seconds / frame number | no, at most one | `frame` ÷ the comp's frame rate; default the active comp's current time, whichever comp is named |
+| `maxSide` / `scale` | px / factor | no, at most one | `maxSide` cut to whole pixels; `scale` × the comp's long side, rounded, at least 1 px; neither, or a `maxSide` of 0, is full size |
 | `transparent` | bool | no | straight alpha instead of the background colour |
+
+A request that names both fields of a pair is `InvalidParams`. The usage of `render-frame` gives each pair as alternatives (`[--time S | --frame N] [--max-side PX | --scale K]`, `apps/effectcraft-cli/src/main.rs:114`), though its code lets `--frame` and `--scale` win. Every other request answers the frame `render-frame` writes for the same flags, and a missing comp is `NotFound` in its words, whatever the format.
 
 **`RenderRequest`** (AD3, `craftbridge-effects`; one field per `render` flag of the CLI, `apps/effectcraft-cli/src/main.rs:888-1037`): `comp`, `output` (path in the container), `format` (`h264|hevc|av1|prores|webm|png|jpeg|tiff|exr|tga|gif|wav|aiff`), `start`, `end`, `workArea`, `fps`, `resolution`, `quality`, `channels`, `jpegQuality`, `bitrate`, `prores`, `audio`, `profile`, `level`, `rateControl`, `videoQuality`, `keyint`, `webmCodec`, `audioBitrate`, `opusApp`, `exrCompression`, `exrDepth`, `queue` (render the project's own queue instead). Defaults, ranges and errors are the CLI's: `RenderRequest::to_queue_params` sets the same render-queue parameters as the CLI's flags, and the conformance corpus runs both on the same inputs (T9–T17).
 
@@ -656,9 +658,10 @@ Every row may also take external crates that are no Craft app's.
 | `src/app.rs` | NEW | `EffectCraftApp`: construction and its confinement (AD9), GPU attach, the method table of §14 |
 | `src/methods.rs` | NEW | one function per method, each calling the upstream function named in §14's table, the one mapping of EffectCraft's failures onto §14's rows (AD10), and the model downloads withheld at the door (AD11) |
 | `src/plugins.rs` | NEW | PD13: plug-in policy |
+| `src/reference.rs` | NEW | a comp or layer reference read as the command line's `reference` reads it (`main.rs:293-298`), for the methods whose commands read theirs that way (`render-frame`, `props`, `get`, `set`), so each finds what its command finds for the same words. `export` and `timings` hand the engine their `comp` as given, as `render` and `bench` do (`main.rs:906-907`, `:1072-1073`): the engine reads a name before digits, and `-` as a name |
 | `src/info.rs` | NEW | `info` (AD10): engine version and pin from the generator's constants (§21), counts, GPU and decoder state |
 | `src/session.rs` | NEW | AD1: the session from EffectCraft's public fields with the app's folders, its exporter set from the one function AD7's exporter replaces; AD2: the phone's fonts, and the font-list filter every app-facing call answers through |
-| `src/requests.rs` | NEW | AD3 `RenderRequest` and AD4 `FrameRequest` |
+| `src/requests.rs` | NEW | AD3 `RenderRequest` and AD4 `FrameRequest`, which refuses a request naming both `time` and `frame`, or both `maxSide` and `scale`, as `InvalidParams`: the usage of `render-frame` gives them as alternatives, where its code lets `--frame` and `--scale` win (§14) |
 | `src/runner.rs` | NEW | AD3: the render runner; AD5: the template runner |
 | `src/timings.rs` | NEW | AD6 |
 | `src/exporter.rs` | NEW | AD7: CraftBridge's exporter |
@@ -721,7 +724,7 @@ UniFFI 0.32 in proc-macro mode generates the Swift and Kotlin bindings (D-3). It
 
 | Crate | Change | What |
 |---|---|---|
-| `rust/core/craftbridge-core-ffi` | NEW | the §14 boundary for the core: `Engine`, `Folders`, `GpuChoice`, `CraftError`, `ProgressListener`, `CancelToken`, `FrameBytes`; `src/platform/ios.rs` and `src/platform/android.rs` |
+| `rust/core/craftbridge-core-ffi` | NEW | the §14 boundary for the core: `Engine`, `Folders`, `GpuChoice`, `CraftError`, `ProgressListener`, `CancelToken`, `FrameBytes`, `PixelFormat`; `src/platform/ios.rs` and `src/platform/android.rs` |
 | `rust/effects/craftbridge-effects-ffi` | NEW | `start_effects_engine(folders, gpu)`; `crate-type = ["staticlib", "cdylib", "lib"]`: the one native library of this distribution (D-4) |
 
 **Unsafe policy.** Both crates inherit the workspace's `unsafe_code = "deny"` and `clippy::undocumented_unsafe_blocks = "deny"`, and add `#![allow(unsafe_code)]` for the generated scaffolding. Hand-written `unsafe` appears only in `src/platform/*.rs`, each block with a `// SAFETY:` comment; `cargo xtask rules` fails on `unsafe`, or on `allow(unsafe_code)`, anywhere else (D-20).

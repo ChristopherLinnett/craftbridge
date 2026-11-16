@@ -1,7 +1,7 @@
 //! [`EffectCraftApp`]: the construction of plan §19 and the dispatch of the §14 method table.
 
 use craftbridge_core::folders::Folders;
-use craftbridge_core::{CraftApp, CraftError, Result};
+use craftbridge_core::{CraftApp, CraftError, FrameBytes, PixelFormat, Result};
 // The core and the engine both call their type `Confinement`: the core's carries the roots the app's
 // folders make, the engine's checks every access against those same roots. They meet in this file
 // alone, so the engine's is renamed here to keep the two apart.
@@ -9,7 +9,7 @@ use effectcraft_automation::confine::Confinement as EngineConfinement;
 use effectcraft_automation::{Backend, McpServer};
 use serde_json::Value;
 
-use crate::{info, methods, session};
+use crate::{info, methods, requests, session};
 
 /// A hosted EffectCraft session: the MCP server built at construction, which owns the headless
 /// [`Backend`] and the confined session behind it (plan §19).
@@ -60,6 +60,12 @@ impl CraftApp for EffectCraftApp {
             Some((_, answer)) => answer(self.server.backend(), &params),
             None => Err(CraftError::unsupported(not_answered(method))),
         }
+    }
+
+    /// Render one frame (plan §14's binary `frame`): the request is resolved as `render-frame`
+    /// resolves its flags. It has no row in [`METHODS`], so `request` keeps refusing the name.
+    fn frame(&mut self, params: Value, format: PixelFormat) -> Result<FrameBytes> {
+        requests::frame(self.server.backend(), &params, format)
     }
 }
 

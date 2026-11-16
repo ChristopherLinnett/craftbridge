@@ -4,8 +4,8 @@
 
 mod common;
 
-use common::Scratch;
-use craftbridge_core::{CraftApp, CraftError, Engine};
+use common::{EVERY_FORMAT, Scratch};
+use craftbridge_core::{CraftApp, CraftError, Engine, PixelFormat};
 use craftbridge_effects::EffectCraftApp;
 use serde_json::{Value, json};
 
@@ -420,5 +420,60 @@ fn the_app_drives_through_the_core_actor() {
     assert_eq!(info["engine"].as_str(), Some("effectcraft"));
     let unsupported = engine.request("frame", json!({})).expect_err("a name `request` does not answer");
     assert!(matches!(unsupported, CraftError::Unsupported { .. }));
+    // The frame is answered through its own call, which reaches the same session.
+    engine.request("run", json!({"steps": [{"command": "comp.new", "params": {"name": "C", "width": 8, "height": 6}}]})).expect("a comp is made");
+    let frame = engine.frame(json!({}), PixelFormat::Rgba8Straight).expect("the frame renders on the engine thread");
+    assert_eq!((frame.width, frame.height, frame.data.len()), (8, 6, 8 * 6 * 4));
     engine.close().expect("the engine closes clean");
+}
+
+#[test]
+fn a_frame_request_is_checked_before_anything_renders() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    app.request("exec", json!({"command": "comp.new", "params": {"name": "C", "width": 8, "height": 6}})).expect("a comp is made");
+    // Each of these names no one frame, or no frame at all, whichever format is asked for, and the
+    // refusal says what to give instead: a comp is an id, a name or `-`, whatever else it was given as.
+    let not_a_comp = "`frame`: `comp` must be an id, a name or `-`";
+    for (params, words) in [
+        (json!({"time": 1, "frame": 2}), "`frame`: give `time` or `frame`, not both"),
+        (json!({"maxSide": 4, "scale": 0.5}), "`frame`: give `maxSide` or `scale`, not both"),
+        (json!({"extra": 1}), "`frame`: unknown parameter(s) `extra`"),
+        (json!({"time": "1"}), "`frame`: `time` must be a number"),
+        (json!({"frame": true}), "`frame`: `frame` must be a number"),
+        (json!({"maxSide": "4"}), "`frame`: `maxSide` must be a number"),
+        (json!({"transparent": 1}), "`frame`: `transparent` must be a bool"),
+        (json!({"comp": 1.5}), not_a_comp),
+        (json!({"comp": -1}), not_a_comp),
+        (json!({"comp": [1]}), not_a_comp),
+        (json!({"comp": true}), not_a_comp),
+        (json!({"comp": {"id": 1}}), not_a_comp),
+        (json!([1]), "`frame`: its parameters must be a JSON object"),
+    ] {
+        for format in EVERY_FORMAT {
+            match app.frame(params.clone(), format).expect_err("the request is refused") {
+                CraftError::InvalidParams { message } => assert_eq!(message, words, "{params} as {format:?}"),
+                other => panic!("{params} as {format:?} is `InvalidParams`, got {other:?}"),
+            }
+        }
+    }
+    // Absent parameters are the defaults, and null fields count as absent.
+    let frame = app.frame(Value::Null, PixelFormat::Rgba8Straight).expect("no parameters is the active comp");
+    assert_eq!((frame.width, frame.height), (8, 6));
+    let frame = app.frame(json!({"comp": null, "time": null, "maxSide": null}), PixelFormat::Rgba8Straight).expect("null fields are absent");
+    assert_eq!((frame.width, frame.height), (8, 6));
+}
+
+#[test]
+fn a_frame_is_never_answered_by_request() {
+    // `frame` has no row of the method table, so `request` refuses the name even when the frame itself
+    // renders: the refusal names what `request` answers.
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    app.request("exec", json!({"command": "comp.new", "params": {"name": "C", "width": 8, "height": 6}})).expect("a comp is made");
+    assert!(app.frame(json!({}), PixelFormat::Png).is_ok());
+    match request(&mut app, "frame", json!({})).expect_err("`request` does not answer `frame`") {
+        CraftError::Unsupported { message } => assert!(message.ends_with("which answers `info`, `commands`, `exec` and `run`"), "{message}"),
+        other => panic!("`frame` through `request` must be `Unsupported`, got {other:?}"),
+    }
 }

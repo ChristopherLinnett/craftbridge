@@ -66,11 +66,15 @@ id = "AD4"
 crate = "craftbridge-effects"
 file = "src/requests.rs"
 implements = "FX-1e"
-summary = "FrameRequest: comp, time or frame, maximum side or scale, transparency, resolved the way render-frame resolves them."
-replaces = "the CLI's render-frame flag handling (apps/effectcraft-cli/src/main.rs:789-821)."
+summary = "FrameRequest: comp, time or frame, maximum side or scale, transparency, resolved the way render-frame resolves them (a comp id read from digits, `-` or nothing as the active comp, a frame number divided by the comp's frame rate or 30, the active comp's current time by default whichever comp is named, a scale rounded to at least one pixel of the longest side, a maximum side cut by a saturating cast), then rendered as PNG through Backend::render_with, the path render-frame writes its file from, or as raw pixels through Session::render_rgba8_alpha, which that PNG is made from, into the core's FrameBytes. A missing comp is refused in render-frame's words whatever the format: the raw formats ask Backend::render_with for them. A request naming both time and frame, or both maximum side and scale, is refused: render-frame's usage gives each pair as alternatives, where its code lets --frame and --scale win."
+replaces = "the CLI's render-frame flag handling (apps/effectcraft-cli/src/main.rs:789-821), its reading of a comp reference (`reference`, :293-298, followed in src/reference.rs by the methods whose commands read their comp through it; render and bench hand theirs to the engine as given, :906-907, :1072-1073) and its usage line for render-frame (:114)."
 depends = [
   "Session::render_rgba8_alpha (crates/engine/src/session/render.rs:132-143)",
-  "Backend::render_with (crates/automation/src/backend.rs:122-124)",
+  "Backend::render_with and the Frame it answers, whose PNG encode_png makes from render_rgba8_alpha's pixels (crates/automation/src/backend.rs:122-124, :136-149, crates/automation/src/lib.rs:53-74)",
+  "the headless branch of Backend::render_output, whose resolution of the comp and of the default time the raw path follows through Backend::session, Session::resolve_comp and Session::time (crates/automation/src/backend.rs:136-149, :61-66, crates/engine/src/session/comps.rs:109, :303)",
+  "no_comp, the words render_output refuses a missing comp with, as BadArgs, before it renders anything; the raw formats ask render_with for them and the plugin maps them to NotFound (crates/automation/src/backend.rs:142, :181-185)",
+  "the comp.info figures `frameRate`, `width` and `height` (crates/engine/src/cmd/query.rs:80-91), which the CLI and the plugin read through the get_comp tool (crates/automation/src/tools.rs:283-285)",
+  "effectcraft_time::Tick::from_seconds_f64 (crates/time/src/lib.rs:31)",
 ]
 
 [[adaptation]]

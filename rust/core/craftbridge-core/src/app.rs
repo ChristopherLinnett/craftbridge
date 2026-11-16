@@ -2,6 +2,7 @@
 
 use crate::Result;
 use crate::error::CraftError;
+use crate::frames::{FrameBytes, PixelFormat};
 use serde_json::Value;
 
 /// A hosted Craft app's session. The app plugin implements this against its own app's engine; the
@@ -46,5 +47,20 @@ pub trait CraftApp: Send {
     fn request_with_progress(&mut self, method: &str, params: Value, on_progress: &mut dyn FnMut(u64, u64, Option<f64>) -> bool) -> Result<Value> {
         let _ = (params, on_progress);
         Err(CraftError::unsupported(format!("`{method}` does not run with progress in this app")))
+    }
+
+    /// Render one frame as `format` (plan §14, §16, §17). Binary pixels cannot come back through
+    /// [`CraftApp::request`]'s JSON, so a frame has this call of its own, which the engine makes on
+    /// its own thread in the order the calls were made, as it makes every call.
+    ///
+    /// The implementation builds its answer with [`FrameBytes::new`], handing it the bytes its
+    /// render produced, so the format's size check and the premultiplied conversion are the core's
+    /// one copy of them and no frame is copied on the way.
+    ///
+    /// An app with no frames keeps this default, which answers [`crate::CraftError::Unsupported`]:
+    /// the refusal is the same for every such app, so it is written once, here.
+    fn frame(&mut self, params: Value, format: PixelFormat) -> Result<FrameBytes> {
+        let _ = (params, format);
+        Err(CraftError::unsupported("this app renders no frames"))
     }
 }

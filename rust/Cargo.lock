@@ -509,6 +509,7 @@ dependencies = [
  "effectcraft-script",
  "effectcraft-text",
  "effectcraft-time",
+ "image",
  "serde_json",
  "tempfile",
 ]
