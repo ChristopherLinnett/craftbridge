@@ -18,7 +18,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::process::CommandExt;
     use std::path::{Path, PathBuf};
-    use std::process::{Child, Command, Stdio};
+    use std::process::{Child, Command, Output, Stdio};
     use std::time::{Duration, Instant, SystemTime};
 
     /// The stub gate a scratch repository commits in place of this repository's `tools/ci.sh`. It judges
@@ -27,11 +27,26 @@ mod tests {
     /// of git's repository variables, and the bytes it could read from its stdin. In the build folder it marks that it is running, so two
     /// gates in it at once are caught, and leaves an artifact as it ends; it keeps the times of its own
     /// checkout and of the artifact the gate before it left. `GATE_HOLD` holds the push's first gate until
-    /// the test lets it go, and makes a signal end that gate with an ordinary failing exit, as a JVM's
-    /// shutdown does, letting go of the running marker on the way out so a gate that died mid-signal
-    /// leaves no later gate to believe it overlapped; `GATE_SLEEP` makes every gate slow; `GATE_DIRTY`
-    /// leaves a file standing in the checkout the gate runs in, as a real gate's build output does.
+    /// the test lets it go, and makes each signal of `GATE_INTERRUPTS`, which the tests set from
+    /// `INTERRUPTS`, end that gate with an ordinary failing exit, as a JVM's shutdown does, letting go of
+    /// the running marker on the way out so a gate that died mid-signal leaves no later gate to believe
+    /// it overlapped; it gives up holding after `GATE_HOLD_TICKS` tenths of a second, which the tests set
+    /// from `STUCK_AFTER`, so a gate whose test is gone never holds for ever. An input a test reads back
+    /// is demanded by name before it is counted on, and the gate refuses at once when one is missing or
+    /// malformed: `GATE_LOG` always, a held gate's whole-number `GATE_HOLD_TICKS` and its
+    /// `GATE_INTERRUPTS`, and the hold's own write to the path it announced. A gate that quietly carried
+    /// on without an input its tests read back would leave every test that relies on it passing or
+    /// failing by luck, so a missing one must say so itself. `GATE_SLEEP` makes every gate slow;
+    /// `GATE_DIRTY` leaves a file standing in the checkout the gate runs in, as a real gate's build
+    /// output does.
     const STUB_GATE: &str = r#"#!/bin/sh
+if [ -z "${GATE_LOG:-}" ]; then echo "stub gate: a gate needs GATE_LOG, the log its runs are written to" >&2; exit 1; fi
+if [ -n "${GATE_HOLD:-}" ]; then
+  case "${GATE_HOLD_TICKS:-}" in
+    '' | *[!0-9]*) echo "stub gate: a held gate needs GATE_HOLD_TICKS, its bound in tenths of a second" >&2; exit 1 ;;
+  esac
+  if [ -z "${GATE_INTERRUPTS:-}" ]; then echo "stub gate: a held gate needs GATE_INTERRUPTS, the signals its test ends it with" >&2; exit 1; fi
+fi
 tree="$(cd "$(dirname "$0")/.." && pwd -P)"
 target="${CRAFTBRIDGE_PUSH_TARGET:-}"
 leaked=""
@@ -50,10 +65,14 @@ if [ -n "$target" ]; then
   cp -p "$0" "$GATE_LOG.$$.checkout"
 fi
 if [ -n "${GATE_HOLD:-}" ] && [ ! -e "$GATE_HOLD" ]; then
-  trap 'if [ "$inside" = 1 ]; then rmdir "$target/gate-running" 2>/dev/null; fi; exit 1' HUP INT TERM
+  trap 'if [ "$inside" = 1 ]; then rmdir "$target/gate-running" 2>/dev/null; fi; exit 1' $GATE_INTERRUPTS
   printf '%s %s\n' "$PPID" "$tree" >"$GATE_HOLD.tmp" && mv "$GATE_HOLD.tmp" "$GATE_HOLD"
+  if [ ! -e "$GATE_HOLD" ]; then
+    if [ "$inside" = 1 ]; then rmdir "$target/gate-running" 2>/dev/null; fi
+    echo "stub gate: a held gate could not write its hold to $GATE_HOLD" >&2; exit 1
+  fi
   n=0
-  while [ ! -e "$GATE_HOLD.go" ] && [ "$n" -lt 600 ]; do sleep 0.1; n=$((n + 1)); done
+  while [ ! -e "$GATE_HOLD.go" ] && [ "$n" -lt "$GATE_HOLD_TICKS" ]; do sleep 0.1; n=$((n + 1)); done
 fi
 sleep "${GATE_SLEEP:-0}"
 printf 'target=%s\ttree=%s\tleaked=%s\tstdin=%s\toverlap=%s\thead=%s\tid=%s\n' "${target:-none}" "$tree" "$leaked" "$stdin" "$overlap" "$head" "$$" >>"$GATE_LOG"
@@ -64,11 +83,21 @@ fi
 [ ! -e "$tree/ci-fails" ]
 "#;
 
-    /// How long a test waits for a push, or a hook, before it calls the hook stuck.
-    const PATIENCE: Duration = Duration::from_secs(60);
+    /// The one bound on every wait in these tests for an event they are sure to get (a push ending, a
+    /// hook's words, a lock appearing or going): how long they wait before they call the hook stuck. It
+    /// exists only so a hook that never reaches the event cannot hang the suite; it must outlast the
+    /// slowest healthy push, a gate that runs `npm ci`, the doctor and the plan views in a fresh tree on
+    /// a machine busy with other gates, so it is far longer than any push takes and no test's pace
+    /// depends on it.
+    const STUCK_AFTER: Duration = Duration::from_secs(600);
 
     /// The words a hook prints when it waits for another push's gate.
     const WAITING: &str = "waiting for the gate of another push";
+
+    /// The signals that interrupt a push: Ctrl-C, a TERM, a closed terminal. Each test push starts with
+    /// every one of them at its default, as a push from a terminal does (`answering_interrupts`), and a
+    /// held stub gate turns each into an ordinary failing exit (`GATE_INTERRUPTS`).
+    const INTERRUPTS: [&str; 3] = ["INT", "TERM", "HUP"];
 
     /// One gate run, as the stub logged it.
     struct Run {
@@ -110,30 +139,64 @@ fi
     }
 
     impl Pushing {
-        fn finish(mut self) -> Push {
-            let deadline = Instant::now() + PATIENCE;
-            let status = loop {
-                if let Some(status) = self.child.try_wait().unwrap() {
-                    break status;
-                }
-                if Instant::now() > deadline {
-                    signal_group(self.child.id(), "KILL");
-                    panic!("the push did not finish: {}", std::fs::read_to_string(&self.stderr).unwrap_or_default());
-                }
-                std::thread::sleep(Duration::from_millis(20));
+        /// Wait for the push to end, whatever its gates take short of `STUCK_AFTER`.
+        fn finish(self) -> Push {
+            self.finish_within(STUCK_AFTER)
+        }
+
+        /// Wait for the push to end, and call its hook stuck once `stuck_after` has passed without it: the
+        /// panic drops the push, which kills the whole of it.
+        fn finish_within(mut self, stuck_after: Duration) -> Push {
+            let mut status = None;
+            poll_until(stuck_after, || {
+                status = self.child.try_wait().unwrap();
+                status.is_some()
+            });
+            let why = self.words();
+            let Some(status) = status else {
+                panic!("the push did not finish: {why}");
             };
-            Push { ok: status.success(), runs: runs_in(&self.log), why: std::fs::read_to_string(&self.stderr).unwrap().trim().to_string() }
+            Push { ok: status.success(), runs: runs_in(&self.log), why: why.trim().to_string() }
+        }
+
+        /// Has the push ended? `std` keeps the status of a child it has already reaped, so a `finish`
+        /// after this still reads the one exit the push ended with.
+        fn ended(&mut self) -> bool {
+            !matches!(self.child.try_wait(), Ok(None))
+        }
+
+        /// The push's own words so far: what git, the hook and its gate have printed to its stderr.
+        fn words(&self) -> String {
+            std::fs::read_to_string(&self.stderr).unwrap_or_default()
+        }
+
+        /// Wait until `event` tells of it, or until the push ends — whichever comes first — and say
+        /// which it was. A push that has ended can bring about no more events of its own, so waiting
+        /// for one past its end waits on what can no longer happen: the caller that gets false fails
+        /// at once in the push's own words, not at the bound the still-running hook is given. Each look
+        /// asks whether the push has ended before it looks for the event, so the look that sees the end
+        /// also sees everything the push did before it: an event that came just before the end is told
+        /// from one that never came.
+        fn wait_while_running(&mut self, what: &str, event: impl Fn(&Self) -> bool) -> bool {
+            let mut arrived = false;
+            wait_until(what, || {
+                let ended = self.ended();
+                arrived = event(self);
+                arrived || ended
+            });
+            arrived
         }
     }
 
     /// A push a test leaves unfinished — an assertion failed while it ran — is killed with its whole
     /// group, so no push, hook or gate outlives the test that started it, waiting on a scratch repository
-    /// that is gone.
+    /// that is gone. The wait for the kill to take is bounded too: a kill that could not be sent leaves a
+    /// stuck push behind, where an unbounded wait would hang the suite on it.
     impl Drop for Pushing {
         fn drop(&mut self) {
-            if let Ok(None) = self.child.try_wait() {
-                signal_group(self.child.id(), "KILL");
-                let _ = self.child.wait();
+            if !self.ended() {
+                let _ = signal_group(self.child.id(), "KILL");
+                poll_until(STUCK_AFTER, || self.ended());
             }
         }
     }
@@ -150,22 +213,80 @@ fi
             .collect()
     }
 
-    /// Send `signal` to every process in the group `group` leads, as a terminal sends Ctrl-C.
-    fn signal_group(group: u32, signal: &str) {
-        let _ = Command::new("kill").args(["-s", signal, "--", &format!("-{group}")]).status();
+    /// Run `command` to its end and keep what it printed. A program that cannot be started is named in the
+    /// error, from the command itself, so a missing tool says which one it is wherever these tests start it.
+    fn output_of(command: &mut Command) -> Result<Output, String> {
+        command.output().map_err(|error| format!("could not run {}: {error}", command.get_program().to_string_lossy()))
+    }
+
+    /// Send `signal` to every process in the group `group` leads, as a terminal sends Ctrl-C. A group with
+    /// nothing left alive in it is as gone as one that no longer exists: the signal has no one to reach,
+    /// and that is no failure. Only a group that still holds a live process the signal did not reach is
+    /// one, and the system's own words are the error. Nothing here panics: a push's `Drop` sends its kill
+    /// while a failed test unwinds, where a panic would abort the whole suite.
+    fn signal_group(group: u32, signal: &str) -> Result<(), String> {
+        let sent = output_of(Command::new("kill").args(["-s", signal, "--", &format!("-{group}")]))?;
+        if sent.status.success() || !group_has_live_process(group)? {
+            return Ok(());
+        }
+        Err(String::from_utf8_lossy(&sent.stderr).trim().to_string())
+    }
+
+    /// Does the process group `group` hold a process that has not yet exited? `kill` answers "No such
+    /// process" for a group that is gone, but macOS refuses a group whose every process has exited and
+    /// not yet been reaped as "Operation not permitted", since its kernel signals no zombie. `pgrep -g`,
+    /// which matches no zombie either, says which of the two a refusal was by its exit status alone: 0
+    /// for a match, 1 for none, anything else for a `pgrep` that could not tell, which judges nothing.
+    fn group_has_live_process(group: u32) -> Result<bool, String> {
+        let found = output_of(Command::new("pgrep").args(["-g", &group.to_string()]))?;
+        match found.status.code() {
+            Some(0) => Ok(true),
+            Some(1) => Ok(false),
+            _ => Err(format!("pgrep could not search the group {group}: {}", String::from_utf8_lossy(&found.stderr).trim())),
+        }
+    }
+
+    /// `command`, set to start with every signal in `INTERRUPTS` at its default, as a push from a terminal
+    /// starts. A signal ignored when a process starts stays ignored in everything it starts: a shell's `&`
+    /// starts a job ignoring SIGINT, and `nohup` one ignoring SIGHUP. A push started under either, its
+    /// hook and its gate with it, could never be ended by that signal, and these tests, started the same
+    /// way, would wait out their bound on a push they had interrupted. No shell can reset a signal it was
+    /// started ignoring, and Rust's std resets none in a child but SIGPIPE, so `perl` (which
+    /// `tools/doctor.sh --gate` asks for) resets them and becomes the command.
+    fn answering_interrupts(command: Command) -> Command {
+        let mut run = Command::new("perl");
+        run.args(["-e", r#"$SIG{$_} = "DEFAULT" for split " ", shift; exec { $ARGV[0] } @ARGV or die "$ARGV[0]: $!\n""#, "--"])
+            .arg(INTERRUPTS.join(" "))
+            .arg(command.get_program())
+            .args(command.get_args());
+        for (name, value) in command.get_envs() {
+            match value {
+                Some(value) => run.env(name, value),
+                None => run.env_remove(name),
+            };
+        }
+        run
     }
 
     fn running(pid: &str) -> bool {
-        Command::new("kill").args(["-0", pid]).stderr(Stdio::null()).status().unwrap().success()
+        output_of(Command::new("kill").args(["-0", pid])).unwrap().status.success()
     }
 
-    /// Wait for `done` to hold, or call the hook stuck.
-    fn wait_until(what: &str, done: impl Fn() -> bool) {
-        let deadline = Instant::now() + PATIENCE;
+    /// Poll `done` until it holds, and say whether it did before `stuck_after` passed.
+    fn poll_until(stuck_after: Duration, mut done: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + stuck_after;
         while !done() {
-            assert!(Instant::now() < deadline, "gave up waiting: {what}");
+            if Instant::now() > deadline {
+                return false;
+            }
             std::thread::sleep(Duration::from_millis(20));
         }
+        true
+    }
+
+    /// Wait for the event `done` tells of, or call the hook stuck.
+    fn wait_until(what: &str, done: impl FnMut() -> bool) {
+        assert!(poll_until(STUCK_AFTER, done), "gave up waiting: {what}");
     }
 
     /// A scratch repository holding the hook under test, a stub gate, and a bare remote to push to.
@@ -250,7 +371,7 @@ fi
         /// Run git in the checkout with the committer's date set, so a commit can be dated against the
         /// shape of the history it stands in.
         fn git_dated(&self, args: &[&str], when: &str) {
-            let run = command(&self.work).env("GIT_COMMITTER_DATE", when).args(args).output().unwrap();
+            let run = output_of(command(&self.work).env("GIT_COMMITTER_DATE", when).args(args)).unwrap();
             assert!(run.status.success(), "git {}: {}", args.join(" "), String::from_utf8_lossy(&run.stderr));
         }
 
@@ -303,12 +424,20 @@ fi
             let n = self.pushes.get();
             self.pushes.set(n + 1);
             let log = self.scratch.0.join(format!("gate-run-{n}.log"));
-            let mut git = command(dir);
-            git.env("GATE_LOG", &log).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(into).process_group(0);
+            let mut git = answering_interrupts(command(dir));
+            git.env("GATE_LOG", &log)
+                .env("GATE_HOLD_TICKS", (STUCK_AFTER.as_secs() * 10).to_string())
+                .env("GATE_INTERRUPTS", INTERRUPTS.join(" "))
+                .args(args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(into)
+                .process_group(0);
             for (name, value) in env {
                 git.env(name, value);
             }
-            Pushing { child: git.spawn().unwrap(), log, stderr }
+            let child = git.spawn().unwrap_or_else(|error| panic!("could not run perl, which starts every test push: {error} (tools/doctor.sh checks it)"));
+            Pushing { child, log, stderr }
         }
 
         fn push(&self, dir: &Path, args: &[&str]) -> Push {
@@ -328,23 +457,132 @@ fi
             let _ = std::fs::remove_file(hold);
             let mut env = env.to_vec();
             env.push(("GATE_HOLD", hold));
-            let pushing = self.start(&self.work, &["push", "-q", "origin", "main"], &env);
-            let (hook, tree) = held(hold);
+            let mut pushing = self.start(&self.work, &["push", "-q", "origin", "main"], &env);
+            let (hook, tree) = held(hold, &mut pushing);
             (pushing, hook, tree)
         }
     }
 
-    /// Wait until a gate holds at `hold`, and read what it wrote there: the pid of its hook, and the
-    /// temporary worktree it runs in.
-    fn held(hold: &Path) -> (String, PathBuf) {
-        wait_until("the gate to start", || hold.exists());
+    /// Wait until the gate of `pushing` holds at `hold`, and read what it wrote there: the pid of its hook,
+    /// and the temporary worktree it runs in. A push that has ended can no longer hold, so the wait ends
+    /// with it, in the push's own words, instead of at the bound.
+    fn held(hold: &Path, pushing: &mut Pushing) -> (String, PathBuf) {
+        let started = pushing.wait_while_running("the gate to start", |_| hold.exists());
+        assert!(started, "the push ended before its gate held: {}", pushing.words());
         let held = std::fs::read_to_string(hold).unwrap();
         let (hook, tree) = held.trim().split_once(' ').unwrap();
         (hook.to_string(), PathBuf::from(tree))
     }
 
+    /// Wait until `pushing`'s own words tell that it waits behind another push's gate, and return those
+    /// words. A push that has ended can print no more, so the wait ends with it, in those words,
+    /// instead of at the bound.
+    fn waited_words(pushing: &mut Pushing, what: &str) -> String {
+        let waiting = pushing.wait_while_running(what, |pushing| pushing.words().contains(WAITING));
+        let words = pushing.words();
+        assert!(waiting, "the push ended before it waited: {words}");
+        words
+    }
+
     fn let_go(hold: &Path) {
         std::fs::write(hold.with_extension("go"), "").unwrap();
+    }
+
+    /// A process group is signalled quietly and correctly whatever state it is in: a live one is killed, one
+    /// whose every process has exited but not been reaped (which macOS refuses as "Operation not
+    /// permitted", a zombie taking no signal) and one that is gone altogether are no failure, and say
+    /// nothing; a live one the signal did not reach is a failure, in `kill`'s own words.
+    #[test]
+    fn a_group_is_killed_when_alive_and_left_quietly_when_gone() {
+        let leader =
+            |program: &str, args: &[&str]| Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::null()).process_group(0).spawn().unwrap();
+        let mut live = leader("sleep", &["120"]);
+        let unsent = signal_group(live.id(), "NOSUCHSIGNAL");
+        assert!(unsent.as_ref().is_err_and(|words| words.contains("NOSUCHSIGNAL")), "a live group no signal reached is a failure, in kill's words: {unsent:?}");
+        assert_eq!(live.try_wait().unwrap(), None, "and the group it did not reach lives on");
+        signal_group(live.id(), "KILL").unwrap();
+        assert!(!live.wait().unwrap().success(), "the live group's leader was killed");
+        let exited = leader("true", &[]);
+        wait_until("the group's only process to exit", || {
+            let state = output_of(Command::new("ps").args(["-o", "stat=", "-p", &exited.id().to_string()])).unwrap();
+            String::from_utf8_lossy(&state.stdout).trim().starts_with('Z')
+        });
+        assert_eq!(signal_group(exited.id(), "KILL"), Ok(()), "a group of exited processes is gone, not unreachable");
+        let mut exited = exited;
+        exited.wait().unwrap();
+        assert_eq!(signal_group(exited.id(), "KILL"), Ok(()), "and so is one whose processes were all reaped");
+    }
+
+    /// A push dropped while it runs is killed with its whole group and reaped before the drop returns, so
+    /// nothing of it is left behind, not even unreaped, once the test that started it has moved on, and the
+    /// drop takes no longer than the kill does. A process leading a group of its own stands in for the push.
+    /// It outlives the bound, so a kill that does not reach it leaves the drop at the bound, which fails the
+    /// test, rather than letting the stand-in end on its own and the drop pass late.
+    #[test]
+    fn a_dropped_push_is_killed_and_gone_before_the_drop_returns() {
+        let scratch = Scratch::new("prepush-dropped");
+        let outlives = (STUCK_AFTER.as_secs() * 2).to_string();
+        let pushing = Pushing {
+            child: Command::new("sleep").arg(&outlives).stdin(Stdio::null()).stdout(Stdio::null()).process_group(0).spawn().unwrap(),
+            log: scratch.0.join("log"),
+            stderr: scratch.0.join("stderr"),
+        };
+        let pid = pushing.child.id().to_string();
+        let dropping = Instant::now();
+        drop(pushing);
+        assert!(dropping.elapsed() < STUCK_AFTER, "the drop ended with the kill, rather than at the bound");
+        assert!(!running(&pid), "the dropped push was killed and reaped before the drop returned");
+    }
+
+    /// A wait for a push's event tells one that came just before the push ended from one that never came.
+    /// A process stands in for the push: it makes the event and ends while a slow look for the event is
+    /// under way, so only a look that asked about the end first can see both. It leads a process group of
+    /// its own, as every push does, so the kill a `Pushing` sends as it is dropped reaches it.
+    #[test]
+    fn a_wait_tells_an_event_just_before_the_push_ended_from_one_that_never_came() {
+        let scratch = Scratch::new("prepush-event-at-end");
+        let made = scratch.0.join("made");
+        let stand_in = |script: &str| Pushing {
+            child: Command::new("sh").arg("-c").arg(script).arg("sh").arg(&made).process_group(0).spawn().unwrap(),
+            log: scratch.0.join("log"),
+            stderr: scratch.0.join("stderr"),
+        };
+        let mut late = stand_in("sleep 0.1; : >\"$1\"");
+        let slow_look = |_: &Pushing| {
+            let seen = made.exists();
+            std::thread::sleep(Duration::from_millis(500));
+            seen
+        };
+        assert!(late.wait_while_running("the event", slow_look), "the event came before the push ended");
+        let mut never = stand_in("true");
+        assert!(!never.wait_while_running("an event that never comes", |_| false), "and one that never came is told apart");
+    }
+
+    /// A program these tests start that cannot be started names itself, so a missing tool reads as what it
+    /// is rather than as a bare "No such file or directory".
+    #[test]
+    fn a_program_that_cannot_be_started_names_itself() {
+        let missing = "craftbridge-no-such-program";
+        let words = output_of(&mut Command::new(missing)).err().unwrap();
+        assert!(words.starts_with(&format!("could not run {missing}: ")), "the failure names the program: {words}");
+    }
+
+    /// A hook that hangs fails the test that started it, and ends with everything it started, instead of
+    /// hanging the suite: the push waits for a gate nobody lets go, and a test that waits for its end
+    /// gives up at its bound, killing the push as it gives up rather than waiting for the gate.
+    #[test]
+    fn a_hook_that_hangs_fails_its_test_and_is_killed_instead_of_hanging_the_suite() {
+        let prover = ScratchRepo::new("prepush-hung");
+        let hold = prover.scratch.0.join("hold");
+        // The gate outholds the bound, so only the kill the give-up makes can end the hook.
+        let outholds = PathBuf::from((STUCK_AFTER.as_secs() * 20).to_string());
+        let (pushing, hook, _) = prover.start_held(&hold, &[("GATE_HOLD_TICKS", &outholds)]);
+        let giving_up = Instant::now();
+        let gave_up = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pushing.finish_within(Duration::from_secs(2)))).err().unwrap();
+        assert!(giving_up.elapsed() < STUCK_AFTER, "the give-up killed the hung push, rather than wait out its gate");
+        let words = gave_up.downcast_ref::<String>().map(String::as_str).unwrap_or_default();
+        assert!(words.starts_with("the push did not finish"), "the hung push failed its wait in its own words: {words}");
+        wait_until("the hung hook to be killed", || !running(&hook));
     }
 
     /// Acceptance: an untracked file that would not be pushed no longer fails the hook.
@@ -458,14 +696,14 @@ fi
     fn the_gate_builds_in_the_folder_the_hook_names() {
         let print_target = r#"source tools/env.sh >/dev/null 2>&1 || exit 1; printf '%s' "$CARGO_TARGET_DIR""#;
         let named = std::env::temp_dir().join("craftbridge-push-folder-named-by-a-proved-run");
-        let with = Command::new("bash").current_dir(repo_root()).arg("-c").arg(print_target).env("CRAFTBRIDGE_PUSH_TARGET", &named).output().unwrap();
+        let with = output_of(Command::new("bash").current_dir(repo_root()).arg("-c").arg(print_target).env("CRAFTBRIDGE_PUSH_TARGET", &named)).unwrap();
         assert!(with.status.success(), "sourcing tools/env.sh failed: {}", String::from_utf8_lossy(&with.stderr));
         assert_eq!(
             String::from_utf8_lossy(&with.stdout),
             named.to_str().unwrap(),
             "a gate started in the environment the hook names builds where the hook named"
         );
-        let plain = Command::new("bash").current_dir(repo_root()).arg("-c").arg(print_target).env_remove("CRAFTBRIDGE_PUSH_TARGET").output().unwrap();
+        let plain = output_of(Command::new("bash").current_dir(repo_root()).arg("-c").arg(print_target).env_remove("CRAFTBRIDGE_PUSH_TARGET")).unwrap();
         assert!(plain.status.success(), "sourcing tools/env.sh failed: {}", String::from_utf8_lossy(&plain.stderr));
         assert_eq!(
             String::from_utf8_lossy(&plain.stdout),
@@ -853,10 +1091,10 @@ fi
         output(&prover.work, &["commit", "-q", "--allow-empty", "-m", "a second commit to gate"]).unwrap();
         let hold = prover.scratch.0.join("hold");
         let dirty: &[(&str, &Path)] = &[("GATE_DIRTY", Path::new("1"))];
-        for signal in ["INT", "TERM", "HUP"] {
+        for signal in INTERRUPTS {
             let (pushing, hook, tree) = prover.start_held(&hold, dirty);
             let gate_log = pushing.log.clone();
-            signal_group(pushing.child.id(), signal);
+            signal_group(pushing.child.id(), signal).unwrap();
             assert!(!pushing.finish().ok, "an interrupted push is refused");
             // Git dies of the signal at once; its hook goes on until it has cleaned up.
             wait_until("the interrupted hook to exit", || !running(&hook));
@@ -885,7 +1123,7 @@ fi
             if let Some((name, value)) = extra {
                 probe.env(name, value);
             }
-            String::from_utf8(probe.output().unwrap().stdout).unwrap().trim().to_string()
+            String::from_utf8(output_of(&mut probe).unwrap().stdout).unwrap().trim().to_string()
         };
         let differs = named(None) != named(Some((name, value)));
         let _ = sleeper.kill();
@@ -904,11 +1142,11 @@ fi
         let hold = prover.scratch.0.join("hold");
         let unread = prover.scratch.0.join("unread.stderr");
         let mut pushing = prover.spawn(&prover.work, &["push", "-q", "origin", "main"], &[("GATE_HOLD", &hold)], Stdio::piped(), unread);
-        let (hook, tree) = held(&hold);
+        let (hook, tree) = held(&hold, &mut pushing);
         drop(pushing.child.stderr.take());
         let_go(&hold);
         wait_until("the hook to exit", || !running(&hook));
-        assert!(pushing.child.wait().unwrap().success(), "the gate passed, and a word no one read does not refuse the push");
+        assert!(pushing.finish().ok, "the gate passed, and a word no one read does not refuse the push");
         assert!(prover.remote_refs().contains("refs/heads/main"), "the commit reached the remote");
         assert!(!prover.lock_is_held(), "the hook let its lock go though no one read its last word");
         assert!(!prover.hook_folder().join("tree").exists(), "and its record of the worktree");
@@ -956,11 +1194,10 @@ fi
             let (holder, hook, tree) = prover.start_held(&hold, &holder_env);
             output(&prover.work, &["branch", "--force", "waiter", "main"]).unwrap();
             let env: Vec<(&str, &Path)> = waiter_env.iter().map(|(name, value)| (*name, value.as_path())).collect();
-            let waiter = prover.start(&prover.work, &["push", "-q", "origin", "waiter"], &env);
-            wait_until(&format!("the round-{n} push to wait"), || std::fs::read_to_string(&waiter.stderr).is_ok_and(|text| text.contains(WAITING)));
-            let words = std::fs::read_to_string(&waiter.stderr).unwrap();
+            let mut waiter = prover.start(&prover.work, &["push", "-q", "origin", "waiter"], &env);
+            let words = waited_words(&mut waiter, &format!("the round-{n} push to wait"));
             assert!(words.contains(&format!("held by {hook}")), "the wait names the push it waits for: {words}");
-            signal_group(waiter.child.id(), "INT");
+            signal_group(waiter.child.id(), "INT").unwrap();
             assert!(!waiter.finish().ok, "the interrupted waiter is refused");
             assert!(prover.lock_is_held(), "the first push still holds its lock");
             let record = std::fs::read_to_string(prover.hook_folder().join("tree")).unwrap();
@@ -1051,7 +1288,7 @@ fi
         gone.wait().unwrap();
         std::os::unix::fs::symlink(format!("{} Wed Jan  1 00:00:00 2025", gone.id()), &lock).unwrap();
         let mut taker = Command::new("sleep").arg("120").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
-        let start = Command::new("ps").env("LC_ALL", "C").env("TZ", "UTC0").args(["-o", "lstart=", "-p", &taker.id().to_string()]).output().unwrap();
+        let start = output_of(Command::new("ps").env("LC_ALL", "C").env("TZ", "UTC0").args(["-o", "lstart=", "-p", &taker.id().to_string()])).unwrap();
         let taken = format!("{} {}", taker.id(), String::from_utf8(start.stdout).unwrap().trim_end_matches('\n'));
         let fake = prover.scratch.0.join("hands-over");
         std::fs::create_dir_all(&fake).unwrap();
@@ -1064,9 +1301,8 @@ fi
         );
         std::fs::write(fake.join("ps"), script).unwrap();
         std::fs::set_permissions(fake.join("ps"), std::fs::Permissions::from_mode(0o755)).unwrap();
-        let waiter = prover.start(&prover.work, &["push", "-q", "origin", "main"], &[("PATH", &PathBuf::from(format!("{}:{path}", fake.display())))]);
-        wait_until("the push to wait for the lock's new holder", || std::fs::read_to_string(&waiter.stderr).is_ok_and(|text| text.contains(WAITING)));
-        let words = std::fs::read_to_string(&waiter.stderr).unwrap();
+        let mut waiter = prover.start(&prover.work, &["push", "-q", "origin", "main"], &[("PATH", &PathBuf::from(format!("{}:{path}", fake.display())))]);
+        let words = waited_words(&mut waiter, "the push to wait for the lock's new holder");
         assert!(words.contains(&format!("held by {}", taker.id())), "the push waits for the lock's new holder: {words}");
         assert_eq!(std::fs::read_link(&lock).unwrap(), PathBuf::from(&taken), "the new holder's lock stands, put back as it was");
         let _ = taker.kill();
@@ -1274,9 +1510,9 @@ fi
         let own_tmp = prover.scratch.0.join("waiter-tmp");
         std::fs::create_dir_all(&own_tmp).unwrap();
         output(&prover.work, &["branch", "--force", "waiter", "main"]).unwrap();
-        let waiter = prover.start(&prover.work, &["push", "-q", "origin", "waiter"], &[("TMPDIR", &own_tmp)]);
-        wait_until("the push to wait", || std::fs::read_to_string(&waiter.stderr).is_ok_and(|text| text.contains(WAITING)));
-        signal_group(waiter.child.id(), "KILL");
+        let mut waiter = prover.start(&prover.work, &["push", "-q", "origin", "waiter"], &[("TMPDIR", &own_tmp)]);
+        waited_words(&mut waiter, "the push to wait");
+        signal_group(waiter.child.id(), "KILL").unwrap();
         assert!(!waiter.finish().ok);
         assert!(std::fs::read_dir(&own_tmp).unwrap().next().is_none(), "the killed waiter left nothing in its temporary folder");
         let_go(&hold);
@@ -1292,7 +1528,8 @@ fi
         let prover = ScratchRepo::new("prepush-killed");
         let hold = prover.scratch.0.join("hold");
         let (pushing, hook, tree) = prover.start_held(&hold, &[("GATE_DIRTY", Path::new("1"))]);
-        assert!(Command::new("kill").args(["-s", "KILL", &hook]).status().unwrap().success());
+        let killed = output_of(Command::new("kill").args(["-s", "KILL", &hook])).unwrap();
+        assert!(killed.status.success(), "the hook was killed outright: {}", String::from_utf8_lossy(&killed.stderr));
         let gate_log = pushing.log.clone();
         let push = pushing.finish();
         assert!(!push.ok, "the killed hook's push fails");
