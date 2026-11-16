@@ -9,12 +9,14 @@
 //! attribute written with this keyword (`#[unsafe(no_mangle)]`) is the only way to write and an item-level
 //! allowance beside it the only level that lets it compile. Anything else is reported.
 //!
-//! Scanning happens on stripped text (comments and literals blanked, line numbers kept), so a keyword
-//! quoted in a comment or a doc block is not a violation, and a real one is not missed because a string
-//! ended early.
+//! The keyword is found as `syn` parses it (`crate::rust_syntax`): blocks, functions, impls, traits,
+//! extern blocks and attributes, and inside a macro's tokens, so one quoted in a comment, a doc block or
+//! a string is no violation, and a real one is not missed because a string ended early.
 
-use crate::{attributes, layers, machinery, report, scan};
-use std::collections::BTreeMap;
+use crate::attributes::{self, Place};
+use crate::rust_syntax::{self, Facts};
+use crate::{layers, machinery, report, scan};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// The lint this rule governs.
@@ -26,34 +28,15 @@ const PLATFORM_MODULE: &str = "platform";
 /// The two items a dylint library exports by symbol name, the names the driver looks them up by, and the
 /// one attribute that exports them: the only place outside a platform module this keyword may be written.
 const DYLINT_EXPORTS: &[&str] = &["dylint_version", "register_lints"];
-const EXPORT_ATTRIBUTE: &str = "unsafe(no_mangle)";
 
 /// Is this crate the gate's lint library? Its folder is the last component of the machinery path.
 fn is_lint_library(crate_name: &str) -> bool {
     machinery::LINT_LIBRARY.trim_end_matches('/').rsplit('/').next().is_some_and(|folder| folder == crate_name)
 }
 
-/// Does the item starting at `from` export one of the two dylint entry points, a function by that name?
-fn is_dylint_export(text: &str, from: usize) -> bool {
-    attributes::declared_item(text, from, "fn").is_some_and(|name| DYLINT_EXPORTS.contains(&name))
-}
-
-/// The lines of `text` with the keyword of each `#[unsafe(no_mangle)]` on a dylint export blanked, byte
-/// for byte so every column stays where it was: the rule then counts every other `unsafe`, the same
-/// attribute on any other item included.
-fn without_dylint_exports(text: &str) -> Vec<String> {
-    let mut bytes = text.as_bytes().to_vec();
-    for (content, item) in attributes::outer_attributes_holding(text, EXPORT_ATTRIBUTE) {
-        if !is_dylint_export(text, item) {
-            continue;
-        }
-        if let Some(keyword) = scan::find(&bytes, content.start, b"unsafe").filter(|at| *at < content.end)
-            && let Some(span) = bytes.get_mut(keyword..keyword + "unsafe".len())
-        {
-            span.fill(b'_');
-        }
-    }
-    String::from_utf8(bytes).unwrap_or_else(|_| text.to_string()).split('\n').map(str::to_string).collect()
+/// Is `name` one of the two functions a dylint library exports?
+fn is_dylint_export(name: &str) -> bool {
+    DYLINT_EXPORTS.contains(&name)
 }
 
 /// One `.rs` file, reduced to what this rule reads.
@@ -68,11 +51,11 @@ pub(crate) struct RustFile<'a> {
     pub(crate) components: Vec<&'a str>,
     /// Whether this is the crate's own `src/lib.rs`, the only place a crate-wide attribute belongs.
     pub(crate) is_lib_root: bool,
-    /// Stripped source, one entry per line.
-    pub(crate) lines: Vec<String>,
+    /// What the file's syntax tree holds.
+    pub(crate) facts: Facts,
 }
 
-/// Check one file's stripped lines against what its crate's row allows.
+/// Check one file's syntax against what its crate's row allows.
 pub(crate) fn check_file(file: &RustFile<'_>) -> Vec<String> {
     let entry = layers::entry(file.crate_name);
     let platform_crate = entry.is_some_and(|entry| entry.platform);
@@ -81,35 +64,45 @@ pub(crate) fn check_file(file: &RustFile<'_>) -> Vec<String> {
     let in_platform_module = file.components.starts_with(&["src", PLATFORM_MODULE]);
     let mut errors = Vec::new();
 
-    let text = file.lines.join("\n");
-    let lines = if lint_library { without_dylint_exports(&text) } else { file.lines.to_vec() };
-    for (index, line) in lines.iter().enumerate() {
-        if scan::count_whole_word(line, "unsafe", true, true) > 0 && !(in_platform_module && platform_crate) {
-            errors.push(format!("{}:{}: unsafe outside a platform module", file.path, index + 1));
+    if !(in_platform_module && platform_crate) {
+        let lines: BTreeSet<usize> = file
+            .facts
+            .unsafe_uses
+            .iter()
+            .filter(|used| !(lint_library && used.exports.as_deref().is_some_and(is_dylint_export)))
+            .map(|used| used.line)
+            .collect();
+        for line in lines {
+            errors.push(format!("{}:{line}: unsafe outside a platform module", file.path));
         }
     }
 
-    for allowance in attributes::allowances(&text) {
+    for allowance in &file.facts.allowances {
         // A lint a macro fills in may be this one, so it is read as this one.
         if !allowance.lints.iter().any(|lint| lint == UNSAFE_CODE || lint == attributes::UNREADABLE) {
             continue;
         }
-        let module = attributes::declared_module(&text, allowance.after);
-        // A whole attribute a macro forwards onto one item is the forwarding idiom, not a level.
-        if allowance.level == attributes::MACRO_ATTRIBUTE && !allowance.inner && module.is_none() {
-            continue;
-        }
         let at = format!("{}:{}: {}({UNSAFE_CODE})", file.path, allowance.line, allowance.level);
-        if allowance.inner {
-            if !(ffi_crate && file.is_lib_root) {
-                errors.push(format!("{at} crate-wide belongs only to an -ffi crate's own src/lib.rs"));
+        match &allowance.place {
+            // A whole attribute a macro forwards onto one item is the forwarding idiom, not a level.
+            Place::Function(_) | Place::Other if allowance.level == attributes::MACRO_ATTRIBUTE => {}
+            Place::Inner => {
+                if !(ffi_crate && file.is_lib_root) {
+                    errors.push(format!("{at} crate-wide belongs only to an -ffi crate's own src/lib.rs"));
+                }
             }
-        } else if let Some(module) = module {
-            if !(platform_crate && module == PLATFORM_MODULE && file.is_lib_root) {
-                errors.push(format!("{at} belongs only on a platform crate's `mod {PLATFORM_MODULE}` declaration in its src/lib.rs"));
+            Place::Module(module) => {
+                if !(platform_crate && module == PLATFORM_MODULE && file.is_lib_root) {
+                    errors.push(format!("{at} belongs only on a platform crate's `mod {PLATFORM_MODULE}` declaration in its src/lib.rs"));
+                }
             }
-        } else if !(lint_library && is_dylint_export(&text, allowance.after)) {
-            errors.push(format!("{at} on one item belongs only to the gate's lint library, on its two dylint exports"));
+            Place::Unknown => errors.push(format!(
+                "{at} on what a macro's tokens do not show, which may be a module: it belongs only on a platform crate's `mod {PLATFORM_MODULE}` declaration in its src/lib.rs"
+            )),
+            Place::Function(name) if lint_library && is_dylint_export(name) => {}
+            Place::Function(_) | Place::Other => {
+                errors.push(format!("{at} on one item belongs only to the gate's lint library, on its two dylint exports"));
+            }
         }
     }
     errors
@@ -168,15 +161,23 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
             .and_then(|parent| parent.strip_prefix(&crate_dir).ok())
             .map(|relative| relative.components().map(|part| part.as_os_str().to_string_lossy().into_owned()).collect())
             .unwrap_or_default();
+        let text = scan::read_text(&file.path)?;
+        crates.insert(crate_name.clone(), crate_dir.clone());
+        let facts = match rust_syntax::read(&text, &shown) {
+            Ok(facts) => facts,
+            Err(error) => {
+                errors.push(error);
+                continue;
+            }
+        };
         let input = RustFile {
             path: &shown,
             crate_name: &crate_name,
             components: inside.iter().map(String::as_str).collect(),
             is_lib_root: file.path == crate_dir.join("src").join("lib.rs"),
-            lines: scan::strip_rust(&scan::read_text(&file.path)?),
+            facts,
         };
         errors.extend(check_file(&input));
-        crates.insert(crate_name, crate_dir);
     }
     errors.extend(platform_dir_errors(root, &crates));
     Ok(errors)
@@ -188,7 +189,7 @@ mod tests {
     use crate::scratch::{Scratch, rust_tree_copy};
 
     fn file<'a>(path: &'a str, crate_name: &'a str, components: Vec<&'a str>, source: &'a str) -> RustFile<'a> {
-        RustFile { path, crate_name, components, is_lib_root: path.ends_with("/src/lib.rs"), lines: scan::strip_rust(source) }
+        RustFile { path, crate_name, components, is_lib_root: path.ends_with("/src/lib.rs"), facts: rust_syntax::read(source, path).unwrap() }
     }
 
     /// The rule's verdict on `source` as the `src/lib.rs` of the crate `crate_name`.
@@ -223,7 +224,7 @@ mod tests {
 
         // Even in a `src/platform/` folder, a crate the table does not mark as a platform crate may not
         // use unsafe.
-        let wrong_crate = "unsafe { }\n";
+        let wrong_crate = "fn f() {\n    unsafe { }\n}\n";
         let errors = check_file(&file("craftbridge-effects/src/platform/x.rs", "craftbridge-effects", vec!["src", "platform"], wrong_crate));
         assert!(errors.iter().any(|e| e.contains("unsafe outside a platform module")), "{errors:?}");
     }
@@ -327,13 +328,51 @@ mod tests {
 
     #[test]
     fn a_quoted_or_commented_unsafe_does_not_count() {
-        let source = "//! the keyword this rule confines is quoted in docs all the time: unsafe\nlet example = \"unsafe\";\n// unsafe\n/* unsafe */\nlet raw = r\"unsafe\";\nlet hint = \"#![allow(unsafe_code)]\";\n";
+        let source = "//! the keyword this rule confines is quoted in docs all the time: unsafe\nfn f() {\n    let example = \"unsafe\";\n    // unsafe\n    /* unsafe */\n    let raw = r\"unsafe\";\n    let hint = \"#![allow(unsafe_code)]\";\n}\n";
         let errors = plugin_lib(source);
         assert!(errors.is_empty(), "{errors:?}");
         // And the keyword still counts on the line after a multi-line comment.
-        let after = "/* doc\nunsafe */\nunsafe { }\n";
+        let after = "/* doc\nunsafe */\nfn f() { unsafe { } }\n";
         let errors = plugin_lib(after);
         assert!(errors.iter().any(|e| e.contains(":3:")), "{errors:?}");
+        // Every other literal holds it as text too, and the line a report names is the keyword's own,
+        // past a literal that spans lines.
+        let literals = "fn f() {\n    let r = r#\"\nunsafe \"x\" unsafe\n\"#;\n    let s = \"first\nunsafe\";\n    let b = b\"un\\\"safe\";\n    let c = c\"unsafe\";\n    let br = br#\"unsafe\"#;\n    let q = '\"'; unsafe { }\n}\n";
+        assert_eq!(plugin_lib(literals), ["craftbridge-effects/src/lib.rs:10: unsafe outside a platform module"]);
+    }
+
+    #[test]
+    fn the_keyword_is_found_wherever_syn_finds_it() {
+        for source in [
+            "fn f() { unsafe { } }\n",
+            "unsafe fn f() {}\n",
+            "struct S;\nunsafe impl Send for S {}\n",
+            "unsafe trait T {}\n",
+            "trait T { unsafe fn f(); }\n",
+            "struct S;\nimpl S { unsafe fn f() {} }\n",
+            "unsafe extern \"C\" { fn f(); }\n",
+            "type F = unsafe fn();\n",
+            "type F = unsafe extern \"C\" fn();\n",
+            "#[unsafe(no_mangle)]\nfn f() {}\n",
+            "#[cfg_attr(all(), unsafe(export_name = \"x\"))]\nfn f() {}\n",
+            "static S: u8 = { unsafe { 0 } };\n",
+            "macro_rules! m { () => { unsafe { } }; }\n",
+            "fn f() { m!(unsafe { }); }\n",
+        ] {
+            let errors = plugin_lib(source);
+            assert!(errors.iter().any(|e| e.contains("unsafe outside a platform module")), "{source:?}: {errors:?}");
+        }
+        for source in ["fn unsafe_len() {}\nstruct Unsafe;\nfn f() { let r#unsafe = 1; }\n", "extern \"C\" { fn f(); }\n"] {
+            assert!(plugin_lib(source).is_empty(), "{source:?}");
+        }
+    }
+
+    #[test]
+    fn a_file_syn_cannot_parse_is_reported_naming_it() {
+        let copy = rust_tree_copy("planted-unparsable");
+        copy.write("rust/core/craftbridge-media/src/broken.rs", "fn f( {\n");
+        let errors = check(&copy.0).unwrap();
+        assert!(errors.iter().any(|e| e.starts_with("rust/core/craftbridge-media/src/broken.rs:1: not Rust that syn can parse")), "{errors:?}");
     }
 
     #[test]
@@ -394,7 +433,8 @@ mod tests {
     fn the_core_is_a_platform_crate_for_its_memory_module() {
         // Plan §16 puts the core's memory-pressure code in `craftbridge-core/src/platform/`.
         assert!(
-            check_file(&file("craftbridge-core/src/platform/memory.rs", "craftbridge-core", vec!["src", "platform"], "// SAFETY: x\nunsafe {}\n")).is_empty()
+            check_file(&file("craftbridge-core/src/platform/memory.rs", "craftbridge-core", vec!["src", "platform"], "fn f() {\n// SAFETY: x\nunsafe {}\n}\n"))
+                .is_empty()
         );
         assert!(lib_of("craftbridge-core", "#[allow(unsafe_code)]\nmod platform;\n").is_empty());
     }
@@ -407,10 +447,38 @@ mod tests {
         }
         let outer = lib_of("craftbridge-media", "# [allow(r#unsafe_code)]\nfn f() {}\n");
         assert!(outer.iter().any(|e| e.contains("one item")), "{outer:?}");
-        // A lint a macro fills in may be `unsafe_code`; an attribute forwarded onto one item is not a level.
+        // A lint a macro fills in may be `unsafe_code`; an attribute its caller wrote, forwarded onto one
+        // item, is not a level.
         let macro_lint = lib_of("craftbridge-media", "macro_rules! m { ($l:ident) => { #![allow($l)] }; }\n");
         assert!(!macro_lint.is_empty(), "{macro_lint:?}");
-        assert!(lib_of("craftbridge-media", "macro_rules! m { ($(#[$a:meta])* $i:item) => { $(#[$a])* $i }; }\n").is_empty());
+        assert!(lib_of("craftbridge-media", "macro_rules! m { ($(#[$a:meta])* $v:vis fn $n:ident) => { $(#[$a])* $v fn $n() {} }; }\n").is_empty());
+    }
+
+    #[test]
+    fn an_allow_a_macro_puts_where_its_tokens_do_not_show_may_be_on_a_module() {
+        for source in [
+            "macro_rules! m { ($i:item) => { #[allow(unsafe_code)] $i }; }\n",
+            "macro_rules! m { ($k:tt $n:ident) => { #[allow(unsafe_code)] $k $n {} }; }\n",
+            "macro_rules! m { ($(#[$a:meta])* $i:item) => { $(#[$a])* $i }; }\n",
+            "macro_rules! m { ($a:meta) => { #[cfg_attr(all(), $a)] fn f() {} }; }\n",
+            // A macro that fills in the attribute's own name, or all of it, from tokens.
+            "macro_rules! m { ($($a:tt)*) => { #[$($a)*] mod inner {} }; }\n",
+            "macro_rules! m { ($n:ident $args:tt) => { #[$n $args] fn f() {} }; }\n",
+            "macro_rules! m { ($args:tt) => { #[allow $args] mod inner {} }; }\n",
+            // A `#` and brackets the macro is handed apart, which the compiler makes one attribute.
+            "macro_rules! m { ($p:tt, $a:meta) => { $p [$a] mod inner {} }; }\nm!(#, allow(unsafe_code));\n",
+            // An attribute written in a call, on the item the caller wrote after it, which the macro may move.
+            "macro_rules! m { ($p:tt $b:tt $($rest:tt)*) => { $($rest)* $p $b mod inner {} }; }\nm!(#[allow(unsafe_code)] fn z() {});\n",
+        ] {
+            let errors = lib_of("craftbridge-media", source);
+            assert!(errors.iter().any(|e| e.contains("(unsafe_code)")), "{source:?}: {errors:?}");
+        }
+        // The allowance a dylint export may carry, written in a call on that export, is one the macro
+        // may move onto a module.
+        let moved = "macro_rules! m { ($p:tt $b:tt $($rest:tt)*) => { $($rest)* $p $b mod inner {} }; }\nm!(#[allow(unsafe_code)] fn dylint_version() {});\n";
+        let errors = lib_of("never-crash-lints", moved);
+        assert!(errors.iter().any(|e| e.contains("on what a macro's tokens do not show")), "{errors:?}");
+        assert!(lib_of("never-crash-lints", "#[allow(unsafe_code)]\nfn dylint_version() {}\n").is_empty(), "written as itself it is the export's");
     }
 
     #[test]

@@ -34,6 +34,7 @@ mod pins;
 mod plan_views;
 mod prepush;
 mod report;
+mod rust_syntax;
 mod scan;
 mod scratch;
 mod sources;
