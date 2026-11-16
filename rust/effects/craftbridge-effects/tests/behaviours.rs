@@ -1,6 +1,6 @@
 //! The behaviours the plugin promises, each pinned by a named test: the confinement that refuses
 //! accesses outside the container, the commands that need a helper answering `Unsupported`, the
-//! plug-ins switched off, the method table's four rows, and `run` stopping at the right step.
+//! plug-ins switched off, the method table's rows, and `run` stopping at the right step.
 
 mod common;
 
@@ -40,9 +40,12 @@ fn confinement_refuses_reads_outside_the_container() {
     // Dropping the confinement step at construction lets this read succeed and this test fail (L5).
     let scratch = Scratch::new().expect("a scratch folder");
     let mut app = scratch.app().expect("the app starts from prepared folders");
-    let error = (request(&mut app, "exec", json!({"command": "file.open", "params": {"path": "/etc/hosts"}}))).expect_err("the call was meant to fail");
+    let outside = scratch.outside_file().expect("a file outside the container");
+    let error = (request(&mut app, "exec", json!({"command": "file.open", "params": {"path": outside}}))).expect_err("the call was meant to fail");
     match error {
-        CraftError::Io { message } => assert!(message.starts_with("cannot read `/etc/hosts`"), "the refusal keeps the engine's words: {message}"),
+        CraftError::Io { message } => {
+            assert!(message.starts_with(&format!("cannot read `{}`", outside.display())), "the refusal keeps the engine's words: {message}")
+        }
         other => panic!("reading outside the container must be `Io`, got {other:?}"),
     }
 }
@@ -51,24 +54,60 @@ fn confinement_refuses_reads_outside_the_container() {
 fn confinement_refuses_writes_outside_the_container() {
     let scratch = Scratch::new().expect("a scratch folder");
     let mut app = scratch.app().expect("the app starts from prepared folders");
-    let error = (request(&mut app, "exec", json!({"command": "file.saveAs", "params": {"path": "/tmp/craftbridge-escape.ecproj"}})))
-        .expect_err("the call was meant to fail");
+    let escape = scratch.outside().join("escape.ecproj");
+    let error = (request(&mut app, "exec", json!({"command": "file.saveAs", "params": {"path": escape}}))).expect_err("the call was meant to fail");
+    // The confinement's own words, path and reason: a write the disk refused is `Io` too, and opens
+    // with the same `cannot write`.
+    let refusal = format!("cannot write `{}`: it is outside the automation roots", escape.display());
     match error {
-        CraftError::Io { message } => assert!(message.starts_with("cannot write"), "the refusal keeps the engine's words: {message}"),
+        CraftError::Io { message } => assert!(message.starts_with(&refusal), "the refusal keeps the confinement's words: {message}"),
         other => panic!("writing outside the container must be `Io`, got {other:?}"),
     }
+    assert!(!escape.exists(), "the refused write left a file outside the container");
+}
+
+#[test]
+fn the_bundle_is_read_and_never_written() {
+    // The bundle is a read root and no write root: a project shipped in it opens, and nothing is
+    // written into it, by name or by saving in place the project opened from it.
+    let scratch = Scratch::with_bundle().expect("a scratch folder with a bundle");
+    let bundle = scratch.bundle().expect("the scratch folder has a bundle").to_path_buf();
+    let shipped = bundle.join("shipped.ecproj");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    request(&mut app, "exec", json!({"command": "file.saveAs", "params": {"path": scratch.path().join("made.ecproj")}})).expect("a project to ship");
+    std::fs::copy(scratch.path().join("made.ecproj"), &shipped).expect("the project is shipped in the bundle");
+    let shipped_bytes = std::fs::read(&shipped).expect("the shipped project reads");
+    request(&mut app, "exec", json!({"command": "file.open", "params": {"path": shipped}})).expect("a project in the bundle opens");
+    let copy = bundle.join("copy.ecproj");
+    for (command, params) in [("file.save", json!({})), ("file.save", json!({"path": copy})), ("file.saveAs", json!({"path": copy}))] {
+        match request(&mut app, "exec", json!({"command": command, "params": params})).expect_err("the bundle is never written") {
+            CraftError::Io { message } => assert!(message.starts_with("cannot write `") && message.contains("it is outside the automation roots"), "{message}"),
+            other => panic!("`{command}` {params} into the bundle must be the confinement's `Io`, got {other:?}"),
+        }
+    }
+    assert_eq!(std::fs::read(&shipped).expect("the shipped project reads"), shipped_bytes, "the shipped project is as it was");
+    assert!(!copy.exists(), "nothing new is written into the bundle");
 }
 
 #[test]
 fn confinement_reads_inside_the_container_are_allowed() {
     // The same call the refusal test makes, aimed inside the container: refused for being no
     // project, never by the confinement, which is what shows the roots hold and do not over-refuse.
+    // The file is there and reads, so the one refusal left is the engine's own of what it holds; a
+    // file the disk would not read is `Io` like the confinement's refusal, and would hide one.
     let scratch = Scratch::new().expect("a scratch folder");
     let inside = scratch.path().join("nothing.ecproj");
+    std::fs::write(&inside, "no project").expect("a file inside the container");
     assert!(scratch.root().join("container").is_dir(), "the container sits in the scratch folder it was prepared from");
     let mut app = scratch.app().expect("the app starts from prepared folders");
     let error = (request(&mut app, "exec", json!({"command": "file.open", "params": {"path": inside}}))).expect_err("the call was meant to fail");
-    assert!(!matches!(error, CraftError::Io { .. }), "an access inside the container is not refused by the confinement: {error}");
+    match error {
+        CraftError::CommandFailed { command, message, .. } => {
+            assert_eq!(command, "file.open");
+            assert!(message.contains(" is not a project EffectCraft can open: "), "the engine read the file: {message}");
+        }
+        other => panic!("an access inside the container is not refused by the confinement: {other:?}"),
+    }
 }
 
 #[test]
@@ -118,11 +157,15 @@ fn run_names_the_failed_step_whatever_row_it_maps_onto() {
         CraftError::NotFound { message } => assert_eq!(message, "comp.info: no composition \"nope\" (step 1)"),
         other => panic!("a missing comp in a step must be `NotFound` naming the step, got {other:?}"),
     }
+    let outside = scratch.outside_file().expect("a file outside the container");
     let refused =
-        (request(&mut app, "run", json!({"steps": [{"command": "file.open", "params": {"path": "/etc/hosts"}}]}))).expect_err("the call was meant to fail");
+        (request(&mut app, "run", json!({"steps": [{"command": "file.open", "params": {"path": outside}}]}))).expect_err("the call was meant to fail");
     match refused {
         CraftError::Io { message } => {
-            assert!(message.starts_with("file.open: cannot read `/etc/hosts`") && message.ends_with(" (step 0)"), "the step is named: {message}")
+            assert!(
+                message.starts_with(&format!("file.open: cannot read `{}`", outside.display())) && message.ends_with(" (step 0)"),
+                "the step is named: {message}"
+            )
         }
         other => panic!("a refused read in a step must be `Io` naming the step, got {other:?}"),
     }
@@ -344,33 +387,18 @@ fn the_catalogue_reports_the_phones_capabilities() {
 fn the_method_table_answers_unwired_methods_as_unsupported() {
     let scratch = Scratch::new().expect("a scratch folder");
     let mut app = scratch.app().expect("the app starts from prepared folders");
-    // The fifteen names §14's table carries that `request` does not answer, and one name the table
+    // The eight names §14's table carries that `request` does not answer, and one name the table
     // carries not at all: every name answers `Unsupported` in the one refusal, whose exact words
     // are pinned so they claim only what is true however the method was asked — that `request`
     // lacks it, and which methods `request` answers.
-    for method in [
-        "props",
-        "get",
-        "set",
-        "open",
-        "save",
-        "saveAs",
-        "new",
-        "frame",
-        "export",
-        "template.render",
-        "template.open",
-        "script",
-        "replay",
-        "timings",
-        "mcp",
-        "no.such.method",
-    ] {
+    for method in ["frame", "export", "template.render", "template.open", "script", "replay", "timings", "mcp", "no.such.method"] {
         let error = (request(&mut app, method, json!({}))).expect_err("the call was meant to fail");
         match error {
             CraftError::Unsupported { message } => assert_eq!(
                 message,
-                format!("`{method}` is not answered by `request` in this build, which answers `info`, `commands`, `exec` and `run`"),
+                format!(
+                    "`{method}` is not answered by `request` in this build, which answers `info`, `commands`, `exec`, `run`, `props`, `get`, `set`, `open`, `save`, `saveAs` and `new`"
+                ),
                 "the refusal names the method and what `request` answers"
             ),
             other => panic!("an unwired method must be `Unsupported`, got {other:?}"),
@@ -394,6 +422,65 @@ fn the_methods_check_their_own_parameters() {
     ));
     assert!(matches!((request(&mut app, "info", json!({"x": 1}))).expect_err("the call was meant to fail"), CraftError::InvalidParams { .. }));
     assert!(matches!((request(&mut app, "commands", json!({"bogus": true}))).expect_err("the call was meant to fail"), CraftError::InvalidParams { .. }));
+}
+
+#[test]
+fn the_property_and_file_methods_check_their_own_parameters() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    app.request("exec", json!({"command": "comp.new", "params": {"name": "A"}})).expect("a comp to ask about");
+    // Each is the caller's to fix: a key the method does not take, a value of the wrong kind, or
+    // parameters that are no object, refused by the method itself before any tool or command is
+    // asked, in one sentence naming the method and, where there is one, the key.
+    let (not_an_object, unknown, not_a_string, not_a_number) =
+        ("its parameters must be a JSON object", "unknown parameter(s) `", "must be a string", "must be a number");
+    for (method, params, sentence) in [
+        ("props", json!({"comp": 1, "layer": 1, "bogus": 1}), format!("`props`: {unknown}bogus`")),
+        ("props", json!({"comp": 1, "layer": 1, "flat": "yes"}), "`props`: `flat` must be a bool".to_string()),
+        ("props", json!({"comp": 1, "layer": 1, "time": "now"}), format!("`props`: `time` {not_a_number}")),
+        ("props", json!({"comp": 1, "layer": 1, "depth": "deep"}), "`props`: `depth` must be a whole number".to_string()),
+        // The tool ignores a depth that is no whole number, so it is refused rather than ignored.
+        ("props", json!({"comp": 1, "layer": 1, "depth": 1.5}), "`props`: `depth` must be a whole number".to_string()),
+        ("props", json!({"comp": 1, "layer": 1, "depth": -1}), "`props`: `depth` must be a whole number".to_string()),
+        ("props", json!([1, 2]), format!("`props`: {not_an_object}")),
+        ("get", json!({"comp": 1, "layer": 1, "path": 5}), format!("`get`: `path` {not_a_string}")),
+        ("get", json!({"comp": 1, "layer": 1, "path": "transform/opacity", "time": "now"}), format!("`get`: `time` {not_a_number}")),
+        ("get", json!({"comp": 1, "layer": 1, "path": "transform/opacity", "value": 5}), format!("`get`: {unknown}value`")),
+        ("set", json!({"comp": 1, "layer": 1, "path": "transform/opacity", "expression": 5}), format!("`set`: `expression` {not_a_string}")),
+        ("set", json!({"comp": 1, "layer": 1, "path": "transform/opacity", "value": 5, "timeBase": "comp"}), format!("`set`: {unknown}timeBase`")),
+        ("open", json!({"path": 5}), format!("`open`: `path` {not_a_string}")),
+        ("open", json!({"file": "a.ecproj"}), format!("`open`: {unknown}file`")),
+        ("save", json!({"path": ["a"]}), format!("`save`: `path` {not_a_string}")),
+        ("saveAs", json!("a.ecproj"), format!("`saveAs`: {not_an_object}")),
+        ("new", json!({"path": "a.ecproj"}), format!("`new`: {unknown}path`")),
+    ] {
+        let error = request(&mut app, method, params.clone()).expect_err("the call was meant to fail");
+        match error {
+            CraftError::InvalidParams { message } => assert_eq!(message, sentence, "{method} {params}"),
+            other => panic!("`{method}` {params} must be `InvalidParams`, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_comp_or_layer_that_names_nothing_is_refused_in_one_sentence() {
+    // A value that is no id, no name and not `-` names nothing the command line could read: the
+    // refusal says what a comp or layer may be, in the same words for each method and key.
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    app.request("exec", json!({"command": "comp.new", "params": {"name": "A"}})).expect("a comp to ask about");
+    for (method, key, params) in [
+        ("props", "comp", json!({"comp": true, "layer": 1})),
+        ("props", "layer", json!({"comp": 1, "layer": 1.5})),
+        ("props", "layer", json!({"comp": 1, "layer": -1})),
+        ("get", "comp", json!({"comp": {"id": 1}, "layer": 1, "path": "transform/opacity"})),
+        ("set", "layer", json!({"comp": 1, "layer": [1], "path": "transform/opacity", "value": 5})),
+    ] {
+        match request(&mut app, method, params.clone()).expect_err("the call was meant to fail") {
+            CraftError::InvalidParams { message } => assert_eq!(message, format!("`{method}`: `{key}` must be an id, a name or `-`"), "{params}"),
+            other => panic!("`{method}` {params} must be `InvalidParams`, got {other:?}"),
+        }
+    }
 }
 
 #[test]
@@ -473,7 +560,10 @@ fn a_frame_is_never_answered_by_request() {
     app.request("exec", json!({"command": "comp.new", "params": {"name": "C", "width": 8, "height": 6}})).expect("a comp is made");
     assert!(app.frame(json!({}), PixelFormat::Png).is_ok());
     match request(&mut app, "frame", json!({})).expect_err("`request` does not answer `frame`") {
-        CraftError::Unsupported { message } => assert!(message.ends_with("which answers `info`, `commands`, `exec` and `run`"), "{message}"),
+        CraftError::Unsupported { message } => assert!(
+            message.ends_with("which answers `info`, `commands`, `exec`, `run`, `props`, `get`, `set`, `open`, `save`, `saveAs` and `new`"),
+            "{message}"
+        ),
         other => panic!("`frame` through `request` must be `Unsupported`, got {other:?}"),
     }
 }
