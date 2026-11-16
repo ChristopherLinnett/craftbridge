@@ -10,10 +10,22 @@ publish.workspace = true
 
 [dependencies]
 # CraftBridge's decoders register into FilmCraft's decoder registry, the one EffectCraft decodes
-# through (plan §18); the layer table's `upstream` row for this crate names these two and no others.
+# through (plan §18); the layer table's `upstream` row for this crate names the ones below and no others.
 # The revisions are the pin [workspace.dependencies] carries, written by tools/update-upstream.sh.
 filmcraft-codecs.workspace = true
 filmcraft-isobmff.workspace = true
+# The picture and colour types a decoder returns: the hardware decoders' frames are built in FilmCraft's own
+# layout.
+filmcraft-color.workspace = true
+filmcraft-frame.workspace = true
+
+# Apple's frameworks, which only an iPhone or its simulator has; the features are the framework headers the
+# decoder reads (src/platform/videotoolbox.rs).
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2-core-foundation = { workspace = true, features = ["std", "CFBase", "CFDictionary", "CFNumber", "CFData", "CFString"] }
+objc2-core-media = { workspace = true, features = ["std", "CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMTime"] }
+objc2-core-video = { workspace = true, features = ["std", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVReturn"] }
+objc2-video-toolbox = { workspace = true, features = ["std", "VTDecompressionSession", "VTDecompressionProperties", "VTErrors", "objc2-core-media", "objc2-core-video"] }
 
 [lints]
 workspace = true

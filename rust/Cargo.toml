@@ -57,7 +57,16 @@ effectcraft-expr = { git = "https://github.com/storytold/effectcraft", rev = "10
 effectcraft-script = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
 effectcraft-plugin = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
 filmcraft-codecs = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
+filmcraft-color = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
+filmcraft-frame = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
 filmcraft-isobmff = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
+
+# Apple's media frameworks, for the iOS hardware decoder in craftbridge-media (plan §18). Each crate turns on
+# only the framework headers it reads.
+objc2-core-foundation = { version = "0.3.2", default-features = false }
+objc2-core-media = { version = "0.3.2", default-features = false }
+objc2-core-video = { version = "0.3.2", default-features = false }
+objc2-video-toolbox = { version = "0.3.2", default-features = false }
 
 # One definition for every crate: each manifest says `[lints] workspace = true`, and
 # `cargo xtask rules` fails if one does not or if this table is weakened.

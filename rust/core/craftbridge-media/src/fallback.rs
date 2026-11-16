@@ -365,6 +365,7 @@ mod tests {
 
     use super::*;
     use crate::fixtures::{avc_entry, pps, prores_entry, sps};
+    use filmcraft_codecs::hw::FrameCodec;
 
     // The last byte of a test sample tells the fakes what to do with it.
     const PLAIN: u8 = 0;
@@ -381,10 +382,12 @@ mod tests {
     const IDR: &[u8] = &[0x65];
     const P: &[u8] = &[0x41];
     const B: &[u8] = &[0x01];
-    // HEVC NAL headers (type, then TemporalId + 1): IDR_W_RADL, CRA, TRAIL_R.
+    // HEVC NAL headers (type, then TemporalId + 1): IDR_W_RADL, CRA, TRAIL_R, and TRAIL_N, a picture none
+    // refers to.
     const HEVC_IDR: &[u8] = &[19 << 1, 1];
     const CRA: &[u8] = &[21 << 1, 1];
     const TRAIL: &[u8] = &[1 << 1, 1];
+    const TRAIL_N: &[u8] = &[0, 1];
 
     /// A length-prefixed access unit of the NAL units `nals`.
     fn access_unit(nals: &[&[u8]]) -> Vec<u8> {
@@ -430,6 +433,19 @@ mod tests {
         info.into()
     }
 
+    fn av1() -> StreamInfo {
+        FrameStreamInfo::for_tests(FrameCodec::Av1, 0, 10, (1, 1), (640, 360)).into()
+    }
+
+    // The first byte of an AV1 frame header: a shown key frame, and a shown inter frame.
+    const KEY: u8 = 0x10;
+    const INTER: u8 = 0x30;
+
+    /// An AV1 sample of one frame OBU, with its size: the frame header's first byte, then `tag`.
+    fn av1_frame(header: u8, tag: u8) -> Vec<u8> {
+        vec![(6 << 3) | 2, 2, header, tag]
+    }
+
     type Fed = Arc<Mutex<Vec<i64>>>;
 
     /// Returns one picture per sample, `latency` samples late (a flush returns the rest), and fails on a
@@ -441,6 +457,9 @@ mod tests {
         cancels: bool,
         /// Loses the pictures it held when it fails, as a hardware decoder whose session is lost does.
         forgets: bool,
+        /// What it says of itself.
+        intra_only: bool,
+        thread_limited: bool,
         pending: VecDeque<i64>,
         fed: Fed,
         drafted: Arc<Mutex<Vec<bool>>>,
@@ -476,10 +495,27 @@ mod tests {
         fn name(&self) -> &str {
             self.name
         }
+        fn intra_only(&self) -> bool {
+            self.intra_only
+        }
+        fn thread_limited(&self) -> bool {
+            self.thread_limited
+        }
     }
 
     fn fake(name: &'static str, fails_on: &'static [u8], latency: usize) -> Fake {
-        Fake { name, fails_on, latency, cancels: name == "hardware", forgets: false, pending: VecDeque::new(), fed: Fed::default(), drafted: Arc::default() }
+        Fake {
+            name,
+            fails_on,
+            latency,
+            cancels: name == "hardware",
+            forgets: false,
+            intra_only: false,
+            thread_limited: false,
+            pending: VecDeque::new(),
+            fed: Fed::default(),
+            drafted: Arc::default(),
+        }
     }
 
     /// A rig: the fakes' latencies, the stream, the attempt from which the software decoder can be made,
@@ -505,7 +541,7 @@ mod tests {
             let hardware = Fake { forgets: self.forgets, ..fake("hardware", &[FAIL, BOTH], self.hardware) };
             let software = fake("software", &[REJECT, BOTH], self.software);
             let (hardware_fed, software_fed) = (Arc::clone(&hardware.fed), Arc::clone(&software.fed));
-            let software_draft = Arc::clone(&software.drafted);
+            let (hardware_draft, software_draft) = (Arc::clone(&hardware.drafted), Arc::clone(&software.drafted));
             let software = Mutex::new(Some(software));
             let made = Arc::new(Mutex::new(0));
             let attempts = Arc::clone(&made);
@@ -523,6 +559,7 @@ mod tests {
                 decoder: Fallback::with_software(hardware, self.stream, make, self.bounds),
                 hardware: hardware_fed,
                 software: software_fed,
+                hardware_draft,
                 software_draft,
                 made,
             }
@@ -536,6 +573,7 @@ mod tests {
         decoder: Fallback<Fake>,
         hardware: Fed,
         software: Fed,
+        hardware_draft: Arc<Mutex<Vec<bool>>>,
         software_draft: Arc<Mutex<Vec<bool>>>,
         made: Arc<Mutex<u32>>,
     }
@@ -559,6 +597,9 @@ mod tests {
         }
         fn fed_to_software(&self) -> Vec<i64> {
             self.software.lock().unwrap().clone()
+        }
+        fn hardware_drafts(&self) -> Vec<bool> {
+            self.hardware_draft.lock().unwrap().clone()
         }
         fn software_drafts(&self) -> Vec<bool> {
             self.software_draft.lock().unwrap().clone()
@@ -800,6 +841,12 @@ mod tests {
             rig.feed(&[at(0, IDR, PLAIN), at(1, P, FAIL)]);
             // A decoder never told is out of draft mode, as FilmCraft's are until they are.
             assert_eq!(rig.software_drafts().last().copied().unwrap_or(false), draft, "draft {draft}");
+            // The hardware decoder had every choice made before the switch, and the software one has every
+            // choice made after it.
+            assert_eq!(rig.hardware_drafts(), vec![!draft, draft], "draft {draft}");
+            rig.decoder.set_draft(!draft);
+            assert_eq!(rig.software_drafts().last().copied(), Some(!draft), "draft {draft}, set after the switch");
+            assert_eq!(rig.hardware_drafts().len(), 2, "draft {draft}: the hardware decoder is told nothing after the switch");
         }
     }
 
@@ -813,6 +860,81 @@ mod tests {
             assert_eq!(rig.decoder.is_random_access(&sample), software.is_random_access(&sample));
         }
         assert!(rig.decoder.is_disposable(&at(0, B, PLAIN).1));
+    }
+
+    /// Every stream a hardware decoder here takes, with samples on which its record answers differently, so
+    /// a wrapper that answered one codec with a fixed value would answer one of them wrongly. VP9 is not
+    /// among them: no hardware decoder here takes it (`layout::tests`).
+    fn served_streams() -> Vec<(&'static str, StreamInfo, Vec<Vec<u8>>)> {
+        let hevc_of_depth = |bits: u32| {
+            let mut info = NalStreamInfo::from_entry(&avc_entry()).unwrap().unwrap();
+            info.codec = NalCodec::Hevc;
+            (info.bit_depth_luma, info.bit_depth_chroma) = (bits, bits);
+            // One temporal sub-layer, so a picture none refers to is disposable.
+            info.highest_tid = Some(0);
+            StreamInfo::from(info)
+        };
+        let hevc_samples = || vec![at(0, HEVC_IDR, PLAIN).1, at(0, TRAIL, PLAIN).1, at(0, TRAIL_N, PLAIN).1];
+        vec![
+            ("H.264", avc(), vec![at(0, IDR, PLAIN).1, at(0, P, PLAIN).1, at(0, B, PLAIN).1]),
+            ("HEVC 8-bit", hevc_of_depth(8), hevc_samples()),
+            ("HEVC 10-bit", hevc_of_depth(10), hevc_samples()),
+            ("AV1", av1(), vec![av1_frame(KEY, PLAIN), av1_frame(INTER, PLAIN)]),
+        ]
+    }
+
+    #[test]
+    fn each_stream_a_hardware_decoder_takes_is_answered_from_its_own_record_before_and_after_a_switch() {
+        for (codec, stream, samples) in served_streams() {
+            let record: Vec<_> = samples.iter().map(|sample| (stream.is_random_access(sample), stream.is_disposable(sample))).collect();
+            assert!(record.iter().any(|answers| Some(answers) != record.first()), "{codec}: the samples must not all get the same answers");
+            let mut rig = Setup { stream: stream.clone(), ..Setup::default() }.rig();
+            // The fakes answer neither, so an answer taken from the active decoder shows as the wrong one
+            // in each of the two phases.
+            for phase in ["hardware", "software"] {
+                let answered: Vec<_> = samples.iter().map(|sample| (rig.decoder.is_random_access(sample), rig.decoder.is_disposable(sample))).collect();
+                assert_eq!(answered, record, "{codec}, answered by the {phase} decoder");
+                assert_eq!(rig.decoder.name(), phase, "{codec}");
+                // Every sample's last byte is the fakes' instruction.
+                let mut failing = samples.first().cloned().unwrap_or_default();
+                if let Some(tag) = failing.last_mut() {
+                    *tag = FAIL;
+                }
+                assert!(rig.decoder.decode(&failing, 0).is_ok(), "{codec}: the failed sample is replayed in software");
+            }
+        }
+    }
+
+    #[test]
+    fn an_av1_stream_replays_from_its_last_key_frame() {
+        let mut rig = Setup { stream: av1(), ..Setup::default() }.rig();
+        let samples = [KEY, INTER, KEY, INTER].iter().zip(0..).map(|(&header, pts)| (pts, av1_frame(header, PLAIN)));
+        let mut out = rig.feed(&samples.collect::<Vec<_>>());
+        out.extend(rig.feed(&[(4, av1_frame(INTER, FAIL))]));
+        assert_eq!(rig.fed_to_software(), vec![2, 3, 4], "the samples since the last key frame, the failed one included");
+        assert_eq!(out, (0..5).map(|pts| Ok(vec![pts])).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn what_a_decoder_says_of_itself_is_the_one_decoding() {
+        let hardware = Fake { thread_limited: true, ..fake("hardware", &[FAIL], 0) };
+        let software = Mutex::new(Some(Fake { intra_only: true, ..fake("software", &[], 0) }));
+        let make = move || Ok(Box::new(software.lock().unwrap().take().expect("made once")) as Box<dyn VideoDecoder>);
+        let mut decoder = Fallback::with_software(hardware, avc(), make, BOUNDS);
+        assert_eq!((decoder.name(), decoder.intra_only(), decoder.thread_limited()), ("hardware", false, true));
+        assert!(decoder.decode(&at(0, IDR, FAIL).1, 0).is_ok(), "the failed sample is replayed in software");
+        assert_eq!((decoder.name(), decoder.intra_only(), decoder.thread_limited()), ("software", true, false));
+    }
+
+    #[test]
+    fn until_a_switch_flush_and_reset_are_the_hardware_decoders() {
+        let mut rig = Setup { hardware: 2, ..Setup::default() }.rig();
+        assert_eq!(pictures(&rig.feed(&[at(0, IDR, PLAIN), at(1, P, PLAIN), at(2, P, PLAIN)])), vec![0]);
+        assert_eq!(rig.flush(), vec![1, 2], "the pictures the hardware decoder held");
+        rig.feed(&[at(3, IDR, PLAIN), at(4, P, PLAIN)]);
+        rig.decoder.reset();
+        assert_eq!(rig.flush(), Vec::<i64>::new(), "a reset empties the hardware decoder");
+        assert_eq!(rig.made(), 0, "nothing here needed the software decoder");
     }
 
     #[test]
