@@ -8,6 +8,7 @@
 //! answers through the same kind of server the plugin answers through.
 
 mod common;
+mod export;
 
 use common::{EVERY_FORMAT, Scratch};
 use craftbridge_core::{CraftApp, CraftError, FrameBytes, PixelFormat};
@@ -68,10 +69,20 @@ impl Run {
 }
 
 /// The command line, set to run in `dir`: its own working folder, its own configuration folder,
-/// and no inherited environment, exactly as the conformance runner gives the oracle (plan §28).
+/// and no inherited environment, as the conformance runner gives the oracle (plan §28), but with
+/// the plugin's thread-pool size. The exporter's WebM muxer writes one cluster per render batch,
+/// and a batch is one frame per thread of the pool the export runs on, so a file's bytes follow
+/// that pool's size: a byte comparison of the two sides holds only when both pools are one size.
+/// The plugin's exports run on this process's global pool, so rayon itself is asked its size, which
+/// holds whatever set it — either of rayon's variables, or the machine's cores — and the command
+/// line is given that size in the one variable it reads first.
 fn oracle_in(dir: &Path) -> std::result::Result<Command, String> {
     let mut command = Command::new(oracle()?);
-    command.current_dir(dir).env_clear().env("EFFECTCRAFT_CONFIG_DIR", dir.join("cli-config"));
+    command
+        .current_dir(dir)
+        .env_clear()
+        .env("EFFECTCRAFT_CONFIG_DIR", dir.join("cli-config"))
+        .env("RAYON_NUM_THREADS", rayon::current_num_threads().to_string());
     Ok(command)
 }
 

@@ -11,12 +11,14 @@
 //!
 //! Every call reaches the session through the MCP server built at construction, so the `mcp`
 //! method's line transport and the method table act on one session. The methods the plugin answers
-//! are the plan's §14 rows its one method list names, each with the result shape and failure words
-//! of the EffectCraft command line at the pin (AD10); any other name `request` is given answers
-//! `Unsupported`, naming what was asked and the methods `request` answers. The binary `frame` is
-//! answered only through [`CraftApp::frame`](craftbridge_core::CraftApp::frame), since pixels cannot
-//! come back through `request`'s JSON; its request is resolved as the command line's `render-frame`
-//! resolves its flags (AD4).
+//! are the plan's §14 rows its method lists name — one for `request`, and one for
+//! `request_with_progress`, which answers `export` through the render runner (AD3) — each with the
+//! result shape and failure words of the EffectCraft command line at the pin (AD10); any other name
+//! either call is given answers `Unsupported`, naming what was asked and the methods that call
+//! answers. The binary `frame` is answered only through
+//! [`CraftApp::frame`](craftbridge_core::CraftApp::frame), since pixels cannot come back through
+//! `request`'s JSON; its request is resolved as the command line's `render-frame` resolves its
+//! flags (AD4).
 
 mod app;
 mod files;
@@ -30,6 +32,8 @@ mod plugins;
 mod properties;
 mod reference;
 mod requests;
+mod runner;
 mod session;
 
 pub use app::EffectCraftApp;
+pub use requests::{CompRef, RenderRequest, Resolution};

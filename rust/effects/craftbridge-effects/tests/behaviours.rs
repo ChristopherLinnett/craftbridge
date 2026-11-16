@@ -407,6 +407,34 @@ fn the_method_table_answers_unwired_methods_as_unsupported() {
 }
 
 #[test]
+fn a_call_with_progress_answers_export_and_refuses_every_other_name() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    // Every name but `export`, the `request` methods included, is refused in the one refusal that
+    // names what the call answers.
+    for method in ["info", "exec", "template.render", "frame", "no.such.method"] {
+        let error = app.request_with_progress(method, json!({}), &mut |_, _, _| true).expect_err("the call was meant to fail");
+        match error {
+            CraftError::Unsupported { message } => assert_eq!(
+                message,
+                format!("`{method}` is not answered by `request_with_progress` in this build, which answers `export`"),
+                "the refusal names the method and what the call answers"
+            ),
+            other => panic!("a name the call does not answer must be `Unsupported`, got {other:?}"),
+        }
+    }
+    // `export` reads its parameters like every method: an unknown field and a missing output are the caller's to fix.
+    for params in [json!({"output": "/x", "widht": 1}), json!({})] {
+        let error = app.request_with_progress("export", params, &mut |_, _, _| true).expect_err("the call was meant to fail");
+        assert!(matches!(error, CraftError::InvalidParams { .. }), "{error:?}");
+    }
+    // An output outside the container is the confinement's to refuse, before anything renders.
+    app.request("exec", json!({"command": "comp.new", "params": {"name": "A", "width": 16, "height": 16, "duration": 0.2, "frameRate": 10}})).expect("a comp");
+    let error = app.request_with_progress("export", json!({"output": "/tmp/outside.mp4"}), &mut |_, _, _| true).expect_err("outside the container");
+    assert!(matches!(error, CraftError::Io { .. }), "{error:?}");
+}
+
+#[test]
 fn the_methods_check_their_own_parameters() {
     let scratch = Scratch::new().expect("a scratch folder");
     let mut app = scratch.app().expect("the app starts from prepared folders");

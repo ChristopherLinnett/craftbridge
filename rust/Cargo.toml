@@ -44,6 +44,10 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 wgpu = { version = "30.0.1", features = ["fragile-send-sync-non-atomic-wasm"] }
 # The core blocks on wgpu's adapter and device futures with the executor EffectCraft blocks on.
 pollster = "1"
+# craftbridge-effects' tests ask the thread pool EffectCraft's exporter renders on how many threads it
+# has, to hand the command line they compare against the same number. It resolves to the one copy
+# EffectCraft already builds, so the pool that answers is the exporter's own.
+rayon = "1"
 
 effectcraft-engine = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
 effectcraft-host = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }

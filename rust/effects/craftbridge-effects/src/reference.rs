@@ -13,18 +13,41 @@ use craftbridge_core::{CraftError, Result};
 use serde_json::Value;
 use serde_json::map::Map;
 
+/// What a reference's JSON holds, before either rule for its text reads it.
+pub(crate) enum Given<'a> {
+    /// A whole number.
+    Id(u64),
+    /// Any text.
+    Text(&'a str),
+}
+
+/// The one shape check of a comp or layer reference: absent or null is none, a whole number is an
+/// id, text is text, and anything else names nothing and is refused, as the caller's to fix. What
+/// the text means is each command's own rule: [`reference`] reads it as the command line's
+/// `reference` does, and `export` keeps it as given.
+pub(crate) fn given<'a>(obj: &'a Map<String, Value>, key: &str, method: &str) -> Result<Option<Given<'a>>> {
+    match obj.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Number(id)) => id.as_u64().map(|id| Some(Given::Id(id))).ok_or_else(|| not_a_reference(key, method)),
+        Some(Value::String(text)) => Ok(Some(Given::Text(text))),
+        Some(_) => Err(not_a_reference(key, method)),
+    }
+}
+
+fn not_a_reference(key: &str, method: &str) -> CraftError {
+    CraftError::invalid_params(format!("`{method}`: `{key}` must be an id, a name or `-`"))
+}
+
 /// A comp or layer reference as the command line reads one: a number is an id, a string of digits is
 /// the same id, `-` or an empty string names none (the active comp), and any other string is a name
 /// or `#n`. An absent or null one is none, `Value::Null`, which the tool reads as the active one.
-/// Anything else names nothing and is refused, as the caller's to fix.
 pub(crate) fn reference(obj: &Map<String, Value>, key: &str, method: &str) -> Result<Value> {
-    match obj.get(key) {
-        None | Some(Value::Null) => Ok(Value::Null),
-        Some(Value::Number(id)) if id.is_u64() => Ok(Value::Number(id.clone())),
-        Some(Value::String(text)) if text == "-" || text.is_empty() => Ok(Value::Null),
-        Some(Value::String(text)) => Ok(text.parse::<u64>().map_or_else(|_| Value::from(text.as_str()), Value::from)),
-        Some(_) => Err(CraftError::invalid_params(format!("`{method}`: `{key}` must be an id, a name or `-`"))),
-    }
+    Ok(match given(obj, key, method)? {
+        None => Value::Null,
+        Some(Given::Id(id)) => Value::from(id),
+        Some(Given::Text("-" | "")) => Value::Null,
+        Some(Given::Text(text)) => text.parse::<u64>().map_or_else(|_| Value::from(text), Value::from),
+    })
 }
 
 #[cfg(test)]
