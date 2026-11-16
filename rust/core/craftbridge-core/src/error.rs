@@ -22,7 +22,7 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CraftError {
     /// Unknown parameter, bad JSON, or parameters a check refuses: the engine's check of a command's,
-    /// or the core's of the folder paths an engine starts with.
+    /// or the core's of the folder paths an engine starts with or of a frame's size against its bytes.
     InvalidParams { message: String },
     /// A command answered `Err` or a render item failed; `step` is the step of a `run` that failed.
     CommandFailed { command: String, message: String, step: Option<u32> },

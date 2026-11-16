@@ -7,10 +7,12 @@ pub mod app;
 pub mod engine;
 pub mod error;
 pub mod folders;
+pub mod frames;
 
 pub use app::CraftApp;
 pub use engine::Engine;
 pub use error::CraftError;
+pub use frames::{FrameBytes, PixelFormat};
 
 /// The result of a runtime call: what the call answers, or the [`CraftError`] it failed with. The
 /// error has a default so a signature can name just its answer, as the plan's runtime sketches write it.
