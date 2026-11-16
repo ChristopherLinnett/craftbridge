@@ -9,8 +9,8 @@
 
 mod common;
 
-use common::Scratch;
-use craftbridge_core::{CraftApp, CraftError};
+use common::{EVERY_FORMAT, Scratch};
+use craftbridge_core::{CraftApp, CraftError, FrameBytes, PixelFormat};
 use craftbridge_effects::EffectCraftApp;
 use serde_json::{Value, json};
 use std::io::Write;
@@ -448,5 +448,209 @@ fn the_confinement_answers_in_the_commands_words() {
             assert_eq!(scrubbed(&message, &[scratch.path()]), command_line, "the confinement refusal differs from the command line's")
         }
         other => panic!("a refused read must be `Io`, got {other:?}"),
+    }
+}
+
+/// Three comps with something to see at every time and a corner left empty, saved with the first
+/// one active at half a second in, so the comp, the time, the size and the alpha of a frame each
+/// change its pixels:
+/// * `Frames`, 64 x 48 at 10 frames a second, a red box moving across a transparent ground;
+/// * `Tall`, 30 x 50 at 25 frames a second, a green box moving down it: its longest side is its
+///   height, and its frame rate is another;
+/// * a 20 x 20 comp named `1`, so the digits `1` read as a name would find another comp than the id
+///   they spell.
+fn frame_steps() -> Vec<(String, Value)> {
+    let step = |command: &str, params: Value| (command.to_string(), params);
+    vec![
+        step("comp.new", json!({"name": "Frames", "width": 64, "height": 48, "duration": 2, "frameRate": 10})),
+        step("layer.newSolid", json!({"comp": "Frames", "name": "Box", "color": "#ff0000", "width": 20, "height": 20})),
+        step("prop.addKey", json!({"comp": "Frames", "layer": "Box", "path": "transform/position", "time": 0, "value": [10, 10]})),
+        step("prop.addKey", json!({"comp": "Frames", "layer": "Box", "path": "transform/position", "time": 1, "value": [50, 30]})),
+        step("comp.new", json!({"name": "Tall", "width": 30, "height": 50, "duration": 2, "frameRate": 25})),
+        step("layer.newSolid", json!({"comp": "Tall", "name": "Drop", "color": "#00ff00", "width": 10, "height": 10})),
+        step("prop.addKey", json!({"comp": "Tall", "layer": "Drop", "path": "transform/position", "time": 0, "value": [5, 5]})),
+        step("prop.addKey", json!({"comp": "Tall", "layer": "Drop", "path": "transform/position", "time": 1, "value": [25, 45]})),
+        step("comp.new", json!({"name": "1", "width": 20, "height": 20, "duration": 1, "frameRate": 24})),
+        step("comp.open", json!({"comp": "Frames"})),
+        step("time.set", json!({"time": 0.5})),
+    ]
+}
+
+/// The ids the engine gave the fixture's comps, which it numbers among every item it makes.
+struct Comps {
+    tall: u64,
+    named_one: u64,
+}
+
+/// The ids of the comps a `run` document made, in order.
+fn made_comps(doc: &Value) -> Vec<u64> {
+    doc.as_array()
+        .into_iter()
+        .flatten()
+        .filter(|step| step.get("command").and_then(Value::as_str) == Some("comp.new"))
+        .filter_map(|step| step.pointer("/result/comp").and_then(Value::as_u64))
+        .collect()
+}
+
+/// A frame the command line wrote: the PNG file, and the figures it decodes to.
+struct CliFrame {
+    png: Vec<u8>,
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+/// Run the command line's `render-frame` on the saved project with these flags and read the file.
+fn cli_frame(dir: &Path, flags: &[&str]) -> std::result::Result<CliFrame, String> {
+    let out = dir.join("cli-frame.png");
+    let (project, out_text) = (dir.join("frames.ecproj").display().to_string(), out.display().to_string());
+    let mut args = vec!["render-frame", "--json", "--project", project.as_str(), "--out", out_text.as_str()];
+    args.extend_from_slice(flags);
+    cli(dir, &args)?.doc()?;
+    let png = std::fs::read(&out).map_err(|e| format!("the frame the command line wrote reads: {e}"))?;
+    let image = image::load_from_memory(&png).map_err(|e| format!("the frame decodes: {e}"))?.to_rgba8();
+    Ok(CliFrame { width: image.width(), height: image.height(), rgba: image.into_raw(), png })
+}
+
+/// The frames of one case in every format the core answers, each held to what the command line wrote.
+fn assert_frame_matches(app: &mut EffectCraftApp, request: &Value, theirs: &CliFrame) -> std::result::Result<(), String> {
+    let mut frame = |format| app.frame(request.clone(), format).map_err(|e| format!("{request} as {format:?} renders: {e}"));
+    let png = frame(PixelFormat::Png)?;
+    assert_eq!((png.width, png.height), (theirs.width, theirs.height), "{request}: the PNG's size");
+    assert_eq!(png.data, theirs.png, "{request}: the PNG is not the command line's file, byte for byte");
+    let straight = frame(PixelFormat::Rgba8Straight)?;
+    assert_eq!((straight.width, straight.height), (theirs.width, theirs.height), "{request}: the straight frame's size");
+    assert_eq!(straight.data, theirs.rgba, "{request}: the straight pixels are not the command line's");
+    let premultiplied = frame(PixelFormat::Bgra8Premultiplied)?;
+    let expected = FrameBytes::new(theirs.width, theirs.height, PixelFormat::Bgra8Premultiplied, theirs.rgba.clone()).map_err(|e| format!("{e}"))?;
+    assert_eq!(premultiplied, expected, "{request}: the premultiplied pixels are not the command line's, converted");
+    Ok(())
+}
+
+/// Build the fixture's comps on both sides, the plugin's session and the command line's saved
+/// project, and answer the ids they were given, which both sides must agree on.
+fn frames_on_both_sides(scratch: &Scratch) -> std::result::Result<(EffectCraftApp, Comps), String> {
+    let steps = frame_steps();
+    let mut saved = steps.clone();
+    saved.push(("file.save".to_string(), json!({"path": scratch.root().join("frames.ecproj").display().to_string()})));
+    let theirs = made_comps(&cli_run(scratch.root(), &saved)?.doc()?);
+    let mut app = scratch.app().map_err(|e| format!("the app starts: {e}"))?;
+    let built = app.request("run", json!({"steps": steps_document(&steps)})).map_err(|e| format!("the plugin builds the comps: {e}"))?;
+    let mine = made_comps(&built);
+    if mine != theirs {
+        return Err(format!("the comps were given other ids: {mine:?} by the plugin, {theirs:?} by the command line"));
+    }
+    match mine.as_slice() {
+        [_, tall, named_one] => Ok((app, Comps { tall: *tall, named_one: *named_one })),
+        other => Err(format!("the fixture makes three comps, the run made {other:?}")),
+    }
+}
+
+#[test]
+fn a_frame_is_the_command_lines_frame_for_the_same_flags() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let (mut app, comps) = frames_on_both_sides(&scratch).expect("the comps are built on both sides");
+    let (tall, named_one) = (comps.tall.to_string(), comps.named_one.to_string());
+    // Each field of the request beside the flag of `render-frame` it stands for: the active comp at
+    // its current time, and another comp at that same time; a time in seconds and a frame number at
+    // each comp's own rate; a longest side, whole, fractional, zero, negative and past the comp; a
+    // scale that rounds up, one that rounds down, one past the comp, zero, and one of a tall comp; the
+    // comp by its name, by its id as a number and as digits (a `+` before them too), by `-` and by
+    // nothing; and the alpha.
+    let cases: Vec<(Value, Vec<&str>)> = vec![
+        (json!({}), vec![]),
+        (json!({"time": 0}), vec!["--time", "0"]),
+        (json!({"time": 1}), vec!["--time", "1"]),
+        (json!({"frame": 7}), vec!["--frame", "7"]),
+        (json!({"frame": 3.5}), vec!["--frame", "3.5"]),
+        (json!({"comp": "Tall", "frame": 5}), vec!["--comp", "Tall", "--frame", "5"]),
+        (json!({"maxSide": 40}), vec!["--max-side", "40"]),
+        (json!({"maxSide": 40.7}), vec!["--max-side", "40.7"]),
+        (json!({"maxSide": 0}), vec!["--max-side", "0"]),
+        (json!({"maxSide": -5}), vec!["--max-side", "-5"]),
+        (json!({"maxSide": 100}), vec!["--max-side", "100"]),
+        (json!({"scale": 0.34}), vec!["--scale", "0.34"]),
+        (json!({"scale": 0.3}), vec!["--scale", "0.3"]),
+        (json!({"scale": 2}), vec!["--scale", "2"]),
+        (json!({"scale": 0}), vec!["--scale", "0"]),
+        (json!({"comp": "Tall", "scale": 0.5}), vec!["--comp", "Tall", "--scale", "0.5"]),
+        (json!({"transparent": true}), vec!["--transparent"]),
+        (json!({"transparent": false}), vec![]),
+        (json!({"comp": "Frames"}), vec!["--comp", "Frames"]),
+        (json!({"comp": "Tall"}), vec!["--comp", "Tall"]),
+        (json!({"comp": comps.tall}), vec!["--comp", tall.as_str()]),
+        (json!({"comp": named_one.as_str()}), vec!["--comp", named_one.as_str()]),
+        (json!({"comp": 1}), vec!["--comp", "1"]),
+        (json!({"comp": "1"}), vec!["--comp", "1"]),
+        (json!({"comp": "+1"}), vec!["--comp", "+1"]),
+        (json!({"comp": "-"}), vec!["--comp", "-"]),
+        (json!({"comp": ""}), vec!["--comp", ""]),
+        (json!({"comp": "Tall", "frame": 7, "scale": 0.5, "transparent": true}), vec!["--comp", "Tall", "--frame", "7", "--scale", "0.5", "--transparent"]),
+    ];
+    for (request, flags) in &cases {
+        assert_frame_matches(&mut app, request, &cli_frame(scratch.root(), flags).expect("the command line rendered the frame"))
+            .expect("the plugin rendered the frames");
+    }
+}
+
+#[test]
+fn each_rule_of_the_request_changes_the_frame_it_is_held_to() {
+    // The comparison above would pass for a request that ignored a field if the command line's frames
+    // did not differ by it too: so the fixture is shown to bite on each rule, against the command line.
+    let scratch = Scratch::new().expect("a scratch folder");
+    let (_app, comps) = frames_on_both_sides(&scratch).expect("the comps are built on both sides");
+    let frame = |flags: &[&str]| cli_frame(scratch.root(), flags).expect("the command line rendered the frame");
+    let size = |frame: &CliFrame| (frame.width, frame.height);
+    let (now, start, later) = (frame(&[]), frame(&["--time", "0"]), frame(&["--time", "1"]));
+    assert_ne!(now.rgba, start.rgba, "the saved current time is not the start");
+    assert_ne!(start.rgba, later.rgba, "time moves the box");
+    assert_eq!(frame(&["--frame", "10"]).rgba, later.rgba, "frame 10 at 10 fps is the same moment as second 1");
+    assert_ne!(frame(&["--comp", "Tall"]).rgba, frame(&["--comp", "Tall", "--time", "0"]).rgba, "another comp is rendered at the active comp's time");
+    assert_eq!(size(&now), (64, 48));
+    assert_eq!(size(&frame(&["--max-side", "40"])), (40, 30), "the longest side is the cap");
+    assert_eq!(size(&frame(&["--max-side", "40.7"])), (40, 30), "a fractional side is cut, not rounded");
+    assert_eq!(size(&frame(&["--max-side", "-5"])), (64, 48), "a negative side is the full size");
+    assert_eq!(size(&frame(&["--scale", "0.34"])), (22, 17), "a scale rounds to the nearest pixel");
+    assert_eq!(size(&frame(&["--scale", "0"])), (1, 1), "a scale is never below one pixel");
+    assert_eq!(size(&frame(&["--comp", "Tall", "--scale", "0.5"])), (15, 25), "a scale is of the longest side, here the height");
+    assert_eq!(size(&frame(&["--comp", &comps.named_one.to_string()])), (20, 20));
+    assert_eq!(size(&frame(&["--comp", "1"])), (64, 48), "the digits 1 are an id, not the comp named 1");
+    let transparent = frame(&["--transparent"]);
+    let alphas = |frame: &CliFrame| frame.rgba.as_chunks::<4>().0.iter().map(|pixel| pixel[3]).collect::<Vec<u8>>();
+    assert!(alphas(&now).iter().all(|alpha| *alpha == 255), "a frame over the background is opaque");
+    assert!(alphas(&transparent).contains(&0), "a transparent frame keeps the empty corner empty");
+}
+
+#[test]
+fn a_frame_that_cannot_be_rendered_fails_in_the_commands_words_in_every_format() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let (mut app, _comps) = frames_on_both_sides(&scratch).expect("the comps are built on both sides");
+    let project = scratch.root().join("frames.ecproj").display().to_string();
+    let theirs = |flags: &[&str]| {
+        let mut args = vec!["render-frame", "--json", "--out", "x.png"];
+        args.extend_from_slice(flags);
+        cli(scratch.root(), &args).expect("the command line ran").failure().expect("the command line reported the failure")
+    };
+    // A comp named nowhere, by a name and by an id, refused by the render; and one a frame number or
+    // a scale must first read the figures of, refused by the tool that reads them, in its own words.
+    let cases: [(Value, Vec<&str>); 4] = [
+        (json!({"comp": "nope"}), vec!["--project", &project, "--comp", "nope"]),
+        (json!({"comp": 99999}), vec!["--project", &project, "--comp", "99999"]),
+        (json!({"comp": "nope", "frame": 3}), vec!["--project", &project, "--comp", "nope", "--frame", "3"]),
+        (json!({"comp": "nope", "scale": 0.5}), vec!["--project", &project, "--comp", "nope", "--scale", "0.5"]),
+    ];
+    let mut empty = scratch.app().expect("the app starts from prepared folders");
+    let no_comp_open = theirs(&["--empty"]);
+    for format in EVERY_FORMAT {
+        for (request, flags) in &cases {
+            match app.frame(request.clone(), format).expect_err("the comp is not there") {
+                CraftError::NotFound { message } => assert_eq!(message, theirs(flags), "{request} as {format:?}: not the command line's words"),
+                other => panic!("{request} as {format:?}: a missing comp is `NotFound`, got {other:?}"),
+            }
+        }
+        match empty.frame(json!({}), format).expect_err("no comp is open") {
+            CraftError::NotFound { message } => assert_eq!(message, no_comp_open, "{format:?}: not the command line's words for no comp open"),
+            other => panic!("{format:?}: no comp open is `NotFound`, got {other:?}"),
+        }
     }
 }

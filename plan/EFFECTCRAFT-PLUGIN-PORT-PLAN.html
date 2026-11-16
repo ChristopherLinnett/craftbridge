@@ -1027,19 +1027,19 @@ impl Engine {
 <td><code>comp</code></td>
 <td>id | name | <code>&quot;-&quot;</code></td>
 <td>no</td>
-<td>default the active comp</td>
+<td>default the active comp; a string of digits is an id, as <code>--comp</code> reads it</td>
 </tr>
 <tr>
 <td><code>time</code> / <code>frame</code></td>
 <td>seconds / frame number</td>
-<td>no, one of</td>
-<td><code>frame</code> ÷ the comp&#39;s frame rate; default the current time</td>
+<td>no, at most one</td>
+<td><code>frame</code> ÷ the comp&#39;s frame rate; default the active comp&#39;s current time, whichever comp is named</td>
 </tr>
 <tr>
 <td><code>maxSide</code> / <code>scale</code></td>
 <td>px / factor</td>
-<td>no, one of</td>
-<td><code>scale</code> × the comp&#39;s long side; 0 = full size</td>
+<td>no, at most one</td>
+<td><code>maxSide</code> cut to whole pixels; <code>scale</code> × the comp&#39;s long side, rounded, at least 1 px; neither, or a <code>maxSide</code> of 0, is full size</td>
 </tr>
 <tr>
 <td><code>transparent</code></td>
@@ -1048,7 +1048,8 @@ impl Engine {
 <td>straight alpha instead of the background colour</td>
 </tr>
 </tbody></table>
-</div><p><strong><code>RenderRequest</code></strong> (AD3, <code>craftbridge-effects</code>; one field per <code>render</code> flag of the CLI, <code>apps/<wbr>effectcraft-cli/<wbr>src/<wbr>main.rs:888-1037</code>): <code>comp</code>, <code>output</code> (path in the container), <code>format</code> (<code>h264|hevc|av1|prores|webm|png|jpeg|tiff|exr|tga|gif|wav|aiff</code>), <code>start</code>, <code>end</code>, <code>workArea</code>, <code>fps</code>, <code>resolution</code>, <code>quality</code>, <code>channels</code>, <code>jpegQuality</code>, <code>bitrate</code>, <code>prores</code>, <code>audio</code>, <code>profile</code>, <code>level</code>, <code>rateControl</code>, <code>videoQuality</code>, <code>keyint</code>, <code>webmCodec</code>, <code>audioBitrate</code>, <code>opusApp</code>, <code>exrCompression</code>, <code>exrDepth</code>, <code>queue</code> (render the project&#39;s own queue instead). Defaults, ranges and errors are the CLI&#39;s: <code>RenderRequest::to_queue_params</code> sets the same render-queue parameters as the CLI&#39;s flags, and the conformance corpus runs both on the same inputs (T9–T17).</p>
+</div><p>A request that names both fields of a pair is <code>InvalidParams</code>. The usage of <code>render-frame</code> gives each pair as alternatives (<code>[--time S | --frame N] [--max-side PX | --scale K]</code>, <code>apps/<wbr>effectcraft-cli/<wbr>src/<wbr>main.rs:114</code>), though its code lets <code>--frame</code> and <code>--scale</code> win. Every other request answers the frame <code>render-frame</code> writes for the same flags, and a missing comp is <code>NotFound</code> in its words, whatever the format.</p>
+<p><strong><code>RenderRequest</code></strong> (AD3, <code>craftbridge-effects</code>; one field per <code>render</code> flag of the CLI, <code>apps/<wbr>effectcraft-cli/<wbr>src/<wbr>main.rs:888-1037</code>): <code>comp</code>, <code>output</code> (path in the container), <code>format</code> (<code>h264|hevc|av1|prores|webm|png|jpeg|tiff|exr|tga|gif|wav|aiff</code>), <code>start</code>, <code>end</code>, <code>workArea</code>, <code>fps</code>, <code>resolution</code>, <code>quality</code>, <code>channels</code>, <code>jpegQuality</code>, <code>bitrate</code>, <code>prores</code>, <code>audio</code>, <code>profile</code>, <code>level</code>, <code>rateControl</code>, <code>videoQuality</code>, <code>keyint</code>, <code>webmCodec</code>, <code>audioBitrate</code>, <code>opusApp</code>, <code>exrCompression</code>, <code>exrDepth</code>, <code>queue</code> (render the project&#39;s own queue instead). Defaults, ranges and errors are the CLI&#39;s: <code>RenderRequest::to_queue_params</code> sets the same render-queue parameters as the CLI&#39;s flags, and the conformance corpus runs both on the same inputs (T9–T17).</p>
 <p><strong>Error mapping</strong> (<code>craftbridge-core</code>):</p>
 <div class="table-wrap"><table>
 <thead>
@@ -1659,6 +1660,11 @@ impl Engine {
 <td>PD13: plug-in policy</td>
 </tr>
 <tr>
+<td><code>src/<wbr>reference.rs</code></td>
+<td>NEW</td>
+<td>a comp or layer reference read as the command line&#39;s <code>reference</code> reads it (<code>main.rs:293-298</code>), for the methods whose commands read theirs that way (<code>render-frame</code>, <code>props</code>, <code>get</code>, <code>set</code>), so each finds what its command finds for the same words. <code>export</code> and <code>timings</code> hand the engine their <code>comp</code> as given, as <code>render</code> and <code>bench</code> do (<code>main.rs:906-907</code>, <code>:1072-1073</code>): the engine reads a name before digits, and <code>-</code> as a name</td>
+</tr>
+<tr>
 <td><code>src/<wbr>info.rs</code></td>
 <td>NEW</td>
 <td><code>info</code> (AD10): engine version and pin from the generator&#39;s constants (§21), counts, GPU and decoder state</td>
@@ -1671,7 +1677,7 @@ impl Engine {
 <tr>
 <td><code>src/<wbr>requests.rs</code></td>
 <td>NEW</td>
-<td>AD3 <code>RenderRequest</code> and AD4 <code>FrameRequest</code></td>
+<td>AD3 <code>RenderRequest</code> and AD4 <code>FrameRequest</code>, which refuses a request naming both <code>time</code> and <code>frame</code>, or both <code>maxSide</code> and <code>scale</code>, as <code>InvalidParams</code>: the usage of <code>render-frame</code> gives them as alternatives, where its code lets <code>--frame</code> and <code>--scale</code> win (§14)</td>
 </tr>
 <tr>
 <td><code>src/<wbr>runner.rs</code></td>
@@ -1721,7 +1727,7 @@ impl Engine {
 <tbody><tr>
 <td><code>rust/<wbr>core/<wbr>craftbridge-core-ffi</code></td>
 <td>NEW</td>
-<td>the §14 boundary for the core: <code>Engine</code>, <code>Folders</code>, <code>GpuChoice</code>, <code>CraftError</code>, <code>ProgressListener</code>, <code>CancelToken</code>, <code>FrameBytes</code>; <code>src/<wbr>platform/<wbr>ios.rs</code> and <code>src/<wbr>platform/<wbr>android.rs</code></td>
+<td>the §14 boundary for the core: <code>Engine</code>, <code>Folders</code>, <code>GpuChoice</code>, <code>CraftError</code>, <code>ProgressListener</code>, <code>CancelToken</code>, <code>FrameBytes</code>, <code>PixelFormat</code>; <code>src/<wbr>platform/<wbr>ios.rs</code> and <code>src/<wbr>platform/<wbr>android.rs</code></td>
 </tr>
 <tr>
 <td><code>rust/<wbr>effects/<wbr>craftbridge-effects-ffi</code></td>

@@ -160,8 +160,14 @@ pub(crate) fn tool_json(backend: &mut Backend, name: &str, args: &Value) -> Resu
         // None of the tools reached here answers a picture; an answer that is one says the plugin
         // called the wrong tool, which is the plugin's own bug, not the app's error.
         Ok(Reply::Image { .. }) => Err(CraftError::internal(format!("`{name}`: answered a picture where a document was expected"))),
-        Err(error) => Err(map_error(error, &Call { command: name, params: args, step: None })),
+        Err(error) => Err(failure(error, name, args)),
     }
+}
+
+/// Map the failure of one EffectCraft automation call that is no command of a `run`: the tools, and
+/// the calls the plugin makes on the backend itself, such as a frame's render.
+pub(crate) fn failure(error: Error, command: &str, params: &Value) -> CraftError {
+    map_error(error, &Call { command, params, step: None })
 }
 
 /// Map one EffectCraft automation failure onto its row (plan §14).
@@ -175,16 +181,21 @@ fn map_error(error: Error, call: &Call) -> CraftError {
     }
 }
 
-/// Sort a refusal of the automation layer, which in a confined session is the confinement's. It
-/// refuses in three voices: a command or setting it withholds while confined (a helper, a script, a
-/// plug-in installer — capabilities this platform does not have) is `Unsupported`; a file access
-/// outside the roots, or a write with nowhere inside them to go, is `Io`; and a parameter it cannot
-/// check (a path that is not a string, a reference resolved too late, a path not given) is the
-/// caller's to fix, `InvalidParams`, which is also what the layer's own argument refusals are.
+/// Sort a refusal of the automation layer, which in a confined session is mostly the confinement's.
+/// It refuses in four voices: a command or setting it withholds while confined (a helper, a script, a
+/// plug-in installer — capabilities this platform does not have) is `Unsupported`; a comp its render
+/// finds nowhere, or finds none open, is `NotFound`; a file access outside the roots, or a write with
+/// nowhere inside them to go, is `Io`; and a parameter it cannot check (a path that is not a string,
+/// a reference resolved too late, a path not given) is the caller's to fix, `InvalidParams`, which is
+/// also what the layer's own argument refusals are.
 fn map_denial(message: String, call: &Call) -> CraftError {
     let row: fn(String) -> CraftError =
         if message.contains("is not available while file access is confined") || message.contains("can't be changed while file access is confined") {
             CraftError::unsupported
+        } else if is_missing_named(&message) || message.starts_with("no active composition") {
+            // The automation layer's own words for a comp that is not there: a render of a comp
+            // named nowhere, or with none open, is the §14 row of a missing comp.
+            CraftError::not_found
         } else if message.starts_with("cannot ") || message.starts_with("the project has no file yet") {
             CraftError::io
         } else {
@@ -266,7 +277,7 @@ fn named(command: &str, text: &str, step: Option<u32>) -> String {
 
 /// The parameters a method was called with, as an object: absent parameters are an empty object,
 /// anything that is not one is refused with the method named.
-fn object_params<'a>(params: &'a Value, method: &str) -> Result<Cow<'a, Map<String, Value>>> {
+pub(crate) fn object_params<'a>(params: &'a Value, method: &str) -> Result<Cow<'a, Map<String, Value>>> {
     match params {
         Value::Object(obj) => Ok(Cow::Borrowed(obj)),
         Value::Null => Ok(Cow::Owned(Map::new())),
@@ -274,12 +285,12 @@ fn object_params<'a>(params: &'a Value, method: &str) -> Result<Cow<'a, Map<Stri
     }
 }
 
-fn reject_unknown(obj: &Map<String, Value>, method: &str, known: &[&str]) -> Result<()> {
+pub(crate) fn reject_unknown(obj: &Map<String, Value>, method: &str, known: &[&str]) -> Result<()> {
     let unknown: Vec<&str> = obj.keys().filter(|key| !known.contains(&key.as_str())).map(String::as_str).collect();
     if unknown.is_empty() { Ok(()) } else { Err(CraftError::invalid_params(format!("`{method}`: unknown parameter(s) `{}`", unknown.join("`, `")))) }
 }
 
-fn string_param<'a>(obj: &'a Map<String, Value>, key: &str, method: &str) -> Result<Option<&'a str>> {
+pub(crate) fn string_param<'a>(obj: &'a Map<String, Value>, key: &str, method: &str) -> Result<Option<&'a str>> {
     match obj.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(text)) => Ok(Some(text)),
@@ -287,11 +298,19 @@ fn string_param<'a>(obj: &'a Map<String, Value>, key: &str, method: &str) -> Res
     }
 }
 
-fn bool_param(obj: &Map<String, Value>, key: &str, method: &str) -> Result<Option<bool>> {
+pub(crate) fn bool_param(obj: &Map<String, Value>, key: &str, method: &str) -> Result<Option<bool>> {
     match obj.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::Bool(flag)) => Ok(Some(*flag)),
         Some(_) => Err(CraftError::invalid_params(format!("`{method}`: `{key}` must be a bool"))),
+    }
+}
+
+pub(crate) fn number_param(obj: &Map<String, Value>, key: &str, method: &str) -> Result<Option<f64>> {
+    match obj.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Number(number)) => number.as_f64().map(Some).ok_or_else(|| CraftError::invalid_params(format!("`{method}`: `{key}` must be a number"))),
+        Some(_) => Err(CraftError::invalid_params(format!("`{method}`: `{key}` must be a number"))),
     }
 }
 

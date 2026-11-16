@@ -126,7 +126,8 @@ fn answer_queued(inbox: &Receiver<Message>, pending: &mut VecDeque<Message>, inf
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::{Engine, THREAD_NAME, lock};
+    use crate::engine::{Engine, Message, THREAD_NAME, lock};
+    use crate::frames::{FrameBytes, PixelFormat};
     use crate::testing::{DEADLINE, Gate, close_begun, eventually, queue_call, recv};
     use serde_json::json;
     use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
@@ -257,6 +258,11 @@ mod tests {
                 "echo" => Ok(params),
                 other => Err(CraftError::internal(format!("unknown method {other}"))),
             }
+        }
+
+        fn frame(&mut self, params: Value, format: PixelFormat) -> Result<FrameBytes> {
+            self.shared.log(&format!("frame {params}"));
+            FrameBytes::new(1, 1, format, vec![1, 2, 3, 255])
         }
 
         fn request_with_progress(&mut self, method: &str, params: Value, on_progress: &mut dyn FnMut(u64, u64, Option<f64>) -> bool) -> Result<Value> {
@@ -390,6 +396,26 @@ mod tests {
         }
         let ran: Vec<String> = lock(&shared.log).iter().filter(|line| !line.starts_with("info")).cloned().collect();
         assert_eq!(ran, ["export export null", "echo {\"n\":1}", "echo {\"n\":2}", "echo {\"n\":3}"], "the calls ran out of order");
+        engine.close().unwrap();
+    }
+
+    /// A frame asked for during an export waits like every call but `info`: it is not answered
+    /// while the export runs, and it runs after the export ends, ahead of a call made after it
+    /// (plan §13 L3, §17's "a preview during an export waits").
+    #[test]
+    fn a_frame_during_an_export_waits_until_it_ends_then_runs_in_order() {
+        let (engine, shared, _cancel, progress, answers) = started_export();
+        let frame = engine.submit(Message::frame(json!({ "n": 1 }), PixelFormat::Rgba8Straight)).unwrap();
+        let echo = queue_call(&engine, "echo", json!({ "n": 2 }));
+        shared.open(1);
+        assert_eq!(progress.next(), Some((1, POLLS, Some(1.0))), "the export never polled again");
+        assert!(frame.try_recv().is_err(), "a frame was answered during the export");
+        shared.open(POLLS - 1);
+        assert_eq!(recv(&answers), Ok(json!({ "done": POLLS })));
+        assert_eq!(recv(&frame), FrameBytes::new(1, 1, PixelFormat::Rgba8Straight, vec![1, 2, 3, 255]));
+        assert_eq!(recv(&echo), Ok(json!({ "n": 2 })));
+        let ran: Vec<String> = lock(&shared.log).iter().filter(|line| !line.starts_with("info")).cloned().collect();
+        assert_eq!(ran, ["export export null", "frame {\"n\":1}", "echo {\"n\":2}"], "the calls ran out of order");
         engine.close().unwrap();
     }
 

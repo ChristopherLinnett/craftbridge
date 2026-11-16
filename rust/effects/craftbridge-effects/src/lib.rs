@@ -13,7 +13,10 @@
 //! method's line transport and the method table act on one session. The methods the plugin answers
 //! are the plan's §14 rows its one method list names, each with the result shape and failure words
 //! of the EffectCraft command line at the pin (AD10); any other name `request` is given answers
-//! `Unsupported`, naming what was asked and the methods `request` answers.
+//! `Unsupported`, naming what was asked and the methods `request` answers. The binary `frame` is
+//! answered only through [`CraftApp::frame`](craftbridge_core::CraftApp::frame), since pixels cannot
+//! come back through `request`'s JSON; its request is resolved as the command line's `render-frame`
+//! resolves its flags (AD4).
 
 mod app;
 /// What the generator writes, one file to a module under `src/generated/`.
@@ -23,6 +26,8 @@ mod generated {
 mod info;
 mod methods;
 mod plugins;
+mod reference;
+mod requests;
 mod session;
 
 pub use app::EffectCraftApp;

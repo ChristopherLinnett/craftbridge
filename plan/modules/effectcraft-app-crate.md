@@ -13,9 +13,10 @@
 | `src/app.rs` | NEW | `EffectCraftApp`: construction and its confinement (AD9), GPU attach, the method table of §14 |
 | `src/methods.rs` | NEW | one function per method, each calling the upstream function named in §14's table, the one mapping of EffectCraft's failures onto §14's rows (AD10), and the model downloads withheld at the door (AD11) |
 | `src/plugins.rs` | NEW | PD13: plug-in policy |
+| `src/reference.rs` | NEW | a comp or layer reference read as the command line's `reference` reads it (`main.rs:293-298`), for the methods whose commands read theirs that way (`render-frame`, `props`, `get`, `set`), so each finds what its command finds for the same words. `export` and `timings` hand the engine their `comp` as given, as `render` and `bench` do (`main.rs:906-907`, `:1072-1073`): the engine reads a name before digits, and `-` as a name |
 | `src/info.rs` | NEW | `info` (AD10): engine version and pin from the generator's constants (§21), counts, GPU and decoder state |
 | `src/session.rs` | NEW | AD1: the session from EffectCraft's public fields with the app's folders, its exporter set from the one function AD7's exporter replaces; AD2: the phone's fonts, and the font-list filter every app-facing call answers through |
-| `src/requests.rs` | NEW | AD3 `RenderRequest` and AD4 `FrameRequest` |
+| `src/requests.rs` | NEW | AD3 `RenderRequest` and AD4 `FrameRequest`, which refuses a request naming both `time` and `frame`, or both `maxSide` and `scale`, as `InvalidParams`: the usage of `render-frame` gives them as alternatives, where its code lets `--frame` and `--scale` win (§14) |
 | `src/runner.rs` | NEW | AD3: the render runner; AD5: the template runner |
 | `src/timings.rs` | NEW | AD6 |
 | `src/exporter.rs` | NEW | AD7: CraftBridge's exporter |

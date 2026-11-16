@@ -6,6 +6,7 @@ use crate::app::CraftApp;
 use crate::cancel::CancelToken;
 use crate::error::CraftError;
 use crate::export::{self, ExportCall};
+use crate::frames::{FrameBytes, PixelFormat};
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::panic::{self, AssertUnwindSafe};
@@ -34,6 +35,7 @@ const PAYLOAD_PANICKED: &str = "a caught panic's payload panicked as it was drop
 /// export mechanism needs travels as one item and the export's own file owns it.
 pub(crate) enum Message {
     Request { method: String, params: Value, answer: Sender<Result<Value>> },
+    Frame { params: Value, format: PixelFormat, answer: Sender<Result<FrameBytes>> },
     Export { call: ExportCall },
     Close,
 }
@@ -43,6 +45,11 @@ impl Message {
     pub(crate) fn request(method: &str, params: Value) -> impl FnOnce(Sender<Result<Value>>) -> Message {
         let method = method.to_string();
         move |answer| Message::Request { method, params, answer }
+    }
+
+    /// A frame call, built once the engine gives it the channel its answer goes back on.
+    pub(crate) fn frame(params: Value, format: PixelFormat) -> impl FnOnce(Sender<Result<FrameBytes>>) -> Message {
+        move |answer| Message::Frame { params, format, answer }
     }
 }
 
@@ -121,11 +128,21 @@ impl Engine {
         answer_of(self.submit(ExportCall::message(method, params, on_progress, cancel))?)
     }
 
+    /// Render one frame as `format` and wait for the engine's answer (plan §14, §16). It is the
+    /// call of a frame, which binary pixels need because `request`'s JSON cannot carry them: it
+    /// waits its turn as any call does, runs on the app's [`CraftApp::frame`], and so waits behind
+    /// an export in the order it was made (plan §13, L3). A panic inside the app is answered as
+    /// [`CraftError::Internal`] and the session stays, and a call made from inside one of this
+    /// engine's own calls is refused with `Internal` at once, as [`Engine::request`] does.
+    pub fn frame(&self, params: Value, format: PixelFormat) -> Result<FrameBytes> {
+        answer_of(self.submit(Message::frame(params, format))?)
+    }
+
     /// Hand one call to the engine thread and take the channel its answer comes back on: the one
     /// way every call reaches the engine. A call from inside one of this engine's own calls is
     /// refused with `Internal` at once rather than waiting for itself, and one after close is
     /// refused without waiting for the engine.
-    pub(crate) fn submit(&self, message: impl FnOnce(Sender<Result<Value>>) -> Message) -> Result<Receiver<Result<Value>>> {
+    pub(crate) fn submit<T>(&self, message: impl FnOnce(Sender<Result<T>>) -> Message) -> Result<Receiver<Result<T>>> {
         if self.on_engine_thread() {
             return Err(CraftError::internal(REENTERED));
         }
@@ -213,7 +230,7 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// closed` and never answered as though it ran, so a write that never happened cannot read as done.
 /// This send fails when the engine had already stopped; [`answer_of`] fails when a close ran ahead
 /// of the call in the queue and the engine dropped it unrun.
-fn hand_over(inbox: &Sender<Message>, message: impl FnOnce(Sender<Result<Value>>) -> Message) -> Result<Receiver<Result<Value>>> {
+fn hand_over<T>(inbox: &Sender<Message>, message: impl FnOnce(Sender<Result<T>>) -> Message) -> Result<Receiver<Result<T>>> {
     let (answer, waiting) = mpsc::channel();
     inbox.send(message(answer)).map_err(|_| closed())?;
     Ok(waiting)
@@ -221,7 +238,7 @@ fn hand_over(inbox: &Sender<Message>, message: impl FnOnce(Sender<Result<Value>>
 
 /// Wait for the answer to a call [`hand_over`] handed over; a call the engine dropped unrun is
 /// refused with `engine is closed`.
-fn answer_of(waiting: Receiver<Result<Value>>) -> Result<Value> {
+fn answer_of<T>(waiting: Receiver<Result<T>>) -> Result<T> {
     waiting.recv().map_err(|_| closed())?
 }
 
@@ -238,13 +255,8 @@ fn run(mut app: Box<dyn CraftApp>, incoming: Receiver<Message>, closing: CancelT
     while let Some(message) = next_message(&mut pending, &incoming) {
         match message {
             Message::Close => break,
-            Message::Request { method, params, answer } => {
-                let answered = guarded(|| app.request(&method, params)).flatten();
-                // The caller may already have gone (a UI that stopped waiting); losing the answer is
-                // not an error for the engine — the call still ran, in order, and the next call is
-                // answered normally.
-                let _ = answer.send(answered);
-            }
+            Message::Request { method, params, answer } => answer_call(&answer, || app.request(&method, params)),
+            Message::Frame { params, format, answer } => answer_call(&answer, || app.frame(params, format)),
             Message::Export { call } => export::run_export(&mut *app, call, export::EngineSide { inbox: &incoming, pending: &mut pending, closing: &closing }),
         }
     }
@@ -256,6 +268,14 @@ fn run(mut app: Box<dyn CraftApp>, incoming: Receiver<Message>, closing: CancelT
     // The session's drop is app code too, so it runs behind the same guard as a call: a panic there
     // is the close's answer rather than a thread that died outside its guard.
     guarded(move || drop(app))
+}
+
+/// Run one call of the app behind the never-crash guard and send what it answered, or the panic it
+/// ended in, back to its caller. The caller may already have gone (a UI that stopped waiting);
+/// losing the answer is not an error for the engine — the call still ran, in order, and the next
+/// call is answered normally.
+fn answer_call<T>(answer: &Sender<Result<T>>, call: impl FnOnce() -> Result<T>) {
+    let _ = answer.send(guarded(call).flatten());
 }
 
 /// The message to run next: one kept waiting during an export first, in the order it arrived, and
@@ -298,6 +318,13 @@ mod tests {
     use serde_json::json;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, OnceLock, Weak};
+
+    /// The straight-RGBA frame the fake app renders for `params`: one pixel whose bytes are the
+    /// call's `v`, so a frame that came back crossed with another call's shows in its bytes.
+    fn pixel_of(params: &Value) -> Vec<u8> {
+        let v = params.get("v").and_then(Value::as_u64).unwrap_or_default();
+        vec![u8::try_from(v).unwrap_or(u8::MAX), 0, 0, 255]
+    }
 
     /// The fake app the runtime is proven on: it keeps a session (a value, plus a log of the calls
     /// it ran in the order it ran them, which is the engine's ordering made visible), and it can be
@@ -392,6 +419,17 @@ mod tests {
                 other => Err(CraftError::internal(format!("unknown method {other}"))),
             }
         }
+
+        fn frame(&mut self, params: Value, format: PixelFormat) -> Result<FrameBytes> {
+            self.log.push(format!("frame {params}"));
+            match params.get("how").and_then(Value::as_str) {
+                Some("panic") => panic!("boom in frame"),
+                Some("reenter") => self.own_engine()?.frame(params, format),
+                // A buffer that is not the size it names: the core's own check refuses it.
+                Some("short") => FrameBytes::new(2, 2, format, pixel_of(&params)),
+                _ => FrameBytes::new(1, 1, format, pixel_of(&params)),
+            }
+        }
     }
 
     impl Drop for FakeApp {
@@ -414,6 +452,27 @@ mod tests {
     /// One plain call through a sender a caller already holds, as [`Engine::request`] makes it.
     fn call_on(inbox: &Sender<Message>, method: &str, params: Value) -> Result<Value> {
         hand_over(inbox, Message::request(method, params)).and_then(answer_of)
+    }
+
+    /// An engine whose fake app can call its own engine, which the tests of a call made from inside a
+    /// call need.
+    fn self_aware_engine() -> (Arc<Engine>, Arc<Shared>) {
+        let (app, shared) = FakeApp::new();
+        let engine = Arc::new(Engine::start(app).unwrap());
+        assert!(shared.engine.set(Arc::downgrade(&engine)).is_ok());
+        (engine, shared)
+    }
+
+    /// One call made to `engine` from a thread of its own, with a deadline on the answer, so an engine
+    /// waiting for itself fails the test instead of hanging the suite.
+    fn from_another_thread<T: Send + 'static>(
+        engine: &Arc<Engine>,
+        call: impl FnOnce(&Engine) -> Result<T> + Send + 'static,
+    ) -> Result<Result<T>, mpsc::RecvTimeoutError> {
+        let (answering, answered) = mpsc::channel();
+        let calling = engine.clone();
+        thread::spawn(move || answering.send(call(&calling)));
+        answered.recv_timeout(DEADLINE)
     }
 
     /// Make the engine busy: a `wait` call that has reached the app and stays there until the test
@@ -500,6 +559,82 @@ mod tests {
         let echoes = (0..5).map(|n| format!("echo {}", json!({ "n": n })));
         let expected: Vec<String> = std::iter::once("wait null".to_string()).chain(echoes).chain(std::iter::once("log null".to_string())).collect();
         assert_eq!(call(&engine, "log").unwrap(), json!(expected));
+    }
+
+    /// A frame is a call like any other: it runs on the engine thread in the order the calls were
+    /// made, behind a call still running, and each caller gets the frame its own call rendered
+    /// (plan §16, L1), in the format it asked for.
+    #[test]
+    fn frames_run_on_the_engine_thread_in_call_order_each_answered_with_its_own() {
+        let (app, shared) = FakeApp::new();
+        let engine = Arc::new(Engine::start(app).unwrap());
+        let blocked = busy(&engine, &shared);
+        let waiting: Vec<_> = (1..=3_u8).map(|n| engine.submit(Message::frame(json!({ "v": n }), PixelFormat::Rgba8Straight)).unwrap()).collect();
+        let echo = queue_call(&engine, "echo", json!({ "after": true }));
+        assert!(waiting.iter().all(|answer| answer.try_recv().is_err()), "a frame was answered while the engine was inside the running call");
+        shared.released.open();
+        assert_eq!(blocked.join().unwrap(), Ok(Value::Null));
+        for (n, answer) in (1..=3_u8).zip(&waiting) {
+            assert_eq!(recv(answer), FrameBytes::new(1, 1, PixelFormat::Rgba8Straight, vec![n, 0, 0, 255]), "frame {n} was answered as another call's");
+        }
+        assert_eq!(recv(&echo), Ok(json!({ "after": true })));
+        let log = call(&engine, "log").unwrap();
+        assert_eq!(log, json!(["wait null", "frame {\"v\":1}", "frame {\"v\":2}", "frame {\"v\":3}", "echo {\"after\":true}", "log null"]));
+        engine.close().unwrap();
+    }
+
+    /// The format the caller asked for reaches the app and shapes what comes back, through the one
+    /// `FrameBytes::new` the app calls: premultiplied BGRA for the format that asks for it.
+    #[test]
+    fn a_frame_is_answered_in_the_format_it_was_asked_in() {
+        let (app, _shared) = FakeApp::new();
+        let engine = Engine::start(app).unwrap();
+        let straight = engine.frame(json!({ "v": 200 }), PixelFormat::Rgba8Straight).unwrap();
+        assert_eq!((straight.width, straight.height, straight.format, straight.data), (1, 1, PixelFormat::Rgba8Straight, vec![200, 0, 0, 255]));
+        let bgra = engine.frame(json!({ "v": 200 }), PixelFormat::Bgra8Premultiplied).unwrap();
+        assert_eq!((bgra.format, bgra.data), (PixelFormat::Bgra8Premultiplied, vec![0, 0, 200, 255]));
+        engine.close().unwrap();
+    }
+
+    /// A failure of the app's frame is the call's answer and the session goes on: the core's size
+    /// check of the bytes, a panic as `Internal` with the document kept (plan §14, §16).
+    #[test]
+    fn a_failed_frame_is_answered_and_the_session_stays() {
+        let (app, _shared) = FakeApp::new();
+        let engine = Engine::start(app).unwrap();
+        engine.request("value_set", json!({ "v": 5 })).unwrap();
+        let refused = engine.frame(json!({ "how": "short" }), PixelFormat::Rgba8Straight).unwrap_err();
+        assert_eq!(refused.to_string(), "frame 2x2 needs 16 raw bytes (width x height x 4), the buffer holds 4");
+        assert_eq!(engine.frame(json!({ "how": "panic" }), PixelFormat::Png), Err(CraftError::Internal { message: "boom in frame".to_string() }));
+        assert_eq!(call(&engine, "value_get").unwrap(), Value::from(5));
+        assert!(engine.frame(json!({ "v": 1 }), PixelFormat::Png).is_ok(), "the engine stopped answering frames after a failed one");
+        engine.close().unwrap();
+    }
+
+    /// An app that keeps the trait's default has no frames: `Unsupported`, and the engine serves on.
+    #[test]
+    fn an_app_without_frames_answers_unsupported_and_keeps_serving() {
+        struct PlainApp;
+        impl CraftApp for PlainApp {
+            fn request(&mut self, _method: &str, params: Value) -> Result<Value> {
+                Ok(params)
+            }
+        }
+        let engine = Engine::start(PlainApp).unwrap();
+        assert_eq!(engine.frame(Value::Null, PixelFormat::Png), Err(CraftError::unsupported("this app renders no frames")));
+        assert_eq!(engine.request("echo", json!({ "n": 1 })), Ok(json!({ "n": 1 })));
+        engine.close().unwrap();
+    }
+
+    /// A frame after close is refused as every call is, and one made from inside one of the engine's
+    /// own calls is refused at once rather than waiting for itself.
+    #[test]
+    fn a_frame_after_close_or_from_inside_a_call_is_refused() {
+        let (engine, _) = self_aware_engine();
+        let reentered = from_another_thread(&engine, |engine| engine.frame(json!({ "how": "reenter" }), PixelFormat::Png));
+        assert_eq!(reentered.map(|answer| answer.map(|_| ())), Ok(Err(CraftError::Internal { message: REENTERED.to_string() })));
+        engine.close().unwrap();
+        assert_eq!(engine.frame(json!({ "v": 1 }), PixelFormat::Png), Err(closed()));
     }
 
     /// A panic inside the app becomes `Internal` — carrying the panic's message — and the session is
@@ -674,15 +809,8 @@ mod tests {
     /// thread; a close from outside then joins it.
     #[test]
     fn calls_from_inside_the_engines_own_calls_are_refused_and_never_wait() {
-        let (app, shared) = FakeApp::new();
-        let engine = Arc::new(Engine::start(app).unwrap());
-        assert!(shared.engine.set(Arc::downgrade(&engine)).is_ok());
-        // From another thread with a deadline, so an engine waiting for itself fails the test
-        // instead of hanging the suite.
-        let (answering, answered) = mpsc::channel();
-        let reentering = engine.clone();
-        thread::spawn(move || answering.send(reentering.request("reenter", Value::Null)));
-        let reentered = answered.recv_timeout(DEADLINE);
+        let (engine, shared) = self_aware_engine();
+        let reentered = from_another_thread(&engine, |engine| engine.request("reenter", Value::Null));
         assert_eq!(reentered, Ok(Err(CraftError::Internal { message: REENTERED.to_string() })));
         assert_eq!(call(&engine, "close_self"), Ok(Value::Null));
         assert_eq!(call(&engine, "echo"), Err(closed()));
@@ -694,13 +822,9 @@ mod tests {
     /// the export would wait behind the call that made it, which waits behind it.
     #[test]
     fn an_export_call_from_inside_the_engines_own_calls_is_refused() {
-        let (app, shared) = FakeApp::new();
-        let engine = Arc::new(Engine::start(app).unwrap());
-        assert!(shared.engine.set(Arc::downgrade(&engine)).is_ok());
-        let (answering, answered) = mpsc::channel();
-        let reentering = engine.clone();
-        thread::spawn(move || answering.send(reentering.request("reenter_progress", Value::Null)));
-        assert_eq!(answered.recv_timeout(DEADLINE), Ok(Err(CraftError::Internal { message: REENTERED.to_string() })));
+        let (engine, _) = self_aware_engine();
+        let reentered = from_another_thread(&engine, |engine| engine.request("reenter_progress", Value::Null));
+        assert_eq!(reentered, Ok(Err(CraftError::Internal { message: REENTERED.to_string() })));
         engine.close().unwrap();
     }
 
