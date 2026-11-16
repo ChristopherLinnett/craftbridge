@@ -19,7 +19,20 @@
 //! which is a comment, a string or a regex literal; the symbol information says which declaration a name
 //! refers to; the document symbols say what a declaration is and how far it reaches. A verdict on one use is
 //! the builds' answers merged: a build that reads it as the host's condemns it, a build that reads it as one
-//! of ours clears it, and no answer is no clearance. On that reading:
+//! of ours clears it, and no answer is no clearance.
+//!
+//! Neither the tools nor the stage may read less than the package, and both tools' own answers guard that.
+//! Before the server for a build starts, SwiftPM itself builds and prepares the package for indexing for
+//! that build, through the same pinned tools, into the scratch the server prepares its modules against:
+//! a prepare-for-indexing plan lists a binary target's staged library as an input to every module that
+//! links it but never stages that copy itself, so a package with a binary target would fail that
+//! preparation and every module importing the binary would read against a missing or stale prepared
+//! module. A preparation that fails fails the stage, naming the build and carrying SwiftPM's own answer,
+//! and so does a file the server still cannot read, as the diagnostics it reports for the file say. Nor may
+//! the server answer with less than it read: each of its own timeouts, past which it answers with what it
+//! has, is set beyond the stage's waits, each question the stage asks has a deadline of its own however much
+//! the server says meanwhile, and the manifest is opened only once the package has settled. A check that
+//! silently reads less than the package passes code it never read. On that reading:
 //!
 //! * outside test code, a use of a banned call (`fatalError`, `exit`, `.unsafelyUnwrapped`, …) fails unless
 //!   every declaration it refers to is one of this repository's files: a module qualifier, backticks or the
@@ -50,7 +63,7 @@ use std::process::{Child, ChildStdin, Command, ExitCode, Stdio};
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// How long one language-server question may take before the check calls the server broken.
 const ANSWER_WAIT: Duration = Duration::from_secs(120);
@@ -59,6 +72,12 @@ const ANSWER_WAIT: Duration = Duration::from_secs(120);
 /// question: a cold machine compiles the SDK's modules for the build's destination first, and that is
 /// minutes, not seconds. A silence beyond this is none.
 const SETTLE_WAIT: Duration = Duration::from_secs(900);
+
+/// Past every wait of the check's own: what each of the server's own timeouts is set to. SourceKit-LSP answers
+/// a request that outlives one of them with what it has — a file's syntax without its semantics, no build
+/// targets, an index cut short — and calls that an answer, which a check would read as the file. Set past the
+/// check's waits, a stall ends as the check's own failure instead, naming what it asked.
+const SERVER_PATIENCE: Duration = Duration::from_secs(SETTLE_WAIT.as_secs() * 2);
 
 const PACKAGE: &str = "ios/sdk";
 const MANIFEST: &str = "ios/sdk/Package.swift";
@@ -216,20 +235,30 @@ fn check(root: &Path) -> Result<Vec<String>, String> {
     let mut banned: BTreeMap<(String, usize, usize), (String, Vec<Referral>)> = BTreeMap::new();
     let mut pointers: BTreeMap<(String, usize, usize), (String, Vec<Use>)> = BTreeMap::new();
     for build in Build::all(&canonical, &package)? {
+        prepare_for_index(&package, &build)?;
         let mut server = LanguageServer::start(&package, build)?;
         server.modules.clone_from(&modules);
         let mut read: Vec<(&str, String)> = Vec::new();
-        for (file, text) in files.iter().zip(&texts) {
-            let path = canonical.join(file);
-            let uri = uri_of(&path);
-            server.ours.insert(path);
-            server.open(&uri, text)?;
-            read.push((file.as_str(), uri));
+        // The files a target compiles are opened, and the package settles on them, before the rest: the
+        // manifest above all. Opened while the server is still loading a package that links a binary target
+        // with C headers, the manifest stalls the server's semantic service, which then answers every file
+        // with its syntax alone, and a type name read that way is no name the checks resolve.
+        let (built, unbuilt): (Vec<_>, Vec<_>) = files.iter().zip(&texts).partition(|(file, _)| compiled.contains(file.as_str()));
+        for opened in [built, unbuilt] {
+            for (file, text) in opened {
+                let path = canonical.join(file);
+                let uri = uri_of(&path);
+                server.ours.insert(path);
+                server.open(&uri, text)?;
+                read.push((file.as_str(), uri));
+            }
+            server.settle()?;
         }
-        server.settle()?;
+        let mut prepared: Vec<(&str, String)> = Vec::new();
         for (file, uri) in &read {
             if compiled.contains(*file) {
                 server.require_build_settings(uri, file)?;
+                prepared.push((*file, uri.clone()));
             }
         }
         let members = server.pointer_alias_names(&read);
@@ -250,6 +279,7 @@ fn check(root: &Path) -> Result<Vec<String>, String> {
                 }
             }
         }
+        server.refuse_unread_reads(&prepared)?;
         server.shutdown();
     }
     for ((file, line, column), (name, referrals)) in &banned {
@@ -719,30 +749,123 @@ impl Build {
     /// was read with. The `-sdk` flags come last so they are the last word whatever the environment (an
     /// `SDKROOT` that `xcrun` exports, say) makes SwiftPM name first.
     fn options(&self) -> Value {
-        let swift = vec![
-            Value::from("-sdk"),
-            Value::from(self.sdk.as_str()),
-            Value::from("-Xcc"),
-            Value::from("-isysroot"),
-            Value::from("-Xcc"),
-            Value::from(self.sdk.as_str()),
-        ];
+        let patience = SERVER_PATIENCE.as_secs();
         object([
             ("defaultWorkspaceType", Value::from("swiftPM")),
             ("backgroundIndexing", Value::from(true)),
             ("buildSettingsTimeout", Value::from(SETTLE_WAIT.as_millis() as u64)),
+            ("sourcekitdRequestTimeout", Value::from(patience)),
+            ("semanticServiceRestartTimeout", Value::from(patience)),
+            ("buildServerWorkspaceRequestsTimeout", Value::from(patience)),
+            ("index", object([("updateIndexStoreTimeout", Value::from(patience))])),
             ("experimentalFeatures", Value::from(vec!["sourcekit-options-request"])),
             (
                 "swiftPM",
                 object([
                     ("triple", Value::from(self.triple.as_str())),
                     ("configuration", Value::from(self.configuration)),
-                    ("swiftCompilerFlags", Value::from(swift)),
-                    ("cCompilerFlags", Value::from(vec![Value::from("-isysroot"), Value::from(self.sdk.as_str())])),
+                    ("scratchPath", Value::from(INDEX_SCRATCH)),
+                    ("swiftCompilerFlags", Value::from(self.swift_sdk_flags().to_vec())),
+                    ("cCompilerFlags", Value::from(self.c_sdk_flags().to_vec())),
                 ]),
             ),
         ])
     }
+
+    /// The Swift compiler's flags that point it, and its C importer, at this build's SDK.
+    fn swift_sdk_flags(&self) -> [&str; 6] {
+        ["-sdk", self.sdk.as_str(), "-Xcc", "-isysroot", "-Xcc", self.sdk.as_str()]
+    }
+
+    /// The C compiler's flag that points it at this build's SDK.
+    fn c_sdk_flags(&self) -> [&str; 2] {
+        ["-isysroot", self.sdk.as_str()]
+    }
+}
+
+/// The scratch path, relative to the package, that SwiftPM prepares the package into for the index: the
+/// check's own builds below write it, and the server is told it as `swiftPM.scratchPath`, so its preparation
+/// and its analysis read the very modules those builds made.
+const INDEX_SCRATCH: &str = ".build/index-build";
+
+/// Build what the language server's index preparation needs, through the same pinned tools, before its
+/// server starts for one build: SwiftPM's own package build, then the package prepared for indexing, for
+/// the same destination and configuration, into the scratch the server prepares against.
+///
+/// A prepare-for-indexing plan lists a binary target's staged library as an input to every module that
+/// links it, but a build prepared for indexing never stages that copy itself, so with a binary target in
+/// the package a preparation from an empty scratch fails on the missing library, the server's own
+/// preparation fails the same way, and every module that imports the binary reads against a missing or
+/// stale prepared module and loses its findings. Building the package itself first stages what the
+/// preparation lacks, so the preparation — this one and the server's — succeeds. SwiftPM's own answers
+/// are the verdict: a nonzero exit status fails the stage, naming the build and carrying what SwiftPM
+/// itself said, the module it could not build or the dependency it could not resolve; the stage never
+/// carries on past a package it could not build for the index to read.
+fn prepare_for_index(package: &Path, build: &Build) -> Result<(), String> {
+    let scratch = package.join(INDEX_SCRATCH);
+    for preparation in [false, true] {
+        let output = swift_pm_build(package, &scratch, build, preparation)?;
+        if let Some(failure) = preparation_failure(build, preparation, output.status.code(), &build_output(&output)) {
+            return Err(failure);
+        }
+    }
+    Ok(())
+}
+
+/// Run one of the two SwiftPM builds the index needs, with the destination, configuration and SDK
+/// arguments the server compiles with, so one build plan serves the server's own preparation as well.
+fn swift_pm_build(package: &Path, scratch: &Path, build: &Build, preparation: bool) -> Result<std::process::Output, String> {
+    let mut command = Command::new("xcrun");
+    command.current_dir(package).args(["swift", "build", "--scratch-path"]).arg(scratch).args([
+        "--disable-index-store",
+        "-c",
+        build.configuration,
+        "--triple",
+        build.triple.as_str(),
+    ]);
+    for flag in build.swift_sdk_flags() {
+        command.args(["-Xswiftc", flag]);
+    }
+    for flag in build.c_sdk_flags() {
+        command.args(["-Xcc", flag]);
+    }
+    if preparation {
+        command.arg("--experimental-prepare-for-indexing");
+    }
+    command.output().map_err(|error| format!("cannot run SwiftPM to prepare the {} build for the index: {error}", build.label))
+}
+
+/// The stage's verdict on one preparation build: no verdict while SwiftPM's own exit status is zero, and
+/// a failure naming the build and what was asked of it, carrying SwiftPM's own output — which is what
+/// names the module that could not be built. Only the tool's own exit status decides; no spelling of a
+/// message is matched on.
+fn preparation_failure(build: &Build, preparation: bool, status: Option<i32>, output: &str) -> Option<String> {
+    (status != Some(0)).then(|| {
+        format!(
+            "{}: SwiftPM could not {} (exit status {}); every module must be read against a prepared build, SwiftPM's own answer: {}",
+            build.label,
+            if preparation { "prepare the package for indexing" } else { "build the package to stage what indexing needs" },
+            status.map(|code| code.to_string()).unwrap_or_else(|| "killed by a signal".to_string()),
+            tail(output.trim(), 4000),
+        )
+    })
+}
+
+/// The last characters of a build's own output, which is where its verdict sits: the whole of a short one,
+/// the tail of a long one, so a failure carries what the tool said without drowning the report.
+fn tail(text: &str, limit: usize) -> String {
+    let length = text.chars().count();
+    if length <= limit {
+        return text.to_string();
+    }
+    format!("…{}", text.chars().skip(length.saturating_sub(limit)).collect::<String>())
+}
+
+/// What SwiftPM answered with, both of its streams, so nothing it said is lost.
+fn build_output(output: &std::process::Output) -> String {
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    text
 }
 
 /// A language server over its JSON-RPC pipe. One server answers every question of one build's reading, with
@@ -808,6 +931,9 @@ impl LanguageServer {
                 "textDocument",
                 object([
                     ("definition", object([("linkSupport", Value::from(false))])),
+                    // Diagnostics are asked for, so each file's are an answer the check waits for, never a
+                    // notification that may not have come yet; the server registers the request for itself.
+                    ("diagnostic", object([("dynamicRegistration", Value::from(true))])),
                     ("documentSymbol", object([("hierarchicalDocumentSymbolSupport", Value::from(true))])),
                     (
                         "semanticTokens",
@@ -884,6 +1010,23 @@ impl LanguageServer {
                 "{file}: the language server reads it without the {} build's settings, so its answers would not be the build's",
                 self.build.label
             ));
+        }
+        Ok(())
+    }
+
+    /// Fail on a compiled file this build could not read against the package, on the server's own answer:
+    /// the diagnostics it reports for the file when asked. SwiftPM's preparation built every module before the
+    /// server started, so a file the server still cannot read — one that errors on a missing module, say —
+    /// means its reading is not backed by that prepared build, and the stage may not carry on past it.
+    fn refuse_unread_reads(&mut self, read: &[(&str, String)]) -> Result<(), String> {
+        for (file, uri) in read {
+            let report = self.request("textDocument/diagnostic", object([("textDocument", object([("uri", Value::from(uri.as_str()))]))]), ANSWER_WAIT)?;
+            if let Some(diagnostic) = unread_read(&report) {
+                return Err(format!(
+                    "{file}: the language server cannot read this file as the {} build compiles it, so the checks would read less than the file; the server's own diagnostic: {diagnostic}",
+                    self.build.label
+                ));
+            }
         }
         Ok(())
     }
@@ -1078,33 +1221,8 @@ impl LanguageServer {
         self.next_id += 1;
         let id = self.next_id;
         self.send(&object([("jsonrpc", Value::from("2.0")), ("id", Value::from(id)), ("method", Value::from(method)), ("params", params)]))?;
-        loop {
-            let message = self.messages.recv_timeout(wait).map_err(|error| match error {
-                mpsc::RecvTimeoutError::Timeout => format!(
-                    "the language server gave no answer to the `{method}` request within {} seconds: a check cannot read a verdict from a silent analyser",
-                    wait.as_secs()
-                ),
-                mpsc::RecvTimeoutError::Disconnected => {
-                    format!("the language server closed its output before it answered the `{method}` request: a check cannot read a verdict from an analyser that is gone")
-                }
-            })?;
-            if message.get("method").is_some() {
-                if let Some(asked) = message.get("id") {
-                    self.send(&object([("jsonrpc", Value::from("2.0")), ("id", asked.clone()), ("result", Value::Null)]))?;
-                }
-                continue;
-            }
-            if message.get("id").and_then(Value::as_u64) != Some(id) {
-                continue;
-            }
-            if let Some(error) = message.get("error") {
-                return Err(format!(
-                    "the language server refused the `{method}` request: {}",
-                    error.get("message").and_then(Value::as_str).unwrap_or("no message")
-                ));
-            }
-            return Ok(message.get("result").cloned().unwrap_or(Value::Null));
-        }
+        let stdin = &mut self.stdin;
+        await_answer(&self.messages, id, method, wait, &mut |reply| send_message(stdin, reply))
     }
 
     fn notify(&mut self, method: &str, params: Value) -> Result<(), String> {
@@ -1112,11 +1230,7 @@ impl LanguageServer {
     }
 
     fn send(&mut self, message: &Value) -> Result<(), String> {
-        let body = message.to_string();
-        self.stdin
-            .write_all(format!("Content-Length: {}\r\n\r\n{body}", body.len()).as_bytes())
-            .map_err(|error| format!("cannot write to the language server: {error}"))?;
-        self.stdin.flush().map_err(|error| format!("cannot flush the language server's stdin: {error}"))
+        send_message(&mut self.stdin, message)
     }
 }
 
@@ -1172,6 +1286,71 @@ fn reads_the_build(arguments: &[&str], build: &Build) -> bool {
 fn defines(arguments: &[&str], flag: &str) -> bool {
     let joined = format!("-D{flag}");
     arguments.iter().any(|argument| *argument == joined) || arguments.windows(2).any(|pair| pair.first() == Some(&"-D") && pair.get(1) == Some(&flag))
+}
+
+/// What the server said it could not read in a file, from the diagnostic report it answered with: the message
+/// of any error-severity diagnostic (LSP's severity 1), which is how a missing or stale prepared module reaches
+/// the stage — the server's own answer names the module it cannot find. A report with no diagnostics list is
+/// no reading of the file at all, so it fails too; a warning is no failure, since the server read the file.
+fn unread_read(report: &Value) -> Option<String> {
+    let Some(diagnostics) = report.get("items").and_then(Value::as_array) else {
+        return Some("it reported no diagnostics for the file".to_string());
+    };
+    diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.get("severity").and_then(Value::as_u64) == Some(1))
+        .map(|diagnostic| diagnostic.get("message").and_then(Value::as_str).unwrap_or("an error it gave no message for").to_string())
+}
+
+/// Wait for the answer to request `id`, until `wait` has passed since it was asked. A request the server sends
+/// meanwhile (a progress token, a capability it registers) is answered at once through `reply`, so the server
+/// never waits on the check while the check waits on it, and a notification is passed over. The deadline is
+/// the request's, not the last message's: a server that keeps reporting progress on a request it never
+/// answers must not keep the check waiting forever.
+fn await_answer(
+    messages: &Receiver<Value>,
+    id: u64,
+    method: &str,
+    wait: Duration,
+    reply: &mut dyn FnMut(&Value) -> Result<(), String>,
+) -> Result<Value, String> {
+    let deadline = Instant::now() + wait;
+    loop {
+        let message = messages.recv_timeout(deadline.saturating_duration_since(Instant::now())).map_err(|error| match error {
+            mpsc::RecvTimeoutError::Timeout => format!(
+                "the language server gave no answer to the `{method}` request within {} seconds: a check cannot read a verdict from a silent analyser",
+                wait.as_secs()
+            ),
+            mpsc::RecvTimeoutError::Disconnected => {
+                format!("the language server closed its output before it answered the `{method}` request: a check cannot read a verdict from an analyser that is gone")
+            }
+        })?;
+        if message.get("method").is_some() {
+            if let Some(asked) = message.get("id") {
+                reply(&object([("jsonrpc", Value::from("2.0")), ("id", asked.clone()), ("result", Value::Null)]))?;
+            }
+            continue;
+        }
+        if message.get("id").and_then(Value::as_u64) != Some(id) {
+            continue;
+        }
+        if let Some(error) = message.get("error") {
+            return Err(format!(
+                "the language server refused the `{method}` request: {}",
+                error.get("message").and_then(Value::as_str).unwrap_or("no message")
+            ));
+        }
+        return Ok(message.get("result").cloned().unwrap_or(Value::Null));
+    }
+}
+
+/// One JSON-RPC message onto the server's stdin, framed as the protocol frames it.
+fn send_message(stdin: &mut impl Write, message: &Value) -> Result<(), String> {
+    let body = message.to_string();
+    stdin
+        .write_all(format!("Content-Length: {}\r\n\r\n{body}", body.len()).as_bytes())
+        .map_err(|error| format!("cannot write to the language server: {error}"))?;
+    stdin.flush().map_err(|error| format!("cannot flush the language server's stdin: {error}"))
 }
 
 /// One JSON-RPC message from the server's stdout, or `None` once the pipe closes or stops making sense.
@@ -1600,5 +1779,137 @@ mod tests {
         assert_eq!(read_message(&mut reader), Some(json!({"id": 1, "result": null})));
         assert_eq!(read_message(&mut reader), Some(json!({})));
         assert_eq!(read_message(&mut reader), None);
+    }
+
+    fn preparation_build() -> Build {
+        Build { label: "debug iOS device".into(), configuration: "debug", sdk: "/sdk/iphoneos".into(), triple: "arm64-apple-ios17.0".into() }
+    }
+
+    #[test]
+    fn a_preparation_that_succeeds_is_no_failure() {
+        // What the pinned SwiftPM answers when the index scratch is staged and its modules prepare.
+        assert_eq!(preparation_failure(&preparation_build(), true, Some(0), "Build complete! (10.41s)"), None);
+    }
+
+    #[test]
+    fn a_preparation_that_cannot_build_fails_naming_the_module_swiftpm_named() {
+        // Captured verbatim from the pinned SwiftPM 6.3.3 (Xcode 26.6) preparing a package whose binary
+        // target had not been staged into the index scratch: a prepare-for-indexing build lists the
+        // binary's library as an input but stages nothing, so it fails where the stage must not carry on.
+        let captured = "error: couldn't build /private/tmp/b1-ops9s/pkg/.build/index-build/arm64-apple-ios/debug/Modules/CraftBridgeEffects.swiftmodule because of missing inputs: /private/tmp/b1-ops9s/pkg/.build/index-build/arm64-apple-ios/debug/libB1Bin.a";
+        let failure = preparation_failure(&preparation_build(), true, Some(1), captured).expect("a preparation that exits nonzero fails the stage");
+        assert!(failure.contains("debug iOS device"), "the failure names the build: {failure}");
+        assert!(failure.contains("CraftBridgeEffects.swiftmodule"), "the failure carries the module SwiftPM could not build: {failure}");
+        // The same answer from the staging build fails too: the stage reads SwiftPM's exit status, not a
+        // spelling of one step's message.
+        assert!(preparation_failure(&preparation_build(), false, Some(1), captured).is_some());
+    }
+
+    #[test]
+    fn a_preparation_killed_counts_as_a_failure() {
+        assert!(preparation_failure(&preparation_build(), true, None, "").is_some(), "a build the system killed read no module");
+    }
+
+    #[test]
+    fn a_failure_carries_the_tools_own_answer_whole_when_it_is_short() {
+        assert_eq!(tail("the tool said it", 4000), "the tool said it");
+        assert_eq!(tail("", 4000), "", "an output that said nothing is carried whole");
+        // The limit counts characters, not bytes, and one at exactly the limit is still whole.
+        let exact = "x".repeat(100);
+        assert_eq!(tail(&exact, 100), exact, "exactly the limit is no cut");
+        assert_eq!(tail(&"é".repeat(100), 100), "é".repeat(100), "the limit counts characters, not bytes");
+        // One past the limit is the first cut, and the cut eats from the front: what is kept is the end,
+        // where the tool's verdict sits. Text whose halves differ says the cut kept the right one.
+        assert_eq!(tail(&format!("{exact}y"), 100), format!("…{}y", "x".repeat(99)), "one character past the limit keeps its last and drops its first");
+        assert_eq!(tail(&format!("{}verdict", "h".repeat(500)), 7), "…verdict", "a long answer keeps its end");
+    }
+
+    #[test]
+    fn a_file_the_server_cannot_read_fails_naming_the_module_the_server_named() {
+        // The diagnostic the pinned SourceKit-LSP (sourcekit-lsp 6.3.3) gives a file whose module's
+        // preparation had failed, while `workspace/synchronize` itself answered success: the server's own
+        // reading of the file is where a missing prepared module shows up. Asked for, it comes as a full report.
+        let report = json!({"kind": "full", "items": [{"severity": 1, "source": "SourceKit", "message": "No such module 'CraftBridge'",
+            "range": {"start": {"character": 7, "line": 1}, "end": {"character": 7, "line": 1}}, "tags": []}]});
+        assert_eq!(unread_read(&report).as_deref(), Some("No such module 'CraftBridge'"));
+        assert_eq!(unread_read(&json!({"kind": "full", "items": []})), None, "a clean report is no failure");
+        assert_eq!(
+            unread_read(&json!({"kind": "full", "items": [{"severity": 2, "message": "a warning"}]})),
+            None,
+            "a warning is not what the server cannot read"
+        );
+        assert!(unread_read(&Value::Null).is_some(), "no report is no reading of the file");
+        assert!(unread_read(&json!({"kind": "unchanged", "resultId": "1"})).is_some(), "a report with no diagnostics read nothing the check asked for");
+    }
+
+    #[test]
+    fn a_question_has_its_own_deadline_however_much_the_server_says_meanwhile() {
+        // A server that reports progress every few milliseconds and never answers: the question must still
+        // fail once its own wait is up, not wait on for as long as the server keeps talking.
+        let (sender, messages) = mpsc::channel();
+        let talker = thread::spawn(move || {
+            for _ in 0..300 {
+                if sender.send(json!({"jsonrpc": "2.0", "method": "window/logMessage", "params": {"type": 3, "message": "Indexing"}})).is_err() {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        });
+        let asked = Instant::now();
+        let answer = await_answer(&messages, 7, "textDocument/semanticTokens/full", Duration::from_millis(300), &mut |_| Ok(()));
+        let waited = asked.elapsed();
+        drop(messages);
+        let _ = talker.join();
+        assert!(answer.is_err_and(|error| error.contains("gave no answer to the `textDocument/semanticTokens/full` request")));
+        assert!(waited < Duration::from_secs(2), "the question waited {waited:?}, past its own deadline, while the server talked on");
+    }
+
+    #[test]
+    fn a_question_answers_what_the_server_asks_and_reads_its_own_answer() {
+        let (sender, messages) = mpsc::channel();
+        for message in [
+            json!({"jsonrpc": "2.0", "id": 1, "method": "client/registerCapability", "params": {}}),
+            json!({"jsonrpc": "2.0", "id": 6, "result": "another question's"}),
+            json!({"jsonrpc": "2.0", "id": 7, "result": {"data": [1]}}),
+        ] {
+            sender.send(message).unwrap();
+        }
+        let mut replies = Vec::new();
+        let answer = await_answer(&messages, 7, "textDocument/semanticTokens/full", Duration::from_secs(5), &mut |reply| {
+            replies.push(reply.clone());
+            Ok(())
+        });
+        assert_eq!(answer, Ok(json!({"data": [1]})));
+        assert_eq!(replies, [json!({"jsonrpc": "2.0", "id": 1, "result": null})], "the server's own request is answered at once");
+        sender.send(json!({"jsonrpc": "2.0", "id": 8, "error": {"message": "no such document"}})).unwrap();
+        assert_eq!(
+            await_answer(&messages, 8, "textDocument/diagnostic", Duration::from_secs(5), &mut |_| Ok(())),
+            Err("the language server refused the `textDocument/diagnostic` request: no such document".to_string())
+        );
+    }
+
+    #[test]
+    fn the_server_waits_longer_than_the_check_and_prepares_where_the_check_builds() {
+        // Every timeout of the server's own outlasts the check's waits, so a stall ends as the check's failure
+        // rather than as an answer with less in it; and the server is told the scratch the check's own builds
+        // write, so it reads the modules they made.
+        let options = preparation_build().options();
+        let patience = SERVER_PATIENCE.as_secs();
+        assert!(patience > SETTLE_WAIT.as_secs() && patience > ANSWER_WAIT.as_secs());
+        for timeout in ["/sourcekitdRequestTimeout", "/semanticServiceRestartTimeout", "/buildServerWorkspaceRequestsTimeout", "/index/updateIndexStoreTimeout"]
+        {
+            assert_eq!(options.pointer(timeout).and_then(Value::as_u64), Some(patience), "{timeout} is the check's to set");
+        }
+        assert_eq!(options.pointer("/swiftPM/scratchPath").and_then(Value::as_str), Some(INDEX_SCRATCH));
+        assert_eq!(options.pointer("/swiftPM/swiftCompilerFlags"), Some(&json!(["-sdk", "/sdk/iphoneos", "-Xcc", "-isysroot", "-Xcc", "/sdk/iphoneos"])));
+        assert_eq!(options.pointer("/swiftPM/cCompilerFlags"), Some(&json!(["-isysroot", "/sdk/iphoneos"])));
+        // This one timeout is milliseconds where the others are seconds: written in the wrong unit, or set
+        // shorter than the check's own wait, the server answers a file with no build settings — a degraded
+        // read that looks like an answer — before the check has stopped waiting for the package to settle.
+        assert_eq!(
+            options.pointer("/buildSettingsTimeout").and_then(Value::as_u64),
+            Some(SETTLE_WAIT.as_millis() as u64),
+            "the server waits for a file's build settings as long as the check waits for the package"
+        );
     }
 }
