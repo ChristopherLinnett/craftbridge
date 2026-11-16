@@ -24,12 +24,13 @@ id = "AD1"
 crate = "craftbridge-effects"
 file = "src/session.rs"
 implements = "FX-1a"
-summary = "Builds CraftBridge's own Session from EffectCraft's public fields: models and plug-ins folders from the app's Folders, EffectCraft's MediaPool, an importer over effectcraft_media::probe, CraftBridge's exporter (AD7), effectcraft_expr's expressions and syntax check, the plug-in loader and no helper hooks; then effectcraft_script::install."
+summary = "Builds CraftBridge's own Session from EffectCraft's public fields: models and plug-ins folders from the app's Folders, EffectCraft's MediaPool, an importer over effectcraft_media::probe, CraftBridge's exporter (AD7), effectcraft_expr's expressions and syntax check, the plug-in loader and previewer when the app names a plug-in folder and the platform carries WebAssembly, no helper hooks, and a plain note that the session renders on the CPU; then effectcraft_script::install."
 replaces = "effectcraft_host::session(), which takes its folders from EFFECTCRAFT_CONFIG_DIR or the desktop conventions and starts external helpers — folders and helpers a phone has neither of (crates/host/src/lib.rs:96-147)."
 depends = [
   "Session (crates/engine/src/lib.rs:104-269)",
   "effectcraft_media::probe (crates/media/src/probe.rs:17)",
   "effectcraft_script::install (crates/script/src/lib.rs:78)",
+  "the headless renderer note the command line sets (apps/effectcraft-cli/src/main.rs:492)",
 ]
 
 [[adaptation]]
@@ -51,9 +52,9 @@ depends = [
 [[adaptation]]
 id = "AD3"
 crate = "craftbridge-effects"
-file = "src/requests.rs and src/runner.rs"
-implements = "FX-1c"
-summary = "RenderRequest — one field per render flag of EffectCraft's CLI, mapped to the render-queue parameters with the CLI's names, defaults and errors — and the render runner: unqueue the project's other items, add this one, render without waiting, poll every 100 ms, report progress, stop on cancel, report failed items."
+file = "src/methods.rs, src/requests.rs and src/runner.rs"
+implements = "FX-1a (the failed-item report of exec and run), FX-1c"
+summary = "RenderRequest — one field per render flag of EffectCraft's CLI, mapped to the render-queue parameters with the CLI's names, defaults and errors — and the render runner: unqueue the project's other items, add this one, render without waiting, poll every 100 ms, report progress, stop on cancel, report failed items. FX-1a lands the failed-item report itself, in src/methods.rs: exec and run answer a renderQueue.render that succeeds with failed items as a failure, in the CLI's joined `comp: reason` words."
 replaces = "the CLI's flag handling and its queue-and-wait loop, which live in its binary (apps/effectcraft-cli/src/main.rs:860-1037)."
 depends = [
   "the renderQueue.add and renderQueue.render commands (crates/engine/src/cmd/render_queue.rs)",
@@ -97,9 +98,9 @@ depends = [
 [[adaptation]]
 id = "AD7"
 crate = "craftbridge-effects"
-file = "src/exporter.rs"
-implements = "FX-1g, MED-3"
-summary = "CraftBridge's exporter, set as Session.exporter: hands each job to EffectCraft's FileExporter inside a thread pool sized from half the memory the phone reports available at 16 bytes a pixel, between one and the core count; from wave 6 it also encodes H.264 and HEVC in hardware through craftbridge-media (plan §18)."
+file = "src/session.rs and src/exporter.rs"
+implements = "FX-1a (the seam), FX-1g, MED-3"
+summary = "CraftBridge's exporter, set as Session.exporter: hands each job to EffectCraft's FileExporter inside a thread pool sized from half the memory the phone reports available at 16 bytes a pixel, between one and the core count; from wave 6 it also encodes H.264 and HEVC in hardware through craftbridge-media (plan §18). FX-1a lands the seam only — Session.exporter is set from one function that hands out EffectCraft's own FileExporter today and the pool when FX-1g writes src/exporter.rs."
 replaces = "FileExporter alone, whose free-memory figure is empty on iOS and Android because sysinfo::memory() has no branch for either (crates/host/src/lib.rs:91-94, crates/engine/src/system/sysinfo.rs:142-168), which leaves frames in flight bounded only by the thread count (crates/export/src/pipeline.rs:140-149, :171-176)."
 depends = [
   "Exporter, ExportJob (crates/engine/src/render_queue.rs:93-113, :22-46)",
@@ -127,4 +128,52 @@ depends = [
   "FilmCraft's own hardware factories' decline rule, which the factory follows: with the switch off, or a configuration record that does not parse, they answer None uncounted, and a decoder that cannot start answers None and counts the decline (crates/platform/src/lib.rs:196-209, :215-228, :234-247, :252-268). hw::HwStats's doc also lists the switch being Off among the counted declines (crates/codecs/src/hw.rs:55-56); no factory has counted it since the first, and note_hw_declined counts a stream a factory is responsible for (:87-88), so CraftBridge follows the code",
   "the GOP decode loop, which moves past a sample only once it decoded and feeds it again after an error (crates/codecs/src/gop.rs:778-779)",
   "HybridDecoder's replay bounds and replay-output cap, restart points, fallback, replay and merge (crates/platform/src/hybrid.rs:19-21, :24-26, :70-94, :105-113, :124-190, :200-202)",
+]
+
+[[adaptation]]
+id = "AD9"
+crate = "craftbridge-effects"
+file = "src/app.rs"
+implements = "FX-1a"
+summary = "Confinement that is never optional: the Backend is built headless on the AD1 session and confined before its first command — read roots the container and, when the app names one, the bundle; write root the container alone — so every path the engine reads, writes or renders must pass EffectCraft's own confinement check, and no caller of the library can leave the app's folders open. The app answers through effectcraft_automation::McpServer over this backend."
+replaces = "the CLI's opt-in --automation-read-root/--automation-write-root flags, which only its mcp subcommand wires up and which a library session has no command line to be given (apps/effectcraft-cli/src/main.rs:827-831)."
+depends = [
+  "Backend::headless and Backend::confine (crates/automation/src/backend.rs:33, :45)",
+  "confine::Confinement::new and the checks Backend::exec makes with it before each command, check_command and check_lookup (crates/automation/src/confine.rs:177, :284, :392)",
+  "McpServer::new and McpServer::backend (crates/automation/src/server.rs:32, :58)",
+]
+
+[[adaptation]]
+id = "AD10"
+crate = "craftbridge-effects"
+file = "src/methods.rs and src/info.rs"
+implements = "FX-1a"
+summary = "The answer table: info beside get_project's document, commands as list_commands, exec as one command's result and run as the list of {command, result}, each in the command line's shapes; every automation and engine error is mapped onto one CraftError row — a command or setting the confinement withholds and a capability the build lacks answer Unsupported; a file access outside the confinement, or a write with nowhere inside it to go, answers Io; an unknown command, an unknown parameter and a parameter the confinement cannot check answer InvalidParams; a missing comp, item, layer or property answers NotFound, in each of the engine's phrasings; everything else answers CommandFailed, a refusal one command passes on from another it ran as the failure of the command that was run; and every failed step of a run names its step, in CommandFailed's step and in the words of every other row, as the CLI's run words it."
+replaces = "the CLI's info, exec and run printing (apps/effectcraft-cli/src/main.rs:630-745); a library has no process to print, so the plugin re-speaks those documents and errors through CraftError."
+depends = [
+  "effectcraft_automation::Error and what each variant displays (crates/automation/src/lib.rs:33)",
+  "EngineError and what each variant displays (crates/engine/src/error.rs:2)",
+  "ProjectError (crates/project/src/settings.rs:83)",
+  "check_params (crates/engine/src/cmd/schema.rs:107), command_specs and find_command (crates/engine/src/cmd.rs:175, :281)",
+  "tools::run and Reply (crates/automation/src/tools.rs:111, :11)",
+  "the refusals the confinement answers in, from Confinement::check, check_command and check_lookup (crates/automation/src/confine.rs:190-423)",
+  "every sentence of the engine's that ends `not available in this build`, as a refusal, as a command's own and as why a command is disabled (crates/engine/src/cmd/effect.rs:39, :91, :223, :236, crates/engine/src/cmd/file_more.rs:606, :1080, crates/engine/src/cmd/proxy.rs:44, crates/engine/src/cmd/relink.rs:84, crates/engine/src/cmd/panels_cmds.rs:33, :58, crates/engine/src/cmd/render_queue.rs:34, :846, crates/engine/src/cmd/file.rs:321, crates/engine/src/cmd/timeline.rs:121, :123, crates/engine/src/footage/footage_reload.rs:258, crates/engine/src/footage/sequence.rs:270, crates/engine/src/render_queue.rs:597, crates/engine/src/background/offload.rs:476, crates/engine/src/system/library.rs:459, :760, :871, :926, crates/engine/src/scriptui.rs:749, :811, crates/engine/src/session/dispatch.rs:21)",
+  "the sentences a missing comp, layer, item or property is refused in — the missing thing alone or followed by the reference it names: `no layer 9` as a command's own refusal and as a plain one, `no such layer`, `no such item`, `no item `name``, `no property `path`` — told from the sentences that open alike about something else, `no layers`, `no layer uses motion blur`, `no compatible unlocked property` (crates/engine/src/cmd/params.rs:138, :160, crates/engine/src/cmd/rig3d.rs:70, crates/engine/src/cmd/footage_panel.rs:151, crates/engine/src/cmd/layer/timing.rs:220)",
+  "engine.batch, which answers a failed step as its own failure rather than passing the step's on (crates/engine/src/cmd/batch.rs:114)",
+  "APP_VERSION, which info reports as the command line reports its own version, the workspace version both share (crates/project/src/settings.rs:13)",
+]
+
+[[adaptation]]
+id = "AD11"
+crate = "craftbridge-effects"
+file = "src/methods.rs"
+implements = "FX-1a"
+summary = "The model downloads start no process: the engine fetches the official weights by starting the system's curl, which is why its own specs mark roto.model.download and face.model.download desktop-only; the phone has no curl to start and the session starts no process, so every way a call reaches either id answers Unsupported before the engine sees the call — as its own command, as one step of a run, and as a step of an engine.batch, whose step ids the plugin reads as the engine reads them (command, else id, never a $N), one level deep because the engine runs no steps of a batch inside a batch; installing weights from a file inside the container — roto.model.install and face.model.install, which the confinement already routes as file reads — stays open as the phone's way to get weights."
+replaces = "nothing in the command line: the CLI runs both downloads with the system's curl, which it has; the refusal is the phone's own, taken in the shape of the confinement's per-command refusal."
+depends = [
+  "download, its curl spawn and the two command specs the engine marks desktop-only (crates/engine/src/analysis/models.rs:639, :655, :714-718, :743-747)",
+  "the batch step's id read — command, else id — the $N substitution applied only to parameters, and the refusal of a batch inside a batch before any of its steps run (crates/engine/src/cmd/batch.rs:14, :77-85)",
+  "the per-command refusal of the confinement, whose wording this mirrors (crates/automation/src/confine.rs:285-286)",
+  "file.runScript, which runs the steps of a command script it reads from a file itself and which the confinement withholds as a command that runs scripts, so those steps never reach the engine (crates/engine/src/cmd/file_more.rs:515-549, crates/engine/src/cmd/scripts.rs:34-35)",
+  "the download's only callers being its two command specs: no other command runs it (crates/engine/src/analysis/models.rs:720, :749)",
 ]
