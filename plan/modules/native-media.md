@@ -9,16 +9,17 @@
 
 | File | Change | What |
 |---|---|---|
-| `Cargo.toml` | NEW | the workspace lints, which deny `unsafe_code` and `clippy::undocumented_unsafe_blocks` (the rule `filmcraft-platform` uses, filmcraft `filmcraft: crates/platform/Cargo.toml:9-13` @ `d5ead4ba`); `filmcraft-codecs` and `filmcraft-isobmff` at EffectCraft's FilmCraft revision; `objc2-video-toolbox`, `objc2-core-video`, `objc2-core-media`, `objc2-core-foundation` 0.3.2 on iOS; `ndk` 0.9 (`media` feature) on Android |
+| `Cargo.toml` | NEW | the workspace lints, which deny `unsafe_code` and `clippy::undocumented_unsafe_blocks` (the rule `filmcraft-platform` uses, filmcraft `filmcraft: crates/platform/Cargo.toml:9-13` @ `d5ead4ba`); `filmcraft-codecs`, `filmcraft-color`, `filmcraft-frame` and `filmcraft-isobmff` at EffectCraft's FilmCraft revision (`filmcraft-color` and `filmcraft-frame` for the colour and frames a decoder returns); `objc2-video-toolbox`, `objc2-core-video`, `objc2-core-media`, `objc2-core-foundation` 0.3.2 on iOS; `ndk` 0.9 (`media` feature) on Android |
 | `src/lib.rs` | NEW | `register(on: bool) -> Availability`: `filmcraft_codecs::register_video_decoder(factory)` (filmcraft `crates/codecs/src/lib.rs:99-104`) and `filmcraft_codecs::hw::set_hardware_decoding(on)` (`crates/codecs/src/hw.rs:25-32`) |
 | `src/fallback.rs` | NEW | `Fallback<D>` (AD8): a `VideoDecoder` that wraps a hardware decoder, keeps the samples since the last random-access point (the one before it after an HEVC CRA), and on a hardware error or an in-band parameter change switches to `filmcraft_codecs::software_video_decoder(entry)` (`crates/codecs/src/lib.rs:124-131`) and replays them, as FilmCraft's `HybridDecoder` does on the desktop (`crates/platform/src/hybrid.rs`) |
 | `src/platform/videotoolbox.rs` | NEW (iOS; `lib.rs` declares `#[allow(unsafe_code)] mod platform`) | `VTDecompressionSession` decoder for `avcC`, `hvcC` and, where `VTIsHardwareDecodeSupported('av01')`, `av1C` streams; CVPixelBuffer (8-bit and 10-bit 4:2:0 biplanar) → `DecodedFrame` |
+| `src/biplanar.rs`, `src/layout.rs`, `src/order.rs` | NEW (iOS, and every target's tests) | the safe code the VideoToolbox decoder reads, so host tests cover it: a biplanar surface's planes into the software decoder's frame, every row checked to lie in its plane before anything is allocated; the streams taken and the surface format asked for; presentation order and the RASL pictures a run leaves out |
 | `src/platform/mediacodec.rs` | NEW (Android; the same platform module) | `AMediaCodec` decoder fed `csd-0`/`csd-1` from the sample entry, decoding into an `AImageReader` (`YUV_420_888`, API 24) so vendor-tiled output formats never reach CraftBridge; planes → `DecodedFrame` |
 
 **Behaviour.**
 1. At engine start the core calls `register(true)` once per process (L8 allows turning it off later).
 2. When EffectCraft opens a movie, `filmcraft_codecs::make_video_decoder` asks the registered factories first (`crates/codecs/src/lib.rs:112-120`).
-3. The CraftBridge factory parses the stream with `filmcraft_codecs::hw::NalStreamInfo::from_entry` (`crates/codecs/src/hw.rs:235`) and asks the platform for a **hardware** decoder: `VTIsHardwareDecodeSupported` on iOS; on Android, a decoder whose name does not start with `c2.android.` or `OMX.google.` (the platform's software codecs).
+3. The CraftBridge factory parses the stream with `filmcraft_codecs::hw::NalStreamInfo::from_entry` (`crates/codecs/src/hw.rs:235`), or `FrameStreamInfo::from_entry` for an `av1C` one (`crates/codecs/src/hw_frame.rs:141`), and asks the platform for a **hardware** decoder: on iOS `VTIsHardwareDecodeSupported`, then a `VTDecompressionSession` that requires hardware; on Android, a decoder whose name does not start with `c2.android.` or `OMX.google.` (the platform's software codecs).
 4. With one, it returns `Fallback<VtDecoder>` or `Fallback<McDecoder>`; without one, or when one cannot start, it returns `None` and FilmCraft's software decoder takes the stream: FilmCraft opens a stream with the first factory that answers, so the factory never answers an error (`crates/codecs/src/lib.rs:112-120`). That decline path ran in the iOS Simulator, which has no hardware decoder, with a byte-identical result (`evidence/03-device-feasibility.md` Finding 14).
 5. Frames are converted into the same `DecodedFrame` layout the software decoder produces for that stream (filmcraft `crates/codecs/src/video.rs:19-55`), so EffectCraft's pipeline sees no difference.
 
@@ -26,10 +27,10 @@
 
 **States.**
 - *Hardware*: `info.hardwareDecoding = "VideoToolbox"` or `"MediaCodec"`.
-- *Declined*: no hardware decoder for this stream (simulator, a 4:2:2 or 10-bit profile the device lacks, AV1 on older devices); the software decoder decodes it.
+- *Declined*: no hardware decoder for this stream (the simulator, a profile the device lacks, AV1 on older devices), or a stream the hardware decoders here do not take (anything but progressive 4:2:0 at 8 or 10 bits, VP9); the software decoder decodes it.
 - *Failed mid-stream*: the wrapper switches to software and replays from the last random-access sample.
 - *Off*: the app turned hardware decoding off.
 
 **Edge cases.** A stream whose decoded frames differ between hardware and software would show as a conformance failure (T23); H.264 and HEVC decoding is exact by specification, and EffectCraft's own desktop test of VideoToolbox decoding measured bit-exact output (storytold/effectcraft#819). Seeking to a non-random-access sample: `Fallback` resets the hardware session and feeds from the previous random-access sample, as the software path does.
 
-**Tests.** Unit: `Fallback` switching on an injected error. Device (V2, V3): T23 decodes the running example's footage on hardware and compares every frame with the software decoder's.
+**Tests.** Unit: `Fallback` switching on an injected error; the surface conversion on known planes (8-bit and 10-bit, odd sizes, crops, planes too short); in the iOS Simulator, the decline through the registry, byte-identical to the software decoder. Device (V2, V3): T23 decodes the running example's footage on hardware and compares every frame with the software decoder's.

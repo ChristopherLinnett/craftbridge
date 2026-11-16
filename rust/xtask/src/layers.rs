@@ -49,7 +49,8 @@ pub(crate) struct Entry {
     pub(crate) build: bool,
     /// The Craft apps' crates a core crate may use. The core knows nothing about any Craft app, with one
     /// exception the plan makes: CraftBridge's decoders register into FilmCraft's decoder registry, the
-    /// one EffectCraft decodes through, so the core's media crate reads FilmCraft's codecs and container.
+    /// one EffectCraft decodes through, so the core's media crate reads FilmCraft's codecs and container, and the
+    /// frame and colour types its decoders return.
     pub(crate) upstream: &'static [&'static str],
 }
 
@@ -68,7 +69,7 @@ pub(crate) const ENTRIES: &[Entry] = &[
         distribution: false,
         platform: true,
         build: false,
-        upstream: &["filmcraft-codecs", "filmcraft-isobmff"],
+        upstream: &["filmcraft-codecs", "filmcraft-color", "filmcraft-frame", "filmcraft-isobmff"],
     },
     Entry { name: "craftbridge-core", kind: Kind::Core, rank: 1, ffi: false, distribution: false, platform: true, build: false, upstream: &[] },
     Entry { name: "craftbridge-core-ffi", kind: Kind::Core, rank: 2, ffi: true, distribution: false, platform: true, build: false, upstream: &[] },
@@ -933,10 +934,15 @@ mod tests {
         let core_upstream = check_crate(&input("craftbridge-core", "core/craftbridge-core", vec![external("effectcraft-host")], Vec::new()));
         assert!(core_upstream.iter().any(|e| e.contains("knows nothing about any Craft app")), "{core_upstream:?}");
         // FilmCraft's decoder registry is where the core's decoders register, so the media crate reads it.
-        let media =
-            check_crate(&input("craftbridge-media", "core/craftbridge-media", vec![external("filmcraft-codecs"), external("filmcraft-isobmff")], Vec::new()));
+        let media = check_crate(&input(
+            "craftbridge-media",
+            "core/craftbridge-media",
+            vec![external("filmcraft-codecs"), external("filmcraft-color"), external("filmcraft-frame"), external("filmcraft-isobmff")],
+            Vec::new(),
+        ));
         assert!(media.is_empty(), "{media:?}");
         assert!(!check_crate(&input("craftbridge-media", "core/craftbridge-media", vec![external("filmcraft-media")], Vec::new())).is_empty());
+        assert!(!check_crate(&input("craftbridge-core", "core/craftbridge-core", vec![external("filmcraft-frame")], Vec::new())).is_empty());
         assert!(!check_crate(&input("craftbridge-core", "core/craftbridge-core", vec![external("filmcraft-codecs")], Vec::new())).is_empty());
         assert!(!check_crate(&input("craftbridge-core", "core/craftbridge-core", vec![external("effectcraft")], Vec::new())).is_empty());
         assert!(check_crate(&input("craftbridge-core", "core/craftbridge-core", vec![external("craft-docpath"), external("serde")], Vec::new())).is_empty());
