@@ -9,7 +9,11 @@
 //! JSON messages through `cargo xtask compiled`, which prints the diagnostics as cargo would and then reads
 //! the dep-info of each such unit cargo built: a file there that is not a `.rs` file inside the crate's own folder, found
 //! by the walk every rule uses (or the lint configuration clippy records beside them), fails the stage,
-//! naming the file and the crate. That reaches code behind
+//! naming the file and the crate. A unit's dep-info is the one rustc wrote beside the file it built, under
+//! the crate's name and the hash cargo gives the unit. A file a message names under its target's bare name
+//! is cargo's copy of that file, an uplift, and the `.d` beside a copy is cargo's own, which lists every
+//! local crate the unit links and is written only for what a command names, so a warm folder keeps an
+//! earlier build's: a copy is traced by file identity to the file rustc wrote. That reaches code behind
 //! a feature, a target or a profile exactly where the stage compiles it, and refuses `include_str!` and
 //! `include_bytes!` of any other file too: nothing here needs data the rules cannot see.
 
@@ -74,18 +78,102 @@ pub(crate) fn read_messages(input: impl BufRead) -> Result<Vec<Artifact>, String
     Ok(artifacts)
 }
 
-/// The dep-info file rustc wrote for a unit, found from one of the files it built: `libname-HASH.rmeta`
-/// and `name-HASH` have `name-HASH.d` beside them, an uplifted `name` has `name.d`.
-fn dep_info_for(filename: &Path) -> Option<PathBuf> {
-    let dir = filename.parent()?;
-    let name = filename.file_name()?.to_str()?;
-    let stem =
-        ["rmeta", "rlib", "a", "so", "dylib", "dll", "lib", "exe"].iter().find_map(|extension| name.strip_suffix(&format!(".{extension}"))).unwrap_or(name);
-    let mut candidates = vec![dir.join(format!("{stem}.d"))];
-    if let Some(bare) = stem.strip_prefix("lib") {
-        candidates.push(dir.join(format!("{bare}.d")));
+/// The dep-info files rustc wrote for the unit a `compiler-artifact` message reports. A file the message
+/// names under rustc's own name for the unit has rustc's dep-info beside it. Any other is cargo's copy of
+/// one — a binary, an example, a build script or what a command named, copied out under the target's bare
+/// name — and nothing beside a copy is read: the unit's dep-info is beside the file rustc wrote that the
+/// copy is. Cargo's messages never name that file, so it is looked for where rustc writes: beside the
+/// copy, as a build script's sits, in the `deps` folder beside the copy, and in every `deps` folder the
+/// stream's units sit in, with the `examples` folder beside it, which is where rustc writes when
+/// `build.build-dir` keeps the build apart from the folder the copies go to.
+fn dep_infos_of(artifact: &Artifact, rustc_folders: &BTreeSet<PathBuf>) -> Vec<PathBuf> {
+    let crate_name = artifact.target_name.replace('-', "_");
+    let files = || artifact.filenames.iter().map(Path::new);
+    if let Some(dep_info) = files().find_map(|file| rustc_dep_info(file, &crate_name)) {
+        return vec![dep_info];
     }
-    candidates.into_iter().find(|candidate| candidate.is_file())
+    files().map(|copy| copied_from(copy, &crate_name, rustc_folders)).find(|found| !found.is_empty()).unwrap_or_default()
+}
+
+/// The folders rustc wrote this stream's units into, as cargo's messages show them: each `deps` folder a
+/// reported file sits in, and the `examples` folder cargo keeps beside it for the examples rustc builds.
+fn rustc_folders(artifacts: &[Artifact]) -> BTreeSet<PathBuf> {
+    let deps = artifacts.iter().flat_map(|artifact| &artifact.filenames).filter_map(|file| Path::new(file).parent()).filter(|dir| dir.ends_with("deps"));
+    deps.flat_map(|dir| [dir.to_path_buf(), dir.with_file_name("examples")]).collect()
+}
+
+/// The dep-info rustc wrote beside `file`, when `file` carries the name rustc gives a unit of `crate_name`:
+/// the crate's name (after `lib` for a library), then the `-C extra-filename` cargo passes, a `-` and the
+/// unit's sixteen-digit hash, then at most one extension. rustc names the dep-info after the crate and that
+/// same suffix, `<crate>-<hash>.d`, so a crate whose name begins with this one's does not reach it. A
+/// local dylib or cdylib carries no hash, and only in `deps`, where cargo copies nothing to, is such a
+/// bare name rustc's: anywhere else it is cargo's copy, and so it is in a profile folder named `deps`,
+/// which holds the `examples` folder cargo makes in every profile folder.
+fn rustc_dep_info(file: &Path, crate_name: &str) -> Option<PathBuf> {
+    let dir = file.parent()?;
+    let name = file.file_name()?.to_str()?;
+    ["", "lib"].into_iter().find_map(|prefix| {
+        let (extra, extension) = name.strip_prefix(prefix)?.strip_prefix(crate_name).map(|rest| rest.split_once('.').unwrap_or((rest, "")))?;
+        let hashed = extra.strip_prefix('-').is_some_and(|hash| hash.len() == 16 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        let bare_in_deps = || extra.is_empty() && dir.ends_with("deps") && !dir.join("examples").exists();
+        let dep_info = dir.join(format!("{crate_name}{extra}.d"));
+        ((hashed || bare_in_deps()) && !extension.contains('.') && dep_info.is_file()).then_some(dep_info)
+    })
+}
+
+/// The dep-info of the file rustc wrote for `crate_name` that `copy` is a copy of. Cargo hard-links where it
+/// can, so the file that is `copy` by inode is the one. On macOS it copies instead, which APFS makes a
+/// clone, keeping the bytes but not the inode, so failing an inode each file with `copy`'s bytes answers;
+/// and two builds of a unit whose hashes differ only in what never reaches the binary, such as a lint level
+/// in `RUSTFLAGS`, can leave byte-identical files, so every one of them is judged rather than one picked
+/// by its name.
+fn copied_from(copy: &Path, crate_name: &str, rustc_folders: &BTreeSet<PathBuf>) -> Vec<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(copied) = copy.metadata() else { return Vec::new() };
+    let mut folders = rustc_folders.clone();
+    if let Some(dir) = copy.parent() {
+        folders.extend([dir.to_path_buf(), dir.join("deps")]);
+    }
+    let candidates: Vec<(PathBuf, PathBuf, std::fs::Metadata)> = folders
+        .iter()
+        .filter_map(|folder| std::fs::read_dir(folder).ok())
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let dep_info = rustc_dep_info(&path, crate_name)?;
+            let metadata = path.metadata().ok().filter(|metadata| metadata.len() == copied.len())?;
+            Some((path, dep_info, metadata))
+        })
+        .collect();
+    if let Some((_, dep_info, _)) = candidates.iter().find(|(_, _, metadata)| metadata.ino() == copied.ino() && metadata.dev() == copied.dev()) {
+        return vec![dep_info.clone()];
+    }
+    let twins: BTreeSet<PathBuf> =
+        candidates.into_iter().filter(|(path, _, _)| same_bytes(copy, path).unwrap_or(false)).map(|(_, dep_info, _)| dep_info).collect();
+    twins.into_iter().collect()
+}
+
+/// Do two files hold the same bytes? Read a chunk of each at a time, so a binary of hundreds of megabytes
+/// is never held whole; `take` fills each chunk through short reads, so they cannot make two identical files
+/// look unlike.
+fn same_bytes(path: &Path, other: &Path) -> std::io::Result<bool> {
+    use std::io::Read;
+    const CHUNK: u64 = 1 << 20;
+    let (mut first, mut second) = (std::fs::File::open(path)?, std::fs::File::open(other)?);
+    let (mut first_chunk, mut second_chunk) = (Vec::new(), Vec::new());
+    loop {
+        first_chunk.clear();
+        second_chunk.clear();
+        let read = (&mut first).take(CHUNK).read_to_end(&mut first_chunk)?;
+        (&mut second).take(CHUNK).read_to_end(&mut second_chunk)?;
+        if first_chunk != second_chunk {
+            return Ok(false);
+        }
+        if read == 0 {
+            return Ok(true);
+        }
+    }
 }
 
 /// Every file a dep-info file names as read: the dependencies of each rule, and the phony rule rustc writes
@@ -178,16 +266,16 @@ fn errors(root: &Path, rust_dir: &Path, artifacts: &[Artifact]) -> Result<Vec<St
             members.insert(package.id.clone(), (package, workspace_dir.clone()));
         }
     }
+    let folders = rustc_folders(artifacts);
     let mut dep_infos: BTreeMap<PathBuf, &(crate::meta::Crate, PathBuf)> = BTreeMap::new();
     let mut errors = Vec::new();
     for artifact in artifacts {
         let Some(package) = members.get(&artifact.package_id) else { continue };
-        match artifact.filenames.iter().find_map(|filename| dep_info_for(Path::new(filename))) {
-            Some(dep_info) => {
-                dep_infos.insert(dep_info, package);
-            }
-            None => errors.push(format!("{}: no dep-info beside {:?}, so what its compilation read is unknown", package.0.name, artifact.filenames)),
+        let found = dep_infos_of(artifact, &folders);
+        if found.is_empty() {
+            errors.push(format!("{}: no dep-info rustc wrote for {:?} is found, so what its compilation read is unknown", package.0.name, artifact.filenames));
         }
+        dep_infos.extend(found.into_iter().map(|dep_info| (dep_info, package)));
     }
     let mut seen = BTreeSet::new();
     for (dep_info, (package, workspace_dir)) in dep_infos {
@@ -232,16 +320,169 @@ mod tests {
         assert_eq!(dep_info_files(text).into_iter().collect::<Vec<_>>(), ["core/x/src/lib.rs", "core/x/src/my file.txt"]);
     }
 
-    #[test]
-    fn the_dep_info_is_found_beside_whatever_the_unit_built() {
-        let scratch = Scratch::new("compiled-dep-info");
-        for name in ["deps/x-1.d", "deps/libx-1.rmeta", "deps/y-2", "deps/y-2.d", "tool", "tool.d"] {
-            scratch.write(name, "");
+    /// An artifact shaped like a message, for target `target`, naming files under this scratch.
+    fn an_artifact(scratch: &Scratch, target: &str, files: &[&str]) -> Artifact {
+        Artifact {
+            package_id: String::new(),
+            target_name: target.to_string(),
+            target_kinds: vec!["bin".to_string()],
+            filenames: files.iter().map(|file| scratch.0.join(file).to_string_lossy().into_owned()).collect(),
+            executable: None,
         }
-        assert_eq!(dep_info_for(&scratch.0.join("deps/libx-1.rmeta")), Some(scratch.0.join("deps/x-1.d")));
-        assert_eq!(dep_info_for(&scratch.0.join("deps/y-2")), Some(scratch.0.join("deps/y-2.d")));
-        assert_eq!(dep_info_for(&scratch.0.join("tool")), Some(scratch.0.join("tool.d")));
-        assert_eq!(dep_info_for(&scratch.0.join("deps/libz-3.rlib")), None);
+    }
+
+    /// Write each file under its own name, so no two hold the same bytes.
+    fn write_each(scratch: &Scratch, names: &[&str]) {
+        for name in names {
+            scratch.write(name, name);
+        }
+    }
+
+    /// A file rustc wrote and cargo names has rustc's dep-info beside it, under the crate's name and the
+    /// unit's hash: in `deps`, bare for a local cdylib, and in the per-unit `out` folder `cargo dylint`'s
+    /// nightly builds into. Another crate whose name starts the same does not reach it.
+    #[test]
+    fn the_dep_info_rustc_wrote_is_found_beside_the_file_it_named() {
+        let scratch = Scratch::new("compiled-dep-info");
+        let out = "dylint/debug/build/w/0123456789abcdef/out";
+        write_each(
+            &scratch,
+            &[
+                "debug/deps/libx-0123456789abcdef.rmeta",
+                "debug/deps/x-0123456789abcdef.d",
+                "debug/deps/x-0123456789abcdef.x1.rcgu.o",
+                "debug/deps/libffi.dylib",
+                "debug/deps/ffi.d",
+                &format!("{out}/libw-0123456789abcdef.rmeta"),
+                &format!("{out}/w-0123456789abcdef.d"),
+                "debug/deps/z-0123456789abcdef",
+                "debug/deps/xy-0123456789abcdef",
+                "debug/deps/xy-0123456789abcdef.d",
+                "debug/deps/v-1",
+                "debug/deps/v-1.d",
+            ],
+        );
+        let found = |target: &str, file: &str| dep_infos_of(&an_artifact(&scratch, target, &[file]), &BTreeSet::new());
+        assert_eq!(found("x", "debug/deps/libx-0123456789abcdef.rmeta"), [scratch.0.join("debug/deps/x-0123456789abcdef.d")]);
+        assert_eq!(found("ffi", "debug/deps/libffi.dylib"), [scratch.0.join("debug/deps/ffi.d")]);
+        assert_eq!(found("w", &format!("{out}/libw-0123456789abcdef.rmeta")), [scratch.0.join(format!("{out}/w-0123456789abcdef.d"))]);
+        assert_eq!(found("z", "debug/deps/z-0123456789abcdef"), Vec::<PathBuf>::new());
+        assert_eq!(found("x", "debug/deps/xy-0123456789abcdef"), Vec::<PathBuf>::new());
+        // A suffix that is no hash cargo writes is not rustc's name for the unit.
+        assert_eq!(found("v", "debug/deps/v-1"), Vec::<PathBuf>::new());
+        // A codegen unit's object file is no output rustc names for the unit.
+        assert_eq!(found("x", "debug/deps/x-0123456789abcdef.x1.rcgu.o"), Vec::<PathBuf>::new());
+    }
+
+    /// What sits beside a copy is cargo's, never read. A copy is the file rustc wrote that it is by inode,
+    /// where cargo hard-linked it, even when another of the crate's files holds the same bytes; failing an
+    /// inode, every file with its bytes is judged, and a file of the same crate with other bytes is passed
+    /// over, so identity picks and not the name.
+    #[test]
+    fn a_copy_is_traced_by_identity_to_the_file_rustc_wrote() {
+        let cloned = Scratch::new("compiled-copy");
+        cloned.write("debug/my-tool.d", "planted");
+        cloned.write("debug/my-tool", "bytes");
+        cloned.write("debug/deps/my_tool-0000000000000001", "other");
+        cloned.write("debug/deps/my_tool-0000000000000002", "bytes");
+        cloned.write("debug/deps/my_tool-0000000000000003", "bytes");
+        write_each(&cloned, &["debug/deps/my_tool-0000000000000001.d", "debug/deps/my_tool-0000000000000002.d", "debug/deps/my_tool-0000000000000003.d"]);
+        let twins = ["debug/deps/my_tool-0000000000000002.d", "debug/deps/my_tool-0000000000000003.d"].map(|file| cloned.0.join(file));
+        assert_eq!(dep_infos_of(&an_artifact(&cloned, "my-tool", &["debug/my-tool"]), &BTreeSet::new()), twins);
+        let linked = Scratch::new("compiled-link");
+        linked.write("debug/tool.d", "planted");
+        linked.write("debug/deps/tool-0000000000000001", "bytes");
+        linked.write("debug/deps/tool-0000000000000002", "bytes");
+        write_each(&linked, &["debug/deps/tool-0000000000000001.d", "debug/deps/tool-0000000000000002.d"]);
+        std::fs::hard_link(linked.0.join("debug/deps/tool-0000000000000002"), linked.0.join("debug/tool")).unwrap();
+        assert_eq!(dep_infos_of(&an_artifact(&linked, "tool", &["debug/tool"]), &BTreeSet::new()), [linked.0.join("debug/deps/tool-0000000000000002.d")]);
+    }
+
+    /// Where the copies go is not always beside rustc's folders. With `build.build-dir` apart, a copy's
+    /// source sits in a `deps` folder the stream's other units name, and a stream that names none leaves the
+    /// unit unfound. A profile folder named `deps` holds copies under bare names, as every profile folder
+    /// does beside its `examples`, and those are not rustc's.
+    #[test]
+    fn a_copy_is_traced_wherever_cargo_writes_its_source() {
+        let scratch = Scratch::new("compiled-apart");
+        scratch.write("build/debug/deps/tool-0000000000000001", "bytes");
+        scratch.write("out/debug/tool", "bytes");
+        write_each(&scratch, &["build/debug/deps/tool-0000000000000001.d", "build/debug/deps/libdep-0000000000000005.rlib", "out/debug/tool.d"]);
+        let tool = an_artifact(&scratch, "tool", &["out/debug/tool"]);
+        let stream = [an_artifact(&scratch, "dep", &["build/debug/deps/libdep-0000000000000005.rlib"]), an_artifact(&scratch, "tool", &["out/debug/tool"])];
+        assert_eq!(dep_infos_of(&tool, &rustc_folders(&stream)), [scratch.0.join("build/debug/deps/tool-0000000000000001.d")]);
+        assert_eq!(dep_infos_of(&tool, &BTreeSet::new()), Vec::<PathBuf>::new());
+        scratch.mkdir("profile/deps/examples");
+        scratch.write("profile/deps/tool", "bytes");
+        scratch.write("profile/deps/deps/tool-0000000000000001", "bytes");
+        write_each(&scratch, &["profile/deps/tool.d", "profile/deps/deps/tool-0000000000000001.d"]);
+        let named_deps = an_artifact(&scratch, "tool", &["profile/deps/tool"]);
+        assert_eq!(dep_infos_of(&named_deps, &BTreeSet::new()), [scratch.0.join("profile/deps/deps/tool-0000000000000001.d")]);
+    }
+
+    /// The layouts cargo itself writes: binaries, with and without a hyphen in the name, an example and a
+    /// build script, each copied out under its target's name, built into one folder, again with the build
+    /// folder apart, and checked. Every unit leads only to dep-info rustc wrote for it, and never to the `.d`
+    /// beside a copy, planted here to name a file outside the crate.
+    #[test]
+    fn every_unit_cargo_builds_leads_to_the_dep_info_rustc_wrote_for_it() {
+        let scratch = Scratch::new("compiled-layouts");
+        scratch.write("probe/Cargo.toml", "[package]\nname = \"probe-tool\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\n");
+        scratch.write("probe/build.rs", "fn main() {}\n");
+        scratch.write("probe/src/lib.rs", "pub fn probe() {}\n");
+        scratch.write("probe/src/main.rs", "fn main() {\n    probe_tool::probe();\n}\n");
+        scratch.write("probe/src/bin/probe.rs", "fn main() {\n    probe_tool::probe();\n}\n");
+        scratch.write("probe/examples/probe-example.rs", "fn main() {\n    probe_tool::probe();\n}\n");
+        let outside = crate::repo_root().join("README.md");
+        let runs = [("build", "one", "one"), ("build", "apart", "intermediate"), ("check", "one", "one")];
+        for (command, target_dir, build_dir) in runs {
+            let output = std::process::Command::new(env!("CARGO"))
+                .current_dir(scratch.0.join("probe"))
+                .env("CARGO_BUILD_BUILD_DIR", scratch.0.join(build_dir))
+                .args([command, "--offline", "--bins", "--examples", "--message-format=json", "--target-dir"])
+                .arg(scratch.0.join(target_dir))
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            let artifacts = read_messages(output.stdout.as_slice()).unwrap();
+            // Beside every file cargo names: a copy's `.d` is cargo's own, and every other file these runs name
+            // starts with `lib` (a library, or the metadata `check` writes for any target), so the plant takes
+            // `lib<crate>-<hash>.d` and never the `<crate>-<hash>.d` rustc wrote.
+            for file in artifacts.iter().flat_map(|artifact| &artifact.filenames) {
+                std::fs::write(Path::new(file).with_extension("d"), format!("{file}: {}\n", outside.display())).unwrap();
+            }
+            // Cargo copies an executable out under its target's name, which tells the copies apart without
+            // asking the code under test.
+            let copied = artifacts
+                .iter()
+                .filter(|artifact| artifact.filenames.iter().all(|file| Path::new(file).file_name().is_some_and(|name| *name == *artifact.target_name)));
+            let kinds: BTreeSet<&str> = copied.flat_map(|artifact| artifact.target_kinds.iter().map(String::as_str)).collect();
+            let expected: BTreeSet<&str> = if command == "build" { ["bin", "custom-build", "example"].into() } else { ["custom-build"].into() };
+            assert_eq!(kinds, expected, "{command} into {target_dir}");
+            let folders = rustc_folders(&artifacts);
+            for artifact in &artifacts {
+                let found = dep_infos_of(artifact, &folders);
+                assert!(!found.is_empty(), "{command} into {target_dir}: {:?}", artifact.filenames);
+                for dep_info in found {
+                    let text = std::fs::read_to_string(&dep_info).unwrap();
+                    assert!(!text.contains(&outside.display().to_string()), "{} was read for {:?}", dep_info.display(), artifact.filenames);
+                }
+            }
+        }
+    }
+
+    /// A unit of a message that leads to no dep-info fails, and the error names it.
+    #[test]
+    fn a_unit_whose_dep_info_cannot_be_found_fails_naming_it() {
+        let root = crate::repo_root();
+        let library = crate::meta::read(&root.join(crate::machinery::LINT_LIBRARY), crate::meta::Graph::Workspace).unwrap();
+        let scratch = Scratch::new("compiled-no-dep-info");
+        scratch.write("debug/never-crash-lints", "bytes");
+        let mut artifact = an_artifact(&scratch, "never-crash-lints", &["debug/never-crash-lints"]);
+        artifact.package_id = library[0].id.clone();
+        let found = errors(&root, &root.join("rust"), &[artifact]).unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].starts_with("never-crash-lints: no dep-info rustc wrote for"), "{found:?}");
     }
 
     #[test]
@@ -312,13 +553,13 @@ mod tests {
         let root = crate::repo_root();
         let library = crate::meta::read(&root.join(crate::machinery::LINT_LIBRARY), crate::meta::Graph::Workspace).unwrap();
         let scratch = Scratch::new("compiled-library");
-        scratch.write("deps/never_crash_lints-1.d", "deps/libnever_crash_lints-1.rmeta: src/lib.rs Cargo.toml ../../README.md\n");
-        scratch.write("deps/libnever_crash_lints-1.rmeta", "");
+        scratch.write("deps/never_crash_lints-0123456789abcdef.d", "deps/libnever_crash_lints-0123456789abcdef.rmeta: src/lib.rs Cargo.toml ../../README.md\n");
+        scratch.write("deps/libnever_crash_lints-0123456789abcdef.rmeta", "");
         let artifact = Artifact {
             package_id: library[0].id.clone(),
             target_name: "never-crash-lints".to_string(),
             target_kinds: vec!["lib".to_string()],
-            filenames: vec![scratch.0.join("deps/libnever_crash_lints-1.rmeta").to_string_lossy().into_owned()],
+            filenames: vec![scratch.0.join("deps/libnever_crash_lints-0123456789abcdef.rmeta").to_string_lossy().into_owned()],
             executable: None,
         };
         let found = errors(&root, &root.join("rust"), &[artifact]).unwrap();
