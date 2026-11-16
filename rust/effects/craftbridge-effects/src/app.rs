@@ -9,6 +9,7 @@ use effectcraft_automation::confine::Confinement as EngineConfinement;
 use effectcraft_automation::{Backend, McpServer};
 use serde_json::Value;
 
+use crate::runner::{self, Progress};
 use crate::{files, info, methods, properties, requests, session};
 
 /// A hosted EffectCraft session: the MCP server built at construction, which owns the headless
@@ -59,6 +60,14 @@ const METHODS: [(&str, Method); 11] = [
     ("new", files::new),
 ];
 
+/// One method that runs long enough to report progress: the backend, the parameters, and the listener
+/// that answers `false` to stop it.
+type ProgressMethod = for<'a> fn(&mut Backend, &Value, Progress<'a>) -> Result<Value>;
+
+/// The methods `request_with_progress` answers, by name, the one list of them as [`METHODS`] is of
+/// `request`'s: the dispatch reads it and so does its refusal.
+const PROGRESS_METHODS: [(&str, ProgressMethod); 1] = [("export", runner::export)];
+
 impl CraftApp for EffectCraftApp {
     /// Answer one method of the plan's §14 table through the function [`METHODS`] names for it.
     /// Every other name — a §14 method `request` does not answer, or no method at all — answers
@@ -70,7 +79,17 @@ impl CraftApp for EffectCraftApp {
     fn request(&mut self, method: &str, params: Value) -> Result<Value> {
         match METHODS.iter().find(|(name, _)| *name == method) {
             Some((_, answer)) => answer(self.server.backend(), &params),
-            None => Err(CraftError::unsupported(not_answered(method))),
+            None => Err(CraftError::unsupported(not_answered(method, "request", METHODS.iter().map(|(name, _)| *name)))),
+        }
+    }
+
+    /// Answer one method of the plan's §14 table that reports progress through the function
+    /// [`PROGRESS_METHODS`] names for it. Every other name answers `Unsupported`, as the core's
+    /// default for an app with no such call does, naming the methods this call does answer.
+    fn request_with_progress(&mut self, method: &str, params: Value, on_progress: &mut dyn FnMut(u64, u64, Option<f64>) -> bool) -> Result<Value> {
+        match PROGRESS_METHODS.iter().find(|(name, _)| *name == method) {
+            Some((_, answer)) => answer(self.server.backend(), &params, on_progress),
+            None => Err(CraftError::unsupported(not_answered(method, "request_with_progress", PROGRESS_METHODS.iter().map(|(name, _)| *name)))),
         }
     }
 
@@ -81,14 +100,14 @@ impl CraftApp for EffectCraftApp {
     }
 }
 
-/// The refusal of a name `request` does not answer: true of any name in any build, since it says
-/// only that `request` lacks it and which methods `request` has, read from [`METHODS`].
-fn not_answered(method: &str) -> String {
-    let names: Vec<String> = METHODS.iter().map(|(name, _)| format!("`{name}`")).collect();
+/// The refusal of a name one entry point does not answer: true of any name in any build, since it says
+/// only that the entry point lacks it and which methods it has, read from its table.
+fn not_answered<'a>(method: &str, entry: &str, answered: impl Iterator<Item = &'a str>) -> String {
+    let names: Vec<String> = answered.map(|name| format!("`{name}`")).collect();
     let answered = match names.split_last() {
         Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
         Some((last, _)) => last.clone(),
         None => "nothing".to_string(),
     };
-    format!("`{method}` is not answered by `request` in this build, which answers {answered}")
+    format!("`{method}` is not answered by `{entry}` in this build, which answers {answered}")
 }

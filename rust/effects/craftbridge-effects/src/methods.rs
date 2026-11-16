@@ -77,21 +77,27 @@ struct Call<'a> {
 }
 
 /// The one entry every command of `exec` and every step of `run` passes on its way to the session:
-/// refuse here, before the engine sees the call, the commands that would start a process — a phone
-/// starts none — and then run the command and map its failure. `step` names the step of a `run` for
+/// the door, then the report of a render whose items failed. `step` names the step of a `run` for
 /// the rows that carry one.
 pub(crate) fn run_command(backend: &mut Backend, command: &str, params: Value, step: Option<u32>) -> Result<Value> {
+    let value = execute(backend, command, params, step)?;
+    match failed_render(command, &value) {
+        Some(failure) => Err(CraftError::command_failed(command, failure, step)),
+        None => Ok(value),
+    }
+}
+
+/// The door every command goes through, the render runner's own included: refuse here, before the
+/// engine sees the call, the commands that would start a process — a phone starts none — and then
+/// run the command and map its failure. A render's failed items are not read here: a render started
+/// without waiting answers while its other items still render, so the render runner reads every
+/// item once the render has ended.
+pub(crate) fn execute(backend: &mut Backend, command: &str, params: Value, step: Option<u32>) -> Result<Value> {
     let params = if params.is_null() { empty_params() } else { params };
     if let Some(withheld) = wants_a_process(command, &params) {
         return Err(CraftError::unsupported(said(command, starts_a_process(withheld), step)));
     }
-    match backend.exec(command, params.clone()) {
-        Ok(value) => match failed_render(command, &value) {
-            Some(failure) => Err(CraftError::command_failed(command, failure, step)),
-            None => Ok(value),
-        },
-        Err(error) => Err(map_error(error, &Call { command, params: &params, step, tool: false })),
-    }
+    backend.exec(command, params.clone()).map_err(|error| map_error(error, &Call { command, params: &params, step, tool: false }))
 }
 
 /// The model downloads fetch their weights by starting the system's `curl`
@@ -244,10 +250,12 @@ fn map_engine(error: EngineError, call: &Call) -> CraftError {
 }
 
 /// Whether the engine refused for a capability this build was put together without: the helper
-/// hooks, the WebAssembly loader, scripting, import, export, the Media Browser. Every such sentence
-/// of the engine's ends the same way ("… is not available in this build", "… are not …").
-fn lacks_capability(why: &str) -> bool {
-    why.ends_with("not available in this build")
+/// hooks, the WebAssembly loader, scripting, import, export, the Media Browser — every such sentence
+/// of the engine's ends the same way ("… is not available in this build", "… are not …") — or an
+/// export format the session's exporter does not write, which the engine words "{format} export is
+/// not available", both as a command's refusal and as the reason a render item failed.
+pub(crate) fn lacks_capability(why: &str) -> bool {
+    why.ends_with("not available in this build") || why.ends_with(" export is not available")
 }
 
 /// Whether the engine failed because the disk would not read or write a file: a file or folder
@@ -329,6 +337,7 @@ pub(crate) fn bool_param(obj: &Map<String, Value>, key: &str, method: &str) -> R
     }
 }
 
+/// A numeric parameter, as the JSON number it is: absent and null mean not given.
 pub(crate) fn number_param(obj: &Map<String, Value>, key: &str, method: &str) -> Result<Option<f64>> {
     match obj.get(key) {
         None | Some(Value::Null) => Ok(None),
@@ -417,10 +426,14 @@ mod tests {
             EngineError::Other("WebAssembly effect plug-ins are not available in this build".into()),
             EngineError::BadParams { cmd: "footage.relink".into(), msg: "media import is not available in this build".into() },
             EngineError::Disabled("footage.relink".into(), "effect helpers are not available in this build".into()),
+            // `render.saveCurrentPreview`'s refusal of a format the session's exporter does not write.
+            EngineError::Other("Animated GIF export is not available".into()),
         ] {
             let mapped = map_engine(error, &call("footage.relink", &params));
             assert!(matches!(mapped, CraftError::Unsupported { .. }), "a missing capability is `Unsupported`, got {mapped:?}");
         }
+        // A sentence that only mentions an export is not one.
+        assert!(!lacks_capability("the export is not available until the comp has a duration, try again"));
     }
 
     /// The engine's sentence for a file the disk would not read or write is the `Io` row, in the
