@@ -81,11 +81,18 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
+    /// How long the step the timeout test stops would run if nothing stopped it.
+    const OUTLASTING_STEP: Duration = Duration::from_secs(30);
+
+    /// A runner of the script `body`, under the bound the runner gives every real step. Every step but the
+    /// timeout test's ends on its own, so that bound only stops one that is truly stuck: a loaded machine,
+    /// or a freshly written script waiting for the system's first-run scan, holds a step far past any pace
+    /// a test might guess, and no test's pace depends on it.
     fn script(folder: &Path, body: &str) -> Cli {
         let binary = folder.join("oracle.sh");
         std::fs::write(&binary, format!("#!/bin/sh\n{body}\n")).expect("write the script");
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).expect("make it executable");
-        Cli { binary, timeout: Duration::from_secs(10) }
+        Cli { binary, timeout: crate::STEP_TIMEOUT }
     }
 
     /// The oracle's whole environment is its configuration folder: whatever the runner's process holds (HOME,
@@ -126,19 +133,25 @@ mod tests {
     fn a_step_that_outlives_the_timeout_is_stopped_and_named() {
         let scratch = tempfile::tempdir().expect("scratch");
         let dir = scratch.path().to_path_buf();
-        let mut cli = script(&dir, "sleep 30");
+        // `exec` makes the sleep the process the runner kills: a shell killed while it waits on a sleep
+        // would leave the sleep running on after the test.
+        let mut cli = script(&dir, &format!("exec sleep {}", OUTLASTING_STEP.as_secs()));
         cli.timeout = Duration::from_millis(200);
         let started = Instant::now();
         let error = cli.run(&dir, &[]).err().unwrap_or_default();
+        let elapsed = started.elapsed();
         assert!(error.contains("was stopped"), "{error}");
-        assert!(started.elapsed() < Duration::from_secs(10));
+        // The step starts after `started` and cannot end by itself sooner than `OUTLASTING_STEP` after it,
+        // so a return before then is the runner's stop: a slow start, the first-run scan included, delays
+        // only the step, and the kill reaches a step held by the scan at once.
+        assert!(elapsed >= cli.timeout && elapsed < OUTLASTING_STEP, "stopped after {elapsed:?}");
     }
 
     #[test]
     fn a_missing_binary_is_an_error_naming_it() {
         let scratch = tempfile::tempdir().expect("scratch");
         let dir = scratch.path().to_path_buf();
-        let cli = Cli { binary: dir.join("nothing-here"), timeout: Duration::from_secs(1) };
+        let cli = Cli { binary: dir.join("nothing-here"), timeout: crate::STEP_TIMEOUT };
         assert!(cli.run(&dir, &[]).err().unwrap_or_default().contains("nothing-here"));
     }
 }
