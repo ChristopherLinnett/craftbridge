@@ -1,5 +1,5 @@
-//! The acceptance of plan §28 T1 to T3 as a property of the plugin: on the same inputs each of the
-//! four methods answers exactly what the EffectCraft command line at the pin answers. Each test
+//! The acceptance of plan §28 T1 to T5 as a property of the plugin: on the same inputs each method
+//! answers exactly what the EffectCraft command line at the pin answers. Each test
 //! drives both — the oracle command line from `tools/oracle.sh` and a fresh plugin app in scratch
 //! folders of its own — and compares whole documents, after rewriting each scratch folder to one
 //! marker so the folders themselves do not count as a gap; a failure is compared in its words. The
@@ -14,6 +14,7 @@ use craftbridge_core::{CraftApp, CraftError, FrameBytes, PixelFormat};
 use craftbridge_effects::EffectCraftApp;
 use serde_json::{Value, json};
 use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
@@ -82,11 +83,19 @@ fn cli(dir: &Path, args: &[&str]) -> std::result::Result<Run, String> {
 
 /// One confined `mcp` run of the command line: the folder is both of its automation roots, one line
 /// of JSON-RPC is sent, and the text of the one reply it answers is returned. This is the command
-/// line's own confined door — the plugin reaches its session through the same kind of server.
-fn cli_mcp_confined(dir: &Path, request: Value) -> std::result::Result<Value, String> {
+/// line's own confined door — the plugin reaches its session through the same kind of server. The
+/// session is empty, or holds `project`, which the command line opens before it confines itself.
+fn cli_mcp_confined(dir: &Path, project: Option<&Path>, request: Value) -> std::result::Result<Value, String> {
     let dir_text = dir.display().to_string();
+    let project_text = project.map(|project| project.display().to_string());
+    let session = match &project_text {
+        Some(project) => ["--project", project.as_str()].to_vec(),
+        None => ["--empty"].to_vec(),
+    };
     let mut child = oracle_in(dir)?
-        .args(["mcp", "--empty", "--automation-read-root", &dir_text, "--automation-write-root", &dir_text])
+        .arg("mcp")
+        .args(session)
+        .args(["--automation-read-root", &dir_text, "--automation-write-root", &dir_text])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -431,18 +440,16 @@ fn a_render_with_a_failed_item_fails_as_the_command_line_fails_it() {
 #[test]
 fn the_confinement_answers_in_the_commands_words() {
     let scratch = Scratch::new().expect("a scratch folder");
-    let command_line = cli_mcp_confined(
-        scratch.root(),
-        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "execute_command", "arguments": {"command": "file.open", "params": {"path": "/etc/hosts"}}}}),
-    )
-    .expect("the confined command line answered");
+    let outside = scratch.outside_file().expect("a file outside both roots");
+    let command_line = cli_mcp_confined(scratch.root(), None, tools_call("execute_command", &json!({"command": "file.open", "params": {"path": outside}})))
+        .expect("the confined command line answered");
     let command_line = match command_line {
         Value::String(message) => scrubbed(&message, &[scratch.root()]),
         other => panic!("the confined command line answered {other} where it should have refused"),
     };
 
     let mut app = scratch.app().expect("the app starts from prepared folders");
-    let answer = app.request("exec", json!({"command": "file.open", "params": {"path": "/etc/hosts"}}));
+    let answer = app.request("exec", json!({"command": "file.open", "params": {"path": outside}}));
     match answer.expect_err("the confinement refuses the read") {
         CraftError::Io { message } => {
             assert_eq!(scrubbed(&message, &[scratch.path()]), command_line, "the confinement refusal differs from the command line's")
@@ -543,6 +550,185 @@ fn frames_on_both_sides(scratch: &Scratch) -> std::result::Result<(EffectCraftAp
     match mine.as_slice() {
         [_, tall, named_one] => Ok((app, Comps { tall: *tall, named_one: *named_one })),
         other => Err(format!("the fixture makes three comps, the run made {other:?}")),
+    }
+}
+
+/// What the build steps of a document leave behind: a comp with a solid, a text layer named `T` with
+/// a blur on it, and a solid named `4`, saved in the folder of each side.
+fn document_steps() -> Vec<(String, Value)> {
+    vec![
+        ("comp.new".to_string(), json!({"name": "A", "width": 640, "height": 360, "duration": 3, "frameRate": 30})),
+        ("layer.newSolid".to_string(), json!({"comp": 1, "name": "Bg"})),
+        ("layer.newText".to_string(), json!({"comp": 1, "text": "Hello", "name": "T"})),
+        ("effect.apply".to_string(), json!({"comp": 1, "layer": "T", "effect": "Gaussian Blur"})),
+        // A layer named as another layer's id is written: digits mean the id, as the command line reads them.
+        ("layer.newSolid".to_string(), json!({"comp": 1, "name": "4"})),
+    ]
+}
+
+/// The same document on both sides: the command line's saved as `doc.ecproj` in its folder, and the
+/// plugin's built by the same steps and saved the same way in the container.
+struct Documents {
+    scratch: Scratch,
+    app: EffectCraftApp,
+}
+
+impl Documents {
+    fn new() -> std::result::Result<Self, String> {
+        Self::in_scratch(Scratch::new().map_err(|e| e.to_string())?)
+    }
+
+    fn in_scratch(scratch: Scratch) -> std::result::Result<Self, String> {
+        let mut steps = document_steps();
+        let saved = |dir: &Path| ("file.saveAs".to_string(), json!({"path": dir.join("doc.ecproj").display().to_string()}));
+        steps.push(saved(scratch.root()));
+        cli_run(scratch.root(), &steps)?.doc()?;
+        steps.pop();
+        steps.push(saved(scratch.path()));
+        let mut app = scratch.app().map_err(|e| e.to_string())?;
+        app.request("run", json!({"steps": steps_document(&steps)})).map_err(|e| format!("the plugin builds the document: {e}"))?;
+        Ok(Self { scratch, app })
+    }
+
+    /// Every spelling of both folders, to rewrite to the marker.
+    fn dirs(&self) -> [&Path; 2] {
+        [self.scratch.root(), self.scratch.path()]
+    }
+
+    /// The command line run on its own copy of the document, with `arguments` after the command.
+    fn cli(&self, command: &str, arguments: &[&str]) -> std::result::Result<Run, String> {
+        let project = self.scratch.root().join("doc.ecproj").display().to_string();
+        let mut args = vec![command, "--json", "--project", &project];
+        args.extend(arguments);
+        cli(self.scratch.root(), &args)
+    }
+
+    /// The command line's answer of `tool` called with `arguments` through its confined `mcp` door,
+    /// on its own copy of the document, as the document the tool answered.
+    fn tool(&self, tool: &str, arguments: &Value) -> std::result::Result<Value, String> {
+        match cli_mcp_confined(self.scratch.root(), Some(&self.scratch.root().join("doc.ecproj")), tools_call(tool, arguments))? {
+            Value::String(text) => serde_json::from_str(&text).map_err(|e| format!("`{tool}` answered no document: {e}: {text}")),
+            other => Err(format!("`{tool}` answered {other}")),
+        }
+    }
+
+    /// The file each side has saved, as whole documents: the plugin's session is saved in place, as
+    /// the command line saved its own copy after each change.
+    fn files(&mut self) -> std::result::Result<(Value, Value), String> {
+        self.app.request("save", json!({})).map_err(|e| format!("the plugin saves in place: {e}"))?;
+        Ok((saved_file(self.scratch.path(), "doc.ecproj", &self.dirs())?, saved_file(self.scratch.root(), "doc.ecproj", &self.dirs())?))
+    }
+}
+
+/// A failure's words as the plugin words every refusal of a command: the command line's "invalid
+/// parameters for `command`:" wrapper, which it puts before an engine refusal, reads as the plain
+/// `command:` the plan's §14 shape has. The second is whether the command line wrapped them.
+fn plain_words(words: &str) -> (String, bool) {
+    match words.strip_prefix("invalid parameters for `").and_then(|rest| rest.split_once("`: ")) {
+        Some((command, refusal)) => (format!("{command}: {refusal}"), true),
+        None => (words.to_string(), false),
+    }
+}
+
+/// The plugin's words for a failure: a `CommandFailed` keeps its command apart from its message, so
+/// the command goes back before the message only where the command line's words name one.
+fn failure_words(error: &CraftError, named: bool) -> String {
+    match error {
+        CraftError::CommandFailed { command, message, step: None } if named => format!("{command}: {message}"),
+        CraftError::CommandFailed { message, step: None, .. } => message.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// One of the command line's own ways to ask the tools and commands the methods go through, and the
+/// words it fails in: the same way a person at a terminal, or a script, would get them.
+enum Oracle<'a> {
+    /// The subcommand of the same name, with its arguments after `--project doc.ecproj`.
+    Subcommand(&'a str, Vec<&'a str>),
+    /// The confined `mcp` door calling a tool, which is what the command line has for a refusal
+    /// its subcommands cannot reach, and for the confinement's own words.
+    Tool(&'a str, Value),
+    /// The same door with the project at the path open, as a session that opened it has it.
+    ToolOn(&'a Path, &'a str, Value),
+}
+
+impl Oracle<'_> {
+    /// The confined door running one command, as its `execute_command` tool runs it.
+    fn command(command: &str, params: Value) -> Self {
+        Oracle::Tool("execute_command", json!({"command": command, "params": params}))
+    }
+
+    fn failure(&self, documents: &Documents) -> std::result::Result<String, String> {
+        let (project, name, arguments) = match self {
+            Oracle::Subcommand(command, arguments) => return documents.cli(command, arguments)?.failure(),
+            Oracle::Tool(name, arguments) => (None, name, arguments),
+            Oracle::ToolOn(project, name, arguments) => (Some(*project), name, arguments),
+        };
+        match cli_mcp_confined(documents.scratch.root(), project, tools_call(name, arguments))? {
+            Value::String(words) => Ok(words),
+            other => Err(format!("the confined command line answered {other} where it should have refused")),
+        }
+    }
+}
+
+/// The one line of JSON-RPC that calls `tool` with `arguments`.
+fn tools_call(tool: &str, arguments: &Value) -> Value {
+    json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": arguments}})
+}
+
+/// Every call here fails: the plugin's words equal the command line's, scrubbed of the folders and
+/// with the wrapper read as above, and the failure is the row the plan's §14 gives it.
+fn assert_fails_as(documents: &mut Documents, cases: Vec<(&str, Value, Oracle, &str)>) -> std::result::Result<(), String> {
+    for (method, params, oracle, row) in cases {
+        let expected = oracle.failure(documents)?;
+        let Err(error) = documents.app.request(method, params.clone()) else {
+            return Err(format!("`{method}` {params} was answered where the command line refused it"));
+        };
+        let kind = format!("{error:?}");
+        assert!(kind.starts_with(row), "`{method}` {params} is `{row}`, got {kind}");
+        let (expected, named) = plain_words(&expected);
+        let (words, expected) = (scrubbed(&failure_words(&error, named), &documents.dirs()), scrubbed(&expected, &documents.dirs()));
+        assert_eq!(words, expected, "`{method}` {params} failed in other words than the command line's");
+    }
+    Ok(())
+}
+
+#[test]
+fn props_is_the_commands_props() {
+    let mut documents = Documents::new().expect("the same document on both sides");
+    // Each parameter beside the argument of the command line's `props <comp> <layer>` it stands for.
+    for (params, arguments) in [
+        (json!({"comp": 1, "layer": "T"}), vec!["1", "T"]),
+        (json!({"comp": "A", "layer": 27}), vec!["A", "27"]),
+        (json!({"comp": "1", "layer": "#1"}), vec!["1", "#1"]),
+        (json!({"comp": 1, "layer": "4"}), vec!["1", "4"]),
+        (json!({"comp": "-", "layer": "Bg"}), vec!["-", "Bg"]),
+        (json!({"layer": "Bg"}), vec!["-", "Bg"]),
+        (json!({"comp": 1, "layer": "T", "flat": true}), vec!["1", "T", "--flat"]),
+        (json!({"comp": 1, "layer": "T", "flat": false}), vec!["1", "T"]),
+        (json!({"comp": 1, "layer": "T", "time": 1.5}), vec!["1", "T", "--time", "1.5"]),
+        (json!({"comp": 1, "layer": "T", "flat": true, "time": 1}), vec!["1", "T", "--flat", "--time", "1"]),
+    ] {
+        let mut expected = documents.cli("props", &arguments).expect("the command line ran").doc().expect("the command line printed the tree");
+        let mut tree = documents.app.request("props", params.clone()).expect("`props` answers");
+        scrub(&mut tree, &documents.dirs());
+        scrub(&mut expected, &documents.dirs());
+        assert!(expected["properties"].is_array() || expected["properties"].is_object(), "the command line printed no tree for {params}");
+        assert_eq!(tree, expected, "`props` {params} answered differently from the command line");
+    }
+    // `depth` against the command line's own door to the same tool: its `props --depth` parses the
+    // number as a decimal, which the tool ignores, while its `mcp` hands the tool the whole number.
+    for params in [
+        json!({"comp": 1, "layer": "T", "depth": 0}),
+        json!({"comp": 1, "layer": "T", "depth": 1}),
+        json!({"comp": "A", "layer": 27, "flat": true, "time": 1, "depth": 2}),
+    ] {
+        let mut expected = documents.tool("get_layer", &params).expect("the command line answered the tool");
+        let mut tree = documents.app.request("props", params.clone()).expect("`props` answers");
+        scrub(&mut tree, &documents.dirs());
+        scrub(&mut expected, &documents.dirs());
+        assert!(expected.to_string().contains("\"truncated\":true"), "the command line limited no group for {params}");
+        assert_eq!(tree, expected, "`props` {params} answered differently from the command line's tool");
     }
 }
 
@@ -653,4 +839,319 @@ fn a_frame_that_cannot_be_rendered_fails_in_the_commands_words_in_every_format()
             other => panic!("{format:?}: no comp open is `NotFound`, got {other:?}"),
         }
     }
+}
+
+#[test]
+fn get_is_the_commands_get() {
+    let mut documents = Documents::new().expect("the same document on both sides");
+    for (params, arguments) in [
+        (json!({"comp": 1, "layer": "T", "path": "transform/opacity"}), vec!["1", "T", "transform/opacity"]),
+        (json!({"comp": 1, "layer": 27, "path": "transform/position", "time": 0.5}), vec!["1", "27", "transform/position", "--time", "0.5"]),
+        (json!({"comp": "A", "layer": "T", "path": "effects/#1/blurriness"}), vec!["A", "T", "effects/#1/blurriness"]),
+        (json!({"layer": "T", "path": "text/sourceText"}), vec!["-", "T", "text/sourceText"]),
+    ] {
+        let expected = documents.cli("get", &arguments).expect("the command line ran").doc().expect("the command line printed the property");
+        let property = documents.app.request("get", params.clone()).expect("`get` answers");
+        assert_eq!(property, expected, "`get` {params} answered differently from the command line");
+    }
+}
+
+#[test]
+fn set_is_the_commands_set() {
+    let mut documents = Documents::new().expect("the same document on both sides");
+    // Each case sets a property of its own, so the document the command line saves in place, one
+    // call after another, is the document the plugin's session builds up the same way.
+    for (params, arguments) in [
+        (json!({"comp": 1, "layer": "T", "path": "transform/opacity", "value": 50}), vec!["1", "T", "transform/opacity", "50"]),
+        (json!({"comp": 1, "layer": "T", "path": "transform/position", "value": [10, 20]}), vec!["1", "T", "transform/position", "[10,20]"]),
+        (json!({"comp": 1, "layer": "T", "path": "text/sourceText", "value": "Bye"}), vec!["1", "T", "text/sourceText", "Bye"]),
+        (json!({"comp": 1, "layer": "T", "path": "text/perChar3d", "value": true}), vec!["1", "T", "text/perChar3d", "true"]),
+        (json!({"comp": 1, "layer": "Bg", "path": "transform/opacity", "value": 25, "time": 1}), vec!["1", "Bg", "transform/opacity", "25", "--time", "1"]),
+        (json!({"layer": "T", "path": "transform/rotation", "expression": "time*90"}), vec!["-", "T", "transform/rotation", "--expression", "time*90"]),
+        (
+            json!({"comp": "A", "layer": 27, "path": "effects/#1/blurriness", "value": 12, "expression": "value*2"}),
+            vec!["A", "27", "effects/#1/blurriness", "12", "--expression", "value*2"],
+        ),
+    ] {
+        let mut arguments = arguments;
+        arguments.push("--save");
+        let mut expected = documents.cli("set", &arguments).expect("the command line ran").doc().expect("the command line printed the property");
+        let property = documents.app.request("set", params.clone()).expect("`set` answers");
+        assert_eq!(property, expected["result"], "`set` {params} answered differently from the command line");
+        assert!(expected.as_object_mut().is_some_and(|entries| entries.remove("saved").is_some()), "the command line saved the document");
+    }
+    let (plugin, command_line) = documents.files().expect("both documents are saved");
+    assert_eq!(plugin, command_line, "the document after the changes differs from the command line's");
+}
+
+#[test]
+fn a_property_call_that_fails_fails_in_the_commands_words() {
+    let mut documents = Documents::new().expect("the same document on both sides");
+    assert_fails_as(
+        &mut documents,
+        vec![
+            ("props", json!({"comp": "nope", "layer": "T"}), Oracle::Subcommand("props", vec!["nope", "T"]), "NotFound"),
+            ("props", json!({"comp": 1, "layer": "Nobody"}), Oracle::Subcommand("props", vec!["1", "Nobody"]), "NotFound"),
+            ("props", json!({"comp": 1}), Oracle::Tool("get_layer", json!({"comp": 1})), "InvalidParams"),
+            ("get", json!({"comp": 1, "layer": "T", "path": "transform/nope"}), Oracle::Subcommand("get", vec!["1", "T", "transform/nope"]), "NotFound"),
+            ("get", json!({"comp": 1, "layer": 99, "path": "transform/opacity"}), Oracle::Subcommand("get", vec!["1", "99", "transform/opacity"]), "NotFound"),
+            ("get", json!({"comp": 1, "layer": "T"}), Oracle::Tool("get_property", json!({"comp": 1, "layer": "T"})), "InvalidParams"),
+            ("set", json!({"comp": 1, "layer": "T", "path": "nope/x", "value": 5}), Oracle::Subcommand("set", vec!["1", "T", "nope/x", "5"]), "NotFound"),
+            (
+                "set",
+                json!({"comp": 1, "layer": "T", "path": "transform/opacity", "value": "abc"}),
+                Oracle::Subcommand("set", vec!["1", "T", "transform/opacity", "abc"]),
+                "CommandFailed",
+            ),
+            (
+                "set",
+                json!({"comp": 1, "layer": "T", "path": "transform/opacity"}),
+                Oracle::Tool("set_property", json!({"comp": 1, "layer": "T", "path": "transform/opacity"})),
+                "InvalidParams",
+            ),
+        ],
+    )
+    .expect("every call fails as the command line fails it");
+}
+
+/// The project file one side holds under `name`, as a whole document.
+fn saved_file(dir: &Path, name: &str, dirs: &[&Path]) -> std::result::Result<Value, String> {
+    let text = std::fs::read_to_string(dir.join(name)).map_err(|e| format!("`{name}` reads: {e}"))?;
+    let mut file: Value = serde_json::from_str(&text).map_err(|e| format!("`{name}` is JSON: {e}"))?;
+    scrub(&mut file, dirs);
+    Ok(file)
+}
+
+/// The command line's own run of one file command on its copy of the document, in its folder.
+fn cli_command(documents: &Documents, command: &str, params: &Value) -> std::result::Result<Value, String> {
+    let params = params.to_string();
+    documents.cli("exec", &[command, &params])?.doc()
+}
+
+#[test]
+fn the_file_methods_are_the_file_commands() {
+    let mut documents = Documents::new().expect("the same document on both sides");
+    // Each method beside the command line's command it goes through, the file it writes, and the
+    // parameters it takes: the command line's `--project`, `--save` and `--save-as` run these.
+    for (method, name, command, file) in [
+        ("saveAs", Some("copy.ecproj"), "file.saveAs", Some("copy.ecproj")),
+        ("save", Some("other.ecproj"), "file.save", Some("other.ecproj")),
+        ("open", Some("doc.ecproj"), "file.open", None),
+        ("save", None, "file.save", Some("doc.ecproj")),
+        ("new", None, "file.newProject", None),
+    ] {
+        let at = |dir: &Path| name.map_or_else(|| json!({}), |name| json!({"path": dir.join(name).display().to_string()}));
+        let mut expected = cli_command(&documents, command, &at(documents.scratch.root())).expect("the command line ran the command");
+        let mut result = documents.app.request(method, at(documents.scratch.path())).expect("the method answers");
+        scrub(&mut result, &documents.dirs());
+        scrub(&mut expected, &documents.dirs());
+        assert_eq!(result, expected, "`{method}` answered differently from the command line's `{command}`");
+        if let Some(file) = file {
+            let (mine, theirs) = (saved_file(documents.scratch.path(), file, &documents.dirs()), saved_file(documents.scratch.root(), file, &documents.dirs()));
+            assert_eq!(
+                mine.expect("the plugin wrote the file"),
+                theirs.expect("the command line wrote the file"),
+                "`{method}` wrote another file than the command line"
+            );
+        }
+    }
+    // `new` leaves the session as the command line's `--empty` starts it.
+    let command_line =
+        cli(documents.scratch.root(), &["info", "--json", "--empty"]).expect("the command line ran").doc().expect("the command line printed its document");
+    let (mut command_line, mut plugin) = (command_line, plugin_info(&mut documents.app).expect("the plugin answers info"));
+    compare_info(&mut command_line, &mut plugin, &documents.dirs());
+
+    // With the settings naming a project template, `new` opens the template as an untitled project
+    // and answers which: the result, and the project it leaves, are the command line's.
+    let mut command_line_steps = template_settings(&documents.scratch.root().join("doc.ecproj"));
+    command_line_steps.extend([("file.newProject".to_string(), json!({})), ("project.summary".to_string(), json!({}))]);
+    let mut command_line =
+        cli_run(documents.scratch.root(), &command_line_steps).expect("the command line ran").doc().expect("the command line printed its results");
+    documents
+        .app
+        .request("run", json!({"steps": steps_document(&template_settings(&documents.scratch.path().join("doc.ecproj")))}))
+        .expect("the settings name a template");
+    let mut opened = documents.app.request("new", json!({})).expect("`new` opens the template");
+    let mut project = documents.app.request("exec", json!({"command": "project.summary"})).expect("the plugin summarises its project");
+    for doc in [&mut command_line, &mut opened, &mut project] {
+        scrub(doc, &documents.dirs());
+    }
+    assert!(opened.get("template").is_some(), "`new` answered no template: {opened}");
+    assert_eq!(opened, command_line[2]["result"], "`new` from a template answered differently from the command line");
+    let mut expected = command_line[3]["result"].clone();
+    mark_accel_note(&mut project);
+    mark_accel_note(&mut expected);
+    assert_eq!(project, expected, "the project `new` opened from a template differs from the command line's");
+}
+
+#[test]
+fn a_file_call_that_fails_fails_in_the_commands_words() {
+    let mut documents = Documents::new().expect("the same document on both sides");
+    for dir in [documents.scratch.root(), documents.scratch.path()] {
+        std::fs::write(dir.join("junk.ecproj"), "not a project").expect("a file that is no project");
+        std::fs::write(dir.join("binary.ecproj"), [0xff, 0xfe, 0x00, 0x80]).expect("a file that is no text");
+        std::fs::write(dir.join("broken.ecprojx"), "<?xml version=\"1.0\"?><project>").expect("a file that is broken XML");
+        std::fs::create_dir(dir.join("folder.ecproj")).expect("a folder where a file is named");
+        std::fs::create_dir(dir.join("locked")).expect("a folder to lock");
+        std::fs::set_permissions(dir.join("locked"), std::fs::Permissions::from_mode(0o555)).expect("a folder nothing may be written in");
+    }
+    let (root, container) = (documents.scratch.root().to_path_buf(), documents.scratch.path().to_path_buf());
+    let at = |dir: &Path, name: &str| json!({"path": dir.join(name).display().to_string()});
+    let command = Oracle::command;
+    // A file the disk will not read or write is `Io`, whatever the system's reason; a file that reads
+    // but holds no project, and a call that names no file, are the command's own failure.
+    assert_fails_as(
+        &mut documents,
+        vec![
+            ("open", at(&container, "missing.ecproj"), command("file.open", at(&root, "missing.ecproj")), "Io"),
+            ("open", at(&container, "folder.ecproj"), command("file.open", at(&root, "folder.ecproj")), "Io"),
+            ("open", at(&container, "junk.ecproj"), command("file.open", at(&root, "junk.ecproj")), "CommandFailed"),
+            ("open", at(&container, "binary.ecproj"), command("file.open", at(&root, "binary.ecproj")), "CommandFailed"),
+            ("open", at(&container, "broken.ecprojx"), command("file.open", at(&root, "broken.ecprojx")), "CommandFailed"),
+            ("open", json!({}), command("file.open", json!({})), "CommandFailed"),
+            ("saveAs", json!({}), command("file.saveAs", json!({})), "CommandFailed"),
+            ("saveAs", at(&container, "no-folder/x.ecproj"), command("file.saveAs", at(&root, "no-folder/x.ecproj")), "Io"),
+            ("saveAs", at(&container, "locked/x.ecproj"), command("file.saveAs", at(&root, "locked/x.ecproj")), "Io"),
+            ("save", at(&container, "locked/x.ecproj"), command("file.save", at(&root, "locked/x.ecproj")), "Io"),
+        ],
+    )
+    .expect("every call fails as the command line fails it");
+    // A project that was never saved has nowhere to save to: the confinement's own words, which say
+    // to give a `path` inside the write root.
+    documents.app.request("new", json!({})).expect("a project with no file");
+    let unsaved = Oracle::command("file.save", json!({}));
+    assert_fails_as(&mut documents, vec![("save", json!({}), unsaved, "Io")]).expect("every call fails as the command line fails it");
+}
+
+/// The names in a folder, sorted. A folder or an entry that cannot be read is an error, never
+/// left out: the list is how a test sees that nothing was written there.
+fn entries(dir: &Path) -> std::result::Result<Vec<String>, String> {
+    let listed = std::fs::read_dir(dir).map_err(|e| format!("`{}` lists: {e}", dir.display()))?;
+    let mut names = listed
+        .map(|entry| entry.map(|entry| entry.file_name().to_string_lossy().into_owned()))
+        .collect::<std::io::Result<Vec<String>>>()
+        .map_err(|e| format!("an entry of `{}` reads: {e}", dir.display()))?;
+    names.sort();
+    Ok(names)
+}
+
+/// The settings that make `new` open `template` as an untitled project. They do not outlast a call
+/// of the command line, so its side runs them in the same `run` as the call that reads them.
+fn template_settings(template: &Path) -> Vec<(String, Value)> {
+    vec![
+        ("prefs.set".to_string(), json!({"key": "project.useTemplate", "value": true})),
+        ("prefs.set".to_string(), json!({"key": "project.templatePath", "value": template.display().to_string()})),
+    ]
+}
+
+/// `new` with the settings naming a project template it cannot use. The command line can only ask
+/// for it as the step of a `run` after its settings, which words the failure as every failed step,
+/// `{command}: {message} (step n)` (plan §14); the plugin's `new` is asked on its own, after its
+/// settings.
+#[test]
+fn a_new_project_whose_template_will_not_open_fails_as_the_command_line_fails_it() {
+    let mut documents = Documents::new().expect("the same document on both sides");
+    for dir in [documents.scratch.root(), documents.scratch.path()] {
+        std::fs::write(dir.join("binary.ecproj"), [0xff, 0xfe, 0x00, 0x80]).expect("a template that is no text");
+        std::fs::write(dir.join("junk.ecproj"), "not a project").expect("a template that is no project");
+        std::fs::create_dir(dir.join("folder")).expect("a folder where a template is named");
+    }
+    // The disk will not read the template: `Io`. A template that read but is no project is the
+    // command's own failure.
+    for (template, row) in [("missing.ecproj", "Io"), ("folder", "Io"), ("binary.ecproj", "CommandFailed"), ("junk.ecproj", "CommandFailed")] {
+        let mut steps = template_settings(&documents.scratch.root().join(template));
+        steps.push(("file.newProject".to_string(), json!({})));
+        let step = steps.len() - 1;
+        let expected = cli_run(documents.scratch.root(), &steps).expect("the command line ran").failure().expect("the command line reported the failure");
+        let settings = steps_document(&template_settings(&documents.scratch.path().join(template)));
+        documents.app.request("run", json!({"steps": settings})).expect("the settings name the template");
+        let error = documents.app.request("new", json!({})).expect_err("the template would not open");
+        let message = match &error {
+            CraftError::Io { message } if row == "Io" => message,
+            CraftError::CommandFailed { command, message, step: None } if row == "CommandFailed" && command == "file.newProject" => message,
+            other => panic!("a `{template}` template is `{row}` from `file.newProject`, got {other:?}"),
+        };
+        let words = scrubbed(&format!("file.newProject: {message} (step {step})"), &documents.dirs());
+        assert_eq!(words, scrubbed(&expected, &documents.dirs()), "a `{template}` template failed in other words than the command line's");
+    }
+}
+
+#[test]
+fn the_file_methods_stay_inside_the_confinement() {
+    let mut documents = Documents::new().expect("the same document on both sides");
+    // Outside the roots of both sides: the scratch folder's own, which no other test or run shares.
+    let elsewhere = documents.scratch.outside().to_path_buf();
+    let readable = documents.scratch.outside_file().expect("a file outside both roots");
+    let escape = elsewhere.join("escape.ecproj").display().to_string();
+    // The links that would lead out, laid alike in the command line's folder and the container: to a
+    // folder outside, and to a file outside.
+    let (root, container) = (documents.scratch.root().to_path_buf(), documents.scratch.path().to_path_buf());
+    for dir in [&root, &container] {
+        std::os::unix::fs::symlink(&elsewhere, dir.join("out")).expect("a link to a folder outside");
+        std::os::unix::fs::symlink(&readable, dir.join("hosts")).expect("a link to a file outside");
+    }
+    let path = |dir: &Path, rest: &str| format!("{}/{rest}", dir.display());
+    let outside = |command: &str, path: &str| Oracle::command(command, json!({"path": path}));
+    let mut cases = vec![
+        ("open", json!({"path": readable}), outside("file.open", &readable.display().to_string()), "Io"),
+        ("save", json!({"path": escape}), outside("file.save", &escape), "Io"),
+        ("saveAs", json!({"path": escape}), outside("file.saveAs", &escape), "Io"),
+        // A relative path, which the command line's own folder holds a project at.
+        ("open", json!({"path": "doc.ecproj"}), outside("file.open", "doc.ecproj"), "Io"),
+        ("saveAs", json!({"path": "escape.ecproj"}), outside("file.saveAs", "escape.ecproj"), "Io"),
+    ];
+    // `..` out of the container reaches the command line's project; out of its folder, the folder above.
+    for (method, command, rest) in
+        [("open", "file.open", "../doc.ecproj"), ("save", "file.save", "../escape.ecproj"), ("saveAs", "file.saveAs", "../escape.ecproj")]
+    {
+        cases.push((method, json!({"path": path(&container, rest)}), outside(command, &path(&root, rest)), "Io"));
+    }
+    cases.push(("open", json!({"path": path(&container, "hosts")}), outside("file.open", &path(&root, "hosts")), "Io"));
+    for (method, command) in [("save", "file.save"), ("saveAs", "file.saveAs")] {
+        cases.push((method, json!({"path": path(&container, "out/escape.ecproj")}), outside(command, &path(&root, "out/escape.ecproj")), "Io"));
+    }
+    assert_fails_as(&mut documents, cases).expect("every call fails as the command line fails it");
+    assert_eq!(entries(&elsewhere).expect("the folder outside lists"), ["readable.txt"], "the refused writes left nothing outside the container");
+    for written in [root.join("escape.ecproj"), PathBuf::from("escape.ecproj")] {
+        assert!(!written.exists(), "the refused writes left nothing at {}", written.display());
+    }
+
+    // A link to a file that is not there yet leads nowhere: the save replaces the link with the
+    // project, inside the container, as the command line's does in its folder.
+    for (dir, target) in [(&root, "cli.ecproj"), (&container, "plugin.ecproj")] {
+        std::os::unix::fs::symlink(elsewhere.join(target), dir.join("dangling.ecproj")).expect("a link to a file not there yet");
+    }
+    let mut expected = cli_command(&documents, "file.saveAs", &json!({"path": path(&root, "dangling.ecproj")})).expect("the command line saved");
+    let mut saved = documents.app.request("saveAs", json!({"path": path(&container, "dangling.ecproj")})).expect("`saveAs` saves");
+    scrub(&mut saved, &documents.dirs());
+    scrub(&mut expected, &documents.dirs());
+    assert_eq!(saved, expected, "`saveAs` through a link answered differently from the command line");
+    let link = std::fs::symlink_metadata(container.join("dangling.ecproj")).expect("the saved file is there");
+    assert!(link.file_type().is_file(), "the project replaced the link inside the container");
+    assert_eq!(entries(&elsewhere).expect("the folder outside lists"), ["readable.txt"], "nothing was written where the link led");
+}
+
+#[test]
+fn the_file_methods_read_the_bundle_and_never_write_it() {
+    let mut documents = Documents::in_scratch(Scratch::with_bundle().expect("a scratch folder with a bundle")).expect("the same document on both sides");
+    let bundle = documents.scratch.bundle().expect("the scratch folder has a bundle").to_path_buf();
+    // A project the app ships: outside the command line's folder, as it is outside the container.
+    let shipped = bundle.join("shipped.ecproj");
+    std::fs::copy(documents.scratch.root().join("doc.ecproj"), &shipped).expect("a project in the bundle");
+    let shipped_bytes = std::fs::read(&shipped).expect("the shipped project reads");
+    let at = |path: &Path| json!({"path": path.display().to_string()});
+    let expected = cli_command(&documents, "file.open", &at(&shipped)).expect("the command line opened the shipped project");
+    let opened = documents.app.request("open", at(&shipped)).expect("a project in the bundle opens");
+    assert_eq!(opened, expected, "`open` of the bundle answered differently from the command line");
+    // Saved in place, the project opened from the bundle would go back into it; by name, a new file.
+    let copy = bundle.join("copy.ecproj");
+    let outside = |command: &str| Oracle::command(command, at(&copy));
+    let in_place = Oracle::ToolOn(&shipped, "execute_command", json!({"command": "file.save", "params": {}}));
+    assert_fails_as(
+        &mut documents,
+        vec![("save", json!({}), in_place, "Io"), ("save", at(&copy), outside("file.save"), "Io"), ("saveAs", at(&copy), outside("file.saveAs"), "Io")],
+    )
+    .expect("every call fails as the command line fails it");
+    assert_eq!(std::fs::read(&shipped).expect("the shipped project reads"), shipped_bytes, "the shipped project is as it was");
+    assert!(!copy.exists(), "nothing new is written into the bundle");
 }

@@ -19,6 +19,7 @@
 //! resolves its flags (AD4).
 
 mod app;
+mod files;
 /// What the generator writes, one file to a module under `src/generated/`.
 mod generated {
     pub(crate) mod version;
@@ -26,6 +27,7 @@ mod generated {
 mod info;
 mod methods;
 mod plugins;
+mod properties;
 mod reference;
 mod requests;
 mod session;

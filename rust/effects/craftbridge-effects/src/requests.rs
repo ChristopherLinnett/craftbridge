@@ -164,7 +164,7 @@ impl Resolved {
 
 /// Map a failure of the render onto its row, under the method's name.
 fn render_failed(error: Error) -> CraftError {
-    failure(error, METHOD, &Value::Null)
+    failure(error, METHOD, &Value::Null, false)
 }
 
 /// The refusal of a comp the session could not resolve, in the words the PNG path's render refuses

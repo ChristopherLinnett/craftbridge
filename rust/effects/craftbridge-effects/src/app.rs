@@ -9,7 +9,7 @@ use effectcraft_automation::confine::Confinement as EngineConfinement;
 use effectcraft_automation::{Backend, McpServer};
 use serde_json::Value;
 
-use crate::{info, methods, requests, session};
+use crate::{files, info, methods, properties, requests, session};
 
 /// A hosted EffectCraft session: the MCP server built at construction, which owns the headless
 /// [`Backend`] and the confined session behind it (plan §19).
@@ -45,7 +45,19 @@ type Method = fn(&mut Backend, &Value) -> Result<Value>;
 /// The methods of the plan's §14 table `request` answers, by name. It is the one list of them: the
 /// dispatch reads it, and the refusal of every other name recites it, so the refusal names what
 /// `request` answers truly whatever a build adds to it.
-const METHODS: [(&str, Method); 4] = [("info", info::info), ("commands", methods::commands), ("exec", methods::exec), ("run", methods::run)];
+const METHODS: [(&str, Method); 11] = [
+    ("info", info::info),
+    ("commands", methods::commands),
+    ("exec", methods::exec),
+    ("run", methods::run),
+    ("props", properties::props),
+    ("get", properties::get),
+    ("set", properties::set),
+    ("open", files::open),
+    ("save", files::save),
+    ("saveAs", files::save_as),
+    ("new", files::new),
+];
 
 impl CraftApp for EffectCraftApp {
     /// Answer one method of the plan's §14 table through the function [`METHODS`] names for it.

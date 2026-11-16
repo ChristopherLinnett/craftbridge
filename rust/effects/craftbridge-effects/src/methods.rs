@@ -70,13 +70,17 @@ struct Call<'a> {
     command: &'a str,
     params: &'a Value,
     step: Option<u32>,
+    /// Whether `command` names an automation tool rather than a command: a tool runs commands of its
+    /// own with parameters it builds, so a refusal can name any of them, and the parameters the
+    /// caller wrote are not the ones that command was given.
+    tool: bool,
 }
 
 /// The one entry every command of `exec` and every step of `run` passes on its way to the session:
 /// refuse here, before the engine sees the call, the commands that would start a process — a phone
 /// starts none — and then run the command and map its failure. `step` names the step of a `run` for
 /// the rows that carry one.
-fn run_command(backend: &mut Backend, command: &str, params: Value, step: Option<u32>) -> Result<Value> {
+pub(crate) fn run_command(backend: &mut Backend, command: &str, params: Value, step: Option<u32>) -> Result<Value> {
     let params = if params.is_null() { empty_params() } else { params };
     if let Some(withheld) = wants_a_process(command, &params) {
         return Err(CraftError::unsupported(said(command, starts_a_process(withheld), step)));
@@ -86,7 +90,7 @@ fn run_command(backend: &mut Backend, command: &str, params: Value, step: Option
             Some(failure) => Err(CraftError::command_failed(command, failure, step)),
             None => Ok(value),
         },
-        Err(error) => Err(map_error(error, &Call { command, params: &params, step })),
+        Err(error) => Err(map_error(error, &Call { command, params: &params, step, tool: false })),
     }
 }
 
@@ -160,14 +164,15 @@ pub(crate) fn tool_json(backend: &mut Backend, name: &str, args: &Value) -> Resu
         // None of the tools reached here answers a picture; an answer that is one says the plugin
         // called the wrong tool, which is the plugin's own bug, not the app's error.
         Ok(Reply::Image { .. }) => Err(CraftError::internal(format!("`{name}`: answered a picture where a document was expected"))),
-        Err(error) => Err(failure(error, name, args)),
+        Err(error) => Err(failure(error, name, args, true)),
     }
 }
 
 /// Map the failure of one EffectCraft automation call that is no command of a `run`: the tools, and
-/// the calls the plugin makes on the backend itself, such as a frame's render.
-pub(crate) fn failure(error: Error, command: &str, params: &Value) -> CraftError {
-    map_error(error, &Call { command, params, step: None })
+/// the calls the plugin makes on the backend itself, such as a frame's render. `tool` says whether
+/// `command` names an automation tool, whose refusals are told by their words (see [`Call::tool`]).
+pub(crate) fn failure(error: Error, command: &str, params: &Value, tool: bool) -> CraftError {
+    map_error(error, &Call { command, params, step: None, tool })
 }
 
 /// Map one EffectCraft automation failure onto its row (plan §14).
@@ -208,9 +213,11 @@ fn map_denial(message: String, call: &Call) -> CraftError {
 /// and a command's own refusal shares its variant with the parameter check's, so the check itself
 /// is re-run to tell them apart: EffectCraft's own `check_params` is one mechanism for both. Only a
 /// refusal naming the command that was run is re-checked: one a command passes on from a command it
-/// ran itself was given parameters the caller never wrote, so it is that command's failure.
+/// ran itself was given parameters the caller never wrote, so it is that command's failure. A tool's
+/// call is the exception: the commands it ran are told by their words alone, since the arguments
+/// the caller wrote are the tool's, not theirs.
 fn map_engine(error: EngineError, call: &Call) -> CraftError {
-    let Call { command, params, step } = *call;
+    let Call { command, params, step, tool } = *call;
     match &error {
         EngineError::UnknownCommand(_) => CraftError::invalid_params(said(command, error.to_string(), step)),
         EngineError::NoComp
@@ -218,10 +225,10 @@ fn map_engine(error: EngineError, call: &Call) -> CraftError {
         | EngineError::Project(ProjectError::NoItem(_) | ProjectError::NotComp(_) | ProjectError::NoLayer(_) | ProjectError::NoProperty(_)) => {
             CraftError::not_found(said(command, error.to_string(), step))
         }
-        EngineError::BadParams { cmd, msg } if cmd == command => {
+        EngineError::BadParams { cmd, msg } if cmd == command || tool => {
             if lacks_capability(msg) {
                 CraftError::unsupported(named(cmd, msg, step))
-            } else if find_command(cmd).is_some_and(|spec| check_params(spec, params).is_err()) {
+            } else if !tool && find_command(cmd).is_some_and(|spec| check_params(spec, params).is_err()) {
                 CraftError::invalid_params(named(cmd, msg, step))
             } else if is_missing_named(msg) {
                 CraftError::not_found(named(cmd, msg, step))
@@ -230,6 +237,7 @@ fn map_engine(error: EngineError, call: &Call) -> CraftError {
             }
         }
         EngineError::Other(why) | EngineError::Disabled(_, why) if lacks_capability(why) => CraftError::unsupported(said(command, error.to_string(), step)),
+        EngineError::Other(why) if is_refused_by_the_disk(why) => CraftError::io(said(command, error.to_string(), step)),
         EngineError::Other(why) if is_missing_named(why) => CraftError::not_found(said(command, error.to_string(), step)),
         _ => CraftError::command_failed(command, error.to_string(), step),
     }
@@ -240,6 +248,21 @@ fn map_engine(error: EngineError, call: &Call) -> CraftError {
 /// of the engine's ends the same way ("… is not available in this build", "… are not …").
 fn lacks_capability(why: &str) -> bool {
     why.ends_with("not available in this build")
+}
+
+/// Whether the engine failed because the disk would not read or write a file: a file or folder
+/// missing, unreadable or unwritable, a disk full (the §14 `Io` row, as every such failure of
+/// CraftBridge's own is). The engine carries no kind for a disk refusal, only its words, and
+/// reports a file it could not read or write as `cannot read {file}: {why}` or `cannot write
+/// {file}: {why}`, with the system's reason after, which is every disk refusal `open`, `save`,
+/// `saveAs` and `new` can meet.
+///
+/// A file that read but holds no project ("… is not a project EffectCraft can open") is the
+/// command's own failure. The engine's few disk refusals worded otherwise stay that row too: a
+/// parameter refusal (`BadParams`) is sorted before this, and a wider match on `cannot` would take
+/// in its refusals of what a file holds ("cannot import …").
+fn is_refused_by_the_disk(why: &str) -> bool {
+    why.starts_with("cannot read ") || why.starts_with("cannot write ")
 }
 
 /// Whether a command's refusal is one of the engine's "the thing you named is not there" sentences
@@ -381,7 +404,7 @@ mod tests {
     }
 
     fn call<'a>(command: &'a str, params: &'a Value) -> Call<'a> {
-        Call { command, params, step: None }
+        Call { command, params, step: None, tool: false }
     }
 
     /// Each of the engine's ways of saying the build lacks a capability is the `Unsupported` row:
@@ -398,6 +421,35 @@ mod tests {
             let mapped = map_engine(error, &call("footage.relink", &params));
             assert!(matches!(mapped, CraftError::Unsupported { .. }), "a missing capability is `Unsupported`, got {mapped:?}");
         }
+    }
+
+    /// The engine's sentence for a file the disk would not read or write is the `Io` row, in the
+    /// engine's words with a `run` step's around them: a full disk, an unwritable folder, a file that
+    /// is not there. A file that read but holds no project, and a refusal worded alike as a
+    /// parameter's, are the command's own failure.
+    #[test]
+    fn a_file_the_disk_refuses_answers_io() {
+        let params = json!({});
+        for (command, why) in [
+            ("file.save", "cannot write /c/doc.ecproj: No space left on device (os error 28)"),
+            ("file.saveAs", "cannot write /c/locked/doc.ecproj: Permission denied (os error 13)"),
+            ("file.open", "cannot read /c/missing.ecproj: No such file or directory (os error 2)"),
+            ("file.newProject", "cannot read the new project template /c/t.ecproj: No such file or directory (os error 2)"),
+        ] {
+            match map_engine(EngineError::Other(why.into()), &call(command, &params)) {
+                CraftError::Io { message } => assert_eq!(message, why, "the refusal keeps the engine's words"),
+                other => panic!("`{why}` is `Io`, got {other:?}"),
+            }
+        }
+        let stepped = Call { command: "file.save", params: &params, step: Some(2), tool: false };
+        match map_engine(EngineError::Other("cannot write /c/doc.ecproj: Disk quota exceeded (os error 69)".into()), &stepped) {
+            CraftError::Io { message } => assert_eq!(message, "file.save: cannot write /c/doc.ecproj: Disk quota exceeded (os error 69) (step 2)"),
+            other => panic!("a refused write in a step is `Io` naming the step, got {other:?}"),
+        }
+        let not_a_project = EngineError::Other("/c/junk.ecproj is not a project EffectCraft can open: expected value".into());
+        assert!(matches!(map_engine(not_a_project, &call("file.open", &params)), CraftError::CommandFailed { .. }), "a file that read is no disk refusal");
+        let svg = EngineError::BadParams { cmd: "edit.pasteSvg".into(), msg: "cannot read the SVG: unexpected end".into() };
+        assert!(matches!(map_engine(svg, &call("edit.pasteSvg", &params)), CraftError::CommandFailed { .. }), "a parameter refused is no disk refusal");
     }
 
     /// Both model downloads are withheld however a call reaches them and nothing else is: a step's
@@ -426,6 +478,24 @@ mod tests {
             "the engine refuses a nested batch before it runs, so its steps reach nothing"
         );
         assert_eq!(wants_a_process("engine.batch", &json!({"steps": [{"command": "comp.new"}, {"params": {}}]})), None);
+    }
+
+    /// A tool runs commands of its own with parameters it builds, so a refusal naming one of them is
+    /// told by its words, and the arguments the caller wrote are never checked against that command's:
+    /// `flat` is the tool's own and the command it ran was never given it.
+    #[test]
+    fn a_refusal_of_a_command_a_tool_ran_is_told_by_its_words() {
+        let arguments = json!({"layer": 5, "flat": true});
+        let tool = Call { command: "get_layer", params: &arguments, step: None, tool: true };
+        let refusal = |msg: &str| EngineError::BadParams { cmd: "layer.tree".into(), msg: msg.into() };
+        assert!(matches!(map_engine(refusal("no layer 5"), &tool), CraftError::NotFound { .. }), "a missing layer is `NotFound`");
+        assert!(matches!(map_engine(refusal("media import is not available in this build"), &tool), CraftError::Unsupported { .. }));
+        match map_engine(refusal("can't use \"abc\" for a scalar property"), &tool) {
+            CraftError::CommandFailed { command, message, step } => {
+                assert_eq!((command.as_str(), message.as_str(), step), ("layer.tree", "can't use \"abc\" for a scalar property", None));
+            }
+            other => panic!("another refusal is the command's failure, got {other:?}"),
+        }
     }
 
     /// A refusal a command passes on from a command it ran itself is that command's failure: the
