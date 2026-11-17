@@ -3,7 +3,7 @@
 //! EffectCraft's own host builder takes its folders from `EFFECTCRAFT_CONFIG_DIR` or the desktop
 //! conventions and starts external helper processes; a phone has neither. This builds the same
 //! session through the engine's public fields alone: the app's [`Folders`] supply what the desktop
-//! host derives, the media importer and the Render-Queue exporter are EffectCraft's own, and the
+//! host derives, the media importer is EffectCraft's own and the exporter is CraftBridge's (AD7), and the
 //! one thing deliberately missing is the helper hooks, so a script or a command that wants a helper
 //! finds none and answers that helpers are not available, and nothing here can start a process.
 
@@ -11,8 +11,9 @@ use std::sync::Arc;
 
 use craftbridge_core::folders::Folders;
 use effectcraft_engine::project::Footage;
-use effectcraft_engine::{Exporter, Importer, Session};
+use effectcraft_engine::{Importer, Session};
 
+use crate::exporter::PooledExporter;
 use crate::{fonts, plugins};
 
 /// The importer EffectCraft's host uses: a probe is EffectCraft's own media probe, so a phone reads
@@ -25,11 +26,11 @@ impl Importer for MediaImporter {
     }
 }
 
-/// The exporter seam: the one place the session's exporter is chosen, so the phone's own exporter
-/// (AD7) takes over every export here and nowhere else. It is EffectCraft's file exporter, the one
-/// the command line exports through, so every export the session makes is EffectCraft's own.
-fn exporter() -> Arc<dyn Exporter> {
-    Arc::new(effectcraft_host::FileExporter::default())
+/// The exporter seam: the one place the session's exporter is chosen. It is CraftBridge's own (AD7):
+/// EffectCraft's file exporter, the one the command line exports through, run on a pool the phone's
+/// memory can feed.
+fn exporter() -> Arc<PooledExporter> {
+    Arc::new(PooledExporter::new())
 }
 
 /// Build the session (plan §19, steps 1 and 2): every field from public inputs, the plug-in hooks from the
@@ -81,6 +82,14 @@ pub(crate) mod tests {
             plugins,
             fonts: Vec::new(),
         }
+    }
+
+    #[test]
+    fn the_session_exports_through_craftbridges_exporter() {
+        // The exporter is the same on every desktop as EffectCraft's own and differs from it only on a
+        // phone, so what a host test can pin is the type the seam hands out.
+        let _: Arc<PooledExporter> = exporter();
+        assert!(build(&folders(None)).exporter.is_some());
     }
 
     #[test]

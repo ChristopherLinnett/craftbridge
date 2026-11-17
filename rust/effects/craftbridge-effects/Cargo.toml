@@ -27,10 +27,11 @@ effectcraft-script.workspace = true
 effectcraft-plugin.workspace = true
 serde_json.workspace = true
 rustix.workspace = true
+# The export's thread pool (AD7).
+rayon.workspace = true
 
 [dev-dependencies]
 image.workspace = true
-rayon.workspace = true
 tempfile.workspace = true
 
 [lints]
