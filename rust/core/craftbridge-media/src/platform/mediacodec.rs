@@ -470,11 +470,12 @@ fn raw_codec(entry: &SampleEntry, stream: &StreamInfo, make: MakeCodec) -> Resul
 /// harness writes before the run (see [`tests::device_codecs`]).
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::collections::VecDeque;
     use std::ops::Range;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, OnceLock};
 
-    use filmcraft_codecs::hw::{FrameCodec, FrameStreamInfo};
+    use filmcraft_codecs::hw::{FrameCodec, FrameStreamInfo, hw_stats};
     use filmcraft_codecs::{VideoDecoder, software_video_decoder};
     use filmcraft_color::ColorInfo;
     use filmcraft_frame::Chroma;
@@ -484,7 +485,7 @@ pub(crate) mod tests {
     use crate::fallback::{Fallback, stream_info};
     use crate::fixtures::{
         av1_entry, av1_samples, counters, decoded, hevc_entry, hevc_samples, hevc10_entry, hevc10_samples, pictures, reordered_entry, reordered_samples, text,
-        through_a_failed_drain, tiny_entry, tiny_samples,
+        through_a_failed_drain, tiny_entry, tiny_samples, two_runs,
     };
     use crate::mediacodec_input::{AV1_MIME, H264_MIME, HEVC_MIME};
 
@@ -627,11 +628,6 @@ pub(crate) mod tests {
             assert_eq!(decoded(&mut decoder, &samples), wanted, "after the end of the stream");
             assert!(decoder.flush().is_empty(), "nothing is held after a flush");
         }
-    }
-
-    /// Two runs of [`tiny_samples`]: the second starts at its own IDR picture, at time 4.
-    fn two_runs() -> Vec<(i64, Vec<u8>)> {
-        tiny_samples().into_iter().chain(tiny_samples().into_iter().map(|(pts, sample)| (pts + 4, sample))).collect()
     }
 
     /// `decoder` and the software decoder each fed samples `before` of `samples`, sought to the run of `length`
@@ -898,34 +894,83 @@ pub(crate) mod tests {
         assert_eq!(decoded(&mut decoder, &samples), decoded(software(&entry).as_mut(), &samples));
     }
 
-    /// A MediaCodec raw decoder whose codec is stopped just before the end of the stream is drained, so that it
-    /// fails there and nowhere else.
-    struct StoppedAtTheEnd(RawCodec);
+    /// A MediaCodec raw decoder whose codec holds back the last `holds` pictures it decoded, as a codec with that
+    /// latency does, and is stopped just before the sample at index `stop_at` is fed or, with none, just before
+    /// the end of the stream is drained: that call fails, and every picture still held is lost with the codec,
+    /// however soon the codec itself hands pictures back.
+    struct Dies {
+        raw: RawCodec,
+        holds: usize,
+        stop_at: Option<usize>,
+        fed: usize,
+        held: VecDeque<(i64, DecodedFrame)>,
+    }
 
-    impl RawDecoder<DecodedFrame> for StoppedAtTheEnd {
+    impl Dies {
+        fn new(raw: RawCodec, holds: usize, stop_at: Option<usize>) -> Self {
+            Self { raw, holds, stop_at, fed: 0, held: VecDeque::new() }
+        }
+
+        fn stop(&mut self) {
+            stop_codec(&self.raw);
+            self.held.clear();
+        }
+    }
+
+    impl RawDecoder<DecodedFrame> for Dies {
         fn feed(&mut self, sample: &[u8], pts: i64) -> std::result::Result<Vec<(i64, DecodedFrame)>, Failure> {
-            self.0.feed(sample, pts)
+            if Some(self.fed) == self.stop_at {
+                self.stop();
+            }
+            self.fed += 1;
+            self.held.extend(self.raw.feed(sample, pts)?);
+            let due = self.held.len().saturating_sub(self.holds);
+            Ok(self.held.drain(..due).collect())
         }
 
         fn restart(&mut self) {
-            self.0.restart();
+            self.held.clear();
+            self.raw.restart();
         }
 
         fn drain(&mut self) -> std::result::Result<Vec<(i64, DecodedFrame)>, Failure> {
-            stop_codec(&self.0);
-            self.0.drain()
+            if self.stop_at.is_none() {
+                self.stop();
+            }
+            let drained = self.raw.drain()?;
+            Ok(self.held.drain(..).chain(drained).collect())
         }
     }
 
     #[test]
     fn a_codec_that_fails_while_draining_gives_the_streams_whole_tail_through_fallback_from_the_software_decoder() {
         let _counters = counters();
-        // A codec can hold every picture of streams this short until the end (the API 29 emulator's does), so
-        // the tail a failed drain loses can be the whole stream.
-        for (entry, samples) in [(tiny_entry(), tiny_samples()), (reordered_entry(), reordered_samples())] {
+        // The codec holds every picture of streams this short until the end, as the API 29 emulator's did, so the
+        // failed drain loses the whole stream, the first run of two included.
+        for (entry, samples) in [(tiny_entry(), tiny_samples()), (reordered_entry(), reordered_samples()), (tiny_entry(), two_runs())] {
             let raw = raw_codec(&entry, &stream(&entry), any_codec).unwrap();
             let codec = raw.layout.codec;
-            through_a_failed_drain(&entry, &samples, HardwareDecoder::new(StoppedAtTheEnd(raw), stream(&entry), 0, BACKEND, codec));
+            through_a_failed_drain(&entry, &samples, HardwareDecoder::new(Dies::new(raw, usize::MAX, None), stream(&entry), 0, BACKEND, codec));
+        }
+    }
+
+    #[test]
+    fn a_codec_stopped_mid_stream_gives_the_whole_stream_back_through_fallback_from_the_software_decoder() {
+        let _counters = counters();
+        // The same codec dying mid-stream instead of at its end, three pictures late, with the pictures it held
+        // gone: the replay reaches back to the restart sample before the oldest picture the caller lacks, and the
+        // rest of the stream comes through the one switch, the same pictures the software decoder gives.
+        let entry = tiny_entry();
+        let samples = two_runs();
+        let wanted = decoded(software(&entry).as_mut(), &samples);
+        for stop_at in [1, 5, 7] {
+            let fallbacks = hw_stats().fallbacks;
+            let raw = raw_codec(&entry, &stream(&entry), any_codec).unwrap();
+            let codec = raw.layout.codec;
+            let hardware = HardwareDecoder::new(Dies::new(raw, 3, Some(stop_at)), stream(&entry), 0, BACKEND, codec);
+            let mut decoder = Fallback::new(hardware, &entry, stream(&entry));
+            assert_eq!(text(&pictures(&mut decoder, &samples)), wanted, "stopped before sample {stop_at}");
+            assert_eq!(hw_stats().fallbacks, fallbacks + 1, "one switch, stopped before sample {stop_at}");
         }
     }
 

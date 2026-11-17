@@ -214,6 +214,11 @@ pub(crate) mod fixtures {
         ]
     }
 
+    /// Two runs of [`tiny_samples`]: the second starts at its own IDR picture, at time 4.
+    pub(crate) fn two_runs() -> Vec<(i64, Vec<u8>)> {
+        tiny_samples().into_iter().chain(tiny_samples().into_iter().map(|(pts, sample)| (pts + 4, sample))).collect()
+    }
+
     /// Samples as owned buffers, each with its presentation time.
     fn owned(samples: &[(i64, &[u8])]) -> Vec<(i64, Vec<u8>)> {
         samples.iter().map(|&(pts, sample)| (pts, sample.to_vec())).collect()
@@ -638,12 +643,18 @@ pub(crate) mod fixtures {
     }
 
     /// Every picture `decoder` returns for `samples` fed in order and then flushed.
-    pub(crate) fn pictures(decoder: &mut dyn VideoDecoder, samples: &[(i64, Vec<u8>)]) -> Vec<DecodedFrame> {
+    pub(crate) fn every_picture(decoder: &mut dyn VideoDecoder, samples: &[(i64, Vec<u8>)]) -> Vec<DecodedFrame> {
         let mut pictures = Vec::new();
         for (pts, sample) in samples {
             pictures.extend(decoder.decode(sample, *pts).unwrap());
         }
         pictures.extend(decoder.flush());
+        pictures
+    }
+
+    /// [`every_picture`] of a stream that has a picture for each sample.
+    pub(crate) fn pictures(decoder: &mut dyn VideoDecoder, samples: &[(i64, Vec<u8>)]) -> Vec<DecodedFrame> {
+        let pictures = every_picture(decoder, samples);
         assert_eq!(pictures.len(), samples.len(), "a picture for each sample");
         pictures
     }

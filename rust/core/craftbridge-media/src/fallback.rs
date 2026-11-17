@@ -17,8 +17,10 @@ use filmcraft_codecs::{CodecError, DecodedFrame, Result, VideoDecoder, software_
 use filmcraft_isobmff::SampleEntry;
 
 /// How much a replay may hold and produce. It runs inside one decode call, so its length is how long
-/// that call takes: at most 600 samples, two ten-second GOPs at 30 pictures a second (after an HEVC CRA
-/// the GOP before it is kept too), and 256 MiB; FilmCraft's hybrid decoder keeps the same two bounds.
+/// that call takes: at most 600 samples, twenty seconds at 30 pictures a second, and 256 MiB, the two
+/// bounds FilmCraft's hybrid decoder keeps. A replay holds the samples since the newest restart sample it
+/// can start at (see `Replay::advance`): a GOP, and past it about as many samples as the decoder holds
+/// pictures. Past a bound it gives up its oldest GOP first (see `Replay::keep`).
 /// The pictures bound is for a corrupt access unit, which can make one sample decode to many pictures,
 /// and so turn a bounded replay into an unbounded queue; FilmCraft's hybrid decoder bounds that too.
 const BOUNDS: Bounds = Bounds { samples: 600, bytes: 256 << 20, pictures: 4096 };
@@ -59,25 +61,24 @@ impl Restart {
 struct Kept {
     pts: i64,
     sample: Vec<u8>,
+    restart: Restart,
     /// The caller already has this sample's picture.
     delivered: bool,
 }
 
 /// The samples, in decode order, a software decoder needs to reach the hardware decoder's state.
 struct Replay {
-    /// From the latest restart sample, or from the one before it when the latest is a CRA; `None` once a
-    /// bound was passed, until the next restart sample.
+    /// From the replay's start (see `advance`); `None` once a bound was passed with no restart sample left to
+    /// start at, until the next one.
     kept: Option<Vec<Kept>>,
     bytes: usize,
-    /// Where the latest restart sample sits in `kept`.
-    latest: usize,
     bounds: Bounds,
 }
 
 impl Replay {
     /// Nothing kept yet: the first sample fed is where a replay starts, as decoding does.
     fn new(bounds: Bounds) -> Self {
-        Self { kept: Some(Vec::new()), bytes: 0, latest: 0, bounds }
+        Self { kept: Some(Vec::new()), bytes: 0, bounds }
     }
 
     fn clear(&mut self) {
@@ -85,32 +86,72 @@ impl Replay {
     }
 
     fn keep(&mut self, stream: &StreamInfo, sample: &[u8], pts: i64) {
-        match (Restart::of(stream, sample), self.kept.as_mut()) {
-            (Restart::No, _) => {}
-            (Restart::KeepsPrevious, Some(kept)) => {
-                let dropped = kept.drain(..self.latest.min(kept.len())).fold(0, |bytes: usize, gone| bytes.saturating_add(gone.sample.len()));
-                self.bytes = self.bytes.saturating_sub(dropped);
-                self.latest = kept.len();
-            }
-            // A clean restart needs nothing before it. A CRA past the bounds has lost the GOP before it, and
-            // is still the best start left: only its leading pictures are missing from a replay.
-            (Restart::Clean | Restart::KeepsPrevious, _) => self.clear(),
+        let restart = Restart::of(stream, sample);
+        let restarts = !matches!(restart, Restart::No);
+        // A restart sample after a bound was passed has lost everything before it, and is still the best start
+        // left.
+        if restarts && self.kept.is_none() {
+            self.clear();
         }
         let Some(kept) = self.kept.as_mut() else { return };
-        let bytes = self.bytes.saturating_add(sample.len());
-        if kept.len() >= self.bounds.samples || bytes > self.bounds.bytes {
-            self.kept = None;
-            return;
+        // Past a bound the replay gives up its oldest GOP first, its start moving to the next restart sample it
+        // holds, or to this one. That is never later than FilmCraft's hybrid decoder's replay starts while that
+        // replay fits the bounds, so a picture this one can no longer make is one that one could not make
+        // either. With no restart sample left to start at, or none but the start, there is no replay.
+        let mut bytes = self.bytes.saturating_add(sample.len());
+        while kept.len() >= self.bounds.samples || bytes > self.bounds.bytes {
+            let next = kept.iter().skip(1).position(|later| !matches!(later.restart, Restart::No)).map(|at| at.saturating_add(1));
+            let Some(start) = next.or(restarts.then_some(kept.len())).filter(|start| *start > 0) else {
+                self.kept = None;
+                return;
+            };
+            bytes = bytes.saturating_sub(drop_before(kept, start));
         }
         self.bytes = bytes;
-        kept.push(Kept { pts, sample: sample.to_vec(), delivered: false });
+        kept.push(Kept { pts, sample: sample.to_vec(), restart, delivered: false });
+        self.advance();
     }
 
-    /// Notes that the caller has the picture with this presentation time, which is its sample's.
-    fn delivered(&mut self, pts: i64) {
-        if let Some(kept) = self.kept.as_mut().and_then(|kept| kept.iter_mut().rev().find(|kept| kept.pts == pts)) {
-            kept.delivered = true;
+    /// Notes that the caller has the pictures with these presentation times, each its sample's.
+    fn delivered(&mut self, pictures: impl IntoIterator<Item = i64>) {
+        let Some(kept) = self.kept.as_mut() else { return };
+        for pts in pictures {
+            if let Some(sample) = kept.iter_mut().rev().find(|sample| sample.pts == pts) {
+                sample.delivered = true;
+            }
         }
+        self.advance();
+    }
+
+    /// Moves the replay's start to the newest restart sample a replay can start at without losing a picture
+    /// the caller has still to get.
+    ///
+    /// Decoders hand pictures back in presentation order, and a sample before a restart sample in decoding
+    /// order presents before it. So once the caller has a restart sample's own picture it has every picture
+    /// presenting before it, the leading pictures that follow it in decoding order included. A clean restart
+    /// sample can start the replay sooner, once the caller has the picture of every sample before it, since
+    /// its leading pictures decode from it; a CRA cannot, since its leading pictures are still to come and a
+    /// replay from it leaves them out. Until then the replay keeps an earlier start, however many pictures
+    /// the decoder holds, so a decoder that dies holding them loses none. The samples presenting before the
+    /// replay's start, its leading pictures, hold nothing back by themselves: the start's own picture, which
+    /// comes out after them, is waited for, and a run started at a CRA or BLA never gives its RASL pictures,
+    /// which would otherwise hold the start back for good.
+    fn advance(&mut self) {
+        let Some(kept) = self.kept.as_mut() else { return };
+        let floor = kept.first().map_or(i64::MIN, |first| first.pts);
+        let (mut start, mut waiting) = (0, false);
+        for (at, sample) in kept.iter().enumerate() {
+            let starts = match sample.restart {
+                Restart::No => false,
+                Restart::Clean => sample.delivered || !waiting,
+                Restart::KeepsPrevious => sample.delivered,
+            };
+            if starts {
+                start = at;
+            }
+            waiting |= !sample.delivered && sample.pts >= floor;
+        }
+        self.bytes = self.bytes.saturating_sub(drop_before(kept, start));
     }
 
     fn take(&mut self) -> Option<Vec<Kept>> {
@@ -118,6 +159,12 @@ impl Replay {
         self.clear();
         kept
     }
+}
+
+/// Drops the samples before `start` from `kept`, and answers how many bytes they held.
+fn drop_before(kept: &mut Vec<Kept>, start: usize) -> usize {
+    let start = start.min(kept.len());
+    kept.drain(..start).fold(0, |bytes: usize, gone| bytes.saturating_add(gone.sample.len()))
 }
 
 enum Engine<D> {
@@ -141,8 +188,9 @@ pub trait Draining: VideoDecoder {
 
 /// Wraps the hardware decoder `D`. When `D` fails, or a sample carries parameters other than the ones
 /// `D` was set up with, or `D` fails while the stream's end is flushed, it switches to the software decoder
-/// and replays the samples since the last restart sample, so the caller sees one continuous stream: the
-/// pictures it already has are left out, and the ones `D` still held come out in presentation order.
+/// and replays the samples back to the restart sample before the oldest picture the caller does not have
+/// yet, so the caller sees one continuous stream: the pictures it already has are left out, and the ones
+/// `D` still held come out in presentation order.
 ///
 /// `D` reports [`CodecError::Cancelled`] only for a sample it has not taken: FilmCraft's decode loop
 /// feeds a sample again after any error.
@@ -199,9 +247,7 @@ impl<D: Draining> Fallback<D> {
     /// Notes the hardware decoder's pictures as the caller's, so a replay leaves them out.
     fn delivered(&mut self, pictures: Vec<DecodedFrame>) -> Vec<DecodedFrame> {
         note_hw_frames(pictures.len());
-        for picture in &pictures {
-            self.replay.delivered(picture.pts);
-        }
+        self.replay.delivered(pictures.iter().map(|picture| picture.pts));
         pictures
     }
 
@@ -214,9 +260,9 @@ impl<D: Draining> Fallback<D> {
     }
 
     /// Makes `software` the engine: the caller's pictures and those the failed hardware decoder still held
-    /// are noted, and the replay is returned. Past a bound there is no replay: the software decoder starts at
-    /// the next restart sample, or at the caller's next seek, and the pictures the hardware decoder still
-    /// held are returned instead.
+    /// are noted, and the replay is returned. When a bound left no replay, the software decoder starts at the
+    /// next restart sample, or at the caller's next seek, and the pictures the hardware decoder still held are
+    /// returned instead.
     fn hand_over(&mut self, software: Box<dyn VideoDecoder>) -> std::result::Result<Vec<Kept>, Vec<DecodedFrame>> {
         let still_held = self.active_mut().flush();
         let replay = self.replay.take();
@@ -284,11 +330,13 @@ impl<D: Draining> Fallback<D> {
 
     /// The hardware decoder failed while draining the end of the stream: the software decoder replays the
     /// kept samples, ends the stream itself, and the pictures the caller does not have yet come out, every
-    /// one from the restart sample the replay starts at; one the failed decoder held from before that sample
-    /// is lost with it, since no kept sample makes it again. When it cannot (no software decoder, a replay
-    /// past a bound, a replay that fails), the pictures the hardware decoder still held are all there is.
-    /// FilmCraft's trait has no error for the end of a stream, so the caller's decode loop finds a lost
-    /// picture missing, and makes it again only at its next seek.
+    /// one: the replay starts at a restart sample before the oldest of them, so every picture a healthy
+    /// decoder would still have given is made again. That reach is what the replay bounds limit: past them
+    /// the replay keeps its last GOP, so a picture the failed decoder held from before it, and lost, is not
+    /// made again, as FilmCraft's hybrid decoder's replay would not make it. When the replay cannot run (no
+    /// software decoder, one GOP past a bound by itself, a replay that fails), the pictures the hardware
+    /// decoder still held are all there is: FilmCraft's trait has no error for the end of a stream, so the
+    /// caller's decode loop finds those pictures missing, and makes them again only at its next seek.
     fn switch_at_the_end(&mut self) -> Vec<DecodedFrame> {
         let Ok(software) = self.software_decoder() else { return self.active_mut().flush() };
         let replay = match self.hand_over(software) {
@@ -419,7 +467,10 @@ mod tests {
     use filmcraft_isobmff::{CodecConfig, FourCc};
 
     use super::*;
-    use crate::fixtures::{avc_entry, counters, pps, prores_entry, reordered_entry, reordered_samples, sps, through_a_failed_drain, tiny_entry, tiny_samples};
+    use crate::fixtures::{
+        avc_entry, counters, every_picture, pps, prores_entry, reordered_entry, reordered_samples, sps, through_a_failed_drain, tiny_entry, tiny_samples,
+        two_runs,
+    };
     use crate::layout::Codec;
     use crate::order::{HardwareDecoder, RawDecoder};
     use filmcraft_codecs::hw::FrameCodec;
@@ -445,6 +496,7 @@ mod tests {
     const CRA: &[u8] = &[21 << 1, 1];
     const TRAIL: &[u8] = &[1 << 1, 1];
     const TRAIL_N: &[u8] = &[0, 1];
+    const RASL: &[u8] = &[8 << 1, 1];
 
     /// A length-prefixed access unit of the NAL units `nals`.
     fn access_unit(nals: &[&[u8]]) -> Vec<u8> {
@@ -512,10 +564,11 @@ mod tests {
         fails_on: &'static [u8],
         latency: usize,
         cancels: bool,
-        /// Loses the pictures it held when it fails, as a hardware decoder whose session is lost does.
+        /// Loses the pictures it held when it fails, or when its drain fails, as a hardware decoder whose
+        /// session is lost does.
         forgets: bool,
-        /// Fails when asked to drain, and keeps the pictures it holds, as a hardware decoder whose
-        /// reorder buffer outlives its codec does.
+        /// Fails when asked to drain, keeping the pictures it holds unless it `forgets`, as a hardware
+        /// decoder whose reorder buffer outlives its codec does.
         drain_fails: bool,
         /// What it says of itself.
         intra_only: bool,
@@ -566,6 +619,9 @@ mod tests {
     impl Draining for Fake {
         fn drain(&mut self) -> Result<Vec<DecodedFrame>> {
             if self.drain_fails {
+                if self.forgets {
+                    self.pending.clear();
+                }
                 return Err(CodecError::Decode("injected drain failure".into()));
             }
             Ok(self.flush())
@@ -596,7 +652,7 @@ mod tests {
         stream: StreamInfo,
         available_from: u32,
         bounds: Bounds,
-        /// The hardware fake loses the pictures it held when it fails.
+        /// The hardware fake loses the pictures it held when it fails, or fails to drain.
         forgets: bool,
         /// The hardware fake fails when drained.
         drain_fails: bool,
@@ -637,6 +693,12 @@ mod tests {
                 made,
             }
         }
+    }
+
+    /// Makes `software` the one time a switch asks for a software decoder.
+    fn once(software: impl VideoDecoder + 'static) -> impl Fn() -> Result<Box<dyn VideoDecoder>> + Send + 'static {
+        let software = Mutex::new(Some(Box::new(software) as Box<dyn VideoDecoder>));
+        move || Ok(software.lock().unwrap().take().expect("the software decoder is made once"))
     }
 
     /// What a call returned: its pictures' presentation times, or that it failed or was cancelled.
@@ -729,21 +791,30 @@ mod tests {
         assert_eq!(rig.decoder.name(), "hardware");
     }
 
+    /// An HEVC run whose only random access points are the CRAs at 2 and 4, failing at 6.
+    fn cra_run() -> Vec<(i64, Vec<u8>)> {
+        vec![at(0, HEVC_IDR, PLAIN), at(1, TRAIL, PLAIN), at(2, CRA, PLAIN), at(3, TRAIL, PLAIN), at(4, CRA, PLAIN), at(5, TRAIL, PLAIN), at(6, TRAIL, FAIL)]
+    }
+
     #[test]
     fn after_an_hevc_cra_the_replay_starts_at_the_restart_before_it() {
-        let mut rig = Setup { stream: hevc(), ..Setup::default() }.rig();
-        let out = rig.feed(&[
-            at(0, HEVC_IDR, PLAIN),
-            at(1, TRAIL, PLAIN),
-            at(2, CRA, PLAIN),
-            at(3, TRAIL, PLAIN),
-            at(4, CRA, PLAIN),
-            at(5, TRAIL, PLAIN),
-            at(6, TRAIL, FAIL),
-        ]);
-        // The CRA at 4 restarts nothing by itself: its leading pictures refer to the GOP of the CRA at 2.
-        // That one restarts the replay, so a stream of CRAs keeps two GOPs, never the whole movie.
+        let mut rig = Setup { stream: hevc(), hardware: 2, ..Setup::default() }.rig();
+        let out = rig.feed(&cra_run());
+        // The hardware decoder is two pictures late: when it fails at 6 the caller has the CRA at 2's picture
+        // but not the CRA at 4's, whose leading pictures a replay from it would leave out, so the replay starts
+        // at the CRA at 2. Each CRA takes the start once its own picture is out, so a stream of CRAs never
+        // keeps the whole movie.
         assert_eq!(rig.fed_to_software(), vec![2, 3, 4, 5, 6]);
+        assert_eq!(pictures(&out), vec![0, 1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn a_cra_starts_the_replay_itself_once_the_caller_has_its_picture() {
+        let mut rig = Setup { stream: hevc(), ..Setup::default() }.rig();
+        let out = rig.feed(&cra_run());
+        // Nothing is late here: the caller has the CRA at 4's picture, and so every one before it, so the
+        // replay starts at the newest CRA, keeping one GOP, not two.
+        assert_eq!(rig.fed_to_software(), vec![4, 5, 6]);
         assert_eq!(pictures(&out), vec![0, 1, 2, 3, 4, 5, 6]);
     }
 
@@ -761,8 +832,9 @@ mod tests {
     fn pictures_the_hardware_decoder_still_held_come_out_in_presentation_order() {
         let mut rig = Setup { hardware: 2, ..Setup::default() }.rig();
         let out = rig.feed(&[at(0, IDR, PLAIN), at(1, P, PLAIN), at(2, IDR, PLAIN), at(3, P, FAIL)]);
-        // The replay starts at the IDR at 2: picture 1 was only ever the hardware decoder's.
-        assert_eq!(rig.fed_to_software(), vec![2, 3]);
+        // Picture 1 belongs to a sample that decodes before the IDR at 2 and the caller is waiting for it,
+        // so the replay starts at the IDR at 0 and makes it again; the picture the caller has is not repeated.
+        assert_eq!(rig.fed_to_software(), vec![0, 1, 2, 3]);
         assert_eq!(out, vec![Ok(vec![]), Ok(vec![]), Ok(vec![0]), Ok(vec![1, 2, 3])]);
     }
 
@@ -1001,10 +1073,9 @@ mod tests {
     #[test]
     fn what_a_decoder_says_of_itself_is_the_one_decoding() {
         let hardware = Fake { thread_limited: true, ..fake("hardware", &[FAIL], 0) };
-        let software = Mutex::new(Some(Fake { intra_only: true, ..fake("software", &[], 0) }));
-        let make = move || Ok(Box::new(software.lock().unwrap().take().expect("made once")) as Box<dyn VideoDecoder>);
+        let software = Fake { intra_only: true, ..fake("software", &[], 0) };
         let _counters = counters();
-        let mut decoder = Fallback::with_software(hardware, avc(), make, BOUNDS);
+        let mut decoder = Fallback::with_software(hardware, avc(), once(software), BOUNDS);
         assert_eq!((decoder.name(), decoder.intra_only(), decoder.thread_limited()), ("hardware", false, true));
         assert!(decoder.decode(&at(0, IDR, FAIL).1, 0).is_ok(), "the failed sample is replayed in software");
         assert_eq!((decoder.name(), decoder.intra_only(), decoder.thread_limited()), ("software", true, false));
@@ -1036,7 +1107,7 @@ mod tests {
 
     #[test]
     fn a_hardware_decoder_that_fails_while_draining_gives_the_streams_whole_tail_from_the_software_decoder() {
-        for latency in [0, 2] {
+        for latency in [0, 2, 3] {
             let mut rig = Setup { hardware: latency, drain_fails: true, ..Setup::default() }.rig();
             let fallbacks = hw_stats().fallbacks;
             let mut seen = pictures(&rig.feed(&the_stream()));
@@ -1047,7 +1118,10 @@ mod tests {
             assert_eq!(seen, software_alone(), "latency {latency}");
             assert_eq!(hw_stats().fallbacks, fallbacks + 1, "the switch is counted, latency {latency}");
             assert_eq!((rig.made(), rig.decoder.name()), (1, "software"));
-            assert_eq!(rig.fed_to_software(), vec![3, 4, 5], "the replay starts at the last restart sample");
+            // Even three pictures late, the decoder had handed over every picture before the IDR at 3 when the
+            // drain failed, the last of them with the last sample, so the pictures it still held all decode
+            // from there.
+            assert_eq!(rig.fed_to_software(), vec![3, 4, 5], "the replay starts at the last restart sample, latency {latency}");
             assert_eq!(rig.fed_to_hardware(), vec![0, 1, 2, 3, 4, 5], "the failed decoder is never fed again");
             assert_eq!(rig.flush(), Vec::<i64>::new(), "the end of the stream is one end");
         }
@@ -1072,11 +1146,134 @@ mod tests {
         }
     }
 
+    /// The eight-picture stream the emulator decodes, as the fakes' samples: restart samples at 0 and 4, plain
+    /// pictures between, and the hardware fake failing at the sample at `fails_at`, if any.
+    fn eight(fails_at: Option<i64>) -> Vec<(i64, Vec<u8>)> {
+        (0..8).map(|pts| at(pts, if pts % 4 == 0 { IDR } else { P }, if Some(pts) == fails_at { FAIL } else { PLAIN })).collect()
+    }
+
+    #[test]
+    fn a_codec_that_dies_holding_pictures_gives_every_one_back_and_past_the_replay_bounds_the_last_gop_whole() {
+        // The shape the emulator's decoder showed: pictures held inside the codec, lost with it when it dies,
+        // mid-stream or while it drains the stream's end. However many it held, the replay reaches back to a
+        // restart sample before the oldest of them, and the caller gets the whole stream, every picture once.
+        // Under bounds too narrow for that reach (here restart samples further apart than half the bound, the
+        // bound a GOP and a sample, then a GOP exactly), the replay gives up its oldest GOP first and keeps the
+        // last whole, as FilmCraft's hybrid decoder's replay would: the caller loses only the pictures the codec
+        // held from before the last restart sample.
+        for fails_at in [Some(6), None] {
+            for samples_bound in [BOUNDS.samples, 5, 4] {
+                for held_back in 0..=8 {
+                    let bounds = Bounds { samples: samples_bound, ..BOUNDS };
+                    let mut rig = Setup { hardware: held_back, forgets: true, drain_fails: fails_at.is_none(), bounds, ..Setup::default() }.rig();
+                    let seen = rig.through_the_end(&eight(fails_at));
+                    // The pictures the codec had handed over before it died.
+                    let had = fails_at.unwrap_or(8) - held_back as i64;
+                    let expected: Vec<i64> = (0..8).filter(|pts| samples_bound == BOUNDS.samples || *pts >= 4 || *pts < had).collect();
+                    assert_eq!(seen, expected, "failing at {fails_at:?}, bounds {samples_bound} samples, {held_back} held");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_restart_sample_after_a_bound_was_passed_starts_a_replay_again() {
+        // The first GOP passes the three-sample bound and has no replay; the IDR at 4 starts one afresh, and the
+        // failure at 6 replays it, making again the picture the codec held and lost.
+        let mut rig = Setup { hardware: 1, forgets: true, bounds: Bounds { samples: 3, ..BOUNDS }, ..Setup::default() }.rig();
+        assert_eq!(rig.through_the_end(&eight(Some(6))), (0..8).collect::<Vec<_>>());
+        assert_eq!(rig.fed_to_software(), vec![4, 5, 6, 7]);
+    }
+
+    /// A raw decoder that answers every sample with its own picture at once, holding nothing back, so its drain
+    /// has nothing to give, and fails the samples tagged to fail, as a codec that dies does.
+    struct EverySample;
+
+    impl RawDecoder<DecodedFrame> for EverySample {
+        fn feed(&mut self, sample: &[u8], pts: i64) -> std::result::Result<Vec<(i64, DecodedFrame)>, String> {
+            if sample.last().is_some_and(|tag| *tag == FAIL) {
+                return Err("injected failure".into());
+            }
+            Ok(vec![(pts, picture(pts))])
+        }
+
+        fn restart(&mut self) {}
+    }
+
+    #[test]
+    fn a_run_started_at_a_cra_leaves_its_undeliverable_pictures_out_of_the_replay() {
+        let _counters = counters();
+        // The stream a seek to a CRA makes: the leading (RASL) picture after it belongs to a GOP the run
+        // has not seen, so the run never gives it and no caller waits for it. The hardware decoder fails on
+        // the IDR at 20, before giving its picture, and the replay starts at that IDR, not back at the CRA
+        // waiting for a picture nothing can make.
+        let stream = hevc();
+        let samples = [at(10, CRA, PLAIN), at(9, RASL, PLAIN), at(11, TRAIL, PLAIN), at(20, HEVC_IDR, FAIL), at(21, TRAIL, PLAIN)];
+        let software = fake("software", &[], 0);
+        let software_fed = Arc::clone(&software.fed);
+        let mut decoder = Fallback::with_software(HardwareDecoder::new(EverySample, stream.clone(), 0, "Raw", Codec::Hevc), stream, once(software), BOUNDS);
+        let seen: Vec<i64> = every_picture(&mut decoder, &samples).iter().map(|picture| picture.pts).collect();
+        assert_eq!(seen, vec![10, 11, 20, 21], "the picture the run leaves out never comes");
+        assert_eq!(software_fed.lock().unwrap().clone(), vec![20, 21], "the replay starts at the IDR");
+    }
+
+    /// A raw decoder that hands each picture back as soon as presentation order lets it, as a codec that outputs
+    /// in presentation order does: each feed answers the pictures listed for it, and a feed listed with none, or
+    /// past the list, fails, losing whatever the codec still held, so its drain has nothing to give.
+    struct Scripted(VecDeque<Option<Vec<i64>>>);
+
+    impl RawDecoder<DecodedFrame> for Scripted {
+        fn feed(&mut self, _sample: &[u8], _pts: i64) -> std::result::Result<Vec<(i64, DecodedFrame)>, String> {
+            let out = self.0.pop_front().flatten().ok_or_else(|| "injected failure".to_string())?;
+            Ok(out.into_iter().map(|pts| (pts, picture(pts))).collect())
+        }
+
+        fn restart(&mut self) {}
+    }
+
+    #[test]
+    fn a_cra_in_mid_run_starts_no_replay_before_the_caller_has_its_leading_pictures() {
+        let _counters = counters();
+        // In decoding order: an IDR, two pictures, a CRA at 5, its leading (RASL) pictures 3 and 4, then a picture
+        // after it. The codec hands 0, 1 and 2 back before the CRA is fed, holds the CRA until its leading pictures
+        // are decoded, gives 3, and dies on 4, losing 4 and the CRA. A replay from the CRA would leave its leading
+        // pictures out, as every decoder starting at a CRA does, and the caller is still waiting for 4: the replay
+        // starts at the IDR, as FilmCraft's hybrid decoder's does after a CRA.
+        let stream = hevc();
+        let samples =
+            [at(0, HEVC_IDR, PLAIN), at(1, TRAIL, PLAIN), at(2, TRAIL, PLAIN), at(5, CRA, PLAIN), at(3, RASL, PLAIN), at(4, RASL, PLAIN), at(6, TRAIL, PLAIN)];
+        let codec = Scripted([Some(vec![0]), Some(vec![1]), Some(vec![2]), Some(vec![]), Some(vec![3]), None].into());
+        // A decoder with the software decoder's rules for leading pictures and presentation order.
+        let software = HardwareDecoder::new(EverySample, stream.clone(), 2, "software", Codec::Hevc);
+        let mut decoder = Fallback::with_software(HardwareDecoder::new(codec, stream.clone(), 0, "Raw", Codec::Hevc), stream, once(software), BOUNDS);
+        let seen: Vec<i64> = every_picture(&mut decoder, &samples).iter().map(|picture| picture.pts).collect();
+        assert_eq!(seen, (0..7).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_picture_the_hardware_decoder_never_gave_holds_no_later_restart_sample_back() {
+        let _counters = counters();
+        // The codec never gives picture 1, as a decoder may drop a picture it cannot decode, and gives the IDR at
+        // 3's picture after it: the caller will not get 1 now, so the IDR at 3 takes the start, and the failure at
+        // 5 replays from there instead of handing 1 over after pictures that present later.
+        let stream = avc();
+        let samples = [at(0, IDR, PLAIN), at(1, P, PLAIN), at(2, P, PLAIN), at(3, IDR, PLAIN), at(4, P, PLAIN), at(5, P, PLAIN)];
+        let codec = Scripted([Some(vec![0]), Some(vec![]), Some(vec![2]), Some(vec![3]), Some(vec![4]), None].into());
+        let software = fake("software", &[], 0);
+        let software_fed = Arc::clone(&software.fed);
+        let mut decoder = Fallback::with_software(HardwareDecoder::new(codec, stream.clone(), 0, "Raw", Codec::H264), stream, once(software), BOUNDS);
+        let seen: Vec<i64> = every_picture(&mut decoder, &samples).iter().map(|picture| picture.pts).collect();
+        assert_eq!(seen, vec![0, 2, 3, 4, 5]);
+        assert_eq!(software_fed.lock().unwrap().clone(), vec![3, 4, 5]);
+    }
+
     #[test]
     fn a_raw_decoder_that_fails_while_draining_gives_the_streams_whole_tail_through_fallback_equal_to_the_software_decoders() {
         let _counters = counters();
         // The second stream has B pictures, so its software decoder holds the last pictures until the end.
-        for (entry, samples) in [(tiny_entry(), tiny_samples()), (reordered_entry(), reordered_samples())] {
+        // The third is the emulator's eight-picture shape: the software decoder holds every picture of it,
+        // so the replay from the first GOP is what the caller gets, picture for picture.
+        for (entry, samples) in [(tiny_entry(), tiny_samples()), (reordered_entry(), reordered_samples()), (tiny_entry(), two_runs())] {
             let stream = stream_info(&entry).unwrap().unwrap();
             let raw = DrainFails(software_video_decoder(&entry).unwrap());
             through_a_failed_drain(&entry, &samples, HardwareDecoder::new(raw, stream, 0, "Raw", Codec::H264));
