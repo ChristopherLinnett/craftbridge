@@ -516,7 +516,7 @@ Every row may also take external crates that are no Craft app's.
 - Cargo applies `[patch]` tables only at the root workspace, so EffectCraft's own `[patch.crates-io]` entries (`hayro-syntax`, `hayro-jbig2` and the egui family, `effectcraft: Cargo.toml:223-239`) and its `[profile.release]` (`effectcraft: Cargo.toml:219-221`) are **generated** into `rust/Cargo.toml` from the pinned upstream `Cargo.toml` by `tools/update-upstream.sh`, and `Cargo.lock` starts from the pinned upstream `Cargo.lock`. No line of them is written by hand (D-21).
 - Nothing in EffectCraft is changed, and CraftBridge never builds from a fork or a patched branch; the fork `ChristopherLinnett/effectcraft` is only kept in step with upstream (PD17).
 
-**The adaptations** (PD5, D-29). Where a phone needs EffectCraft to do something differently, CraftBridge does it in its own crates on EffectCraft's public interfaces, never by copying EffectCraft code. `tools/adaptations.toml` lists each adaptation with the EffectCraft files and items it relies on, so the update script names the adaptations an update touches (§24).
+**The adaptations** (PD5, D-29). Where a phone needs EffectCraft to do something differently, CraftBridge does it in its own crates on EffectCraft's public interfaces, never by copying EffectCraft code. `tools/adaptations.toml` lists each adaptation with the EffectCraft files and items it relies on, so the update script names the adaptations an update touches (§24). An adaptation upstream made needless does not leave the list: its entry stays, marked `retired` with the id of the upstream commit whose interface replaced it and with its items removed, so its id holds its place in the order and is never reused; the reader checks a retired entry's id with the others, and that it names that commit and holds no items, and reads nothing else of it, and the update's report lists retired entries apart from the live ones (AGENTS §7).
 
 | ID | Adaptation in CraftBridge | Instead of | Relies on (EffectCraft at `10376058`, FilmCraft at `d5ead4ba`) | Task |
 |---|---|---|---|---|
@@ -547,7 +547,7 @@ Every row may also take external crates that are no Craft app's.
 **Edge cases.**
 - An update changes code an adaptation follows (a new `render` flag, a renamed command an adaptation calls): the script names the adaptation; `RenderRequest` gains the field and the corpus the scenario, in the same update.
 - An update removes a public item an adaptation uses: the build fails at the gate, and the adaptation is rewritten on what upstream offers instead, in the same update.
-- Upstream adds a public interface that does what an adaptation does (a session with explicit folders, an encoder interface): the adaptation moves onto it and leaves `tools/adaptations.toml` (upstream wins).
+- Upstream adds a public interface that does what an adaptation does (a session with explicit folders, an encoder interface): the adaptation moves onto it and its entry in `tools/adaptations.toml` is retired (upstream wins, AGENTS §7).
 
 **The gate.** `tools/ci.sh` is the one entry point for people, agents and CI (D-25). Before any stage it refuses a Rust toolchain other than the one `rust/rust-toolchain.toml` pins, any rustup override of `rust/`, the same in the lint library's folder against the nightly its own `rust-toolchain.toml` pins, and an environment that switches what the Rust tools check (a rustflags or rustdocflags variable, a compiler, wrapper, rustdoc or rustfmt, a runner or linker, a profile or alias override, another lockfile, `RUSTC_BOOTSTRAP`, `CLIPPY_CONF_DIR`, dylint's `DYLINT_*`), naming the variable — and the same switches written as keys in any Cargo configuration Cargo reads for a build in `rust/` are refused the same way: one table, `tools/refused-switches.tsv`, names every switch by its configuration key and the variables Cargo derives from it, the environment check and the rules' key check read that one table, and the rules name the file and the key — and reads the pins of both pin files through `cargo xtask pins`, from an xtask it built in that run. It runs `tools/doctor.sh --gate`, then the rules, which need no build, before any stage compiles the workspace (so no build script runs before the gate has judged whether it may exist), then every other stage, and one run reports every failure; `tools/ci.sh <stage or group>…` runs only those named, every name checked before the first runs.
 
@@ -875,7 +875,7 @@ Two Android library modules in the Gradle build at `android/sdk/` (PD16, PD19), 
 
 1. **Fetch** storytold/effectcraft and read the new revision's `Cargo.toml` and `Cargo.lock`.
 2. **Pins:** write the new `rev` and EffectCraft's FilmCraft revision into `[workspace.dependencies]` of `rust/Cargo.toml`; regenerate `[patch.crates-io]` and `[profile.release]` from upstream; start `Cargo.lock` from upstream's and resolve CraftBridge's own crates (D-21).
-3. **Adaptations:** for each entry of `tools/adaptations.toml`, diff the EffectCraft files and items it lists between the old and the new revision, and name every adaptation whose items changed, with its diff, for a person to recheck against upstream's new code (§15).
+3. **Adaptations:** for each live entry of `tools/adaptations.toml`, diff the EffectCraft files and items it lists between the old and the new revision, and name every adaptation whose items changed, with its diff, for a person to recheck against upstream's new code (§15); the run's report lists the list's retired entries apart from the live ones, each with the commit that replaced it.
 4. **Regenerate:** `cargo xtask generate` (the API surface and both facades); `craftbridge-effects-codegen diff` against the previous surface.
 5. **Gate:** `tools/ci.sh` (desktop conformance against the new revision's CLI, mobile type-checks, duplicate-crate check).
 6. **Record:** append to `docs/upstream-updates.md`: from and to revisions, the adaptations named and how each was resolved, commands added, changed and removed, the gate result.
@@ -885,7 +885,7 @@ Two Android library modules in the Gradle build at `android/sdk/` (PD16, PD19), 
 
 **Edge cases.** Upstream adds a public interface that does what an adaptation does: the adaptation moves onto it in that update (§15). Upstream adds a CLI flag or method: AD3 lists the CLI's flag code, so the script names it, and the corpus gains a scenario. A FilmCraft revision change: taken from EffectCraft's `Cargo.toml`; the duplicate-crate check proves one copy of `filmcraft-codecs` (D-13).
 
-**Tests.** A dry run against the current pin produces no changes; a fixture surface with a removed command makes `diff` exit 2; a fixture revision that changes a file an adaptation lists names that adaptation; a catalog version behind its latest release is named.
+**Tests.** A dry run against the current pin produces no changes; a fixture surface with a removed command makes `diff` exit 2; a fixture revision that changes a file an adaptation lists names that adaptation; a fixture list's retired entry is shown apart, rechecked by nothing; a catalog version behind its latest release is named.
 <!-- @end -->
 
 ## 25. Samples and guides design

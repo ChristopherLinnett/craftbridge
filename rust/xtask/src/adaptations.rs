@@ -7,7 +7,9 @@
 //! listed file, and names every adaptation with an item whose lines the difference touches, or whose file
 //! is listed whole and differs, with that difference for a person to recheck. A change above an item's
 //! lines moves them without altering the item, so the item is listed apart with the lines it moved to,
-//! for the list to be refreshed with the recheck.
+//! for the list to be refreshed with the recheck. An adaptation upstream made needless stays in the list,
+//! marked `retired` with the upstream commit whose interface replaced it and with its items removed, so
+//! its id is never reused, and the report lists retired entries apart from the live ones.
 //!
 //! What git is asked is behind [`Revisions`], so the tests give it a scratch repository's revisions and
 //! the update gives it the machine's caches of the official repositories.
@@ -116,13 +118,26 @@ pub(crate) struct Relies {
     pub(crate) at: Vec<Location>,
 }
 
-/// One adaptation of the list.
+/// One adaptation of the list: live, or retired with the upstream commit whose interface replaced it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Adaptation {
     pub(crate) id: String,
+    /// The upstream commit whose interface replaced this adaptation, on a retired entry; `None` on a
+    /// live one. A retired entry is read for its id and this commit and nothing else, so the fields
+    /// below hold what no reading of a retired entry ever touches: no crate, no places.
+    pub(crate) retired: Option<String>,
     pub(crate) crate_name: String,
     pub(crate) repository: Repository,
     pub(crate) relies: Vec<Relies>,
+}
+
+/// A retired entry of the list. Nothing of it can change with a revision, since it lists no items, so
+/// the update's report lists retired entries apart from the live ones.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Retired {
+    pub(crate) id: String,
+    /// The upstream commit whose interface replaced the adaptation.
+    pub(crate) replaced_by: String,
 }
 
 /// What the update asks of git about two revisions of one repository.
@@ -257,6 +272,26 @@ fn adaptation_of(position: usize, entry: &toml::Value, numbers: &mut Vec<(u64, S
         return Err(format!("{what}: entry {named} comes after entry {earlier}, whose id AD{last} is greater"));
     }
     numbers.push((number, named));
+    // A retired adaptation keeps its entry so its id is never taken again. The id and its place in
+    // the order are checked above with every other entry's; of the rest of a retired entry the
+    // reader reads only the commit that replaced it, written as its id so that it names one commit
+    // for good, and refuses `depends` whatever it holds: an item left in any form reads as one the
+    // adaptation still relies on.
+    if let Some(retired) = entry.get("retired") {
+        let commit = retired.as_str().filter(|commit| crate::upstream::is_commit_id(commit)).ok_or_else(|| {
+            format!("{what}: is retired without its upstream commit: `retired` is {retired}, no commit id in full or abbreviated as git writes one")
+        })?;
+        if entry.get("depends").is_some() {
+            return Err(format!("{what}: is retired but keeps `depends`: a retired entry holds no items, only the commit {commit} that replaced it"));
+        }
+        return Ok(Adaptation {
+            id: id.to_string(),
+            retired: Some(commit.to_string()),
+            crate_name: String::new(),
+            repository: Repository::Effectcraft,
+            relies: Vec::new(),
+        });
+    }
     let named = match entry.get("repository") {
         None => None,
         Some(value) => Some(value.as_str().ok_or_else(|| format!("{what}: `repository` is no string"))?),
@@ -269,14 +304,15 @@ fn adaptation_of(position: usize, entry: &toml::Value, numbers: &mut Vec<(u64, S
         .filter(|depends| !depends.is_empty())
         .ok_or_else(|| format!("{what}: lists nothing it relies on"))?;
     let relies = depends.iter().map(|depend| relies_of(depend, &what, repository)).collect::<Result<Vec<_>, _>>()?;
-    Ok(Adaptation { id: id.to_string(), crate_name: text_of(entry, "crate", &what)?.to_string(), repository, relies })
+    Ok(Adaptation { id: id.to_string(), retired: None, crate_name: text_of(entry, "crate", &what)?.to_string(), repository, relies })
 }
 
 /// The adaptations of a list's text. Each id is greater than the last entry's, and no id is taken twice: two
 /// changes that each add an adaptation take the same next id, and the gate passes each alone, so only the
-/// reader refuses the second once both have merged. A gap is allowed, since an adaptation that upstream made
-/// needless leaves the list and its id is never reused. A refusal of an entry names the line the entry starts
-/// on, for a paste or a merge that left a table empty or an entry twice.
+/// reader refuses the second once both have merged. A gap is allowed. A retired entry's id holds its place
+/// in the order as every other id does, so it is never reused; of the rest of a retired entry the reader
+/// checks that it names its commit and holds no items, and reads nothing else. A refusal of an entry names
+/// the line the entry starts on, for a paste or a merge that left a table empty or an entry twice.
 pub(crate) fn parse(text: &str) -> Result<Vec<Adaptation>, String> {
     let document: toml::Value = toml::from_str(text).map_err(|error| format!("{LIST}: is not valid TOML: {error}"))?;
     let entries = document.get("adaptation").and_then(toml::Value::as_array).ok_or_else(|| format!("{LIST}: lists no [[adaptation]]"))?;
@@ -389,6 +425,8 @@ pub(crate) struct Moved {
 pub(crate) struct Comparison {
     pub(crate) recheck: Vec<Recheck>,
     pub(crate) moved: Vec<Moved>,
+    /// The list's retired entries, in the list's order, which no comparison can touch.
+    pub(crate) retired: Vec<Retired>,
 }
 
 /// Where `span` lies at the new revision, given every hunk of its file that does not touch it: each
@@ -417,10 +455,15 @@ pub(crate) fn missing(list: &[Adaptation], revisions: &dyn Revisions) -> Result<
     Ok(absent)
 }
 
-/// Compare the two revisions against every adaptation of the list.
+/// Compare the two revisions against every live adaptation of the list. A retired entry lists no items
+/// for a revision to touch, so it is named apart, as retired, instead of compared.
 pub(crate) fn compare(list: &[Adaptation], revisions: &dyn Revisions) -> Result<Comparison, String> {
     let mut comparison = Comparison::default();
     for adaptation in list {
+        if let Some(replaced_by) = &adaptation.retired {
+            comparison.retired.push(Retired { id: adaptation.id.clone(), replaced_by: replaced_by.clone() });
+            continue;
+        }
         let mut touched = Vec::new();
         for (relies, location) in adaptation.relies.iter().flat_map(|relies| relies.at.iter().map(move |location| (relies, location))) {
             let diff = revisions.diff(location.repository, &location.file)?;
@@ -594,15 +637,7 @@ depends = [
 
     #[test]
     fn an_id_is_greater_than_the_last_entry_s_and_names_one_adaptation() {
-        let list = |ids: &[(&str, &str)]| -> String {
-            ids.iter()
-                .map(|(id, task)| {
-                    format!(
-                        "[[adaptation]]\nid = \"{id}\"\ncrate = \"c\"\nimplements = \"{task}\"\ndepends = [{{ item = \"i\", at = [{{ file = \"f.rs\" }}] }}]\n"
-                    )
-                })
-                .collect()
-        };
+        let list = |ids: &[(&str, &str)]| -> String { ids.iter().map(|(id, task)| live(id, task)).collect() };
         assert!(parse(&list(&[("AD1", "FX-1a"), ("AD2", "FX-1b"), ("AD3", "MED-1a")])).is_ok());
         let twice = parse(&list(&[("AD1", "FX-1a"), ("AD2", "CORE-2a"), ("AD2", "FX-1b")]));
         assert!(
@@ -611,7 +646,7 @@ depends = [
         );
         let again = parse(&list(&[("AD1", "FX-1a"), ("AD2", "FX-1b"), ("AD1", "CORE-2a")]));
         assert!(again.as_ref().is_err_and(|error| error.contains("1 (FX-1a)") && error.contains("3 (CORE-2a)")), "an earlier id taken again: {again:?}");
-        assert!(parse(&list(&[("AD1", "FX-1a"), ("AD3", "FX-1b"), ("AD9", "MED-1a")])).is_ok(), "a gap is a retired adaptation");
+        assert!(parse(&list(&[("AD1", "FX-1a"), ("AD3", "FX-1b"), ("AD9", "MED-1a")])).is_ok(), "a gap is allowed");
         assert!(parse(&list(&[("AD4", "FX-1a")])).is_ok(), "the first entry need not be AD1");
         let backwards = parse(&list(&[("AD3", "FX-1a"), ("AD1", "FX-1b")]));
         assert!(
@@ -621,6 +656,77 @@ depends = [
         for odd in ["AD01", "AD+1", "AD0", "ad1", "AD", "A1", "AD1a"] {
             assert!(parse(&list(&[(odd, "FX-1a")])).is_err_and(|error| error.contains(odd)), "{odd} is no id the order reads");
         }
+    }
+
+    /// A retired entry: its id, and the upstream commit whose interface replaced it, and nothing else.
+    fn retired(id: &str, commit: &str) -> String {
+        format!("[[adaptation]]\nid = \"{id}\"\nretired = \"{commit}\"\n")
+    }
+
+    /// A live entry, with one item.
+    fn live(id: &str, task: &str) -> String {
+        format!("[[adaptation]]\nid = \"{id}\"\ncrate = \"c\"\nimplements = \"{task}\"\ndepends = [{{ item = \"i\", at = [{{ file = \"f.rs\" }}] }}]\n")
+    }
+
+    #[test]
+    fn a_retired_entry_keeps_its_id_in_the_order_so_no_entry_after_it_can_take_it_again() {
+        let list = parse(&format!("{}{}{}", live("AD1", "FX-1a"), retired("AD2", "0d1e2f3a4b5c"), live("AD3", "FX-1b"))).unwrap();
+        assert_eq!(list.len(), 3, "the retired entry is one of the list's entries");
+        let second = list.get(1).unwrap();
+        assert_eq!(second.retired.as_deref(), Some("0d1e2f3a4b5c"), "the commit whose interface replaced it");
+        assert!(second.relies.is_empty() && second.crate_name.is_empty(), "the reader reads no items and no crate of a retired entry");
+        let taken = parse(&format!("{}{}{}", live("AD1", "FX-1a"), live("AD9", "FX-1b"), retired("AD9", "0d1e2f3a4b5c")));
+        assert!(
+            taken.as_ref().is_err_and(|error| error.contains("entries 2 (FX-1b) and 3 both have id AD9")),
+            "a retired entry takes an id a live entry already holds, naming both: {taken:?}"
+        );
+        let taken = parse(&format!("{}{}{}", live("AD1", "FX-1a"), retired("AD9", "0d1e2f3a4b5c"), live("AD9", "FX-1c")));
+        assert!(
+            taken.as_ref().is_err_and(|error| error.contains("entries 2 and 3 (FX-1c) both have id AD9")),
+            "a new entry takes the retired entry's highest id, naming both: {taken:?}"
+        );
+        assert!(
+            parse(&format!("{}{}", retired("AD9", "0d1e2f3a4b5c"), live("AD5", "FX-1b"))).is_err_and(|error| error.contains("AD9") && error.contains("AD5")),
+            "the order rule covers a retired entry's id too"
+        );
+    }
+
+    #[test]
+    fn a_retired_entry_holds_no_items_and_names_the_upstream_commit_that_replaced_it() {
+        let keeps = "tools/adaptations.toml: AD2: is retired but keeps `depends`: a retired entry holds no items, only the commit 0d1e2f3a4b5c that replaced it (the entry starting at line 1)";
+        for depends in [
+            "depends = [{ item = \"i\", at = [{ file = \"f.rs\" }] }]\n",
+            "depends = { item = \"i\", at = [{ file = \"f.rs\" }] }\n",
+            "depends = \"i, in f.rs\"\n",
+            "depends = []\n",
+            "[[adaptation.depends]]\nitem = \"i\"\nat = [{ file = \"f.rs\" }]\n",
+        ] {
+            let with_items = retired("AD2", "0d1e2f3a4b5c") + depends;
+            assert_eq!(parse(&with_items), Err(keeps.to_string()), "an item left in any form, or the key left empty: {with_items}");
+        }
+        let no_commit = |shown: &str| {
+            format!(
+                "tools/adaptations.toml: AD2: is retired without its upstream commit: `retired` is {shown}, no commit id in full or abbreviated as git writes one (the entry starting at line 1)"
+            )
+        };
+        for commit in ["", "yes", "main", "v0.24.1", "main~3", "0D1E2F3A", " 0d1e2f3a", "0d1e2f3g", &"0".repeat(41)] {
+            assert_eq!(parse(&retired("AD2", commit)), Err(no_commit(&format!("\"{commit}\""))), "a commit is named by its id: {commit:?}");
+        }
+        for (written, shown) in [("3", "3"), ("true", "true"), ("[\"0d1e2f3a\"]", "[\"0d1e2f3a\"]")] {
+            let not_a_string = retired("AD2", "0d1e2f3a4b5c").replace("\"0d1e2f3a4b5c\"", written);
+            assert_eq!(parse(&not_a_string), Err(no_commit(shown)), "a commit is written as a string: {not_a_string}");
+        }
+        for commit in ["1037", "0d1e2f3a4b5c", "103760584a60074c9aaeef686d2d05d89f08155e"] {
+            let list = parse(&retired("AD1", commit));
+            assert!(
+                list.as_ref().is_ok_and(|list| list.first().and_then(|ad| ad.retired.as_deref()) == Some(commit)),
+                "the retired form needs no crate, no implements and no items: {list:?}"
+            );
+        }
+        let kept = retired("AD2", "0d1e2f3a4b5c")
+            + "crate = \"craftbridge-effects\"\nfile = \"src/gone.rs\"\nimplements = \"FX-1a\"\nrepository = \"storytold/nowhere\"\n"
+            + "summary = \"what the adaptation did while it lived\"\nreplaces = \"what it stood in for (crates/host/src/lib.rs:96-147)\"\n";
+        assert!(parse(&kept).is_ok_and(|list| list.first().is_some_and(|ad| ad.retired.is_some())), "the reader reads nothing else of a retired entry");
     }
 
     #[test]

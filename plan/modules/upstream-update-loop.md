@@ -9,7 +9,7 @@
 
 1. **Fetch** storytold/effectcraft and read the new revision's `Cargo.toml` and `Cargo.lock`.
 2. **Pins:** write the new `rev` and EffectCraft's FilmCraft revision into `[workspace.dependencies]` of `rust/Cargo.toml`; regenerate `[patch.crates-io]` and `[profile.release]` from upstream; start `Cargo.lock` from upstream's and resolve CraftBridge's own crates (D-21).
-3. **Adaptations:** for each entry of `tools/adaptations.toml`, diff the EffectCraft files and items it lists between the old and the new revision, and name every adaptation whose items changed, with its diff, for a person to recheck against upstream's new code (§15).
+3. **Adaptations:** for each live entry of `tools/adaptations.toml`, diff the EffectCraft files and items it lists between the old and the new revision, and name every adaptation whose items changed, with its diff, for a person to recheck against upstream's new code (§15); the run's report lists the list's retired entries apart from the live ones, each with the commit that replaced it.
 4. **Regenerate:** `cargo xtask generate` (the API surface and both facades); `craftbridge-effects-codegen diff` against the previous surface.
 5. **Gate:** `tools/ci.sh` (desktop conformance against the new revision's CLI, mobile type-checks, duplicate-crate check).
 6. **Record:** append to `docs/upstream-updates.md`: from and to revisions, the adaptations named and how each was resolved, commands added, changed and removed, the gate result.
@@ -19,4 +19,4 @@
 
 **Edge cases.** Upstream adds a public interface that does what an adaptation does: the adaptation moves onto it in that update (§15). Upstream adds a CLI flag or method: AD3 lists the CLI's flag code, so the script names it, and the corpus gains a scenario. A FilmCraft revision change: taken from EffectCraft's `Cargo.toml`; the duplicate-crate check proves one copy of `filmcraft-codecs` (D-13).
 
-**Tests.** A dry run against the current pin produces no changes; a fixture surface with a removed command makes `diff` exit 2; a fixture revision that changes a file an adaptation lists names that adaptation; a catalog version behind its latest release is named.
+**Tests.** A dry run against the current pin produces no changes; a fixture surface with a removed command makes `diff` exit 2; a fixture revision that changes a file an adaptation lists names that adaptation; a fixture list's retired entry is shown apart, rechecked by nothing; a catalog version behind its latest release is named.

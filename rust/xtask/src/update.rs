@@ -3,7 +3,8 @@
 //! and decides how the run ends.
 //!
 //! 1. and 2. move the pin and write what comes from it,
-//! 3. name the adaptations whose upstream items the revision change touches ([`crate::adaptations`]),
+//! 3. name the live adaptations whose upstream items the revision change touches, and list the list's
+//!    retired entries apart ([`crate::adaptations`]),
 //! 4. regenerate the API surface and diff it against the one the tree held ([`crate::effects_api`]),
 //! 5. run the gate, the conformance suite with it,
 //! 6. append the record to `docs/upstream-updates.md`,
@@ -155,9 +156,13 @@ fn section(old: &Revs, new: &Revs, comparison: &Comparison, surface: &SurfaceDif
     text
 }
 
-/// What to print: the adaptations to recheck with their diffs, the API change, the gate, and the versions.
+/// What to print: the list's retired entries apart, then the live adaptations to recheck with their
+/// diffs, the API change, the gate, and the versions.
 fn report(old: &Revs, new: &Revs, comparison: &Comparison, surface: &SurfaceDiff, gate_passed: bool, newer: Option<&[Newer]>) -> String {
     let mut text = format!("upstream: EffectCraft {} to {}\n", short(&old.effectcraft), short(&new.effectcraft));
+    for retired in &comparison.retired {
+        text.push_str(&format!("upstream: retired: {} replaced upstream by {}\n", retired.id, retired.replaced_by));
+    }
     if comparison.recheck.is_empty() {
         text.push_str("upstream: no adaptation relies on anything the revision change touched\n");
     }
@@ -454,7 +459,7 @@ pub(crate) fn run(root: &Path, rev: &str) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adaptations::{Moved, Recheck, Touched};
+    use crate::adaptations::{Moved, Recheck, Retired, Touched};
 
     fn revs(effectcraft: &str) -> Revs {
         Revs { effectcraft: format!("{effectcraft:0<40}"), filmcraft: "d5ead4ba".to_string() }
@@ -466,6 +471,7 @@ mod tests {
         taken: Revs,
         recheck: Vec<Recheck>,
         moved: Vec<Moved>,
+        retired: Vec<Retired>,
         breaking: bool,
         gate: bool,
         versions: Result<Vec<Newer>, String>,
@@ -482,6 +488,7 @@ mod tests {
                 taken: revs("2"),
                 recheck: Vec::new(),
                 moved: Vec::new(),
+                retired: Vec::new(),
                 breaking: false,
                 gate: true,
                 versions: Ok(Vec::new()),
@@ -507,7 +514,7 @@ mod tests {
         }
         fn adaptations(&self, _: &Revs, _: &Revs) -> Result<Comparison, String> {
             self.called("adaptations")?;
-            Ok(Comparison { recheck: self.recheck.clone(), moved: self.moved.clone() })
+            Ok(Comparison { recheck: self.recheck.clone(), moved: self.moved.clone(), retired: self.retired.clone() })
         }
         fn surface(&self) -> Result<SurfaceDiff, String> {
             self.called("surface")?;
@@ -603,6 +610,17 @@ mod tests {
     }
 
     #[test]
+    fn the_report_lists_retired_entries_apart_from_the_live_ones() {
+        let mut fake = Fake::new();
+        fake.recheck = vec![touched_adaptation()];
+        fake.retired = vec![Retired { id: "AD5".to_string(), replaced_by: "0d1e2f3a4b5c".to_string() }];
+        let outcome = update(&fake, "2").unwrap();
+        let lines: Vec<&str> = outcome.report.lines().collect();
+        assert!(lines.contains(&"upstream: retired: AD5 replaced upstream by 0d1e2f3a4b5c"), "the retired entry on its own line: {}", outcome.report);
+        assert!(lines.iter().any(|line| line.starts_with("upstream: RECHECK AD1")), "the live adaptation is still named apart: {}", outcome.report);
+    }
+
+    #[test]
     fn a_breaking_surface_ends_the_run_with_exit_2() {
         let mut fake = Fake::new();
         fake.breaking = true;
@@ -674,22 +692,28 @@ crate = "craftbridge-effects"
 depends = [{ item = "queue", at = [{ file = "crates/engine/src/render_queue.rs" }] }]
 "#;
 
-    /// The fixture list compared, with real git, between a revision holding its three files and one
-    /// holding `second` instead.
-    fn compared_with(second: &[(&str, &str)]) -> Comparison {
+    /// The given list compared, with real git, between a revision holding the numbered fixture files
+    /// and one holding `second` instead.
+    fn compared_against(list_text: &str, second: &[(&str, &str)]) -> Comparison {
+        let session = numbered(40, None);
         let backend = numbered(30, None);
         let first = [
-            ("crates/engine/src/lib.rs", numbered(40, None)),
-            ("crates/automation/src/backend.rs", backend.clone()),
-            ("crates/engine/src/render_queue.rs", backend),
+            ("crates/engine/src/lib.rs", session.as_str()),
+            ("crates/automation/src/backend.rs", backend.as_str()),
+            ("crates/engine/src/render_queue.rs", backend.as_str()),
         ];
-        let first: Vec<(&str, &str)> = first.iter().map(|(name, text)| (*name, text.as_str())).collect();
         let (cache, old, new) = cache_with_two_revisions(&first, second);
         let cache = crate::upstream::Cache::at(cache.0.clone()).unwrap();
         let revisions = CacheRevisions { changed: vec![(Repository::Effectcraft, cache, old, new)] };
-        let list = crate::adaptations::parse(FIXTURE_LIST).unwrap();
+        let list = crate::adaptations::parse(list_text).unwrap();
         assert!(crate::adaptations::missing(&list, &revisions).unwrap().is_empty());
         crate::adaptations::compare(&list, &revisions).unwrap()
+    }
+
+    /// The fixture list compared, with real git, between a revision holding its three files and one
+    /// holding `second` instead.
+    fn compared_with(second: &[(&str, &str)]) -> Comparison {
+        compared_against(FIXTURE_LIST, second)
     }
 
     /// The same, with only the first adaptation's file changed to `session`.
@@ -756,6 +780,29 @@ depends = [{ item = "queue", at = [{ file = "crates/engine/src/render_queue.rs" 
     #[test]
     fn a_fixture_revision_that_changes_no_listed_file_names_nothing() {
         assert_eq!(compared(&numbered(40, None)), Comparison::default());
+    }
+
+    /// A fixture list with a retired entry, compared against a revision that changes a live entry's
+    /// lines: the live one is named for the recheck and the retired one is shown apart, in the
+    /// comparison and in the report printed from it, and the retired entry is looked for in no file,
+    /// since it lists none.
+    #[test]
+    fn a_fixture_revision_shows_a_retired_entry_apart_from_the_live_ones() {
+        let backend = numbered(30, None);
+        let session = numbered(40, Some(15));
+        let found = compared_against(
+            &format!("{FIXTURE_LIST}\n[[adaptation]]\nid = \"AD4\"\nretired = \"0d1e2f3a4b5c\"\n"),
+            &[("crates/engine/src/lib.rs", &session), ("crates/automation/src/backend.rs", &backend), ("crates/engine/src/render_queue.rs", &backend)],
+        );
+        assert_eq!(found.recheck.iter().map(|recheck| recheck.id.as_str()).collect::<Vec<_>>(), ["AD1"], "the live adaptation whose lines changed");
+        assert_eq!(found.retired, [Retired { id: "AD4".to_string(), replaced_by: "0d1e2f3a4b5c".to_string() }], "the retired entry, named apart");
+        let printed = report(&revs("1"), &revs("2"), &found, &SurfaceDiff { breaking: false, report: String::new() }, true, None);
+        assert_eq!(
+            printed.lines().filter(|line| line.contains("AD4")).collect::<Vec<_>>(),
+            ["upstream: retired: AD4 replaced upstream by 0d1e2f3a4b5c"],
+            "the retired entry on a line of its own, and on no recheck or moved line: {printed}"
+        );
+        assert!(printed.lines().any(|line| line.starts_with("upstream: RECHECK AD1 ")), "the live entry rechecked: {printed}");
     }
 
     #[test]

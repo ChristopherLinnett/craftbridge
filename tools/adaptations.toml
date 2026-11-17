@@ -5,9 +5,9 @@
 #
 # The point of the list is the update loop (plan §24 step 3): when tools/update-upstream.sh moves the
 # pin, the revision diff is read against these entries, and every adaptation whose items the diff
-# touches is rechecked before the pin is accepted. An adaptation leaves this file the moment EffectCraft
-# offers a public interface that does its job (§7: upstream wins), and an entry is updated in the same
-# change that alters what it relies on.
+# touches is rechecked before the pin is accepted. When EffectCraft offers a public interface that does
+# an adaptation's job (§7: upstream wins), the adaptation's entry is retired, not removed (below), and an
+# entry is updated in the same change that alters what it relies on.
 #
 # Each `depends` entry is one item the adaptation relies on, in a table of its own: `item` says what it
 # is, by the name EffectCraft's sources give it or, where it has none, in words; `at` lists every place
@@ -25,7 +25,10 @@
 # update takes from Cargo's resolved graph before and after the pin. Each `id` is AD followed by a
 # number greater than the last entry's, and no id is taken twice, so two changes that each add an
 # adaptation cannot both keep the one next id: the reader refuses the later, naming both entries. A gap
-# is allowed, since an adaptation leaves the list when upstream does its job and its id is never reused.
+# is allowed. A retired entry keeps its id in the order, so the id is never reused, and holds `retired`,
+# the id of the upstream commit whose interface replaced the adaptation, and no `depends`: the reader
+# checks a retired entry's id with the others, and that it names that commit and holds no `depends`, and
+# reads nothing else of it; the update's report lists retired entries apart from the live ones.
 # `implements` names the plan task that lands each adaptation's code (plan §15); entries are written
 # here before their code exists so the first pin's updates already recheck what the first release will
 # carry.
