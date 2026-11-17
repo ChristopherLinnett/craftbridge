@@ -2,55 +2,55 @@
 Timestamp : 2026-11-12T15:59:44Z
 OS        : Version 26.5 (Build 23F77)
 Process   : FontProbe (pid 47502)
-App bundle: /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Bundle/Application/C5CD98C5-10A4-4781-B7A4-097AEA576163/FontProbe.app
+App bundle: $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Bundle/Application/C5CD98C5-10A4-4781-B7A4-097AEA576163/FontProbe.app
 Target path: /System/Library/Fonts
 
 --- 1. Path provenance ---
   realpath(/System/Library/Fonts) = /System/Library/Fonts
   lstat   : directory, st_dev=16777232
   Environment of this process (all, values truncated to 160 chars):
-    CFFIXED_USER_HOME = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-
+    CFFIXED_USER_HOME = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-
     DYLD_FALLBACK_FRAMEWORK_PATH = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/L
     DYLD_FALLBACK_LIBRARY_PATH = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/usr/lib
     DYLD_ROOT_PATH = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot
     DYLD_SHARED_CACHE_DIR = /Library/Developer/CoreSimulator/Caches/dyld/25F71/com.apple.CoreSimulator.SimRuntime.iOS-26-5.23F77/
-    HOME = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-
+    HOME = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-
     IOS_SIMULATOR_SYSLOG_SOCKET = /private/var/tmp/com.apple.CoreSimulator.SimDevice.E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/syslogsock
-    IPHONE_SHARED_RESOURCES_DIRECTORY = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data
+    IPHONE_SHARED_RESOURCES_DIRECTORY = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data
     IPHONE_SIMULATOR_ROOT = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot
-    IPHONE_TVOUT_EXTENDED_PROPERTIES = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Library/Application Support/Simulator/extended_displ
+    IPHONE_TVOUT_EXTENDED_PROPERTIES = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Library/Application Support/Simulator/extended_displ
     LS_ENABLE_BUNDLE_LOCALIZATION_CACHING = 1
     PATH = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/usr/bin:
     RWI_LISTEN_SOCKET = /private/var/tmp/com.apple.launchd.rh19CS4mwF/com.apple.webinspectord_sim.socket
     SIMULATOR_ARCHS = arm64
-    SIMULATOR_AUDIO_DEVICES_PLIST_PATH = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/var/run/com.apple.coresimulator.audio.plist
-    SIMULATOR_AUDIO_SETTINGS_PATH = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/var/run/simulatoraudio/audiosettings.plist
+    SIMULATOR_AUDIO_DEVICES_PLIST_PATH = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/var/run/com.apple.coresimulator.audio.plist
+    SIMULATOR_AUDIO_SETTINGS_PATH = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/var/run/simulatoraudio/audiosettings.plist
     SIMULATOR_BOOT_TIME = 1794470293
     SIMULATOR_CAPABILITIES = /Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 17 Pro.simdevicetype/Contents/Resources/capabilities.plist
     SIMULATOR_DEVICE_NAME = iPhone 17 Pro
-    SIMULATOR_EXTENDED_DISPLAY_PROPERTIES = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Library/Application Support/Simulator/extended_displ
+    SIMULATOR_EXTENDED_DISPLAY_PROPERTIES = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Library/Application Support/Simulator/extended_displ
     SIMULATOR_FRAMEBUFFER_FRAMEWORK = /Library/Developer/PrivateFrameworks/CoreSimulator.framework/Resources/Platforms/iphoneos/Library/PrivateFrameworks/SimFramebuffer.framework/SimFramebuffer
     SIMULATOR_HID_SYSTEM_MANAGER = /Library/Developer/PrivateFrameworks/CoreSimulator.framework/Resources/Platforms/iphoneos/Library/Frameworks/SimulatorHID.framework
-    SIMULATOR_HOST_HOME = /Users/christopherlinnett
+    SIMULATOR_HOST_HOME = $HOME
     SIMULATOR_LEGACY_ASSET_SUFFIX = iphone
-    SIMULATOR_LOG_ROOT = /Users/christopherlinnett/Library/Logs/CoreSimulator/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D
+    SIMULATOR_LOG_ROOT = $HOME/Library/Logs/CoreSimulator/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D
     SIMULATOR_MAINSCREEN_HEIGHT = 2622
     SIMULATOR_MAINSCREEN_PITCH = 460.000000
     SIMULATOR_MAINSCREEN_SCALE = 3.000000
     SIMULATOR_MAINSCREEN_WIDTH = 1206
-    SIMULATOR_MEMORY_WARNINGS = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/var/run/memory_warning_simulation
+    SIMULATOR_MEMORY_WARNINGS = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/var/run/memory_warning_simulation
     SIMULATOR_MODEL_IDENTIFIER = iPhone18,1
     SIMULATOR_PRODUCT_CLASS = V53
     SIMULATOR_ROOT = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot
     SIMULATOR_RUNTIME_BUILD_VERSION = 23F77
     SIMULATOR_RUNTIME_VERSION = 26.5
-    SIMULATOR_SHARED_RESOURCES_DIRECTORY = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data
+    SIMULATOR_SHARED_RESOURCES_DIRECTORY = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data
     SIMULATOR_UDID = E33474EA-1897-4EF8-9DFB-DD3FFA178C8D
     SIMULATOR_VERSION_INFO = CoreSimulator 1051.55 - Device: iPhone 17 Pro (E33474EA-1897-4EF8-9DFB-DD3FFA178C8D) - Runtime: iOS 26.5 (23F77) - DeviceType: iPhone 17 Pro
     TERM = dumb
     TESTMANAGERD_REMOTE_AUTOMATION_SIM_SOCK = /private/var/tmp/com.apple.launchd.li2d9HPYyv/com.apple.testmanagerd.remote-automation.uds
     TESTMANAGERD_SIM_SOCK = /private/var/tmp/com.apple.launchd.RyndgMMKXY/com.apple.testmanagerd.unix-domain.socket
-    TMPDIR = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-
+    TMPDIR = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-
     XPC_FLAGS = 0x0
     XPC_SERVICE_NAME = UIKitApplication:com.craftbridge.FontProbe[5345][rb-legacy]
     XPC_SIMULATOR_LAUNCHD_NAME = com.apple.CoreSimulator.SimDevice.E33474EA-1897-4EF8-9DFB-DD3FFA178C8D
@@ -451,64 +451,64 @@ Target path: /System/Library/Fonts
         read 4 bytes: hex [4F 54 54 4F] ascii "OTTO"
 
 --- 6. Report file in Documents ---
-  Documents dir: /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-1366770CADFC/Documents
+  Documents dir: $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-1366770CADFC/Documents
   Report body (sections 1-5): 30137 bytes, SHA-256 642cfe13699e319952747b6c9b293218316a411bae543f24e3f8b76d387a1f84
-  WRITE: OK -> /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-1366770CADFC/Documents/fontprobe_report.txt
+  WRITE: OK -> $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-1366770CADFC/Documents/fontprobe_report.txt
   READ-BACK: OK, file on disk matches this report (30708 bytes)
 2026-11-12 23:59:44.345 FontProbe[47502:179480972] FontProbe report begin
 === CraftBridge FontProbe report (issue craftbridge#28, seam S3) ===
 Timestamp : 2026-11-12T15:59:44Z
 OS        : Version 26.5 (Build 23F77)
 Process   : FontProbe (pid 47502)
-App bundle: /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Bundle/Application/C5CD98C5-10A4-4781-B7A4-097AEA576163/FontProbe.app
+App bundle: $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Bundle/Application/C5CD98C5-10A4-4781-B7A4-097AEA576163/FontProbe.app
 Target path: /System/Library/Fonts
 
 --- 1. Path provenance ---
   realpath(/System/Library/Fonts) = /System/Library/Fonts
   lstat   : directory, st_dev=16777232
   Environment of this process (all, values truncated to 160 chars):
-    CFFIXED_USER_HOME = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-
+    CFFIXED_USER_HOME = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-
     DYLD_FALLBACK_FRAMEWORK_PATH = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/L
     DYLD_FALLBACK_LIBRARY_PATH = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/usr/lib
     DYLD_ROOT_PATH = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot
     DYLD_SHARED_CACHE_DIR = /Library/Developer/CoreSimulator/Caches/dyld/25F71/com.apple.CoreSimulator.SimRuntime.iOS-26-5.23F77/
-    HOME = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-
+    HOME = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-
     IOS_SIMULATOR_SYSLOG_SOCKET = /private/var/tmp/com.apple.CoreSimulator.SimDevice.E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/syslogsock
-    IPHONE_SHARED_RESOURCES_DIRECTORY = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data
+    IPHONE_SHARED_RESOURCES_DIRECTORY = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data
     IPHONE_SIMULATOR_ROOT = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot
-    IPHONE_TVOUT_EXTENDED_PROPERTIES = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Library/Application Support/Simulator/extended_displ
+    IPHONE_TVOUT_EXTENDED_PROPERTIES = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Library/Application Support/Simulator/extended_displ
     LS_ENABLE_BUNDLE_LOCALIZATION_CACHING = 1
     PATH = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/usr/bin:
     RWI_LISTEN_SOCKET = /private/var/tmp/com.apple.launchd.rh19CS4mwF/com.apple.webinspectord_sim.socket
     SIMULATOR_ARCHS = arm64
-    SIMULATOR_AUDIO_DEVICES_PLIST_PATH = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/var/run/com.apple.coresimulator.audio.plist
-    SIMULATOR_AUDIO_SETTINGS_PATH = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/var/run/simulatoraudio/audiosettings.plist
+    SIMULATOR_AUDIO_DEVICES_PLIST_PATH = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/var/run/com.apple.coresimulator.audio.plist
+    SIMULATOR_AUDIO_SETTINGS_PATH = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/var/run/simulatoraudio/audiosettings.plist
     SIMULATOR_BOOT_TIME = 1794470293
     SIMULATOR_CAPABILITIES = /Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 17 Pro.simdevicetype/Contents/Resources/capabilities.plist
     SIMULATOR_DEVICE_NAME = iPhone 17 Pro
-    SIMULATOR_EXTENDED_DISPLAY_PROPERTIES = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Library/Application Support/Simulator/extended_displ
+    SIMULATOR_EXTENDED_DISPLAY_PROPERTIES = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Library/Application Support/Simulator/extended_displ
     SIMULATOR_FRAMEBUFFER_FRAMEWORK = /Library/Developer/PrivateFrameworks/CoreSimulator.framework/Resources/Platforms/iphoneos/Library/PrivateFrameworks/SimFramebuffer.framework/SimFramebuffer
     SIMULATOR_HID_SYSTEM_MANAGER = /Library/Developer/PrivateFrameworks/CoreSimulator.framework/Resources/Platforms/iphoneos/Library/Frameworks/SimulatorHID.framework
-    SIMULATOR_HOST_HOME = /Users/christopherlinnett
+    SIMULATOR_HOST_HOME = $HOME
     SIMULATOR_LEGACY_ASSET_SUFFIX = iphone
-    SIMULATOR_LOG_ROOT = /Users/christopherlinnett/Library/Logs/CoreSimulator/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D
+    SIMULATOR_LOG_ROOT = $HOME/Library/Logs/CoreSimulator/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D
     SIMULATOR_MAINSCREEN_HEIGHT = 2622
     SIMULATOR_MAINSCREEN_PITCH = 460.000000
     SIMULATOR_MAINSCREEN_SCALE = 3.000000
     SIMULATOR_MAINSCREEN_WIDTH = 1206
-    SIMULATOR_MEMORY_WARNINGS = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/var/run/memory_warning_simulation
+    SIMULATOR_MEMORY_WARNINGS = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/var/run/memory_warning_simulation
     SIMULATOR_MODEL_IDENTIFIER = iPhone18,1
     SIMULATOR_PRODUCT_CLASS = V53
     SIMULATOR_ROOT = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot
     SIMULATOR_RUNTIME_BUILD_VERSION = 23F77
     SIMULATOR_RUNTIME_VERSION = 26.5
-    SIMULATOR_SHARED_RESOURCES_DIRECTORY = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data
+    SIMULATOR_SHARED_RESOURCES_DIRECTORY = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data
     SIMULATOR_UDID = E33474EA-1897-4EF8-9DFB-DD3FFA178C8D
     SIMULATOR_VERSION_INFO = CoreSimulator 1051.55 - Device: iPhone 17 Pro (E33474EA-1897-4EF8-9DFB-DD3FFA178C8D) - Runtime: iOS 26.5 (23F77) - DeviceType: iPhone 17 Pro
     TERM = dumb
     TESTMANAGERD_REMOTE_AUTOMATION_SIM_SOCK = /private/var/tmp/com.apple.launchd.li2d9HPYyv/com.apple.testmanagerd.remote-automation.uds
     TESTMANAGERD_SIM_SOCK = /private/var/tmp/com.apple.launchd.RyndgMMKXY/com.apple.testmanagerd.unix-domain.socket
-    TMPDIR = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-
+    TMPDIR = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-
     XPC_FLAGS = 0x0
     XPC_SERVICE_NAME = UIKitApplication:com.craftbridge.FontProbe[5345][rb-legacy]
     XPC_SIMULATOR_LAUNCHD_NAME = com.apple.CoreSimulator.SimDevice.E33474EA-1897-4EF8-9DFB-DD3FFA178C8D
@@ -909,9 +909,9 @@ Target path: /System/Library/Fonts
         read 4 bytes: hex [4F 54 54 4F] ascii "OTTO"
 
 --- 6. Report file in Documents ---
-  Documents dir: /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-1366770CADFC/Documents
+  Documents dir: $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-1366770CADFC/Documents
   Report body (sections 1-5): 30137 bytes, SHA-256 642cfe13699e319952747b6c9b293218316a411bae543f24e3f8b76d387a1f84
-  WRITE: OK -> /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-1366770CADFC/Documents/fontprobe_report.txt
+  WRITE: OK -> $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/911C76EF-5CB0-4727-BF45-1366770CADFC/Documents/fontprobe_report.txt
   READ-BACK: OK, file on disk matches this report (30708 bytes)
 
 FontProbe report end

@@ -5,7 +5,7 @@ Round B3 re-ran every claim and fix of round A3 — by running things (compiler,
 ## 1. Environment re-check
 
 - Simulator iPhone 17 Pro `E33474EA-1897-4EF8-9DFB-DD3FFA178C8D`, booted, iOS 26.5 (23F77) the only runtime; Xcode 26.6 (17F113). Third-party apps before and after the round: `com.craftbridge.FontProbe` and `com.example.orchestratorFlutter`. FontProbe stayed installed (`run-sim.sh` reinstalls it); the other app was not touched; the simulator was left booted.
-- **Device: `xcrun devicectl list devices` shows "SeaEl iPhone" (iPhone 12 Pro, iPhone13,3) `unavailable`.** `capture/review-devicectl.txt` was made again, byte-identical to A3's. Nothing was installed or run on a device.
+- **Device: `xcrun devicectl list devices` shows the acceptance iPhone (iPhone 12 Pro, iPhone13,3) `unavailable`.** `capture/review-devicectl.txt` was made again, byte-identical to A3's. Nothing was installed or run on a device.
 
 ## 2. Round A3's claims and fixes, re-run
 
@@ -38,7 +38,7 @@ No other substantive defect was found: every A3 figure, citation and behaviour c
 - `review-scripts/engine-checks.sh` → exit 0: all seven captures byte-identical to A3's.
 - `xcodebuild … -sdk iphoneos` → `** BUILD SUCCEEDED **`; `nm` → 6 `T _ecprobe_` symbols.
 - `xcrun swiftc -typecheck … coretext-availability.swift` → exit 1, one error (`CTFontManagerCopyAvailableFontURLs`).
-- `xcrun devicectl list devices` → SeaEl iPhone `unavailable`, byte-identical capture.
+- `xcrun devicectl list devices` → the acceptance iPhone `unavailable`, byte-identical capture.
 - `python3 -I review-scripts/noto-cjk-sizes.py capture/review-noto-cjk-sizes.txt` → exit 0; only the fetch-time line differs from A3's.
 
 ## 4. The recommendation
@@ -47,7 +47,7 @@ A3's wording stands and B3 agrees: AD2 should pass CoreText's folders (section 8
 
 ## 5. Open items after round B3
 
-- **The acceptance iPhone.** "SeaEl iPhone" was again `unavailable` and nothing was run on a device; V1's device half stays open. RESULT §7's recipe stands; its two unverified points (the device sandbox's font reads, the device's folder list) can only be settled there.
+- **The acceptance iPhone.** It was again `unavailable` and nothing was run on a device; V1's device half stays open. RESULT §7's recipe stands; its two unverified points (the device sandbox's font reads, the device's folder list) can only be settled there.
 - The bundled CJK question (variant choice) and FX-3's hiding of the 92 dot-named families in `list_fonts` presentation are unchanged.
 - Noto Sans SC/TC are confirmed only by filenames and naming metadata; the family names inside the files and the fallback drawing with them stay unverified until someone downloads the files. Downloading them is the owner's call; round B3 downloaded no font.
 

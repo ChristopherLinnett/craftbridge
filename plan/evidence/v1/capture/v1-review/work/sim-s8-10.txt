@@ -424,8 +424,8 @@
     /run/host/fonts (exists: false)
     /run/host/local-fonts (exists: false)
     /run/host/user-fonts (exists: false)
-    /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/463EC780-3E7E-4D25-A15A-C76D0F5AB85B/.local/share/fonts (exists: false)
-    /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/463EC780-3E7E-4D25-A15A-C76D0F5AB85B/.fonts (exists: false)
+    $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/463EC780-3E7E-4D25-A15A-C76D0F5AB85B/.local/share/fonts (exists: false)
+    $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/463EC780-3E7E-4D25-A15A-C76D0F5AB85B/.fonts (exists: false)
   DirectorySource { dirs }.faces() (lists, registers nothing):
     dirs = [/System/Library/Fonts]: 787 faces, 370 files, 378 families 
     dirs = [/System/Library/Fonts] (the iOS copy; no font files at its top level): 613 faces, 264 files, 296 families 

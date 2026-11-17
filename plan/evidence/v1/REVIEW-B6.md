@@ -6,7 +6,7 @@ Work was alone; no other agent or worker was started. On the iPhone only FontPro
 
 ## 1. Environment and starting state
 
-- Device connected: `xcrun devicectl list devices` (run for this review, output not written into `capture/`) shows `SeaEl iPhone`, identifier `08452DF6-1739-55D5-8C38-622DEDB24E5E`, state `available (paired)`, model `iPhone 12 Pro (iPhone13,3)` — as RESULT's Environment row and §7 header say.
+- Device connected: `xcrun devicectl list devices` (run for this review, output not written into `capture/`) shows the acceptance iPhone, identifier `<device>`, state `available (paired)`, model `iPhone 12 Pro (iPhone13,3)` — as RESULT's Environment row and §7 header say.
 - Hashes verified before touching anything and re-verified after the round: device report `45c9805e…` (40,589 B — §8's recorded SHA and size), canonical simulator report `f2844cb0…`, `run-device.sh` `39307445…`, `review-host-checks.txt` `20cf25df…`, and every other `capture/review-*` file and `sandbox-canary.txt`. All unchanged after the round: the check run wrote only into `$CAPTURE_DIR`.
 - No source changed since the canonical device run, so (per the round brief) no rebuild was needed; the installed app was re-used.
 
@@ -60,7 +60,7 @@ So after normalisation the two reports differ only by two simulator-only lines �
 
 ## 4. The device re-run (`capture/b6-check/`)
 
-`CAPTURE_DIR=capture/b6-check review-scripts/run-device.sh 08452DF6-1739-55D5-8C38-622DEDB24E5E` exited 0. Against the canonical report the diff is nine lines, every one an instance value: timestamp; pid 540 → 545; XPC service id `[e964]` → `[93e1]`; `TERM` vt100 → dumb (the launching shell's value, §8's instance-value class); three scan timings (139 → 46, 2 → 1, 50 → 47 ms); and section 11's body byte count and SHA plus the matching READ-BACK count, which move with the timing digits (40,589 → 40,587 B, two digits fewer). Every count and finding is equal: 613 / 264 / 296, 633 / 263 / 311, all eight per-folder triples, 314, 81/86, the fallback lines, 86 = 86 = 86, `OK 103, FAIL 0`, the magic-number split, section 10 in full. Nothing was promoted per §8's re-run rule; `capture/b6-check/` keeps this round's evidence (covered by §8's pattern row). The b6-check stdout also matches its own Documents copy, re-proving §7's stdout sentence on a fresh run. Canonical `capture/` unchanged before and after (hash re-checked).
+`CAPTURE_DIR=capture/b6-check review-scripts/run-device.sh <device>` exited 0. Against the canonical report the diff is nine lines, every one an instance value: timestamp; pid 540 → 545; XPC service id `[e964]` → `[93e1]`; `TERM` vt100 → dumb (the launching shell's value, §8's instance-value class); three scan timings (139 → 46, 2 → 1, 50 → 47 ms); and section 11's body byte count and SHA plus the matching READ-BACK count, which move with the timing digits (40,589 → 40,587 B, two digits fewer). Every count and finding is equal: 613 / 264 / 296, 633 / 263 / 311, all eight per-folder triples, 314, 81/86, the fallback lines, 86 = 86 = 86, `OK 103, FAIL 0`, the magic-number split, section 10 in full. Nothing was promoted per §8's re-run rule; `capture/b6-check/` keeps this round's evidence (covered by §8's pattern row). The b6-check stdout also matches its own Documents copy, re-proving §7's stdout sentence on a fresh run. Canonical `capture/` unchanged before and after (hash re-checked).
 
 ## 5. The device script
 

@@ -5,7 +5,7 @@ Round A3 re-ran every claim and fix of round B2, reviewed the whole investigatio
 ## 1. Environment re-check
 
 - Simulator iPhone 17 Pro `E33474EA-1897-4EF8-9DFB-DD3FFA178C8D`, booted, iOS 26.5 (23F77) the only runtime; Xcode 26.6 (17F113). Third-party apps before and after the round: `com.craftbridge.FontProbe` and `com.example.orchestratorFlutter`. FontProbe stayed installed (`run-sim.sh` reinstalls it); the other app was not touched; the simulator was left booted.
-- **Device: `xcrun devicectl list devices` shows "SeaEl iPhone" (iPhone 12 Pro, iPhone13,3) `unavailable`.** `capture/review-devicectl.txt` was made again, byte-identical. Nothing was installed or run on a device.
+- **Device: `xcrun devicectl list devices` shows the acceptance iPhone (iPhone 12 Pro, iPhone13,3) `unavailable`.** `capture/review-devicectl.txt` was made again, byte-identical. Nothing was installed or run on a device.
 
 ## 2. Round B2's claims and fixes, re-run
 
@@ -78,7 +78,7 @@ The report differs from A2's only in instance values, timings (scans 126/126/20 
 
 ## 5. Open items
 
-- **Device half of V1:** "SeaEl iPhone" was `unavailable`. Nothing ran on a device; §7's recipe stands.
+- **Device half of V1:** the acceptance iPhone was `unavailable`. Nothing ran on a device; §7's recipe stands.
 - **FX-3, what `list_fonts` shows** (not decided): the 92 dot-named and 133 extra visible families; the options are unchanged from A2.
 - **The bundled CJK font** (owner's call): §4's noto-cjk proposal stands; its sources were re-fetched this round and match. The family names inside the files and the fallback drawing with them stay unverified until someone downloads the files.
 

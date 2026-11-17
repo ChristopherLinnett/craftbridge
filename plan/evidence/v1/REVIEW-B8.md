@@ -7,7 +7,7 @@ Work was alone. No font was downloaded, no GitHub request was made, no git state
 ## 1. Starting state and capture hygiene
 
 - **Simulator:** iPhone 17 Pro, booted, iOS 26.5, left as found (FontProbe installed, from A7).
-- **iPhone:** `xcrun devicectl list devices` now shows "SeaEl iPhone" `available (paired)` (A2–B3 had it `unavailable`). The app's sources had not changed since A7, so FontProbe was **not rebuilt or reinstalled**; it was only re-launched through `run-device.sh` with `CAPTURE_DIR=capture/b8-check`, per the round's rules, and nothing else on the phone was touched.
+- **iPhone:** `xcrun devicectl list devices` now shows the acceptance iPhone `available (paired)` (A2–B3 had it `unavailable`). The app's sources had not changed since A7, so FontProbe was **not rebuilt or reinstalled**; it was only re-launched through `run-device.sh` with `CAPTURE_DIR=capture/b8-check`, per the round's rules, and nothing else on the phone was touched.
 - **Canonical captures:** they had changed since the last copy in `capture/a7-run/` only in the sense that A7 itself left them; B8 copied nothing new to a `-run` folder except the one capture it replaced (A2's `review-devicectl.txt` into `capture/a2-run/`), because that is the only canonical capture whose content B8 changed. All of §5 (steps 1–5, plus the new 2b) ran with `CAPTURE_DIR=capture/b8-check`.
 
 ## 2. A7's fixes, re-run and re-read

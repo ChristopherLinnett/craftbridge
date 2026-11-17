@@ -1,7 +1,7 @@
 # V7 evidence: files kept outside the repository
 
 `v7/` holds the text evidence `RESULT.md` cites, copied from `/tmp/craftbridge-v7` (which macOS clears at restart) so the plan record survives. The test app's sources and scripts here are V7's own measurement code, a record of what ran, not CraftBridge's code.
-Each file below is cited too but not committed; its copy is in `~/dev/artcraft-dev/craftbridge-work-archive/v7/`, at the same path, with this SHA-256.
+Each file below is cited too but not committed; its copy is in the owner's work archive outside the repository, `<archive>/v7/`, at the same path, with this SHA-256.
 
 | File | Bytes | SHA-256 | Why not committed |
 |---|---|---|---|

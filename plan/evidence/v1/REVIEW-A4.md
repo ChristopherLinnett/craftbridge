@@ -11,7 +11,7 @@ EffectCraft was read only at the pinned rev through `git show` in the existing c
 
 - The simulator is iPhone 17 Pro `E33474EA-1897-4EF8-9DFB-DD3FFA178C8D`: booted, iOS 26.5 (23F77), with Xcode 26.6.
 - Third-party apps before and after the round: `com.craftbridge.FontProbe` and `com.example.orchestratorFlutter`. FontProbe stayed installed (`run-sim.sh` reinstalls it), the other app was not touched, and the simulator was left booted.
-- **Device: "SeaEl iPhone" (iPhone 12 Pro) is `unavailable`** in `xcrun devicectl list devices`. The check capture is byte-identical to the canonical one. Nothing was installed or run on a device.
+- **Device: the acceptance iPhone (iPhone 12 Pro) is `unavailable`** in `xcrun devicectl list devices`. The check capture is byte-identical to the canonical one. Nothing was installed or run on a device.
 - Before running anything, round A4 copied B3's `capture/review-*` files and `sandbox-canary.txt` (17 files) to `capture/b3-run/`.
 
 ## 2. Round B3's claims and fixes, checked
@@ -61,7 +61,7 @@ So the canonical report and RESULT's run record (§3's "17 ms in this run", §8'
 
 1. **minor — RESULT §3's "no top-level files … and no symlinks" had no capture behind it.** The top-level count could only be worked out from host-checks' totals, and the symlink count appeared only in B1's and B3's review notes. **Fix:** `host-checks.sh` now records both, as `files at its top level: 0; symlinks anywhere in it: 0` in `capture/review-host-checks.txt`.
 2. **minor — RESULT §7 predicted an untested device result.** It said section 7 "should say the canary file does not exist", but on a device the sandbox may refuse `/tmp/craftbridge-v1/…` before the lookup. **Fix:** it now says the read must fail, and that error 257 (`NSFileReadNoPermissionError`) or 260 (`NSFileReadNoSuchFileError`) tells which. Both codes are quoted from the SDK's `FoundationErrors.h`. The sandbox answer itself stays with section 8.
-3. **minor — RESULT §5 never said where `effectcraft-text` comes from.** `ecprobe/Cargo.toml` uses an absolute `file:///Users/christopherlinnett/dev/artcraft-dev/effectcraft/repository` URL, so on another machine the first cargo build fails. **Fix:** §5 says so and what to change; the `rev` and `Cargo.lock` still pin the code.
+3. **minor — RESULT §5 never said where `effectcraft-text` comes from.** `ecprobe/Cargo.toml` uses an absolute `file://$HOME/dev/artcraft-dev/effectcraft/repository` URL, so on another machine the first cargo build fails. **Fix:** §5 says so and what to change; the `rev` and `Cargo.lock` still pin the code.
 
 No other defect was found. Every RESULT figure, citation and behaviour claim that the check run or a reading could test held.
 
@@ -76,7 +76,7 @@ Those folders register 263 files where CoreText offers 103, which is a display q
 
 ## 7. Open items
 
-- **Device half of V1:** "SeaEl iPhone" is still `unavailable`; §7's recipe stands.
+- **Device half of V1:** the acceptance iPhone is still `unavailable`; §7's recipe stands.
 - **FX-3, what `list_fonts` shows:** the 92 dot-named families and the 133 extra visible families. Not decided.
 - **The bundled CJK font:** the owner's call. §4's noto-cjk proposal stands. The family names inside the files and the fallback drawing with them stay unverified until the files are downloaded.
 

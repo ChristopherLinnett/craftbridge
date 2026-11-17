@@ -55,7 +55,7 @@ The worker's other findings hold, and I reproduced them independently (`capture/
 
 ## Not done / left open
 
-- **Device half of V1:** the paired iPhone 12 Pro ("SeaEl iPhone") was `unavailable`. Run RESULT §7 on the acceptance iPhone. It needs a signing team.
+- **Device half of V1:** the paired iPhone 12 Pro, the acceptance iPhone, was `unavailable`. Run RESULT §7 on the acceptance iPhone. It needs a signing team.
 - `gh issue view 28 -R ChristopherLinnett/craftbridge` could not find the repository with the current `gh` login, so I took V1's wording from the plan's `EFFECTCRAFT-PLUGIN-PORT-SCOPING.md` (read-only `grep`; nothing in `artcraft-plugin-port` was changed). Nothing was posted.
 - Files outside `/tmp/craftbridge-v1`: cargo's cache of the EffectCraft clone (`~/.cargo/git/db/repository-9f1ad1fe48d3a199`, plus its checkout under `~/.cargo/git/checkouts`), and `fontprobe-stdout.txt` / `fontprobe-stderr.txt` in the simulated device's `data/tmp`, where `run-sim.sh` points `simctl launch --stdout` (simctl resolves those paths inside the device). I removed my earlier stray files there.
 - 92 of the 314 families EffectCraft lists on iOS are Apple's hidden dot-named fonts. EffectCraft 10376058 does not filter them. This is a display question for FX-3.

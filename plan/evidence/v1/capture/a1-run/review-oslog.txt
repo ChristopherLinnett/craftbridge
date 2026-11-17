@@ -4,14 +4,14 @@ Timestamp               Ty Process[PID:TID]
 Timestamp : 2026-11-12T16:05:46Z
 OS        : Version 26.5 (Build 23F77)
 Process   : FontProbe (pid 61946)
-App bundle: /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Bundle/Application/5F97F27C-058D-4237-BA3B-4E3BDD88F2FE/FontProbe.app
+App bundle: $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Bundle/Application/5F97F27C-058D-4237-BA3B-4E3BDD88F2FE/FontProbe.app
 Target path: /System/Library/Fonts
 
 --- 1. Path provenance ---
   realpath(/System/Library/Fonts) = /System/Library/Fonts
   lstat   : directory, st_dev=16777232
   Environment of this process (all, values truncated to 160 chars):
-    CFFIXED_USER_HOME = /Users/christopherlinnett/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/A7E7289A-26CA-49B0-9F18-
+    CFFIXED_USER_HOME = $HOME/Library/Developer/CoreSimulator/Devices/E33474EA-1897-4EF8-9DFB-DD3FFA178C8D/data/Containers/Data/Application/A7E7289A-26CA-49B0-9F18-
     DYLD_FALLBACK_FRAMEWORK_PATH = /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/L
     DYL<…>
 2026-11-13 00:33:39.779 Df FontProbe[29686:ab61784] (Foundation) FontProbe report: 44902 bytes, written to Documents/fontprobe_report.txt

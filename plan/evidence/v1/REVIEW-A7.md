@@ -7,7 +7,7 @@ Work was alone. No font was downloaded, no GitHub request was made, no git state
 ## 1. Environment and starting state
 
 - **Simulator:** iPhone 17 Pro, booted, iOS 26.5. The third-party apps before and after the round were FontProbe (reinstalled by `run-sim.sh`) and `com.example.orchestratorFlutter` (not touched).
-- **iPhone:** `xcrun devicectl list devices` showed "SeaEl iPhone" `available (paired)`. The app's source changed this round (§4), so FontProbe was rebuilt, signed with team `Z798ZWJ358` as in §7's recipe, and installed with `devicectl device install app`. Only FontProbe was run, through `run-device.sh` with `CAPTURE_DIR=capture/a7-check`. Nothing else was installed, no setting was changed, and FontProbe stays installed.
+- **iPhone:** `xcrun devicectl list devices` showed the acceptance iPhone `available (paired)`. The app's source changed this round (§4), so FontProbe was rebuilt, signed with team `<team id>` as in §7's recipe, and installed with `devicectl device install app`. Only FontProbe was run, through `run-device.sh` with `CAPTURE_DIR=capture/a7-check`. Nothing else was installed, no setting was changed, and FontProbe stays installed.
 - **Canonical captures:** they had changed since the last copy in `capture/a4-run/`: A6's and B7's new captures and the device captures. So round A7 first copied all 23 (`capture/review-*`, `sandbox-canary.txt`, `capture/device-*`) to `capture/b7-run/`, and hashed them.
 
 ## 2. B7's claims, re-run
