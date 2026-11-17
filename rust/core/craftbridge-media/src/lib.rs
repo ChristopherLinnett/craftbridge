@@ -21,6 +21,8 @@ use filmcraft_codecs::{Result, VideoDecoder, register_video_decoder};
 use filmcraft_isobmff::SampleEntry;
 
 pub use fallback::Fallback;
+#[cfg(target_os = "android")]
+pub use mediacodec_input::CodecInfo;
 
 /// What [`register`] left the process able to do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,6 +104,16 @@ fn answer(
             None
         }
     }
+}
+
+/// Gives the Android decoder the device's codec list, `MediaCodecList(MediaCodecList.REGULAR_CODECS)` in its
+/// order, each codec with what its `MediaCodecInfo` answers, which the decoder picks its hardware decoders
+/// from: the NDK lists codecs, and says which are hardware, only from API 36, and the platform's default
+/// decoder for a type can be a software codec. Call it before [`register`], which reports the backend from
+/// it; with no list, every stream goes to the software decoders.
+#[cfg(target_os = "android")]
+pub fn set_device_codecs(codecs: Vec<CodecInfo>) {
+    platform::mediacodec::set_device_codecs(codecs);
 }
 
 /// Registers CraftBridge's decoders in FilmCraft's decoder registry, the one every app that decodes
@@ -606,7 +618,8 @@ pub(crate) mod fixtures {
     }
 
     /// Held by a test that reads FilmCraft's process-wide decline counter, or makes a decoder that may bump it,
-    /// so another test's decline does not land between its two readings.
+    /// so another test's decline does not land between its two readings; and by one that reads or changes the
+    /// device's codec list the Android decoder picks from, which is process-wide too.
     pub(crate) fn counters() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -655,7 +668,7 @@ mod tests {
     const BACKEND: &str = if cfg!(target_os = "android") { "MediaCodec" } else { "VideoToolbox" };
 
     /// Whether this device has a hardware decoder: on Android, one for a type it takes, an answer the MediaCodec
-    /// tests check against the names of the device's own codecs.
+    /// tests check against the device's own codec list.
     #[cfg(target_os = "android")]
     fn has_hardware() -> bool {
         platform::mediacodec::available()
@@ -681,6 +694,13 @@ mod tests {
         has_hardware()
     }
 
+    /// Gives the decoders what the app gives them before it registers them: on Android, the device's codec
+    /// list. Called under [`counters`].
+    fn as_the_app_starts() {
+        #[cfg(target_os = "android")]
+        platform::mediacodec::tests::give_device_codecs();
+    }
+
     /// A device's backend name is read from the platform module only where a device has a hardware decoder,
     /// which the iOS Simulator has not: its name is pinned here, where every phone build runs it.
     #[cfg(any(target_os = "ios", target_os = "android"))]
@@ -704,6 +724,7 @@ mod tests {
     #[test]
     fn register_puts_the_factory_in_filmcrafts_registry_and_sets_the_switch() {
         let _counters = counters();
+        as_the_app_starts();
         let device = backend();
         assert_eq!(device.is_some(), has_hardware(), "the device's own answer");
         assert!(device.is_none_or(|name| name == BACKEND), "the only backend a device names is its platform's");
@@ -754,6 +775,7 @@ mod tests {
     #[test]
     fn a_stream_opened_through_the_registry_decodes_to_the_bytes_the_software_decoder_gives() {
         let _counters = counters();
+        as_the_app_starts();
         register(true);
         let hardware_name = if cfg!(target_os = "android") { ["MediaCodec H.264", "MediaCodec HEVC"] } else { ["VideoToolbox H.264", "VideoToolbox HEVC"] };
         // An iPhone's AV1 hardware is a matter of its model, which `hardware_takes` does not ask VideoToolbox.

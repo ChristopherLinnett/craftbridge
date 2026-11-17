@@ -8,19 +8,23 @@
 //! and no earlier, and read from the image's hardware buffer, locked for the CPU, only when that buffer is
 //! P010 laid out as P010 is: before Android 14 no decoder starts for a 10-bit stream, and a device whose
 //! buffer is another (vendor-tiled) format fails the picture's read; either way the software decoder takes
-//! the stream. The decoder it uses must be a hardware one (the platform's own software codecs are no faster
-//! than FilmCraft's), so a device or stream without one fails to start and the factory declines it.
-//! MediaCodec decodes on its own schedule, so a picture comes out of a later call than the one that fed its
-//! sample, and [`crate::order::Sequence`] runs around the codec as it does around VideoToolbox: the RASL
-//! pictures of a run starting at a CRA are never fed to it, and the pictures it still holds at the end come
-//! out of [`RawDecoder::drain`]. Every status MediaCodec and the image reader return is checked and
-//! becomes the decoder's error, which [`crate::Fallback`] answers by switching to the software decoder.
+//! the stream. The decoder it uses must be a hardware one by the platform's own answer (a software codec is
+//! no faster than FilmCraft's), chosen from the device's codec list rather than taken from the platform's
+//! default for the type, which can be a software codec; a device or stream without one fails to start and
+//! the factory declines it. MediaCodec decodes on its own schedule, so a picture comes out of a later call
+//! than the one that fed its sample, and [`crate::order::Sequence`] runs around the codec as it does around
+//! VideoToolbox: the RASL pictures of a run starting at a CRA are never fed to it, and the pictures it still
+//! holds at the end come out of [`RawDecoder::drain`]. Every status MediaCodec and the image reader return
+//! is checked and becomes the decoder's error, which [`crate::Fallback`] answers by switching to the
+//! software decoder.
 //!
 //! The official NDK bindings (`ndk`) make every call; the only `unsafe` here is the claim that the codec and
 //! the reader may move between threads, and the bytes of a locked P010 buffer's planes. Which streams the
 //! device takes, the codec-specific data and samples it is fed and the planes' conversion into FilmCraft's
 //! frame layout are safe code every target tests ([`crate::mediacodec_input`], [`crate::biplanar`]).
 
+use std::cell::Cell;
+use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 use filmcraft_codecs::hw::StreamInfo;
@@ -35,7 +39,7 @@ use ndk::media::media_format::MediaFormat;
 
 use crate::biplanar::{self, Crop, Depth, Locked, Plane, Strided};
 use crate::layout::Layout;
-use crate::mediacodec_input::{self, BACKEND_MIMES, ReaderFormat};
+use crate::mediacodec_input::{self, BACKEND_MIMES, CodecInfo, ReaderFormat};
 use crate::order::{HardwareDecoder, RawDecoder};
 
 /// A failed call, with what failed.
@@ -44,8 +48,9 @@ type Failure = String;
 /// The backend's name, which [`crate::register`] reports and every decoder's name starts with.
 pub(crate) const BACKEND: &str = "MediaCodec";
 
-/// Makes the codec a decoding run decodes a MIME type with: [`hardware_codec`], bar in a test that feeds
-/// another of the device's decoders exactly as the hardware one is fed.
+/// Makes the codec a decoder decodes a MIME type with, and makes it again after one that failed to flush:
+/// [`hardware_codec`], bar in a test that feeds another of the device's decoders exactly as the hardware one
+/// is fed.
 type MakeCodec = fn(&str) -> std::result::Result<MediaCodec, Failure>;
 
 /// How long a wait for the codec or the image reader may take before the decoder gives up on it: far
@@ -72,14 +77,36 @@ fn step<T, E: std::fmt::Debug>(result: std::result::Result<T, E>, call: &str) ->
     result.map_err(|error| format!("{call} failed ({error:?})"))
 }
 
-/// The device's decoder for `mime`, when it is a hardware one; an error naming why not.
+/// The device's codec list, as the app handed it over ([`set_device_codecs`]).
+static DEVICE_CODECS: RwLock<Option<Vec<CodecInfo>>> = RwLock::new(None);
+
+/// Gives the decoder the device's codec list, which it chooses its hardware decoders from. The NDK lists
+/// codecs, and says which are hardware, only from API 36 (`AMediaCodecStore_*` in `NdkMediaCodecStore.h`,
+/// `AMediaCodecInfo_getMediaCodecInfoType` in `NdkMediaCodecInfo.h`), beyond the SDK's minSdk 29, and what it
+/// answers for a type (`AMediaCodec_createDecoderByType`) is the platform's default, which can be a software
+/// codec. The app's own `MediaCodecList` and `MediaCodecInfo.isHardwareAccelerated` give both at API 29.
+/// Until the list is given, every stream goes to the software decoder.
+pub(crate) fn set_device_codecs(codecs: Vec<CodecInfo>) {
+    *DEVICE_CODECS.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(codecs);
+}
+
+/// The first of the device's hardware decoders for `mime`, in the device's own order, that the platform
+/// creates; an error naming why there is none.
 fn hardware_codec(mime: &str) -> std::result::Result<MediaCodec, Failure> {
-    let codec = MediaCodec::from_decoder_type(mime).ok_or_else(|| format!("this device has no decoder for {mime}"))?;
-    let name = step(codec.name(), "naming the decoder")?;
-    if mediacodec_input::is_software_codec(&name) {
-        return Err(format!("this device decodes {mime} only in software ({name})"));
-    }
-    Ok(codec)
+    let codecs = DEVICE_CODECS.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+    listed_hardware_codec(mime, codecs.as_deref().ok_or("the device's codec list was not given")?)
+}
+
+/// [`hardware_codec`] from a given codec list.
+fn listed_hardware_codec(mime: &str, codecs: &[CodecInfo]) -> std::result::Result<MediaCodec, Failure> {
+    let names = mediacodec_input::hardware_decoders(codecs, mime);
+    names.iter().find_map(|name| MediaCodec::from_codec_name(name)).ok_or_else(|| {
+        if names.is_empty() {
+            format!("this device has no hardware decoder for {mime}")
+        } else {
+            format!("none of this device's hardware decoders for {mime} could be created")
+        }
+    })
 }
 
 /// Whether this device has a hardware decoder for `mime`. It does not promise a decoder will start
@@ -106,6 +133,8 @@ struct Pipeline {
     /// Dropped before `reader`: the codec stops writing to the reader's surface before the surface goes.
     codec: MediaCodec,
     reader: ImageReader,
+    /// Whether the codec has output anything, a picture or its output format, since it started.
+    output: Cell<bool>,
 }
 
 // SAFETY: see the type's documentation.
@@ -150,9 +179,9 @@ fn image_reader(width: i32, height: i32, depth: Depth) -> std::result::Result<Im
 }
 
 impl Pipeline {
-    /// `codec`, a decoder of `mime`, started for a picture of `layout`'s size from `config` and decoding into
-    /// a reader.
-    fn start(codec: MediaCodec, mime: &str, layout: &Layout, config: &[u8]) -> std::result::Result<Self, Failure> {
+    /// `codec`, a decoder of `mime`, started for a picture of `layout`'s size from the codec-specific data
+    /// `config` and decoding into a reader.
+    fn start(codec: MediaCodec, mime: &str, layout: &Layout, config: &[(&str, Vec<u8>)]) -> std::result::Result<Self, Failure> {
         let (width, height) = layout.size_i32().ok_or("the picture is too large")?;
         let reader = image_reader(width, height, layout.depth)?;
         let window = step(reader.window(), "getting the image reader's surface")?;
@@ -160,10 +189,12 @@ impl Pipeline {
         format.set_str("mime", mime);
         format.set_i32("width", width);
         format.set_i32("height", height);
-        format.set_buffer("csd-0", config);
+        for (key, data) in config {
+            format.set_buffer(key, data);
+        }
         step(codec.configure(&format, Some(&window), MediaCodecDirection::Decoder), "configuring the decoder")?;
         step(codec.start(), "starting the decoder")?;
-        Ok(Self { codec, reader })
+        Ok(Self { codec, reader, output: Cell::new(false) })
     }
 
     /// Queues `data` as one input sample at the codec's `time` ([`mediacodec_input::codec_time`]), or the end
@@ -190,6 +221,20 @@ impl Pipeline {
         }
     }
 
+    /// Discards every sample and picture the codec holds, for the codec to take the stream again from a
+    /// sample decoding can start at. The codec takes input again at once and is not started again: Android
+    /// asks for `start()` after `flush()` only of a codec in asynchronous mode, and this decoder registers no
+    /// callback, so it runs in synchronous mode. A codec that has output nothing yet is not flushed, and the
+    /// call fails, so the decoder drops it and the next sample starts a fresh one: Android's MediaCodec
+    /// reference says a codec flushed that soon after its start may lose its codec-specific data, which a
+    /// decoder that has lost it shows only as pictures that never come, with no error.
+    fn flush(&self) -> std::result::Result<(), Failure> {
+        if !self.output.get() {
+            return Err("the decoder has output nothing to flush after".into());
+        }
+        step(self.codec.flush(), "flushing the decoder")
+    }
+
     /// Every picture the codec has ready, waiting up to `wait` for the first; and whether the end of the
     /// stream came out, which no picture follows.
     fn pictures(&self, wait: Duration, layout: &Layout) -> std::result::Result<(Vec<(i64, VideoFrame)>, bool), Failure> {
@@ -197,8 +242,10 @@ impl Pipeline {
         loop {
             match step(self.codec.dequeue_output_buffer(wait), "waiting for a picture")? {
                 DequeuedOutputBufferInfoResult::TryAgainLater => return Ok((pictures, false)),
-                DequeuedOutputBufferInfoResult::OutputFormatChanged | DequeuedOutputBufferInfoResult::OutputBuffersChanged => {}
+                DequeuedOutputBufferInfoResult::OutputFormatChanged => self.output.set(true),
+                DequeuedOutputBufferInfoResult::OutputBuffersChanged => {}
                 DequeuedOutputBufferInfoResult::Buffer(output) => {
+                    self.output.set(true);
                     let info = output.info();
                     let (pts, flags, shown) = (mediacodec_input::stream_time(info.presentation_time_us()), info.flags(), info.size() > 0);
                     // Rendering hands the picture to the reader; releasing without it drops one that is not.
@@ -312,21 +359,31 @@ unsafe fn locked_pixels(planes: &[LockedPlaneInfo], width: usize, height: usize,
     Ok(biplanar::to_pixels(luma, chroma, crop, Depth::Ten)?)
 }
 
-/// What a MediaCodec decoder feeds [`crate::order::Sequence`]: the codec, made again after a seek.
+/// What a MediaCodec decoder feeds [`crate::order::Sequence`]: one codec, flushed at each seek and at the end
+/// of the stream.
 pub(crate) struct RawCodec {
     layout: Layout,
     stream: StreamInfo,
     mime: &'static str,
     make: MakeCodec,
     /// The codec-specific data a codec starts with.
-    config: Vec<u8>,
-    /// `None` until the first sample of a run: each run, after a seek or the end of a stream, gets a codec of
-    /// its own. A fresh codec refers to no picture of an earlier run and holds none of its pictures, and a
-    /// flushed one is no substitute: the emulator's decoder takes no sample after a flush and a restart.
+    config: Vec<(&'static str, Vec<u8>)>,
+    /// The codec the decoder started with, kept for its life: a seek or the end of a stream flushes it, which
+    /// leaves it referring to no picture of the run before and holding none of its pictures. A codec that
+    /// cannot flush, or has output nothing yet ([`Pipeline::flush`]), is dropped (`None`), and the next sample
+    /// gets a fresh one.
     pipeline: Option<Pipeline>,
 }
 
 impl RawCodec {
+    /// Ends the run: the codec is flushed, and dropped when it cannot be, so the next sample starts a fresh
+    /// one.
+    fn end_run(&mut self) {
+        if self.pipeline.as_ref().is_some_and(|pipeline| pipeline.flush().is_err()) {
+            self.pipeline = None;
+        }
+    }
+
     /// The codec of the run under way, started if the run has none yet.
     fn pipeline(&mut self) -> std::result::Result<&Pipeline, Failure> {
         if self.pipeline.is_none() {
@@ -350,7 +407,7 @@ impl RawDecoder<DecodedFrame> for RawCodec {
     }
 
     fn restart(&mut self) {
-        self.pipeline = None;
+        self.end_run();
     }
 
     fn drain(&mut self) -> Vec<(i64, DecodedFrame)> {
@@ -369,8 +426,8 @@ impl RawDecoder<DecodedFrame> for RawCodec {
                 }
             }
         }
-        // A codec that has seen the end takes no more samples.
-        self.pipeline = None;
+        // A codec that has seen the end takes no more samples until it is flushed.
+        self.end_run();
         decoded(pictures)
     }
 }
@@ -389,23 +446,31 @@ pub(crate) fn decoder(entry: &SampleEntry, stream: &StreamInfo) -> Result<McDeco
     decoder_with(entry, stream, hardware_codec)
 }
 
-/// [`decoder`], with the codec each decoding run gets made by `make`.
+/// [`decoder`], with its codec made by `make`.
 fn decoder_with(entry: &SampleEntry, stream: &StreamInfo, make: MakeCodec) -> Result<McDecoder> {
+    let raw = raw_codec(entry, stream, make)?;
+    let codec = raw.layout.codec;
+    // MediaCodec outputs pictures in presentation order itself, so the reorder buffer holds none back.
+    Ok(HardwareDecoder::new(raw, stream.clone(), 0, BACKEND, codec))
+}
+
+/// What [`decoder_with`] runs [`crate::order::Sequence`] around, its codec made by `make` and started.
+fn raw_codec(entry: &SampleEntry, stream: &StreamInfo, make: MakeCodec) -> Result<RawCodec> {
     let layout = Layout::for_stream(stream).map_err(CodecError::Unsupported)?;
     let mime = mediacodec_input::mime(&layout).map_err(CodecError::Unsupported)?;
     let config = mediacodec_input::codec_specific_data(entry, stream).map_err(|error| CodecError::Unsupported(error.into()))?;
     let pipeline = make(mime).and_then(|codec| Pipeline::start(codec, mime, &layout, &config)).map_err(CodecError::Unsupported)?;
-    let codec = layout.codec;
-    // MediaCodec outputs pictures in presentation order itself, so the reorder buffer holds none back.
-    let raw = RawCodec { layout, stream: stream.clone(), mime, make, config, pipeline: Some(pipeline) };
-    Ok(HardwareDecoder::new(raw, stream.clone(), 0, BACKEND, codec))
+    Ok(RawCodec { layout, stream: stream.clone(), mime, make, config, pipeline: Some(pipeline) })
 }
 
 /// These run where a device's media codecs are: on an Android phone or emulator, which is where this module
-/// builds.
+/// builds. The device's codec list is the one the platform gives, handed over as the app hands it: a file the
+/// harness writes before the run (see [`tests::device_codecs`]).
 #[cfg(test)]
-mod tests {
-    use std::sync::Arc;
+pub(crate) mod tests {
+    use std::ops::Range;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, OnceLock};
 
     use filmcraft_codecs::hw::{FrameCodec, FrameStreamInfo};
     use filmcraft_codecs::{VideoDecoder, software_video_decoder};
@@ -416,21 +481,61 @@ mod tests {
     use super::*;
     use crate::fallback::{Fallback, stream_info};
     use crate::fixtures::{
-        av1_entry, av1_samples, decoded, hevc_entry, hevc_samples, hevc10_entry, hevc10_samples, pictures, reordered_entry, reordered_samples, text,
+        av1_entry, av1_samples, counters, decoded, hevc_entry, hevc_samples, hevc10_entry, hevc10_samples, pictures, reordered_entry, reordered_samples, text,
         tiny_entry, tiny_samples,
     };
     use crate::mediacodec_input::{AV1_MIME, H264_MIME, HEVC_MIME};
+
+    /// Names the file the harness writes from `MediaCodecList(MediaCodecList.REGULAR_CODECS)`, one codec a line
+    /// in the list's order, tab-separated: `getName()`, `isHardwareAccelerated()`, `isEncoder()`, then
+    /// `getSupportedTypes()` joined by commas.
+    const LIST_FILE: &str = "CRAFTBRIDGE_CODEC_LIST";
+
+    /// The device's codec list, as the app hands it over. A run without it would compare nothing, so the tests
+    /// that need it fail instead.
+    pub(crate) fn device_codecs() -> &'static [CodecInfo] {
+        static LIST: OnceLock<std::result::Result<Vec<CodecInfo>, String>> = OnceLock::new();
+        let list = LIST.get_or_init(|| {
+            let path = std::env::var_os(LIST_FILE).ok_or(format!("{LIST_FILE} names no file of the device's codec list"))?;
+            let text = std::fs::read_to_string(&path).map_err(|error| format!("{LIST_FILE}: {error}"))?;
+            text.lines()
+                .map(|line| match line.split('\t').collect::<Vec<_>>()[..] {
+                    [name, hardware_accelerated, encoder, types] => Ok(CodecInfo {
+                        name: name.to_string(),
+                        types: types.split(',').map(str::to_string).collect(),
+                        encoder: encoder.parse().map_err(|error| format!("{line:?}: {error}"))?,
+                        hardware_accelerated: hardware_accelerated.parse().map_err(|error| format!("{line:?}: {error}"))?,
+                    }),
+                    _ => Err(format!("{line:?} is not four tab-separated fields")),
+                })
+                .collect()
+        });
+        list.as_deref().unwrap_or_else(|why| panic!("{why}"))
+    }
+
+    /// Gives the decoder the device's codec list, as the app does before it registers the decoders.
+    pub(crate) fn give_device_codecs() {
+        set_device_codecs(device_codecs().to_vec());
+    }
 
     fn stream(entry: &SampleEntry) -> StreamInfo {
         stream_info(entry).unwrap().unwrap()
     }
 
-    /// The device's decoder for `entry`'s stream; `None` where the device has no hardware decoder for its codec,
-    /// which is the decline the factory turns into the software decoder.
-    fn device_decoder(entry: &SampleEntry, mime: &str) -> Option<McDecoder> {
-        let decoder = decoder(entry, &stream(entry));
-        assert_eq!(decoder.is_ok(), has_hardware_decoder(mime), "a decoder starts exactly where the device has a hardware one for {mime}");
-        decoder.ok()
+    /// The device's hardware decoder for `mime`, chosen from the device's list.
+    fn listed(mime: &str) -> std::result::Result<MediaCodec, Failure> {
+        listed_hardware_codec(mime, device_codecs())
+    }
+
+    /// The device's hardware decoder for `entry`'s stream, which the factory declines the stream without: none
+    /// where the device has no hardware decoder for its codec, and then there is nothing to compare. The
+    /// platform's H.264 software decoder is no stand-in: on the API 29 emulator, read through the image reader,
+    /// a picture of it now and then carries an earlier picture's pixels, in about one run of these tests in ten
+    /// and in most runs with the tests in parallel.
+    fn device_decoders(entry: &SampleEntry, mime: &str) -> Vec<McDecoder> {
+        let decoder = decoder_with(entry, &stream(entry), listed);
+        assert_eq!(decoder.is_ok(), listed(mime).is_ok(), "a decoder starts exactly where the device has a hardware one for {mime}");
+        decoder.into_iter().collect()
     }
 
     fn software(entry: &SampleEntry) -> Box<dyn VideoDecoder> {
@@ -438,18 +543,48 @@ mod tests {
     }
 
     #[test]
-    fn a_decoder_is_hardware_only_when_the_device_names_one_that_is_not_a_platform_software_codec() {
+    fn the_decoder_picked_is_the_devices_first_hardware_one_for_the_type_and_never_a_software_default() {
         for mime in BACKEND_MIMES {
-            let name = MediaCodec::from_decoder_type(mime).map(|codec| codec.name().unwrap());
-            let expected = match name {
-                None => Err(format!("this device has no decoder for {mime}")),
-                Some(name) if mediacodec_input::is_software_codec(&name) => Err(format!("this device decodes {mime} only in software ({name})")),
-                Some(_) => Ok(()),
-            };
-            assert_eq!(hardware_codec(mime).map(|_| ()), expected, "{mime}");
-            assert_eq!(has_hardware_decoder(mime), expected.is_ok(), "{mime}");
+            let hardware = |name: &str| device_codecs().iter().any(|codec| codec.name == name && !codec.encoder && codec.hardware_accelerated);
+            let first = device_codecs().iter().find(|codec| hardware(&codec.name) && codec.types.iter().any(|kind| kind == mime));
+            match (listed(mime), first) {
+                (Ok(codec), Some(first)) => assert_eq!(codec.name().unwrap(), first.name, "{mime}"),
+                (Err(error), None) => assert_eq!(error, format!("this device has no hardware decoder for {mime}"), "{mime}"),
+                (picked, first) => panic!("{mime}: picked {:?}, the platform lists {first:?} first", picked.map(|codec| codec.name())),
+            }
+            // The platform's default for the type is taken only where it is a hardware decoder itself.
+            if let Some(default) = MediaCodec::from_decoder_type(mime).map(|codec| codec.name().unwrap()) {
+                let picked = listed(mime).map(|codec| codec.name().unwrap());
+                assert_eq!(picked.as_ref() == Ok(&default), hardware(&default), "{mime}: the default is {default}, the pick {picked:?}");
+            }
         }
-        assert_eq!(available(), BACKEND_MIMES.into_iter().any(has_hardware_decoder));
+    }
+
+    #[test]
+    fn a_listed_hardware_decoder_the_platform_cannot_create_is_passed_over_for_the_next() {
+        let missing = CodecInfo { name: "c2.craftbridge.missing.decoder".into(), types: vec![H264_MIME.into()], encoder: false, hardware_accelerated: true };
+        assert_eq!(
+            listed_hardware_codec(H264_MIME, std::slice::from_ref(&missing)).map(|_| ()),
+            Err(format!("none of this device's hardware decoders for {H264_MIME} could be created"))
+        );
+        let after = [&[missing][..], device_codecs()].concat();
+        assert_eq!(listed_hardware_codec(H264_MIME, &after).map(|codec| codec.name().unwrap()).ok(), listed(H264_MIME).map(|codec| codec.name().unwrap()).ok());
+    }
+
+    #[test]
+    fn the_decoder_chooses_from_the_list_the_app_gave_and_declines_every_stream_until_it_is_given() {
+        let _shared = counters();
+        let given = |mime: &str| hardware_codec(mime).map(|_| ());
+        let before = DEVICE_CODECS.write().unwrap().take();
+        assert_eq!(given(H264_MIME), Err("the device's codec list was not given".to_string()));
+        assert!(!available());
+        assert!(matches!(decoder(&tiny_entry(), &stream(&tiny_entry())), Err(CodecError::Unsupported(_))));
+        give_device_codecs();
+        let expected = BACKEND_MIMES.map(|mime| listed(mime).map(|_| ()));
+        assert_eq!(BACKEND_MIMES.map(given), expected);
+        assert_eq!(available(), expected.iter().any(|answer| answer.is_ok()));
+        assert_eq!(has_hardware_decoder(H264_MIME), expected[0].is_ok());
+        *DEVICE_CODECS.write().unwrap() = before;
     }
 
     #[test]
@@ -465,29 +600,188 @@ mod tests {
         // stream's first pictures: the codec hands every presentation time back as it was given.
         let before_zero = reordered_samples().into_iter().map(|(pts, sample)| (pts - 2, sample)).collect();
         for (entry, samples) in [(tiny_entry(), tiny_samples()), (reordered_entry(), reordered_samples()), (reordered_entry(), before_zero)] {
-            let Some(mut decoder) = device_decoder(&entry, H264_MIME) else { return };
-            assert_eq!(decoder.name(), "MediaCodec H.264");
-            assert_eq!(decoded(&mut decoder, &samples), decoded(software(&entry).as_mut(), &samples));
+            for mut decoder in device_decoders(&entry, H264_MIME) {
+                assert_eq!(decoder.name(), "MediaCodec H.264");
+                assert_eq!(decoded(&mut decoder, &samples), decoded(software(&entry).as_mut(), &samples));
+            }
         }
     }
 
     #[test]
     fn pictures_of_a_stream_with_b_pictures_come_out_in_presentation_order() {
-        let entry = reordered_entry();
-        let Some(mut decoder) = device_decoder(&entry, H264_MIME) else { return };
-        let order: Vec<i64> = pictures(&mut decoder, &reordered_samples()).iter().map(|picture| picture.pts).collect();
-        assert_eq!(order, [0, 1, 2, 3, 4, 5]);
+        for mut decoder in device_decoders(&reordered_entry(), H264_MIME) {
+            let order: Vec<i64> = pictures(&mut decoder, &reordered_samples()).iter().map(|picture| picture.pts).collect();
+            assert_eq!(order, [0, 1, 2, 3, 4, 5]);
+        }
     }
 
     #[test]
     fn a_flush_ends_the_run_and_the_decoder_takes_the_stream_again_from_its_start() {
         let entry = tiny_entry();
-        let Some(mut decoder) = device_decoder(&entry, H264_MIME) else { return };
         let samples = tiny_samples();
         let wanted = decoded(software(&entry).as_mut(), &samples);
+        for mut decoder in device_decoders(&entry, H264_MIME) {
+            assert_eq!(decoded(&mut decoder, &samples), wanted);
+            assert_eq!(decoded(&mut decoder, &samples), wanted, "after the end of the stream");
+            assert!(decoder.flush().is_empty(), "nothing is held after a flush");
+        }
+    }
+
+    /// Two runs of [`tiny_samples`]: the second starts at its own IDR picture, at time 4.
+    fn two_runs() -> Vec<(i64, Vec<u8>)> {
+        tiny_samples().into_iter().chain(tiny_samples().into_iter().map(|(pts, sample)| (pts + 4, sample))).collect()
+    }
+
+    /// `decoder` and the software decoder each fed samples `before` of `samples`, sought to the run of `length`
+    /// samples that starts at `to`, and that run decoded: the decoder's pictures must be the software
+    /// decoder's from that point, on the one codec.
+    fn assert_seek_matches_software(
+        decoder: &mut McDecoder,
+        entry: &SampleEntry,
+        samples: &[(i64, Vec<u8>)],
+        (before, to, length): (Range<usize>, usize, usize),
+    ) {
+        let mut software = software(entry);
+        for (pts, sample) in &samples[before.clone()] {
+            decoder.decode(sample, *pts).unwrap();
+            software.decode(sample, *pts).unwrap();
+        }
+        decoder.reset();
+        software.reset();
+        let seeked = &samples[to..to + length];
+        let wanted = decoded(software.as_mut(), seeked);
+        assert_eq!(decoded(decoder, seeked), wanted, "a seek to {to} after samples {before:?}");
+    }
+
+    #[test]
+    fn a_seek_mid_stream_decodes_the_pictures_the_software_decoder_gives_from_that_point() {
+        let entry = tiny_entry();
+        let samples = two_runs();
+        for mut decoder in device_decoders(&entry, H264_MIME) {
+            assert_eq!(decoded(&mut decoder, &samples), decoded(software(&entry).as_mut(), &samples), "the whole stream");
+            for (before, to) in [(0..3, 4), (4..7, 0), (0..2, 0), (4..8, 4)] {
+                assert_seek_matches_software(&mut decoder, &entry, &samples, (before, to, 4));
+            }
+        }
+    }
+
+    #[test]
+    fn a_seek_in_an_av1_stream_decodes_the_pictures_the_software_decoder_gives_from_that_point() {
+        // The device's hardware AV1 decoder where it has one, and its own AV1 decoder, a software one included,
+        // fed exactly as the hardware one is, so the seek is run on every device that decodes AV1.
+        let entry = av1_entry();
+        let samples = av1_samples();
+        let own = decoder_with(&entry, &stream(&entry), any_codec).ok();
+        for mut decoder in device_decoders(&entry, AV1_MIME).into_iter().chain(own) {
+            assert_eq!(decoded(&mut decoder, &samples), decoded(software(&entry).as_mut(), &samples), "the whole stream");
+            for before in [0..0, 0..1, 0..samples.len()] {
+                assert_seek_matches_software(&mut decoder, &entry, &samples, (before, 0, samples.len()));
+            }
+        }
+    }
+
+    /// How many codecs [`counted`] has made.
+    static MADE: AtomicUsize = AtomicUsize::new(0);
+
+    /// [`listed`], counted in [`MADE`]: only the test that reads it uses it.
+    fn counted(mime: &str) -> std::result::Result<MediaCodec, Failure> {
+        MADE.fetch_add(1, Ordering::SeqCst);
+        listed(mime)
+    }
+
+    #[test]
+    fn a_decoder_keeps_its_one_codec_through_seeks_and_the_ends_of_streams() {
+        let entry = reordered_entry();
+        let samples = reordered_samples();
+        let wanted = decoded(software(&entry).as_mut(), &samples);
+        let Ok(mut decoder) = decoder_with(&entry, &stream(&entry), counted) else { return assert!(listed(H264_MIME).is_err()) };
         assert_eq!(decoded(&mut decoder, &samples), wanted);
-        assert_eq!(decoded(&mut decoder, &samples), wanted, "after the end of the stream");
-        assert!(decoder.flush().is_empty(), "nothing is held after a flush");
+        for (pts, sample) in samples.iter().take(3) {
+            decoder.decode(sample, *pts).unwrap();
+        }
+        decoder.reset();
+        assert_eq!(decoded(&mut decoder, &samples), wanted, "after a seek");
+        decoder.reset();
+        assert_eq!(decoded(&mut decoder, &samples), wanted, "after the end of the stream and a seek");
+        assert_eq!(MADE.load(Ordering::SeqCst), 1, "one codec for the decoder's life");
+    }
+
+    /// `samples` fed to `raw` and drained, as text: what [`decoded`] gives for a decoder, for a stream with no
+    /// reordering.
+    fn raw_pictures(raw: &mut RawCodec, samples: &[(i64, Vec<u8>)]) -> Vec<String> {
+        let mut out: Vec<DecodedFrame> = samples.iter().flat_map(|(pts, sample)| raw.feed(sample, *pts).unwrap()).map(|(_, picture)| picture).collect();
+        out.extend(raw.drain().into_iter().map(|(_, picture)| picture));
+        text(&out)
+    }
+
+    /// The device's hardware decoder for the tiny stream, outside [`crate::order::Sequence`]; none where the
+    /// device has no hardware H.264 decoder.
+    fn tiny_raw() -> Option<RawCodec> {
+        let raw = raw_codec(&tiny_entry(), &stream(&tiny_entry()), listed);
+        assert_eq!(raw.is_ok(), listed(H264_MIME).is_ok(), "a codec starts exactly where the device has a hardware one for {H264_MIME}");
+        raw.ok()
+    }
+
+    #[test]
+    fn a_start_after_a_synchronous_flush_is_refused_and_the_codec_decodes_on() {
+        // Android asks for `start()` after `flush()` only of a codec in asynchronous mode: in synchronous mode
+        // the flushed codec is running already, and a start is an invalid operation. A decoder that started it
+        // and minded the answer would lose its codec at every seek.
+        let samples = tiny_samples();
+        let wanted = decoded(software(&tiny_entry()).as_mut(), &samples);
+        let Some(mut raw) = tiny_raw() else { return };
+        assert_eq!(raw_pictures(&mut raw, &samples), wanted);
+        assert!(raw.pipeline.as_ref().unwrap().codec.start().is_err(), "a start after the flush at the end of the stream");
+        assert_eq!(raw_pictures(&mut raw, &samples), wanted, "after the refused start");
+    }
+
+    #[test]
+    fn a_seek_before_the_codec_has_output_anything_decodes_the_run_after_it() {
+        // A seek as soon as the decoder is made, as opening a movie part of the way in makes, and one straight
+        // after the stream's first sample, as scrubbing makes.
+        let entry = tiny_entry();
+        let samples = tiny_samples();
+        let wanted = decoded(software(&entry).as_mut(), &samples);
+        for fed in [0, 1] {
+            for mut decoder in device_decoders(&entry, H264_MIME) {
+                for (pts, sample) in samples.iter().take(fed) {
+                    decoder.decode(sample, *pts).unwrap();
+                }
+                decoder.reset();
+                assert_eq!(decoded(&mut decoder, &samples), wanted, "a seek after {fed} samples");
+            }
+        }
+    }
+
+    #[test]
+    fn a_codec_that_has_output_nothing_is_replaced_at_a_seek_and_one_that_has_is_flushed_and_kept() {
+        // Android's MediaCodec reference: a codec flushed before it returns any output buffer or output format
+        // may lose its codec-specific data, which an emulator's decoder does not show, so the rule is checked by
+        // what the decoder keeps.
+        let samples = tiny_samples();
+        let wanted = decoded(software(&tiny_entry()).as_mut(), &samples);
+        let Some(mut raw) = tiny_raw() else { return };
+        raw.restart();
+        assert!(raw.pipeline.is_none(), "a codec that has output nothing is not flushed");
+        assert_eq!(raw_pictures(&mut raw, &samples), wanted, "a fresh codec takes the stream");
+        raw.feed(&samples[0].1, samples[0].0).unwrap();
+        raw.restart();
+        assert!(raw.pipeline.is_some(), "a codec that has output is flushed and kept");
+        assert_eq!(raw_pictures(&mut raw, &samples), wanted, "after the flush");
+    }
+
+    #[test]
+    fn a_codec_that_cannot_flush_is_dropped_and_the_next_sample_gets_a_fresh_one() {
+        let samples = tiny_samples();
+        let wanted = decoded(software(&tiny_entry()).as_mut(), &samples);
+        let Some(mut raw) = tiny_raw() else { return };
+        assert_eq!(raw_pictures(&mut raw, &samples), wanted);
+        raw.feed(&samples[0].1, samples[0].0).unwrap();
+        // A stopped codec refuses a flush, as a codec that has failed does.
+        raw.pipeline.as_ref().unwrap().codec.stop().unwrap();
+        raw.restart();
+        assert!(raw.pipeline.is_none(), "the codec that could not flush is gone");
+        assert_eq!(raw_pictures(&mut raw, &samples), wanted, "a fresh codec takes the stream");
     }
 
     #[test]
@@ -495,36 +789,39 @@ mod tests {
         // The pictures the first samples of a stream with B pictures leave in the codec must not come out of the
         // next run.
         for (entry, samples) in [(tiny_entry(), tiny_samples()), (reordered_entry(), reordered_samples())] {
-            let Some(mut decoder) = device_decoder(&entry, H264_MIME) else { return };
-            for (pts, sample) in samples.iter().take(3) {
-                decoder.decode(sample, *pts).unwrap();
+            for mut decoder in device_decoders(&entry, H264_MIME) {
+                for (pts, sample) in samples.iter().take(3) {
+                    decoder.decode(sample, *pts).unwrap();
+                }
+                decoder.reset();
+                assert_eq!(decoded(&mut decoder, &samples), decoded(software(&entry).as_mut(), &samples));
             }
-            decoder.reset();
-            assert_eq!(decoded(&mut decoder, &samples), decoded(software(&entry).as_mut(), &samples));
         }
     }
 
     #[test]
     fn a_sample_that_is_not_nal_units_is_an_error_the_decoder_survives() {
         let entry = tiny_entry();
-        let Some(mut decoder) = device_decoder(&entry, H264_MIME) else { return };
-        assert!(matches!(decoder.decode(&[0, 0, 0, 9, 0x65], 0), Err(CodecError::Decode(_))));
-        assert!(matches!(decoder.decode(&[], 0), Err(CodecError::Decode(_))));
-        assert_eq!(decoded(&mut decoder, &tiny_samples()), decoded(software(&entry).as_mut(), &tiny_samples()));
+        for mut decoder in device_decoders(&entry, H264_MIME) {
+            assert!(matches!(decoder.decode(&[0, 0, 0, 9, 0x65], 0), Err(CodecError::Decode(_))));
+            assert!(matches!(decoder.decode(&[], 0), Err(CodecError::Decode(_))));
+            assert_eq!(decoded(&mut decoder, &tiny_samples()), decoded(software(&entry).as_mut(), &tiny_samples()));
+        }
     }
 
     #[test]
-    fn the_device_decodes_hevc_only_where_it_has_a_hardware_decoder_for_it() {
+    fn the_device_decodes_hevc_through_its_hardware_decoder_where_it_has_one() {
         let entry = hevc_entry();
-        let Some(mut decoder) = device_decoder(&entry, HEVC_MIME) else { return };
-        assert_eq!(decoder.name(), "MediaCodec HEVC");
-        assert_eq!(decoded(&mut decoder, &hevc_samples()), decoded(software(&entry).as_mut(), &hevc_samples()));
+        for mut decoder in device_decoders(&entry, HEVC_MIME) {
+            assert_eq!(decoder.name(), "MediaCodec HEVC");
+            assert_eq!(decoded(&mut decoder, &hevc_samples()), decoded(software(&entry).as_mut(), &hevc_samples()));
+        }
     }
 
     #[test]
     fn the_device_decodes_av1_only_where_it_has_a_hardware_decoder_for_it() {
         let entry = av1_entry();
-        let Some(mut decoder) = device_decoder(&entry, AV1_MIME) else { return };
+        let Some(mut decoder) = device_decoders(&entry, AV1_MIME).pop() else { return };
         assert_eq!(decoder.name(), "MediaCodec AV1");
         assert_eq!(decoded(&mut decoder, &av1_samples()), decoded(software(&entry).as_mut(), &av1_samples()));
     }
@@ -535,7 +832,7 @@ mod tests {
         // it with the same `av1C` as `csd-0`, the same temporal units and the same image reader.
         let entry = av1_entry();
         let decoder = decoder_with(&entry, &stream(&entry), any_codec);
-        assert_eq!(decoder.is_ok(), MediaCodec::from_decoder_type(AV1_MIME).is_some(), "a decoder starts wherever the device decodes AV1");
+        assert_eq!(decoder.is_ok(), any_codec(AV1_MIME).is_ok(), "a decoder starts wherever the device decodes AV1");
         let Ok(mut decoder) = decoder else { return };
         assert_eq!(decoder.name(), "MediaCodec AV1");
         let wanted = decoded(software(&entry).as_mut(), &av1_samples());
@@ -544,9 +841,10 @@ mod tests {
         assert!(matches!(decoder.decode(&[], 0), Err(CodecError::Decode(_))), "an empty sample");
     }
 
-    /// The device's own decoder for `mime`, a software one included.
+    /// The device's own decoder for `mime`, a software one included, the first the list gives.
     fn any_codec(mime: &str) -> std::result::Result<MediaCodec, Failure> {
-        MediaCodec::from_decoder_type(mime).ok_or_else(|| format!("this device has no decoder for {mime}"))
+        let name = device_codecs().iter().find(|codec| !codec.encoder && codec.types.iter().any(|kind| kind == mime)).map(|codec| codec.name.as_str());
+        name.and_then(MediaCodec::from_codec_name).ok_or_else(|| format!("this device has no decoder for {mime}"))
     }
 
     #[test]
@@ -555,7 +853,7 @@ mod tests {
         // the same codec-specific data, the same Annex B samples and the same image reader.
         let entry = hevc_entry();
         let decoder = decoder_with(&entry, &stream(&entry), any_codec);
-        assert_eq!(decoder.is_ok(), MediaCodec::from_decoder_type("video/hevc").is_some(), "a decoder starts wherever the device decodes HEVC");
+        assert_eq!(decoder.is_ok(), any_codec(HEVC_MIME).is_ok(), "a decoder starts wherever the device decodes HEVC");
         let Ok(mut decoder) = decoder else { return };
         assert_eq!(decoder.name(), "MediaCodec HEVC");
         assert_eq!(decoded(&mut decoder, &hevc_samples()), decoded(software(&entry).as_mut(), &hevc_samples()));
