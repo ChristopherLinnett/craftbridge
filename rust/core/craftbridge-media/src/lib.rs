@@ -176,12 +176,17 @@ fn report(on: bool, backend: Option<&'static str>) -> Availability {
 ///   --cpu-used=6 --threads=1 --color-primaries=bt709 --transfer-characteristics=bt709 \
 ///   --matrix-coefficients=bt709 --ivf -o av1.ivf av1.y4m
 /// ffmpeg -i av1.ivf -c copy av1.mp4
+/// crop="crop_left=6:crop_top=4:crop_right=2:crop_bottom=4"
+/// ffmpeg -i reordered.mp4 -c copy -bsf:v h264_metadata=$crop reordered-offset.mp4
+/// ffmpeg -i hevc.mp4 -c copy -tag:v hvc1 -bsf:v hevc_metadata=$crop hevc-offset.mp4
 /// ```
 ///
-/// The SEI x264 writes its own settings in is removed (`filter_units`), and x265 writes none (`info=0`). Each
-/// stream's configuration record, for H.264 the SPS and PPS its `avcC` holds, and its samples, in decoding order
-/// as the MP4 holds them, each with its presentation time counted in pictures from the first, are what
-/// `ffprobe -show_streams -show_packets -show_data` reads of the MP4.
+/// The SEI x264 writes its own settings in is removed (`filter_units`), and x265 writes none (`info=0`). The last
+/// two commands rewrite only the crop their stream's SPS carries, so their samples are that stream's own and their
+/// pictures a window of its coded pictures that starts 6 samples in and 4 down, which no decoder that ignores a
+/// crop's offset shows. Each stream's configuration record, for H.264 the SPS and PPS its `avcC` holds, and its
+/// samples, in decoding order as the MP4 holds them, each with its presentation time counted in pictures from the
+/// first, are what `ffprobe -show_streams -show_packets -show_data` reads of the MP4.
 #[cfg(test)]
 pub(crate) mod fixtures {
     use filmcraft_codecs::DecodedFrame;
@@ -212,7 +217,8 @@ pub(crate) mod fixtures {
     /// The size of the pictures of every stream below, in luma samples: even, and no smaller than
     /// [`HARDWARE_SMALLEST`] on either side, since a hardware decoder refuses a smaller stream or gives none of its
     /// pictures, and a test of it would then compare nothing. H.264 codes it as 160x128 and crops the last 8 rows,
-    /// as it codes 1080p footage. Small enough that a test decodes a stream in a moment.
+    /// as it codes 1080p footage. Small enough that a test decodes a stream in a moment. The two offset crops show a
+    /// window of their stream's pictures instead ([`reordered_offset_entry`], [`hevc_offset_entry`]).
     pub(crate) const SIZE: (u16, u16) = (160, 120);
 
     const TINY_SPS: &[u8] =
@@ -1009,6 +1015,12 @@ pub(crate) mod fixtures {
             ],
         ),
     ];
+    const REORDERED_OFFSET_SPS: &[u8] =
+        &[0x67, 0x4D, 0x40, 0x0B, 0xEC, 0xA1, 0x42, 0x39, 0x13, 0x78, 0x08, 0x80, 0x00, 0x00, 0x03, 0x00, 0x80, 0x00, 0x00, 0x19, 0x07, 0x8A, 0x14, 0xCB];
+    const HEVC_OFFSET_SPS: &[u8] = &[
+        0x42, 0x01, 0x01, 0x01, 0x60, 0x00, 0x00, 0x03, 0x00, 0x90, 0x00, 0x00, 0x03, 0x00, 0x00, 0x03, 0x00, 0x1E, 0xA0, 0x14, 0x20, 0x79, 0x91, 0x37, 0x96,
+        0x56, 0x49, 0x24, 0xCA, 0xF0, 0x16, 0x80, 0x80, 0x00, 0x00, 0x03, 0x00, 0x80, 0x00, 0x00, 0x0C, 0x84,
+    ];
 
     /// A real H.264 stream in constrained baseline profile, an IDR picture and three P pictures: short enough to
     /// decode in a test, long enough to have a sample after a restart one.
@@ -1080,6 +1092,74 @@ pub(crate) mod fixtures {
         owned(HEVC10_SAMPLES)
     }
 
+    /// [`reordered_entry`]'s stream with an SPS whose crop starts 6 samples in and 4 down: 152x120 of its 160x128
+    /// coded pictures, from (6, 4). Its samples are [`reordered_samples`].
+    pub(crate) fn reordered_offset_entry() -> SampleEntry {
+        SampleEntry::avc(AvcConfig::new(vec![REORDERED_OFFSET_SPS.to_vec()], vec![REORDERED_PPS.to_vec()], 4), 152, 120)
+    }
+
+    /// [`hevc_entry`]'s stream with an SPS whose conformance window starts 6 samples in and 4 down: 152x112 of its
+    /// 160x120 coded pictures, from (6, 4). Its record is the stream's own with that SPS in its SPS's place, as
+    /// `hevc_metadata` writes it, and its samples are [`hevc_samples`].
+    pub(crate) fn hevc_offset_entry() -> SampleEntry {
+        let mut record = HevcConfig::parse(HEVC_RECORD).unwrap();
+        // NAL unit type 33 is the SPS.
+        let sps = record.arrays.iter_mut().find(|array| array.nal_type == 33).unwrap();
+        sps.nalus = vec![HEVC_OFFSET_SPS.to_vec()];
+        SampleEntry::hevc(record, 152, 112)
+    }
+
+    /// A stream of the set as a test takes it: the name its failures give it, its sample entry, and its samples in
+    /// decoding order, each with its presentation time.
+    pub(crate) struct Stream {
+        pub(crate) name: &'static str,
+        pub(crate) entry: SampleEntry,
+        pub(crate) samples: Vec<(i64, Vec<u8>)>,
+    }
+
+    /// [`tiny_entry`]'s stream.
+    pub(crate) fn h264() -> Stream {
+        Stream { name: "H.264", entry: tiny_entry(), samples: tiny_samples() }
+    }
+
+    /// [`reordered_entry`]'s stream.
+    pub(crate) fn h264_with_b_pictures() -> Stream {
+        Stream { name: "H.264 with B pictures", entry: reordered_entry(), samples: reordered_samples() }
+    }
+
+    /// [`hevc_entry`]'s stream.
+    pub(crate) fn hevc() -> Stream {
+        Stream { name: "HEVC", entry: hevc_entry(), samples: hevc_samples() }
+    }
+
+    /// [`hevc10_entry`]'s stream.
+    pub(crate) fn hevc10() -> Stream {
+        Stream { name: "10-bit HEVC", entry: hevc10_entry(), samples: hevc10_samples() }
+    }
+
+    /// [`av1_entry`]'s stream.
+    pub(crate) fn av1() -> Stream {
+        Stream { name: "AV1", entry: av1_entry(), samples: av1_samples() }
+    }
+
+    /// [`reordered_entry`]'s stream shown from two pictures before time zero, where a negative composition offset
+    /// can put a stream's first pictures: what the device tests decode through a phone's own decoder.
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    pub(crate) fn h264_with_b_pictures_from_before_zero() -> Stream {
+        let samples = reordered_samples().into_iter().map(|(pts, sample)| (pts - 2, sample)).collect();
+        Stream { name: "H.264 with B pictures, from before time zero", entry: reordered_entry(), samples }
+    }
+
+    /// [`reordered_offset_entry`]'s stream.
+    pub(crate) fn h264_with_an_offset_crop() -> Stream {
+        Stream { name: "H.264 with an offset crop", entry: reordered_offset_entry(), samples: reordered_samples() }
+    }
+
+    /// [`hevc_offset_entry`]'s stream.
+    pub(crate) fn hevc_with_an_offset_crop() -> Stream {
+        Stream { name: "HEVC with an offset crop", entry: hevc_offset_entry(), samples: hevc_samples() }
+    }
+
     /// Held by a test that reads FilmCraft's process-wide decline counter, or makes a decoder that may bump it,
     /// so another test's decline does not land between its two readings; and by one that reads or changes the
     /// device's codec list the Android decoder picks from, which is process-wide too.
@@ -1121,8 +1201,7 @@ pub(crate) mod fixtures {
     /// for byte, and that the stream went on in the software decoder, the switch counted once. The caller holds
     /// [`counters`], since the switch counter is process-wide.
     pub(crate) fn through_a_failed_drain(entry: &SampleEntry, samples: &[(i64, Vec<u8>)], hardware: impl crate::Draining) {
-        let stream = crate::fallback::stream_info(entry).unwrap().unwrap();
-        let mut decoder = crate::Fallback::new(hardware, entry, stream);
+        let mut decoder = crate::Fallback::new(hardware, entry, stream(entry));
         let hardware_name = decoder.name().to_string();
         let fallbacks = filmcraft_codecs::hw::hw_stats().fallbacks;
         let mut seen = Vec::new();
@@ -1135,6 +1214,41 @@ pub(crate) mod fixtures {
         assert_eq!(text(&seen), decoded(software.as_mut(), samples));
         let switched = (decoder.name(), filmcraft_codecs::hw::hw_stats().fallbacks);
         assert_eq!(switched, (software.name(), fallbacks + 1), "the stream went on in software, once");
+    }
+
+    /// What FilmCraft's hardware-decoder support reads from `entry`, a stream of the set, which it reads every one
+    /// of.
+    pub(crate) fn stream(entry: &SampleEntry) -> filmcraft_codecs::hw::StreamInfo {
+        crate::fallback::stream_info(entry).unwrap().unwrap()
+    }
+
+    /// Plane `plane` of an 8-bit 4:2:0 picture, and its width in samples.
+    pub(crate) fn eight_bit_plane(picture: &DecodedFrame, plane: usize) -> (&[u8], usize) {
+        let filmcraft_frame::PixelData::Yuv8 { planes, .. } = &picture.frame.data else { panic!("8-bit planes") };
+        let width = picture.frame.width as usize;
+        (planes[plane].as_slice(), if plane == 0 { width } else { width.div_ceil(2) })
+    }
+
+    /// Whether a device test that compared `compared` pictures of a stream of type `kind`, as the platform names
+    /// the type, with the software decoder's may pass on a device whose hardware decoder for the type is
+    /// `hardware`: where it has one, only having compared some, since a test that passed having compared none would
+    /// hide that the hardware decoded nothing; on a device with none, whose streams the factory hands to the
+    /// software decoder, whatever it compared.
+    pub(crate) fn hardware_compared(kind: &str, hardware: Option<&str>, compared: usize) -> Result<(), String> {
+        match hardware {
+            Some(name) if compared == 0 => Err(format!("{kind}: the device's hardware decoder {name} gave no picture compared with the software decoder's")),
+            _ => Ok(()),
+        }
+    }
+
+    /// The decoder `start` made over the device's hardware decoder for a stream of type `kind`, which is `hardware`
+    /// where the device has one; `None` for a start that was refused, which compares no picture: on a device with
+    /// a hardware decoder for the type, that is an error saying what the platform answered.
+    pub(crate) fn hardware_start<T>(kind: &str, hardware: Option<&str>, start: Result<T, impl std::fmt::Debug>) -> Result<Option<T>, String> {
+        match start {
+            Ok(decoder) => Ok(Some(decoder)),
+            Err(why) => hardware_compared(kind, hardware, 0).map(|()| None).map_err(|rule| format!("{rule}: its start was refused ({why:?})")),
+        }
     }
 
     /// A stream no hardware decoder takes.
@@ -1150,9 +1264,7 @@ mod tests {
     use filmcraft_isobmff::AvcConfig;
 
     use super::*;
-    use crate::fixtures::{
-        avc_entry, counters, decoded, hevc_entry, hevc_samples, pps, prores_entry, reordered_entry, reordered_samples, tiny_entry, tiny_samples,
-    };
+    use crate::fixtures::{avc_entry, counters, decoded, hevc_entry, hevc_samples, pps, prores_entry, reordered_entry, tiny_entry};
 
     /// What the device this build runs on names its backend.
     const BACKEND: &str = if cfg!(target_os = "android") { "MediaCodec" } else { "VideoToolbox" };
@@ -1172,16 +1284,29 @@ mod tests {
     }
 
     /// Whether this device's hardware decodes the stream `entry` describes, so the registry answers with its
-    /// decoder rather than declining.
-    #[cfg(target_os = "android")]
+    /// decoder rather than declining: the device's own answer for the stream's codec.
     fn hardware_takes(entry: &SampleEntry) -> bool {
         let layout = fallback::stream_info(entry).and_then(Result::ok).and_then(|stream| layout::Layout::for_stream(&stream).ok());
-        layout.and_then(|layout| mediacodec_input::mime(&layout).ok()).is_some_and(platform::mediacodec::has_hardware_decoder)
+        layout.is_some_and(|layout| device_decodes(&layout))
     }
 
-    #[cfg(not(target_os = "android"))]
-    fn hardware_takes(_entry: &SampleEntry) -> bool {
-        has_hardware()
+    /// Whether the device's codec list names a hardware decoder for the stream's type.
+    #[cfg(target_os = "android")]
+    fn device_decodes(layout: &layout::Layout) -> bool {
+        mediacodec_input::mime(layout).ok().is_some_and(platform::mediacodec::has_hardware_decoder)
+    }
+
+    /// VideoToolbox's answer for the stream's codec, which is no on the Simulator for every codec, and on a phone
+    /// a matter of its chip for AV1.
+    #[cfg(target_os = "ios")]
+    fn device_decodes(layout: &layout::Layout) -> bool {
+        platform::videotoolbox::hardware_available(layout.codec)
+    }
+
+    /// No other build has a hardware decoder.
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    fn device_decodes(_layout: &layout::Layout) -> bool {
+        false
     }
 
     /// Gives the decoders what the app gives them before it registers them: on Android, the device's codec
@@ -1215,17 +1340,22 @@ mod tests {
         let (width, height) = fixtures::SIZE;
         assert!(width.is_multiple_of(2) && height.is_multiple_of(2), "4:2:0 chroma halves an even size exactly");
         let (smallest_width, smallest_height) = fixtures::HARDWARE_SMALLEST;
-        assert!(width >= smallest_width && height >= smallest_height, "a phone's hardware decoder refuses a smaller stream or gives none of its pictures");
+        let whole = (u32::from(width), u32::from(height));
+        // Each stream, whether it is fed in an order other than the one it is shown in, and its pictures' size.
         let streams = [
-            ("H.264", tiny_entry(), tiny_samples(), false),
-            ("H.264 with B pictures", reordered_entry(), reordered_samples(), true),
-            ("HEVC", hevc_entry(), hevc_samples(), true),
-            ("10-bit HEVC", fixtures::hevc10_entry(), fixtures::hevc10_samples(), true),
-            ("AV1", fixtures::av1_entry(), fixtures::av1_samples(), false),
+            (fixtures::h264(), false, whole),
+            (fixtures::h264_with_b_pictures(), true, whole),
+            (fixtures::hevc(), true, whole),
+            (fixtures::hevc10(), true, whole),
+            (fixtures::av1(), false, whole),
+            (fixtures::h264_with_an_offset_crop(), true, (152, 120)),
+            (fixtures::hevc_with_an_offset_crop(), true, (152, 112)),
         ];
-        for (name, entry, samples, reordered) in streams {
+        for (fixtures::Stream { name, entry, samples }, reordered, size) in streams {
+            let smallest = size.0 >= u32::from(smallest_width) && size.1 >= u32::from(smallest_height);
+            assert!(smallest, "{name}: a phone's hardware decoder refuses a smaller stream or gives none of its pictures");
             let pictures = fixtures::pictures(software_video_decoder(&entry).unwrap().as_mut(), &samples);
-            assert!(pictures.iter().all(|picture| (picture.frame.width, picture.frame.height) == (u32::from(width), u32::from(height))), "{name}");
+            assert!(pictures.iter().all(|picture| (picture.frame.width, picture.frame.height) == size), "{name}");
             let shown: Vec<i64> = pictures.iter().map(|picture| picture.pts).collect();
             assert_eq!(shown, (0..samples.len()).map(|at| at as i64).collect::<Vec<_>>(), "{name}: a picture at each time from 0");
             let fed: Vec<i64> = samples.iter().map(|(pts, _)| *pts).collect();
@@ -1236,6 +1366,31 @@ mod tests {
             let (info, _) = nal_types(&entry, &[]);
             assert_eq!(info.crop, (0, 0, u32::from(width), u32::from(height)));
             assert!(info.coded.1 > info.crop.3, "coded {:?}", info.coded);
+        }
+        // The offset crops show their stream's coded pictures from 6 samples in and 4 down, chroma from an odd
+        // column: every sample of theirs is the one the whole stream shows there, where it shows that row.
+        let offset = [(fixtures::h264_with_an_offset_crop(), fixtures::h264_with_b_pictures()), (fixtures::hevc_with_an_offset_crop(), fixtures::hevc())];
+        for (window, whole) in offset {
+            let (info, _) = nal_types(&window.entry, &[]);
+            assert_eq!((info.crop.0, info.crop.1), (6, 4), "{}", window.name);
+            let windows = fixtures::pictures(software_video_decoder(&window.entry).unwrap().as_mut(), &window.samples);
+            let wholes = fixtures::pictures(software_video_decoder(&whole.entry).unwrap().as_mut(), &whole.samples);
+            for (picture, of) in windows.iter().zip(&wholes) {
+                for (plane, (x, y)) in [(0, (6, 4)), (1, (3, 2)), (2, (3, 2))] {
+                    let ((part, part_width), (all, all_width)) = (fixtures::eight_bit_plane(picture, plane), fixtures::eight_bit_plane(of, plane));
+                    let rows = (part.len() / part_width).min(all.len() / all_width - y);
+                    for row in 0..rows {
+                        let from = (row + y) * all_width + x;
+                        assert_eq!(
+                            &part[row * part_width..][..part_width],
+                            &all[from..from + part_width],
+                            "{} at {}: plane {plane}, row {row}",
+                            window.name,
+                            picture.pts
+                        );
+                    }
+                }
+            }
         }
         // The HEVC stream has a CRA after its start, whose leading picture is a RASL picture.
         let (_, types) = nal_types(&hevc_entry(), &hevc_samples());
@@ -1292,42 +1447,49 @@ mod tests {
 
     /// A stream FilmCraft opens through the registry reaches the hardware decoder when the device has one for
     /// it, and its software decoder when not (the iOS Simulator, an emulator with no decoder for the codec, a
-    /// profile the device lacks); either way it decodes to the same bytes the software decoder gives when asked
-    /// directly, and a decline is counted as FilmCraft's own factories count one.
+    /// profile the device lacks, AV1 on a chip with no AV1 decoder); either way it decodes to the same bytes the
+    /// software decoder gives when asked directly, and a decline is counted as FilmCraft's own factories count
+    /// one. Every failure names the stream, so a decline the device should not have made says which stream it was.
     #[test]
     fn a_stream_opened_through_the_registry_decodes_to_the_bytes_the_software_decoder_gives() {
         let _counters = counters();
         as_the_app_starts();
         register(true);
-        let hardware_name = if cfg!(target_os = "android") { ["MediaCodec H.264", "MediaCodec HEVC"] } else { ["VideoToolbox H.264", "VideoToolbox HEVC"] };
-        // An iPhone's AV1 hardware is a matter of its model, which `hardware_takes` does not ask VideoToolbox.
-        let av1 = cfg!(target_os = "android").then(|| (fixtures::av1_entry(), fixtures::av1_samples(), "MediaCodec AV1"));
-        let streams = [
-            (tiny_entry(), tiny_samples(), hardware_name[0]),
-            (reordered_entry(), reordered_samples(), hardware_name[0]),
-            (hevc_entry(), hevc_samples(), hardware_name[1]),
-        ]
-        .into_iter()
-        .chain(av1);
-        for (entry, samples, hardware_name) in streams {
+        let streams = [(fixtures::h264(), "H.264"), (fixtures::h264_with_b_pictures(), "H.264"), (fixtures::hevc(), "HEVC"), (fixtures::av1(), "AV1")];
+        for (fixtures::Stream { name, entry, samples }, codec) in streams {
+            let hardware_name = format!("{BACKEND} {codec}");
             let (declined, fallbacks) = (hw_stats().declined, hw_stats().fallbacks);
             let mut through_registry = make_video_decoder(&entry).unwrap();
             let mut software = software_video_decoder(&entry).unwrap();
             let hardware = hardware_takes(&entry);
             if hardware {
-                assert_eq!(hw_stats().declined, declined, "the hardware decoder started");
-                assert_eq!(through_registry.name(), hardware_name);
+                assert_eq!(hw_stats().declined, declined, "{name}: the hardware decoder started");
+                assert_eq!(through_registry.name(), hardware_name, "{name}");
             } else {
-                assert_eq!(hw_stats().declined, declined + 1, "the stream is one the factory is responsible for and could not start a decoder for");
-                assert_eq!(through_registry.name(), software.name(), "the factory declined");
+                assert_eq!(hw_stats().declined, declined + 1, "{name}: the stream is one the factory is responsible for and could not start a decoder for");
+                assert_eq!(through_registry.name(), software.name(), "{name}: the factory declined");
             }
-            assert_eq!(decoded(through_registry.as_mut(), &samples), decoded(software.as_mut(), &samples), "{hardware_name}");
+            assert_eq!(decoded(through_registry.as_mut(), &samples), decoded(software.as_mut(), &samples), "{name}");
             // A hardware decoder that failed on a picture hands the stream to the software decoder, whose pictures
             // the comparison cannot tell from the hardware's: only a decoder still the hardware one, with no
             // switch counted, compared the hardware's pictures.
             if hardware {
-                assert_eq!((through_registry.name(), hw_stats().fallbacks), (hardware_name, fallbacks), "{hardware_name} gave every picture");
+                let still = (through_registry.name(), hw_stats().fallbacks);
+                assert_eq!(still, (hardware_name.as_str(), fallbacks), "{name}: {hardware_name} gave every picture");
             }
         }
+    }
+
+    #[test]
+    fn a_refused_start_compares_no_picture_and_fails_only_where_the_device_has_a_hardware_decoder_for_the_type() {
+        let (kind, decoder) = ("video/avc", Some("c2.example.avc.decoder"));
+        let rule = "video/avc: the device's hardware decoder c2.example.avc.decoder gave no picture compared with the software decoder's";
+        assert_eq!(fixtures::hardware_compared(kind, decoder, 0), Err(rule.to_string()));
+        assert_eq!(fixtures::hardware_compared(kind, decoder, 1), Ok(()));
+        assert_eq!(fixtures::hardware_compared(kind, None, 0), Ok(()), "a device with none takes the decline path");
+        let refused = || Err::<u8, _>("no session");
+        assert_eq!(fixtures::hardware_start(kind, decoder, refused()), Err(format!("{rule}: its start was refused (\"no session\")")));
+        assert_eq!(fixtures::hardware_start(kind, None, refused()), Ok(None), "a refused start compares nothing");
+        assert_eq!(fixtures::hardware_start(kind, decoder, Ok::<_, ()>(7)), Ok(Some(7)));
     }
 }

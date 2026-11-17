@@ -170,16 +170,22 @@ impl Layout {
         })
     }
 
-    /// Where the picture is in a surface of `width` x `height` luma samples: a surface of the picture's own
-    /// size holds just it, one of the coded size holds it at its crop. Any other size is not this stream's.
+    /// Where the picture is in a surface of `shown` luma samples that holds `extended` more to the right and
+    /// below, from its origin. One that holds the coded picture has the picture at its crop: VideoToolbox's
+    /// surface is the coded picture from its corner, reported at the picture's size, with the rest of it held to
+    /// the right and below as extended pixels, whatever the crop's offset. One that holds just the picture has it
+    /// at its origin only where the crop starts at the coded picture's corner: for a crop that starts off it, a
+    /// surface of the picture's size could hold either the picture or the coded picture's corner, and reading the
+    /// wrong one gives another window of the picture with no error. Any other surface is not this stream's.
     #[cfg(any(target_os = "ios", test))]
-    pub(crate) fn crop_in(&self, width: usize, height: usize) -> Option<Crop> {
-        if (width, height) == (self.crop.width, self.crop.height) {
-            Some(Crop { x: 0, y: 0, ..self.crop })
-        } else if (width, height) == self.coded {
-            Some(self.crop)
+    pub(crate) fn crop_in(&self, shown: (usize, usize), extended: (usize, usize)) -> Result<Crop, String> {
+        let held = shown.0.checked_add(extended.0).zip(shown.1.checked_add(extended.1));
+        let held = held.ok_or_else(|| "the decoded picture's surface is too large".to_string())?;
+        let at_the_corner = (self.crop.x, self.crop.y) == (0, 0);
+        if held == self.coded || (at_the_corner && shown == (self.crop.width, self.crop.height)) {
+            Ok(self.crop)
         } else {
-            None
+            Err(format!("the decoded picture is {}x{} in a surface that holds {}x{}, not the stream's", shown.0, shown.1, held.0, held.1))
         }
     }
 
@@ -319,20 +325,29 @@ mod tests {
     }
 
     #[test]
-    fn a_surface_is_the_pictures_own_size_or_the_coded_size_and_nothing_else() {
+    fn a_surface_that_holds_the_coded_picture_has_the_picture_at_its_crop_and_one_of_its_own_size_only_at_the_corner() {
         let mut info = nal();
         info.coded = (1920, 1088);
         info.crop = (0, 0, 1920, 1080);
         let taken = layout(info).unwrap();
-        assert_eq!(taken.crop_in(1920, 1080), Some(Crop { x: 0, y: 0, width: 1920, height: 1080 }));
-        assert_eq!(taken.crop_in(1920, 1088), Some(Crop { x: 0, y: 0, width: 1920, height: 1080 }));
-        assert_eq!(taken.crop_in(1280, 720), None);
+        let picture = Ok(Crop { x: 0, y: 0, width: 1920, height: 1080 });
+        assert_eq!(taken.crop_in((1920, 1080), (0, 0)), picture, "just the picture");
+        assert_eq!(taken.crop_in((1920, 1080), (0, 8)), picture, "the picture's size, the rest held below it");
+        assert_eq!(taken.crop_in((1920, 1088), (0, 0)), picture, "the coded size");
+        assert_eq!(taken.crop_in((1280, 720), (0, 0)), Err("the decoded picture is 1280x720 in a surface that holds 1280x720, not the stream's".into()));
+        assert_eq!(taken.crop_in((1920, usize::MAX), (0, 1)), Err("the decoded picture's surface is too large".into()));
+        // A crop 8 in and 4 down: VideoToolbox's surface of the picture's size holds the coded picture from its
+        // corner, so the picture is at its crop; held to just its size, the surface could be either.
         let mut offset = nal();
         offset.coded = (64, 64);
         offset.crop = (8, 4, 32, 32);
         let taken = layout(offset).unwrap();
-        assert_eq!(taken.crop_in(32, 32), Some(Crop { x: 0, y: 0, width: 32, height: 32 }));
-        assert_eq!(taken.crop_in(64, 64), Some(Crop { x: 8, y: 4, width: 32, height: 32 }));
+        let window = Ok(Crop { x: 8, y: 4, width: 32, height: 32 });
+        assert_eq!(taken.crop_in((32, 32), (32, 32)), window, "the picture's size, the rest of the coded picture held beside it");
+        assert_eq!(taken.crop_in((64, 64), (0, 0)), window, "the coded size");
+        let either = "the decoded picture is 32x32 in a surface that holds 32x32, not the stream's";
+        assert_eq!(taken.crop_in((32, 32), (0, 0)), Err(either.into()), "a surface that could hold either window");
+        assert!(taken.crop_in((32, 32), (8, 4)).is_err(), "a surface short of the coded picture");
     }
 
     #[test]
