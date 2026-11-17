@@ -387,17 +387,17 @@ fn the_catalogue_reports_the_phones_capabilities() {
 fn the_method_table_answers_unwired_methods_as_unsupported() {
     let scratch = Scratch::new().expect("a scratch folder");
     let mut app = scratch.app().expect("the app starts from prepared folders");
-    // The eight names §14's table carries that `request` does not answer, and one name the table
+    // The six names §14's table carries that `request` does not answer, and one name the table
     // carries not at all: every name answers `Unsupported` in the one refusal, whose exact words
     // are pinned so they claim only what is true however the method was asked — that `request`
     // lacks it, and which methods `request` answers.
-    for method in ["frame", "export", "template.render", "template.open", "script", "replay", "timings", "mcp", "no.such.method"] {
+    for method in ["frame", "export", "template.render", "template.open", "script", "mcp", "no.such.method"] {
         let error = (request(&mut app, method, json!({}))).expect_err("the call was meant to fail");
         match error {
             CraftError::Unsupported { message } => assert_eq!(
                 message,
                 format!(
-                    "`{method}` is not answered by `request` in this build, which answers `info`, `commands`, `exec`, `run`, `props`, `get`, `set`, `open`, `save`, `saveAs` and `new`"
+                    "`{method}` is not answered by `request` in this build, which answers `info`, `commands`, `exec`, `run`, `props`, `get`, `set`, `open`, `save`, `saveAs`, `new`, `replay` and `timings`"
                 ),
                 "the refusal names the method and what `request` answers"
             ),
@@ -590,7 +590,8 @@ fn a_frame_is_never_answered_by_request() {
     assert!(app.frame(json!({}), PixelFormat::Png).is_ok());
     match request(&mut app, "frame", json!({})).expect_err("`request` does not answer `frame`") {
         CraftError::Unsupported { message } => assert!(
-            message.ends_with("which answers `info`, `commands`, `exec`, `run`, `props`, `get`, `set`, `open`, `save`, `saveAs` and `new`"),
+            message
+                .ends_with("which answers `info`, `commands`, `exec`, `run`, `props`, `get`, `set`, `open`, `save`, `saveAs`, `new`, `replay` and `timings`"),
             "{message}"
         ),
         other => panic!("`frame` through `request` must be `Unsupported`, got {other:?}"),

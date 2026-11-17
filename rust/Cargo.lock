@@ -511,6 +511,7 @@ dependencies = [
  "effectcraft-time",
  "image",
  "rayon",
+ "rustix",
  "serde_json",
  "tempfile",
 ]

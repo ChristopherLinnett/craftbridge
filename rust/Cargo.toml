@@ -23,6 +23,9 @@ craftbridge-effects = { path = "effects/craftbridge-effects" }
 # codegen writes and its diff reads back, and the conformance corpus craftbridge-effects-conformance reads.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The process's CPU time, which `timings` reports beside wall time as the command line's `bench` does,
+# read from the system clock through the crate the core's `tempfile` already brings into every build.
+rustix = { version = "1", features = ["time"] }
 toml = "0.9"
 toml_edit = "0.25"
 unicode-normalization = "0.1"

@@ -11,7 +11,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 
 use crate::runner::{self, Progress};
-use crate::{files, info, methods, properties, requests, session};
+use crate::{files, info, mcp, methods, properties, replay, requests, session, timings};
 
 /// A hosted EffectCraft session: the MCP server built at construction, which owns the headless
 /// [`Backend`] and the confined session behind it (plan §19).
@@ -20,8 +20,8 @@ use crate::{files, info, methods, properties, requests, session};
 /// so nothing here needs a lock: one call at a time is what the engine thread already gives it.
 pub struct EffectCraftApp {
     /// Every method reaches the session through this server's backend, so the app keeps the server
-    /// itself rather than the backend inside it: the `mcp` method will answer its lines from here,
-    /// and an app that wired the line transport around a copy of the backend would fork the session.
+    /// itself rather than the backend inside it: the `mcp` call answers its lines from here, and an
+    /// app that wired the line transport around a copy of the backend would fork the session.
     server: McpServer,
 }
 
@@ -47,7 +47,7 @@ type Method = fn(&mut Backend, &Value) -> Result<Value>;
 /// The methods of the plan's §14 table `request` answers, by name. It is the one list of them: the
 /// dispatch reads it, and the refusal of every other name recites it, so the refusal names what
 /// `request` answers truly whatever a build adds to it.
-const METHODS: [(&str, Method); 11] = [
+const METHODS: [(&str, Method); 13] = [
     ("info", info::info),
     ("commands", methods::commands),
     ("exec", methods::exec),
@@ -59,6 +59,8 @@ const METHODS: [(&str, Method); 11] = [
     ("save", files::save),
     ("saveAs", files::save_as),
     ("new", files::new),
+    ("replay", replay::replay),
+    ("timings", timings::timings),
 ];
 
 /// One method that runs long enough to report progress: the backend, the parameters, and the listener
@@ -108,6 +110,13 @@ impl CraftApp for EffectCraftApp {
     /// resolves its flags. It has no row in [`METHODS`], so `request` keeps refusing the name.
     fn frame(&mut self, params: Value, format: PixelFormat) -> Result<FrameBytes> {
         requests::frame(self.server.backend(), &params, format)
+    }
+
+    /// Answer one line of the MCP transport through the server built at construction, which owns the
+    /// session every method reaches. It is not a row of [`METHODS`]: a line is not a method call, so
+    /// `request` keeps refusing the name `mcp`.
+    fn mcp(&mut self, line: &str) -> Option<String> {
+        mcp::answer(&mut self.server, line)
     }
 }
 

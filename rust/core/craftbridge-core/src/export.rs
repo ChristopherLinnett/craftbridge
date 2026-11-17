@@ -335,6 +335,11 @@ mod tests {
             }
             Ok(json!({ "done": POLLS }))
         }
+
+        fn mcp(&mut self, line: &str) -> Option<String> {
+            self.shared.log(&format!("mcp {line}"));
+            Some(format!("mcp {line}"))
+        }
     }
 
     impl Drop for ExportApp {
@@ -399,6 +404,12 @@ mod tests {
         (engine, shared, cancel, progress, answers)
     }
 
+    /// What the fake app ran, in the order it ran, without the `info` each export asks the app for as
+    /// it begins: the one reading of the log every order test below compares against.
+    fn ran(log: &Mutex<Vec<String>>) -> Vec<String> {
+        lock(log).iter().filter(|entry| !entry.starts_with("info")).cloned().collect()
+    }
+
     /// The plan §16 interval, written out rather than read from the constant, so an interval
     /// retyped to anything else fails here.
     #[test]
@@ -426,8 +437,37 @@ mod tests {
         for (n, call) in (1..=3).zip(&waiting) {
             assert_eq!(recv(call), Ok(json!({ "n": n })));
         }
-        let ran: Vec<String> = lock(&shared.log).iter().filter(|line| !line.starts_with("info")).cloned().collect();
-        assert_eq!(ran, ["export export null", "echo {\"n\":1}", "echo {\"n\":2}", "echo {\"n\":3}"], "the calls ran out of order");
+        assert_eq!(ran(&shared.log), ["export export null", "echo {\"n\":1}", "echo {\"n\":2}", "echo {\"n\":3}"], "the calls ran out of order");
+        engine.close().unwrap();
+    }
+
+    /// An MCP line sent during an export is not the exception `info` is: it waits in `pending` like
+    /// every other call, and runs when the export ends, in the order it was made among the calls it
+    /// waited with (plan §13, L3).
+    #[test]
+    fn an_mcp_line_during_an_export_waits_until_it_ends_then_runs_in_order() {
+        let (engine, shared, _cancel, progress, answers) = started_export();
+        let before = queue_call(&engine, "echo", json!({ "n": 1 }));
+        let line = engine.submit(Message::mcp("one")).unwrap();
+        let after = queue_call(&engine, "echo", json!({ "n": 2 }));
+
+        // The export moves, its next poll arrives, and the line is still unanswered: the engine ran
+        // no line while it was inside the export.
+        shared.open(1);
+        assert_eq!(progress.next(), Some((1, POLLS, Some(1.0))), "the export never polled again");
+        assert!(line.try_recv().is_err(), "an mcp line was answered during the export");
+
+        // Let the export end; the line runs after it, between the calls that waited with it.
+        shared.open(POLLS - 1);
+        assert_eq!(recv(&answers), Ok(json!({ "done": POLLS })));
+        assert_eq!(recv(&before), Ok(json!({ "n": 1 })));
+        assert_eq!(recv(&line), Ok(Some("mcp one".to_string())), "the mcp line went unanswered once the export ended");
+        assert_eq!(recv(&after), Ok(json!({ "n": 2 })));
+        assert_eq!(
+            ran(&shared.log),
+            ["export export null", "echo {\"n\":1}", "mcp one", "echo {\"n\":2}"],
+            "the line ran between the calls that waited with it"
+        );
         engine.close().unwrap();
     }
 
@@ -446,8 +486,7 @@ mod tests {
         assert_eq!(recv(&answers), Ok(json!({ "done": POLLS })));
         assert_eq!(recv(&frame), FrameBytes::new(1, 1, PixelFormat::Rgba8Straight, vec![1, 2, 3, 255]));
         assert_eq!(recv(&echo), Ok(json!({ "n": 2 })));
-        let ran: Vec<String> = lock(&shared.log).iter().filter(|line| !line.starts_with("info")).cloned().collect();
-        assert_eq!(ran, ["export export null", "frame {\"n\":1}", "echo {\"n\":2}"], "the calls ran out of order");
+        assert_eq!(ran(&shared.log), ["export export null", "frame {\"n\":1}", "echo {\"n\":2}"], "the calls ran out of order");
         engine.close().unwrap();
     }
 
@@ -741,8 +780,11 @@ mod tests {
         assert_eq!(recv(&second_answers), Ok(json!({ "done": POLLS })));
         assert_eq!(recv(&before), Ok(json!({ "n": 1 })));
         assert_eq!(recv(&after), Ok(json!({ "n": 2 })));
-        let ran: Vec<String> = lock(&shared.log).iter().filter(|line| !line.starts_with("info")).cloned().collect();
-        assert_eq!(ran, ["export export null", "echo {\"n\":1}", "export export null", "echo {\"n\":2}"], "the second export did not take its turn in order");
+        assert_eq!(
+            ran(&shared.log),
+            ["export export null", "echo {\"n\":1}", "export export null", "echo {\"n\":2}"],
+            "the second export did not take its turn in order"
+        );
         engine.close().unwrap();
     }
 
