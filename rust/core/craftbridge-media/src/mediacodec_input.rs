@@ -23,14 +23,41 @@ pub(crate) const AV1_MIME: &str = "video/av01";
 pub(crate) const BACKEND_MIMES: [&str; 3] = [H264_MIME, HEVC_MIME, AV1_MIME];
 
 /// The MIME type MediaCodec names the decoder of `layout`'s stream by, or why the Android decoder does not
-/// take it. Only 8-bit pictures reach `YUV_420_888`, the format the decoder's output is read in: a 10-bit
-/// picture would lose its low bits on the way, so it is left to the software decoder, which keeps them.
+/// take it. A 10-bit H.264 or HEVC picture is taken too, but reaches CraftBridge only through the P010 reader
+/// ([`reader_format`]): where the platform makes none, no decoder starts, and where a device decodes into any
+/// other buffer the picture's read fails; either way the software decoder takes the stream. 10-bit AV1 is
+/// left to the software decoder, since no 10-bit AV1 stream has been run through the P010 reader.
 pub(crate) fn mime(layout: &Layout) -> Result<&'static str, String> {
     match (layout.codec, layout.depth) {
-        (_, Depth::Ten) => Err("10-bit video".into()),
-        (Codec::H264, Depth::Eight) => Ok(H264_MIME),
-        (Codec::Hevc, Depth::Eight) => Ok(HEVC_MIME),
+        (Codec::Av1, Depth::Ten) => Err("10-bit video".into()),
+        (Codec::H264, _) => Ok(H264_MIME),
+        (Codec::Hevc, _) => Ok(HEVC_MIME),
         (Codec::Av1, Depth::Eight) => Ok(AV1_MIME),
+    }
+}
+
+/// The image reader a decoder renders its pictures into, which is also where their samples are read from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReaderFormat {
+    /// `AIMAGE_FORMAT_YUV_420_888`, which carries 8 bits a sample: a picture is read from the image's own
+    /// planes.
+    Yuv420,
+    /// `AHARDWAREBUFFER_FORMAT_YCbCr_P010`, 10 bits in the high bits of 16-bit words, which no NDK image plane
+    /// carries: a picture is read from the image's hardware buffer, locked for the CPU. The NDK's image
+    /// formats have no 10-bit YUV one; `AImageReader` takes the HAL format of this number from Android 14
+    /// (API 34) and refuses it before.
+    P010,
+}
+
+/// The reader pictures of `depth` are decoded into. A 10-bit picture has the P010 reader alone, so before
+/// Android 14 no decoder starts for it and the software decoder takes the stream from its first sample. The
+/// `YUV_420_888` reader is no way round that: Android 10 and 11 hand it a producer's P010 buffer, but lock
+/// such a buffer as one plane, not as P010's planes (Android 13 is the first that does), and from Android 12
+/// the reader refuses the buffer, so a decoder started with it would fail at its first picture.
+pub(crate) fn reader_format(depth: Depth) -> ReaderFormat {
+    match depth {
+        Depth::Eight => ReaderFormat::Yuv420,
+        Depth::Ten => ReaderFormat::P010,
     }
 }
 
@@ -130,10 +157,13 @@ pub(crate) fn annex_b(info: &NalStreamInfo, sample: &[u8]) -> Result<Vec<u8>, &'
 #[cfg(test)]
 mod tests {
     use filmcraft_codecs::hw::{FrameCodec, FrameStreamInfo, NalCodec};
+    use filmcraft_codecs::software_video_decoder;
     use filmcraft_color::ColorInfo;
+    use filmcraft_frame::PixelData;
 
     use super::*;
-    use crate::fixtures::{av1_entry, av1_samples, avc_entry, hevc_entry, pps, sps};
+    use crate::fallback::stream_info;
+    use crate::fixtures::{av1_entry, av1_samples, avc_entry, hevc_entry, hevc10_entry, hevc10_samples, pictures, pps, sps};
 
     fn nal() -> NalStreamInfo {
         NalStreamInfo::from_entry(&avc_entry()).unwrap().unwrap()
@@ -160,21 +190,42 @@ mod tests {
     }
 
     #[test]
-    fn ten_bit_pictures_are_left_to_the_software_decoder() {
+    fn ten_bit_h264_and_hevc_are_taken_with_their_codecs_mime_type_and_ten_bit_av1_is_left_to_the_software_decoder() {
         let ten = layout(|info| {
             info.bit_depth_luma = 10;
             info.bit_depth_chroma = 10;
         });
-        assert_eq!(mime(&ten), Err("10-bit video".to_string()), "10-bit H.264");
+        assert_eq!(mime(&ten), Ok("video/avc"), "10-bit H.264");
         let ten_hevc = layout(|info| {
             info.codec = NalCodec::Hevc;
             info.bit_depth_luma = 10;
             info.bit_depth_chroma = 10;
         });
-        assert_eq!(mime(&ten_hevc), Err("10-bit video".to_string()), "10-bit HEVC");
+        assert_eq!(mime(&ten_hevc), Ok("video/hevc"), "10-bit HEVC");
         let mut ten_av1 = FrameStreamInfo::for_tests(FrameCodec::Av1, 0, 10, (1, 1), (640, 360));
         ten_av1.color = Some(ColorInfo::REC709);
         assert_eq!(mime(&Layout::for_stream(&StreamInfo::Frame(ten_av1)).unwrap()), Err("10-bit video".to_string()), "10-bit AV1");
+    }
+
+    #[test]
+    fn the_ten_bit_fixture_is_a_main_10_hevc_stream_whose_pictures_the_software_decoder_gives_in_ten_bits() {
+        let entry = hevc10_entry();
+        let stream = stream_info(&entry).unwrap().unwrap();
+        let layout = Layout::for_stream(&stream).unwrap();
+        assert_eq!((layout.codec, layout.depth, mime(&layout)), (Codec::Hevc, Depth::Ten, Ok("video/hevc")));
+        let StreamInfo::Nal(info) = &stream else { panic!("an hvcC stream") };
+        let samples = hevc10_samples();
+        assert!(samples.iter().all(|(_, sample)| annex_b(info, sample).is_ok()), "whole NAL units, as MediaCodec is fed them");
+        let mut software = software_video_decoder(&entry).unwrap();
+        let frames = pictures(software.as_mut(), &samples);
+        let bits: Vec<_> = frames.iter().map(|frame| matches!(frame.frame.data, PixelData::Yuv16 { bits: 10, .. })).collect();
+        assert_eq!(bits, vec![true; samples.len()]);
+    }
+
+    #[test]
+    fn an_8_bit_picture_is_decoded_into_a_yuv_420_888_reader_and_a_10_bit_one_into_the_p010_reader_alone() {
+        assert_eq!(reader_format(Depth::Eight), ReaderFormat::Yuv420);
+        assert_eq!(reader_format(Depth::Ten), ReaderFormat::P010);
     }
 
     #[test]

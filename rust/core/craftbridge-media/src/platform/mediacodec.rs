@@ -1,34 +1,41 @@
 //! The Android hardware video decoder: MediaCodec decoding `avcC` (H.264) and, where the device decodes it,
-//! `hvcC` (HEVC) and `av1C` (AV1) streams into an `AImageReader` of `YUV_420_888` images.
+//! `hvcC` (HEVC) and `av1C` (AV1) streams into an `AImageReader`.
 //!
 //! Decoding to an image reader, rather than to the buffers MediaCodec hands out, is what keeps vendor-tiled
-//! and other private output formats away from CraftBridge: the platform converts every picture into the one
-//! format Android guarantees. The decoder it uses must be a hardware one (the platform's own software
-//! codecs are no faster than FilmCraft's), so a device or stream without one fails to start and the factory
-//! declines it. MediaCodec decodes on its own schedule, so a picture comes out of a later call than the
-//! one that fed its sample, and [`crate::order::Sequence`] runs around the codec as it does around VideoToolbox: the
-//! RASL pictures of a run starting at a CRA are never fed to it, and the pictures it still holds at the end
-//! come out of [`RawDecoder::drain`]. Every status MediaCodec and the image reader return is checked and
+//! and other private output formats away from CraftBridge. An 8-bit picture is read from a `YUV_420_888`
+//! image, the one format Android guarantees. The NDK has no 10-bit YUV image format, so a 10-bit picture is
+//! decoded into a reader of `AHARDWAREBUFFER_FORMAT_YCbCr_P010` images, which Android makes from 14 (API 34)
+//! and no earlier, and read from the image's hardware buffer, locked for the CPU, only when that buffer is
+//! P010 laid out as P010 is: before Android 14 no decoder starts for a 10-bit stream, and a device whose
+//! buffer is another (vendor-tiled) format fails the picture's read; either way the software decoder takes
+//! the stream. The decoder it uses must be a hardware one (the platform's own software codecs are no faster
+//! than FilmCraft's), so a device or stream without one fails to start and the factory declines it.
+//! MediaCodec decodes on its own schedule, so a picture comes out of a later call than the one that fed its
+//! sample, and [`crate::order::Sequence`] runs around the codec as it does around VideoToolbox: the RASL
+//! pictures of a run starting at a CRA are never fed to it, and the pictures it still holds at the end come
+//! out of [`RawDecoder::drain`]. Every status MediaCodec and the image reader return is checked and
 //! becomes the decoder's error, which [`crate::Fallback`] answers by switching to the software decoder.
 //!
 //! The official NDK bindings (`ndk`) make every call; the only `unsafe` here is the claim that the codec and
-//! the reader may move between threads. Which streams the device takes, the codec-specific data and samples
-//! it is fed and the planes' conversion into FilmCraft's frame layout are safe code every target tests
-//! ([`crate::mediacodec_input`], [`crate::biplanar`]).
+//! the reader may move between threads, and the bytes of a locked P010 buffer's planes. Which streams the
+//! device takes, the codec-specific data and samples it is fed and the planes' conversion into FilmCraft's
+//! frame layout are safe code every target tests ([`crate::mediacodec_input`], [`crate::biplanar`]).
 
 use std::time::{Duration, Instant};
 
 use filmcraft_codecs::hw::StreamInfo;
 use filmcraft_codecs::{CodecError, DecodedFrame, Result};
-use filmcraft_frame::VideoFrame;
+use filmcraft_frame::{PixelData, VideoFrame};
 use filmcraft_isobmff::SampleEntry;
+use ndk::hardware_buffer::{HardwareBuffer, HardwareBufferUsage, LockedPlaneInfo};
+use ndk::hardware_buffer_format::HardwareBufferFormat;
 use ndk::media::image_reader::{AcquireResult, Image, ImageFormat, ImageReader};
-use ndk::media::media_codec::{DequeuedInputBufferResult, DequeuedOutputBufferInfoResult, MediaCodec, MediaCodecDirection};
+use ndk::media::media_codec::{DequeuedInputBufferResult, DequeuedOutputBufferInfoResult, InputBuffer, MediaCodec, MediaCodecDirection};
 use ndk::media::media_format::MediaFormat;
 
-use crate::biplanar::{self, Strided};
+use crate::biplanar::{self, Crop, Depth, Locked, Plane, Strided};
 use crate::layout::Layout;
-use crate::mediacodec_input::{self, BACKEND_MIMES};
+use crate::mediacodec_input::{self, BACKEND_MIMES, ReaderFormat};
 use crate::order::{HardwareDecoder, RawDecoder};
 
 /// A failed call, with what failed.
@@ -56,8 +63,12 @@ const END_OF_STREAM: u32 = 4;
 /// the codec never waits for a free one; the margin keeps a slow release from stalling it.
 const IMAGES: i32 = 4;
 
+/// How the pictures of the decoder's output are read: by the CPU, which both readers' usage says, so the
+/// buffers the codec allocates for them are ones the CPU can read.
+const READ_USAGE: HardwareBufferUsage = HardwareBufferUsage::CPU_READ_OFTEN;
+
 /// Turns a failed NDK call into the decoder's error.
-fn step<T>(result: ndk::media_error::Result<T>, call: &str) -> std::result::Result<T, Failure> {
+fn step<T, E: std::fmt::Debug>(result: std::result::Result<T, E>, call: &str) -> std::result::Result<T, Failure> {
     result.map_err(|error| format!("{call} failed ({error:?})"))
 }
 
@@ -100,12 +111,50 @@ struct Pipeline {
 // SAFETY: see the type's documentation.
 unsafe impl Send for Pipeline {}
 
+/// Copies `data` into the input buffer the codec handed out.
+fn fill(input: &mut InputBuffer<'_>, data: &[u8]) -> std::result::Result<(), Failure> {
+    // `buffer_mut` panics when `AMediaCodec_getInputBuffer` gives no memory, as it does once the codec has
+    // failed (a decoder that cannot decode the stream's profile). The failure lands on the codec's own thread,
+    // so it can come after the buffer was dequeued, and the NDK has no state to ask first; the bindings'
+    // `MediaCodec::input_buffer` answers `None` instead, but only by the buffer's index, which `InputBuffer`
+    // keeps to itself. Catching the panic is what is left, and it makes the failure the decoder's error, never
+    // a crash.
+    let input = &mut *input;
+    let room = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let input = input;
+        input.buffer_mut()
+    }))
+    .map_err(|_| "the decoder gave no input buffer memory")?;
+    let (target, _) = room.split_at_mut_checked(data.len()).ok_or("the sample is larger than the decoder's input buffer")?;
+    for (to, from) in target.iter_mut().zip(data) {
+        to.write(*from);
+    }
+    Ok(())
+}
+
+/// The image format the NDK makes a reader of `format` with. The P010 one is the HAL format of that name,
+/// which the NDK's `AIMAGE_FORMAT_*` list has no entry for.
+fn image_format(format: ReaderFormat) -> ImageFormat {
+    match format {
+        ReaderFormat::Yuv420 => ImageFormat::YUV_420_888,
+        ReaderFormat::P010 => ImageFormat::from(i32::from(HardwareBufferFormat::YCbCr_P010)),
+    }
+}
+
+/// The reader pictures of `depth` are decoded into ([`mediacodec_input::reader_format`]); an error naming its
+/// format where the platform makes no such reader, which keeps the decoder from starting.
+fn image_reader(width: i32, height: i32, depth: Depth) -> std::result::Result<ImageReader, Failure> {
+    let format = mediacodec_input::reader_format(depth);
+    let reader = ImageReader::new_with_usage(width, height, image_format(format), READ_USAGE, IMAGES);
+    step(reader, &format!("creating the {format:?} image reader"))
+}
+
 impl Pipeline {
     /// `codec`, a decoder of `mime`, started for a picture of `layout`'s size from `config` and decoding into
     /// a reader.
     fn start(codec: MediaCodec, mime: &str, layout: &Layout, config: &[u8]) -> std::result::Result<Self, Failure> {
         let (width, height) = layout.size_i32().ok_or("the picture is too large")?;
-        let reader = step(ImageReader::new(width, height, ImageFormat::YUV_420_888, IMAGES), "creating the image reader")?;
+        let reader = image_reader(width, height, layout.depth)?;
         let window = step(reader.window(), "getting the image reader's surface")?;
         let mut format = MediaFormat::new();
         format.set_str("mime", mime);
@@ -126,11 +175,7 @@ impl Pipeline {
         loop {
             match step(self.codec.dequeue_input_buffer(POLL), "waiting for an input buffer")? {
                 DequeuedInputBufferResult::Buffer(mut input) => {
-                    let room = input.buffer_mut();
-                    let (target, _) = room.split_at_mut_checked(data.len()).ok_or("the sample is larger than the decoder's input buffer")?;
-                    for (to, from) in target.iter_mut().zip(data) {
-                        to.write(*from);
-                    }
+                    fill(&mut input, data)?;
                     let flags = if end { END_OF_STREAM } else { 0 };
                     step(self.codec.queue_input_buffer(input, 0, data.len(), time, flags), "queueing the sample")?;
                     return Ok(pictures);
@@ -190,20 +235,81 @@ impl Pipeline {
 
 /// The picture in a decoded image, as the frame FilmCraft's software decoder makes for the stream.
 fn read_picture(image: &Image, layout: &Layout) -> std::result::Result<VideoFrame, Failure> {
+    let rect = step(image.crop_rect(), "reading the picture's crop")?;
+    let crop = mediacodec_input::crop_of((rect.left, rect.top, rect.right, rect.bottom), layout)?;
+    let pixels = match mediacodec_input::reader_format(layout.depth) {
+        ReaderFormat::Yuv420 => yuv_420_888_pixels(image, crop)?,
+        ReaderFormat::P010 => p010_pixels(&step(image.hardware_buffer(), "getting the picture's hardware buffer")?, crop)?,
+    };
+    Ok(layout.frame(pixels))
+}
+
+/// The 8-bit picture at `crop` in a `YUV_420_888` image.
+fn yuv_420_888_pixels(image: &Image, crop: Crop) -> std::result::Result<PixelData, Failure> {
     let format = step(image.format(), "reading the picture's format")?;
     if format != ImageFormat::YUV_420_888 || step(image.number_of_planes(), "counting the picture's planes")? != 3 {
         return Err(format!("the decoded picture is in format {format:?}, not YUV_420_888"));
     }
-    let rect = step(image.crop_rect(), "reading the picture's crop")?;
-    let crop = mediacodec_input::crop_of((rect.left, rect.top, rect.right, rect.bottom), layout)?;
     let plane = |index: i32| -> std::result::Result<Strided<'_>, Failure> {
         let data = step(image.plane_data(index), "reading a plane")?;
         let stride = step(image.plane_row_stride(index), "reading a plane's row stride")?;
         let pixel = step(image.plane_pixel_stride(index), "reading a plane's pixel stride")?;
         mediacodec_input::plane(index, data, stride, pixel)
     };
-    let pixels = biplanar::planar_to_pixels(mediacodec_input::luma(plane(0)?)?, plane(1)?, plane(2)?, crop)?;
-    Ok(layout.frame(pixels))
+    Ok(biplanar::planar_to_pixels(mediacodec_input::luma(plane(0)?)?, plane(1)?, plane(2)?, crop)?)
+}
+
+/// The 10-bit picture at `crop` in a decoded image's hardware `buffer`: an error unless the buffer is P010.
+/// The buffer is locked for the CPU only while its planes are read into FilmCraft's own planes.
+fn p010_pixels(buffer: &HardwareBuffer, crop: Crop) -> std::result::Result<PixelData, Failure> {
+    let description = buffer.describe();
+    if description.format != HardwareBufferFormat::YCbCr_P010 {
+        return Err(format!("the decoded picture is in hardware buffer format {:?}, not P010", description.format));
+    }
+    let size = usize::try_from(description.width).and_then(|width| Ok((width, usize::try_from(description.height)?)));
+    let (width, height) = size.map_err(|_| "the picture is too large".to_string())?;
+    let planes: Vec<_> = step(buffer.lock_planes(READ_USAGE, None, None), "locking the picture's planes")?.collect();
+    // SAFETY: the planes are the ones locking this buffer gave, and the buffer is `width` x `height` samples
+    // by its own description; it stays locked for CPU reads, its planes mapped, until after the call returns.
+    let pixels = unsafe { locked_pixels(&planes, width, height, crop) };
+    let unlocked = step(buffer.unlock(), "unlocking the picture's planes");
+    let pixels = pixels?;
+    unlocked?;
+    Ok(pixels)
+}
+
+/// The picture at `crop` in the planes of a locked P010 buffer of `width` x `height` samples. Planes that are
+/// not P010's biplanar layout are an error, and nothing of them is read.
+///
+/// # Safety
+///
+/// The first two planes' addresses must each be readable, for as long as the call lasts, for the bytes
+/// [`biplanar::p010_extents`] gives them from their strides and `width` x `height`, as the planes of a P010
+/// buffer of that size are while it is locked for CPU reads.
+unsafe fn locked_pixels(planes: &[LockedPlaneInfo], width: usize, height: usize, crop: Crop) -> std::result::Result<PixelData, Failure> {
+    let locked = planes
+        .iter()
+        .map(|plane| {
+            let strides = (usize::try_from(plane.bytes_per_stride), usize::try_from(plane.bytes_per_pixel));
+            let (Ok(row_stride), Ok(pixel_stride)) = strides else { return Err("a plane has strides no address space holds".to_string()) };
+            Ok(Locked { address: plane.virtual_address.addr(), row_stride, pixel_stride })
+        })
+        .collect::<std::result::Result<Vec<_>, Failure>>()?;
+    let extents = biplanar::p010_extents(&locked, width, height)?;
+    let (Some(luma), Some(chroma)) = (planes.first(), planes.get(1)) else { return Err("the picture has no planes".into()) };
+    // SAFETY: the caller keeps both planes readable for these extents for the call, and the slices are read
+    // into FilmCraft's own planes before it returns. `lockPlanes` reports no length; `p010_extents` bounds each
+    // as Android bounds a P010 plane's data (`NdkImage.cpp`): the row stride times the rows before the last,
+    // plus the last row's samples.
+    let (luma, chroma) = unsafe {
+        (
+            std::slice::from_raw_parts(luma.virtual_address.cast::<u8>().cast_const(), extents.luma_len),
+            std::slice::from_raw_parts(chroma.virtual_address.cast::<u8>().cast_const(), extents.chroma_len),
+        )
+    };
+    let luma = Plane { data: luma, stride: extents.luma_stride };
+    let chroma = Plane { data: chroma, stride: extents.chroma_stride };
+    Ok(biplanar::to_pixels(luma, chroma, crop, Depth::Ten)?)
 }
 
 /// What a MediaCodec decoder feeds [`crate::order::Sequence`]: the codec, made again after a seek.
@@ -299,12 +405,20 @@ fn decoder_with(entry: &SampleEntry, stream: &StreamInfo, make: MakeCodec) -> Re
 /// builds.
 #[cfg(test)]
 mod tests {
-    use filmcraft_codecs::hw::NalCodec;
+    use std::sync::Arc;
+
+    use filmcraft_codecs::hw::{FrameCodec, FrameStreamInfo};
     use filmcraft_codecs::{VideoDecoder, software_video_decoder};
+    use filmcraft_color::ColorInfo;
+    use filmcraft_frame::Chroma;
+    use ndk::hardware_buffer::{HardwareBufferDesc, HardwareBufferRef};
 
     use super::*;
-    use crate::fallback::stream_info;
-    use crate::fixtures::{av1_entry, av1_samples, decoded, hevc_entry, hevc_samples, pictures, reordered_entry, reordered_samples, tiny_entry, tiny_samples};
+    use crate::fallback::{Fallback, stream_info};
+    use crate::fixtures::{
+        av1_entry, av1_samples, decoded, hevc_entry, hevc_samples, hevc10_entry, hevc10_samples, pictures, reordered_entry, reordered_samples, text,
+        tiny_entry, tiny_samples,
+    };
     use crate::mediacodec_input::{AV1_MIME, H264_MIME, HEVC_MIME};
 
     fn stream(entry: &SampleEntry) -> StreamInfo {
@@ -342,7 +456,7 @@ mod tests {
     fn a_failed_call_is_the_decoders_error_naming_the_call_and_what_the_platform_said() {
         let failed: ndk::media_error::Result<()> = Err(ndk::media_error::MediaError::ErrorMalformed);
         assert_eq!(step(failed, "queueing the sample"), Err("queueing the sample failed (ErrorMalformed)".to_string()));
-        assert_eq!(step(Ok(3), "queueing the sample"), Ok(3));
+        assert_eq!(step(Ok::<_, ndk::media_error::MediaError>(3), "queueing the sample"), Ok(3));
     }
 
     #[test]
@@ -448,11 +562,251 @@ mod tests {
     }
 
     #[test]
+    fn an_input_buffer_a_codec_has_no_memory_for_is_the_decoders_error_never_a_panic() {
+        // A codec stopped after handing out an input buffer has no memory for it, as a codec that has failed
+        // on its own thread has none: the same call, met every time rather than in a race.
+        let entry = tiny_entry();
+        let layout = Layout::for_stream(&stream(&entry)).unwrap();
+        let config = mediacodec_input::codec_specific_data(&entry, &stream(&entry)).unwrap();
+        let pipeline = Pipeline::start(any_codec(H264_MIME).unwrap(), H264_MIME, &layout, &config).unwrap();
+        let DequeuedInputBufferResult::Buffer(mut input) = pipeline.codec.dequeue_input_buffer(STALL).unwrap() else { panic!("no input buffer") };
+        pipeline.codec.stop().unwrap();
+        assert_eq!(fill(&mut input, &[0, 0, 0, 1]), Err("the decoder gave no input buffer memory".to_string()));
+    }
+
+    #[test]
     fn streams_the_device_decoder_does_not_take_are_refused_before_it_is_asked() {
-        let mut ten_bit = stream(&tiny_entry());
-        let StreamInfo::Nal(info) = &mut ten_bit else { panic!("an avcC stream") };
-        assert_eq!(info.codec, NalCodec::H264);
-        (info.bit_depth_luma, info.bit_depth_chroma) = (10, 10);
-        assert!(matches!(decoder(&tiny_entry(), &ten_bit), Err(CodecError::Unsupported(_))), "10-bit video");
+        let mut ten_bit_av1 = FrameStreamInfo::for_tests(FrameCodec::Av1, 0, 10, (1, 1), (640, 360));
+        ten_bit_av1.color = Some(ColorInfo::REC709);
+        assert!(matches!(decoder(&av1_entry(), &StreamInfo::Frame(ten_bit_av1)), Err(CodecError::Unsupported(_))), "10-bit AV1");
+    }
+
+    /// The 10-bit sample of [`p010_buffer`] at (x, y): luma, then the Cb and the Cr of the chroma pair at
+    /// (x, y). The buffer is taller than it is wide, so a width and a height taken for each other read wrong
+    /// samples.
+    fn luma_at(x: usize, y: usize) -> u16 {
+        ((y * 32 + x) % 1024) as u16
+    }
+
+    fn cb_at(x: usize, y: usize) -> u16 {
+        ((300 + y * 16 + x) % 1024) as u16
+    }
+
+    fn cr_at(x: usize, y: usize) -> u16 {
+        ((700 + y * 16 + x) % 1024) as u16
+    }
+
+    /// A P010 buffer of 32 x 48 samples holding [`luma_at`], [`cb_at`] and [`cr_at`], written through the plane
+    /// layout the platform reports; `None` where the device allocates no such buffer. The samples are the
+    /// picture's own 10-bit values, so the buffer holds each shifted up by six bits, as P010 does.
+    fn p010_buffer() -> Option<HardwareBufferRef> {
+        let description = HardwareBufferDesc {
+            width: 32,
+            height: 48,
+            layers: 1,
+            format: HardwareBufferFormat::YCbCr_P010,
+            usage: HardwareBufferUsage::CPU_READ_OFTEN | HardwareBufferUsage::CPU_WRITE_OFTEN,
+            stride: 0,
+        };
+        if !HardwareBuffer::is_supported(description) {
+            return None;
+        }
+        let buffer = HardwareBuffer::allocate(description).ok()?;
+        let planes: Vec<_> = buffer.lock_planes(HardwareBufferUsage::CPU_WRITE_OFTEN, None, None).ok()?.collect();
+        let [luma, cb, cr] = planes.as_slice() else { panic!("a P010 buffer locks as three planes, not {}", planes.len()) };
+        let word = |at: *mut std::ffi::c_void, plane: &LockedPlaneInfo, row: u32, column: u32, value: u16| {
+            let offset = (row * plane.bytes_per_stride + column * plane.bytes_per_pixel) as usize;
+            // SAFETY: the sample lies inside the locked buffer, 32 x 48 luma samples and 16 x 24 chroma pairs.
+            unsafe { at.cast::<u8>().add(offset).cast::<u16>().write_unaligned(value << 6) };
+        };
+        for y in 0..48 {
+            for x in 0..32 {
+                word(luma.virtual_address, luma, y, x, luma_at(x as usize, y as usize));
+            }
+        }
+        for y in 0..24 {
+            for x in 0..16 {
+                word(cb.virtual_address, cb, y, x, cb_at(x as usize, y as usize));
+                word(cr.virtual_address, cr, y, x, cr_at(x as usize, y as usize));
+            }
+        }
+        buffer.unlock().ok()?;
+        Some(buffer)
+    }
+
+    /// The 10-bit planes of [`p010_buffer`] at `crop`: the luma and the Cb and Cr samples the crop holds.
+    fn p010_planes(crop: Crop) -> [Vec<u16>; 3] {
+        let (mut luma, mut cb, mut cr) = (Vec::new(), Vec::new(), Vec::new());
+        for y in crop.y..crop.y + crop.height {
+            luma.extend((crop.x..crop.x + crop.width).map(|x| luma_at(x, y)));
+        }
+        for y in crop.y / 2..(crop.y + crop.height).div_ceil(2) {
+            cb.extend((crop.x / 2..(crop.x + crop.width).div_ceil(2)).map(|x| cb_at(x, y)));
+            cr.extend((crop.x / 2..(crop.x + crop.width).div_ceil(2)).map(|x| cr_at(x, y)));
+        }
+        [luma, cb, cr]
+    }
+
+    /// The crops of [`p010_buffer`] the tests read, each with the pixels its picture is.
+    fn p010_pictures() -> [(Crop, PixelData); 3] {
+        [Crop { x: 0, y: 0, width: 32, height: 48 }, Crop { x: 2, y: 4, width: 15, height: 9 }, Crop { x: 0, y: 30, width: 31, height: 18 }]
+            .map(|crop| (crop, PixelData::Yuv16 { planes: p010_planes(crop).map(Arc::new), chroma: Chroma::C420, bits: 10, alpha: None }))
+    }
+
+    #[test]
+    fn a_p010_hardware_buffer_is_read_into_the_ten_bit_planes_the_software_decoder_makes() {
+        let Some(buffer) = p010_buffer() else { return };
+        for (crop, wanted) in p010_pictures() {
+            // The device lays the planes out as it likes. The buffer's own size and the planes it locks to are
+            // what the read must take, so reading them by hand gives the same answer: a layout other than
+            // P010's biplanar one is declined by both, and the one this reads is read exactly.
+            let planes: Vec<_> = buffer.lock_planes(READ_USAGE, None, None).unwrap().collect();
+            // SAFETY: the planes are the ones locking this 32 x 48 buffer gave, and it stays locked until the
+            // call has returned.
+            let by_hand = unsafe { locked_pixels(&planes, 32, 48, crop) };
+            buffer.unlock().unwrap();
+            let read = p010_pixels(&buffer, crop);
+            assert_eq!(format!("{read:?}"), format!("{by_hand:?}"), "{crop:?}");
+            match read {
+                Ok(pixels) => assert_eq!(format!("{pixels:?}"), format!("{wanted:?}"), "{crop:?}"),
+                // Another layout is declined, and nothing else fails.
+                Err(why) => assert_eq!(why, "the decoded picture's planes are not a P010 buffer's", "{crop:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn the_planes_of_a_locked_buffer_in_plain_memory_are_read_with_their_padding_and_nothing_past_their_end() {
+        // A P010 buffer of 32 x 48 samples with 8 words of padding after each luma row and 4 after each chroma
+        // row, in memory whose end is the last chroma sample's: a read past the extents would leave it.
+        let (luma_stride, chroma_stride) = (32 * 2 + 16, 16 * 4 + 8);
+        let sample = |value: u16| (value << 6).to_ne_bytes();
+        let mut memory: Vec<u8> = Vec::new();
+        for y in 0..48 {
+            memory.extend((0..luma_stride / 2).flat_map(|x| sample(if x < 32 { luma_at(x, y) } else { 1023 })));
+        }
+        let chroma_at = memory.len();
+        for y in 0..24 {
+            for x in 0..chroma_stride / 4 {
+                let (cb, cr) = if x < 16 { (cb_at(x, y), cr_at(x, y)) } else { (1023, 1023) };
+                memory.extend(sample(cb).into_iter().chain(sample(cr)));
+            }
+        }
+        memory.truncate(chroma_at + chroma_stride * 23 + 16 * 4);
+        let at = |offset: usize, row_stride: usize, pixel_stride: u32| LockedPlaneInfo {
+            virtual_address: memory.get(offset..).unwrap().as_ptr().cast_mut().cast(),
+            bytes_per_pixel: pixel_stride,
+            bytes_per_stride: row_stride as u32,
+        };
+        let planes = [at(0, luma_stride, 2), at(chroma_at, chroma_stride, 4), at(chroma_at + 2, chroma_stride, 4)];
+        // SAFETY: every plane points into `memory`, which holds the extents of a 32 x 48 buffer with these
+        // strides. A call with other planes or the size turned round is refused before anything is read.
+        let read = |planes: &[LockedPlaneInfo], (width, height): (usize, usize), crop| unsafe { locked_pixels(planes, width, height, crop) };
+        for (crop, wanted) in p010_pictures() {
+            assert_eq!(format!("{:?}", read(&planes, (32, 48), crop).unwrap()), format!("{wanted:?}"), "{crop:?}");
+        }
+        let planar_chroma = [planes[0], LockedPlaneInfo { bytes_per_pixel: 2, ..planes[1] }, planes[2]];
+        let whole = Crop { x: 0, y: 0, width: 32, height: 48 };
+        assert!(read(&planar_chroma, (32, 48), whole).is_err(), "planar chroma");
+        assert!(read(&planes[..2], (32, 48), whole).is_err(), "two planes");
+        assert!(read(&planes, (32, 48), Crop { width: 33, ..whole }).is_err(), "a crop wider than the buffer");
+        assert!(read(&planes, (48, 32), whole).is_err(), "a width and a height taken for each other");
+    }
+
+    /// The device's API level, as the platform's own property names it.
+    fn api_level() -> u32 {
+        let property = std::process::Command::new("getprop").arg("ro.build.version.sdk").output().unwrap();
+        String::from_utf8(property.stdout).unwrap().trim().parse().unwrap()
+    }
+
+    /// Whether the platform makes the reader a 10-bit picture is decoded into.
+    fn p010_reader_made() -> bool {
+        image_reader(32, 32, Depth::Ten).is_ok()
+    }
+
+    #[test]
+    fn an_8_bit_picture_gets_a_yuv_420_888_reader_and_a_10_bit_one_the_p010_reader_from_android_14_and_none_before() {
+        // The NDK header's AHARDWAREBUFFER_FORMAT_YCbCr_P010.
+        assert_eq!(i32::from(image_format(ReaderFormat::P010)), 0x36);
+        assert_eq!(image_reader(32, 32, Depth::Eight).unwrap().format().unwrap(), ImageFormat::YUV_420_888);
+        match image_reader(32, 32, Depth::Ten) {
+            Ok(reader) => assert_eq!(reader.format().unwrap(), image_format(ReaderFormat::P010)),
+            Err(error) => assert_eq!(error, "creating the P010 image reader failed (ErrorInvalidParameter)"),
+        }
+        assert_eq!(p010_reader_made(), api_level() >= 34, "AImageReader takes the P010 format from Android 14 (API 34)");
+    }
+
+    #[test]
+    fn a_hardware_buffer_that_is_not_p010_is_an_error_naming_its_format() {
+        let description = HardwareBufferDesc {
+            width: 32,
+            height: 32,
+            layers: 1,
+            format: HardwareBufferFormat::R8G8B8A8_UNORM,
+            usage: HardwareBufferUsage::CPU_READ_OFTEN | HardwareBufferUsage::CPU_WRITE_OFTEN,
+            stride: 0,
+        };
+        let buffer = HardwareBuffer::allocate(description).unwrap();
+        let error = p010_pixels(&buffer, Crop { x: 0, y: 0, width: 32, height: 32 }).unwrap_err();
+        assert_eq!(error, "the decoded picture is in hardware buffer format R8G8B8A8_UNORM, not P010");
+    }
+
+    /// A decoder of the 10-bit HEVC stream, made over the device's own HEVC decoder (a hardware one or not),
+    /// with the error that started none.
+    fn ten_bit_decoder() -> (SampleEntry, std::result::Result<McDecoder, CodecError>) {
+        let entry = hevc10_entry();
+        let decoder = decoder_with(&entry, &stream(&entry), any_codec);
+        (entry, decoder)
+    }
+
+    #[test]
+    fn a_10_bit_hevc_stream_decodes_to_the_pictures_the_software_decoder_gives_or_is_declined() {
+        // Before Android 14 there is no reader for a 10-bit picture, so no decoder starts, which the factory
+        // answers by declining: the software decoder takes the stream from its first sample.
+        if !p010_reader_made() {
+            let Err(CodecError::Unsupported(why)) = ten_bit_decoder().1 else { panic!("a 10-bit decoder started without a P010 reader") };
+            assert_eq!(why, "creating the P010 image reader failed (ErrorInvalidParameter)");
+            return;
+        }
+        // From it, the device's own decoder takes the stream with the same codec-specific data, the same Annex B
+        // samples and the P010 reader. Where that decoder gives P010 buffers, its pictures are the software
+        // decoder's, frame by frame. Where it gives none (a decoder that does not decode 10-bit video, or that
+        // makes another buffer format), a sample is an error, which the registry's decoder answers by
+        // replaying the stream in software: the pictures are then the software decoder's, byte for byte. A
+        // codec that has failed has no input buffer memory to give, and that must be the same error, so the
+        // run repeats to meet a codec in that state. A codec that fails only after the last sample was fed
+        // loses its pictures without an error, which a run cannot tell from no pictures, so a run that ends
+        // so compares nothing, and at least one run must compare. A decoder that refuses the stream at its start
+        // is declined by the factory, as before Android 14.
+        let samples = hevc10_samples();
+        let wanted = decoded(software(&hevc10_entry()).as_mut(), &samples);
+        let mut compared = 0;
+        for _ in 0..6 {
+            let (entry, decoder) = ten_bit_decoder();
+            let Ok(mut decoder) = decoder else {
+                compared += 1;
+                continue;
+            };
+            let outcome: std::result::Result<Vec<_>, _> = samples.iter().map(|(pts, sample)| decoder.decode(sample, *pts)).collect();
+            let Ok(decoded_samples) = outcome else {
+                drop(decoder);
+                let (_, again) = ten_bit_decoder();
+                let Ok(again) = again else {
+                    compared += 1;
+                    continue;
+                };
+                let mut declined = Fallback::new(again, &entry, stream(&entry));
+                assert_eq!(decoded(&mut declined, &samples), wanted, "a decline is byte-identical");
+                compared += 1;
+                continue;
+            };
+            let mut pictures: Vec<_> = decoded_samples.into_iter().flatten().collect();
+            pictures.extend(decoder.flush());
+            if !pictures.is_empty() {
+                assert_eq!(text(&pictures), wanted, "the device gave P010");
+                compared += 1;
+            }
+        }
+        assert!(compared > 0, "no run of the 10-bit stream gave pictures or an error");
     }
 }

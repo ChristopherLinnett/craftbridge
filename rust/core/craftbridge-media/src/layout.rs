@@ -1,5 +1,6 @@
 //! What a hardware decoder needs to know about a stream to set itself up, and what every picture it
-//! returns carries: the surface format to ask for (VideoToolbox's; MediaCodec's is always `YUV_420_888`),
+//! returns carries: the surface format to ask for (VideoToolbox's; MediaCodec's is its image reader's format, `YUV_420_888` for 8-bit pictures and P010 for
+//! 10-bit ones),
 //! the part of the surface that is the picture, and the colour and pixel aspect FilmCraft's software
 //! decoder reports for the same stream. Streams the hardware
 //! decoders here do not take (interlaced, 4:2:2 or 4:4:4, other bit depths) are refused up front, so they
