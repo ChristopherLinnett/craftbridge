@@ -10,7 +10,7 @@
 //! number.
 
 use super::common::Scratch;
-use super::export::{entries_under, same_files};
+use super::export::{QUEUED_HARDWARE, entries_under, same_files};
 use super::{cli, scrub, scrubbed};
 use craftbridge_core::{CancelToken, CraftApp, CraftError, Engine, GpuChoice, PixelFormat};
 use craftbridge_effects::EffectCraftApp;
@@ -292,15 +292,40 @@ fn a_bad_value_is_refused_in_the_command_lines_words_before_anything_is_imported
     let _ = photo;
 }
 
+/// The template of a small card made in `scratch`, by its path, and an engine started on it.
+fn started_with_template(scratch: &Scratch) -> Result<(String, Engine), String> {
+    let (template, _) = make(scratch, (96, 64), 1.0, "Arial")?;
+    let engine = Engine::start(scratch.app().map_err(|e| e.to_string())?, GpuChoice::CpuOnly).map_err(|e| e.to_string())?;
+    Ok((template.display().to_string(), engine))
+}
+
+/// A render of `path` with the request `output` that the engine refuses as `InvalidParams` and that leaves
+/// what `state` reads as `before`, answering the refusal.
+fn refused_render<T: PartialEq + std::fmt::Debug>(
+    engine: &Engine,
+    path: &str,
+    output: &Value,
+    state: &dyn Fn() -> T,
+    before: &T,
+) -> Result<CraftError, String> {
+    let params = json!({"template": path, "output": output});
+    let refused = engine.request_with_progress(RENDER, params, |_, _, _| {}, &CancelToken::new()).err().ok_or("the render is refused")?;
+    if !matches!(refused, CraftError::InvalidParams { .. }) {
+        return Err(format!("{output}: {refused:?}"));
+    }
+    if &state() != before {
+        return Err(format!("{output}: a refused render request leaves something behind"));
+    }
+    Ok(refused)
+}
+
 #[test]
 fn a_request_refused_for_its_shape_leaves_no_instance_behind() {
     // A frame's or a render's own request is read whole before the template is imported, as the
     // command line reads its whole command line first: a request refused for its shape leaves the
     // project as it was.
     let scratch = Scratch::new().expect("a scratch folder");
-    let (template, _) = make(&scratch, (96, 64), 1.0, "Arial").expect("the template is made");
-    let path = template.display().to_string();
-    let engine = Engine::start(scratch.app().expect("the app starts"), GpuChoice::CpuOnly).expect("the engine starts");
+    let (path, engine) = started_with_template(&scratch).expect("the template and the engine");
     let project = || engine.request("info", json!({})).expect("info answers")["project"].clone();
     let before = project();
     for frame in [json!({"time": 1, "frame": 2}), json!({"time": "1"}), json!({"nope": 1})] {
@@ -310,10 +335,7 @@ fn a_request_refused_for_its_shape_leaves_no_instance_behind() {
     }
     let out = scratch.path().join("x.mp4").display().to_string();
     for output in [json!({"output": 5}), json!({"output": out, "end": "x"}), json!({"output": out, "nope": 1})] {
-        let params = json!({"template": path, "output": output});
-        let refused = engine.request_with_progress(RENDER, params, |_, _, _| {}, &CancelToken::new()).expect_err("refused");
-        assert!(matches!(refused, CraftError::InvalidParams { .. }), "{output}: {refused:?}");
-        assert_eq!(project(), before, "{output}: a refused render request leaves no instance behind");
+        refused_render(&engine, &path, &output, &project, &before).expect("refused, and nothing left behind");
     }
     engine.close().expect("the engine closes");
 }
@@ -731,4 +753,25 @@ fn a_null_or_false_field_asks_for_nothing_as_the_requests_read_it() {
     assert!(plugin_frame(&scratch, &template, None, json!({"comp": null})).expect("a null comp renders") == plain, "a null comp is the instance");
     let words = render(&scratch, json!({"template": path, "values": [1], "output": {"output": null, "end": "x"}})).expect_err("refused").to_string();
     assert_eq!(words, "`export`: `output` is required (or `queue`)", "a null output is refused as an absent one is, before the values");
+}
+
+#[test]
+fn a_template_output_that_queues_and_asks_for_hardware_is_refused_in_the_exports_words_before_anything_renders() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let (path, engine) = started_with_template(&scratch).expect("the template and the engine");
+    let state =
+        || (engine.request("info", json!({})).expect("info answers")["project"].clone(), entries_under(scratch.path(), &[]).expect("the container lists"));
+    let before = state();
+    let out = scratch.path().join("x.mp4").display().to_string();
+    for output in [json!({"queue": true, "hardware": true}), json!({"output": out, "format": "h264", "queue": true, "hardware": true, "comp": 1})] {
+        assert_eq!(
+            refused_render(&engine, &path, &output, &state, &before).expect("refused, and nothing left behind").to_string(),
+            QUEUED_HARDWARE,
+            "{output}"
+        );
+    }
+    let params = json!({"template": path, "output": {"output": out, "queue": true}});
+    let refused = engine.request_with_progress(RENDER, params, |_, _, _| {}, &CancelToken::new()).expect_err("a queue beside a template is refused");
+    assert_eq!(refused.to_string(), "`template.render`: `output` cannot name `queue`: a template renders a new instance", "a queue alone is refused as before");
+    engine.close().expect("the engine closes");
 }

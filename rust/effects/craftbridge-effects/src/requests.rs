@@ -56,6 +56,10 @@ use crate::reference::{Given, given, reference};
 /// The method a refusal of these parameters names.
 const EXPORT: &str = "export";
 
+/// The two fields a request cannot set together.
+const QUEUE: &str = "queue";
+const HARDWARE: &str = "hardware";
+
 /// Every parameter `export` takes, one per flag of `render`; any other name is refused.
 const FIELDS: [&str; 27] = [
     "comp",
@@ -83,8 +87,8 @@ const FIELDS: [&str; 27] = [
     "opusApp",
     "exrCompression",
     "exrDepth",
-    "queue",
-    "hardware",
+    QUEUE,
+    HARDWARE,
 ];
 
 /// A composition named by its id or by its name.
@@ -212,7 +216,9 @@ pub struct RenderRequest {
     /// `--exr-depth`: `half` or `float`.
     pub exr_depth: Option<String>,
     /// `--queue`: render the project's own queue; every other field is then left unread, as the
-    /// command line leaves its flags, so a value it would refuse is not refused either.
+    /// command line leaves its flags, so a value it would refuse is not refused either. The one it is
+    /// refused beside is a `hardware` of `true`, since a queued render encodes through the render
+    /// queue's encoders.
     pub queue: bool,
     /// CraftBridge's own option, no flag of the command line: encode an H.264 or HEVC movie with the
     /// device's hardware encoder where it has one (plan §18). Every other format, and a device without the
@@ -223,10 +229,18 @@ pub struct RenderRequest {
 impl RenderRequest {
     /// The parameters of an `export` call as an object of the fields it takes, refused otherwise: what
     /// the command line's own parser refuses of its flags, an option it does not know, before it reads
-    /// any of them.
+    /// any of them. A request that queues and chooses hardware is refused here too, as the one place
+    /// every render request is read first: the project's own queue encodes through the render queue's
+    /// encoders, so the choice would be dropped without a word.
     pub(crate) fn fields(params: &Value) -> Result<Cow<'_, Map<String, Value>>> {
         let obj = object_params(params, EXPORT)?;
         reject_unknown(&obj, EXPORT, &FIELDS)?;
+        let is_true = |key: &str| obj.get(key) == Some(&Value::Bool(true));
+        if is_true(QUEUE) && is_true(HARDWARE) {
+            return Err(CraftError::invalid_params(format!(
+                "`{EXPORT}`: `{QUEUE}` cannot be set with `{HARDWARE}`: a queued render encodes through the render queue and its own encoders, never the device's hardware encoder"
+            )));
+        }
         Ok(obj)
     }
 
@@ -242,7 +256,7 @@ impl RenderRequest {
     /// [`RenderRequest::to_queue_params`] then refuses for naming no output.
     pub fn from_params(params: &Value) -> Result<Self> {
         let obj = Self::fields(params)?;
-        if bool_param(&obj, "queue", EXPORT)?.unwrap_or(false) {
+        if bool_param(&obj, QUEUE, EXPORT)?.unwrap_or(false) {
             return Ok(Self { queue: true, ..Self::default() });
         }
         let text = |key: &str| -> Result<Option<String>> { Ok(string_param(&obj, key, EXPORT)?.map(str::to_string)) };
@@ -274,7 +288,7 @@ impl RenderRequest {
             exr_compression: text("exrCompression")?,
             exr_depth: text("exrDepth")?,
             queue: false,
-            hardware: bool_param(&obj, "hardware", EXPORT)?.unwrap_or(false),
+            hardware: bool_param(&obj, HARDWARE, EXPORT)?.unwrap_or(false),
         })
     }
 
@@ -591,9 +605,12 @@ mod tests {
         let request = RenderRequest::from_params(&json!({"queue": true, "output": "/c/x", "bitrate": 1, "start": "soon"})).expect("reads");
         assert_eq!(request, RenderRequest { queue: true, ..RenderRequest::default() });
         assert_eq!(request.to_queue_params().expect("maps"), None);
-        // An unknown name is refused whatever else is given, as the command line refuses an unknown option.
-        let error = RenderRequest::from_params(&json!({"queue": true, "widht": 1})).expect_err("an unknown name");
-        assert_eq!(error, CraftError::invalid_params("`export`: unknown parameter(s) `widht`"));
+        // An unknown name is refused whatever else is given, `queue` with `hardware` included, as the
+        // command line refuses an unknown option before it reads any.
+        for request in [json!({"queue": true, "widht": 1}), json!({"queue": true, "hardware": true, "widht": 1})] {
+            let error = RenderRequest::from_params(&request).expect_err("an unknown name");
+            assert_eq!(error, CraftError::invalid_params("`export`: unknown parameter(s) `widht`"), "{request}");
+        }
     }
 
     #[test]
@@ -691,6 +708,28 @@ mod tests {
         assert_eq!(RenderRequest::from_params(&request(json!({"hardware": "yes"}))), Err(CraftError::invalid_params("`export`: `hardware` must be a bool")));
     }
 
+    /// The refusal of a queued render that asks for hardware, in its exact words, from the one reader of
+    /// the fields; each field alone, a `false` or a null beside the other, and a value that is no bool
+    /// (which the field's own reader answers) are not it.
+    #[test]
+    fn a_queued_request_that_asks_for_hardware_is_refused_in_one_set_of_words() {
+        let words = "`export`: `queue` cannot be set with `hardware`: a queued render encodes through the render queue and its own encoders, never the device's hardware encoder";
+        for request in [json!({"queue": true, "hardware": true}), json!({"hardware": true, "queue": true, "output": "/c/x.mp4"})] {
+            assert_eq!(RenderRequest::fields(&request).unwrap_err(), CraftError::invalid_params(words));
+            assert_eq!(RenderRequest::from_params(&request), Err(CraftError::invalid_params(words)));
+        }
+        for request in [
+            json!({"queue": true}),
+            json!({"hardware": true, "output": "/c/x.mp4"}),
+            json!({"queue": true, "hardware": false}),
+            json!({"queue": false, "hardware": true, "output": "/c/x.mp4"}),
+            json!({"queue": true, "hardware": null}),
+        ] {
+            assert!(RenderRequest::from_params(&request).is_ok(), "{request}");
+        }
+        assert!(!RenderRequest::from_params(&json!({"queue": true, "hardware": "yes"})).expect("queue leaves the rest unread").hardware);
+    }
+
     #[test]
     fn a_request_chooses_hardware_only_when_it_says_true_and_reads() {
         assert!(RenderRequest::chooses_hardware(&json!({"output": "/c/x.mp4", "hardware": true})));
@@ -698,7 +737,8 @@ mod tests {
         assert!(!RenderRequest::chooses_hardware(&json!({"output": "/c/x.mp4"})));
         assert!(!RenderRequest::chooses_hardware(&json!({"output": "/c/x.mp4", "hardware": "yes"})), "a value that does not read chooses nothing");
         assert!(!RenderRequest::chooses_hardware(&json!({"output": "/c/x.mp4", "hardware": true, "widht": 1})), "nor does a call that is refused");
-        assert!(!RenderRequest::chooses_hardware(&json!({"queue": true, "hardware": true})), "the project's own queue renders no request");
+        assert!(!RenderRequest::chooses_hardware(&json!({"queue": true, "hardware": true})), "a queued request that asks for hardware is refused");
+        assert!(!RenderRequest::chooses_hardware(&json!({"queue": true})), "the project's own queue renders no request");
         assert!(!RenderRequest::chooses_hardware(&Value::Null));
     }
 
