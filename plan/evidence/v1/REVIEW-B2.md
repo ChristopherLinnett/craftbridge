@@ -6,7 +6,7 @@ Round B2 re-ran every claim and fix of round A2 — by running things (compiler,
 
 - macOS 26.5; Xcode 26.6 (17F113); rustc 1.99.1 with `aarch64-apple-ios` and `aarch64-apple-ios-sim` installed. Simulator iPhone 17 Pro `E33474EA-1897-4EF8-9DFB-DD3FFA178C8D`, booted, iOS 26.5 (23F77) the only runtime. `ecprobe/Cargo.lock` pins `effectcraft-text` to the rev above (`git+file://…#10376058…`).
 - One canonical run was made from a shell that exports `TERM` (the harness shell; its report has one extra `TERM = dumb` env line, §8); the final run was made with `env -u CARGO_TARGET_DIR` from a shell where it was unset. Before the round the simulator had two third-party apps, `com.craftbridge.FontProbe` and `com.example.orchestratorFlutter`; after it, the same two: FontProbe was uninstalled once on purpose (§2) and reinstalled by `run-sim.sh`; the other app was not touched; the simulator was left booted.
-- **Device: `xcrun devicectl list devices` still shows "SeaEl iPhone" (iPhone 12 Pro) `unavailable`** — `capture/review-devicectl.txt` re-made byte-identically. Nothing was installed or run on a device.
+- **Device: `xcrun devicectl list devices` still shows the acceptance iPhone (iPhone 12 Pro) `unavailable`** — `capture/review-devicectl.txt` re-made byte-identically. Nothing was installed or run on a device.
 
 ## 2. Round A2's claims and fixes, re-run
 
@@ -40,7 +40,7 @@ Also strengthened, not a defect: RESULT §5 now records the two things this roun
 
 ## 5. Open items
 
-- **Device half of V1:** "SeaEl iPhone" was `unavailable` again; nothing ran on a device. §7's recipe stands (flags re-checked against `--help`), and only the device run can say whether the sandbox lets an app read CoreText's files.
+- **Device half of V1:** the acceptance iPhone was `unavailable` again; nothing ran on a device. §7's recipe stands (flags re-checked against `--help`), and only the device run can say whether the sandbox lets an app read CoreText's files.
 - **FX-3, what `list_fonts` shows** (not decided): unchanged from A2 — hide dot-named families and/or show only files CoreText lists, all faces staying registered for fallback.
 - **The bundled CJK font** (owner's call): §4's proposal stands, re-verified against live sources this round. Unverified until someone downloads the files: the family names inside `NotoSansSC-Regular.otf` / `NotoSansTC-Regular.otf`, and EffectCraft's fallback actually drawing with them at Regular (§4 says exactly this and gives the two commands).
 - The one `TERM = dumb` line in this round's report is a harness-shell artefact; a run from a shell that does not export `TERM` (like the worker and round A2) will not show it. Harmless, recorded in §8.

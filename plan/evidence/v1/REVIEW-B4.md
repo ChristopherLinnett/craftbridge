@@ -8,7 +8,7 @@ EffectCraft was read only at the pinned rev `103760584a60074c9aaeef686d2d05d89f0
 
 - The simulator is iPhone 17 Pro `E33474EA-1897-4EF8-9DFB-DD3FFA178C8D`: booted, iOS 26.5 (23F77), with Xcode 26.6 (Build 17F113). `simctl list runtimes` still shows that one runtime only (RESULT §6).
 - Third-party apps before and after the round: `com.craftbridge.FontProbe` and `com.example.orchestratorFlutter`. FontProbe stayed installed (`run-sim.sh` reinstalls it), the other app was not touched, and the simulator was left booted.
-- **Device: "SeaEl iPhone" (iPhone 12 Pro, `08452DF6-1739-55D5-8C38-622DEDB24E5E`) is still `unavailable`.** Nothing was installed or run on a device; `capture/review-devicectl.txt` was reproduced byte-identically.
+- **Device: the acceptance iPhone (iPhone 12 Pro, `<device>`) is still `unavailable`.** Nothing was installed or run on a device; `capture/review-devicectl.txt` was reproduced byte-identically.
 - Before running anything, B4 copied A4's `capture/review-*` files and `sandbox-canary.txt` (17 files) to `capture/a4-run/` and hashed all 31 canonical capture files. Those two hashes (before and after the round) are what §8's method turns on.
 - **§8's hashes:** every SHA-256 §8 lists (22 of them) matched before anything was touched, and the five kept run reports match what §8 says of them: `a1-run` 46,188 B `e05f2b64…`, `b1-run` 46,203 B `a4694a8f…`, `a2-run` 52,582 B `4c544c06…`, `a3-run` 52,681 B `0e8b07f0…`, `a4-check` 52,681 B `952f17c2…`.
 
@@ -22,7 +22,7 @@ EffectCraft was read only at the pinned rev `103760584a60074c9aaeef686d2d05d89f0
 | fix 2: `ecprobe::arg_label` names a folder list by file name, so `capture/review-han-fallback.txt` was promoted | re-ran `engine-checks.sh`; also ran the host `fallback` example with `@./b4-scratch/one-dir.txt`, `@/nonexistent/x.txt`, `@` alone and a plain folder | holds. The capture is byte-identical to the canonical one, the `registered … from @review-fontsroot-dir.txt` lines name the list by file name, a plain folder prints as given, and an unreadable list exits 2. Answers unchanged since B1. `cargo clippy --all-targets` is clean for the host, `aarch64-apple-ios-sim` **and** `aarch64-apple-ios` (A4 checked the first two; B4 checked the device target too) |
 | fix 3: `host-checks.sh` records the top-level file and symlink counts (both 0) | diffed the canonical capture against the copies in `a1-run`, `b1-run`, `a2-run`, `a3-run` | holds. Those four are byte-identical (1,918 B) and the canonical one (1,974 B) is one line longer: `files at its top level: 0; symlinks anywhere in it: 0`. REVIEW-B2.md records B2's copy as identical to A2's, so §8's "every other line byte-identical across the A1 to A4 runs" is right |
 | fix 4: §7 now says the device read must fail, with 257 or 260 telling which | grepped `FoundationErrors.h` in `iphonesimulator26.5.sdk` | holds: `NSFileReadNoPermissionError = 257`, `NSFileReadNoSuchFileError = 260`, as §7 quotes |
-| fix 5: §5 says what to change on another machine | read §5, `ecprobe/Cargo.toml` and `Cargo.lock` | holds: §5 names the absolute `file:///Users/christopherlinnett/dev/artcraft-dev/effectcraft/repository` URL and says to point it at any clone holding the pinned rev; the `rev` and the lock's source line fix the code |
+| fix 5: §5 says what to change on another machine | read §5, `ecprobe/Cargo.toml` and `Cargo.lock` | holds: §5 names the absolute `file://$HOME/dev/artcraft-dev/effectcraft/repository` URL and says to point it at any clone holding the pinned rev; the `rev` and the lock's source line fix the code |
 | A4 §2: a failed build stops `run-sim.sh`, and a foreign `CARGO_TARGET_DIR` is never used | planted `let b4PlantedError: Int = "not an int"` (source backed up, restored, SHA-256 `58a72c5c…` re-verified), then ran §5 with `CARGO_TARGET_DIR=/tmp/craftbridge-v1/b4-foreign-target` | holds. Exit 1 at the build step, `FontProbe.swift:34:35: error: cannot convert value of type 'String' to specified type 'Int'` printed, nothing installed, the check folder stayed empty. The foreign folder was never created — `FontProbe.xcodeproj` has no build phase that calls cargo, so `xcodebuild` cannot reach it either |
 
 ## 3. The check run (`capture/b4-check/`)
@@ -80,7 +80,7 @@ Those folders register 263 files where CoreText offers 103, which is a display q
 
 ## 7. Open items
 
-- **Device half of V1:** "SeaEl iPhone" is still `unavailable`; §7's recipe (including the 257/260 reading of section 7) stands and needs a device.
+- **Device half of V1:** the acceptance iPhone is still `unavailable`; §7's recipe (including the 257/260 reading of section 7) stands and needs a device.
 - **FX-3, what `list_fonts` shows:** the 92 dot-named families and the 133 extra visible ones. Not decided.
 - **The bundled CJK font:** the owner's call. §4's noto-cjk proposal stands; the family names inside the files and the fallback drawing with them stay unverified until someone downloads them.
 

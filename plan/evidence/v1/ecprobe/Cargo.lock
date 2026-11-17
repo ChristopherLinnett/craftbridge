@@ -51,7 +51,7 @@ dependencies = [
 [[package]]
 name = "effectcraft-color"
 version = "0.24.1"
-source = "git+file:///Users/christopherlinnett/dev/artcraft-dev/effectcraft/repository?rev=103760584a60074c9aaeef686d2d05d89f08155e#103760584a60074c9aaeef686d2d05d89f08155e"
+source = "git+file://$HOME/dev/artcraft-dev/effectcraft/repository?rev=103760584a60074c9aaeef686d2d05d89f08155e#103760584a60074c9aaeef686d2d05d89f08155e"
 dependencies = [
  "serde",
 ]
@@ -59,7 +59,7 @@ dependencies = [
 [[package]]
 name = "effectcraft-geom"
 version = "0.24.1"
-source = "git+file:///Users/christopherlinnett/dev/artcraft-dev/effectcraft/repository?rev=103760584a60074c9aaeef686d2d05d89f08155e#103760584a60074c9aaeef686d2d05d89f08155e"
+source = "git+file://$HOME/dev/artcraft-dev/effectcraft/repository?rev=103760584a60074c9aaeef686d2d05d89f08155e#103760584a60074c9aaeef686d2d05d89f08155e"
 dependencies = [
  "serde",
 ]
@@ -67,7 +67,7 @@ dependencies = [
 [[package]]
 name = "effectcraft-keyframe"
 version = "0.24.1"
-source = "git+file:///Users/christopherlinnett/dev/artcraft-dev/effectcraft/repository?rev=103760584a60074c9aaeef686d2d05d89f08155e#103760584a60074c9aaeef686d2d05d89f08155e"
+source = "git+file://$HOME/dev/artcraft-dev/effectcraft/repository?rev=103760584a60074c9aaeef686d2d05d89f08155e#103760584a60074c9aaeef686d2d05d89f08155e"
 dependencies = [
  "effectcraft-color",
  "effectcraft-geom",
@@ -79,7 +79,7 @@ dependencies = [
 [[package]]
 name = "effectcraft-text"
 version = "0.24.1"
-source = "git+file:///Users/christopherlinnett/dev/artcraft-dev/effectcraft/repository?rev=103760584a60074c9aaeef686d2d05d89f08155e#103760584a60074c9aaeef686d2d05d89f08155e"
+source = "git+file://$HOME/dev/artcraft-dev/effectcraft/repository?rev=103760584a60074c9aaeef686d2d05d89f08155e#103760584a60074c9aaeef686d2d05d89f08155e"
 dependencies = [
  "effectcraft-keyframe",
  "harfrust",
@@ -92,7 +92,7 @@ dependencies = [
 [[package]]
 name = "effectcraft-time"
 version = "0.24.1"
-source = "git+file:///Users/christopherlinnett/dev/artcraft-dev/effectcraft/repository?rev=103760584a60074c9aaeef686d2d05d89f08155e#103760584a60074c9aaeef686d2d05d89f08155e"
+source = "git+file://$HOME/dev/artcraft-dev/effectcraft/repository?rev=103760584a60074c9aaeef686d2d05d89f08155e#103760584a60074c9aaeef686d2d05d89f08155e"
 dependencies = [
  "serde",
 ]

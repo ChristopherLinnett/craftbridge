@@ -31,6 +31,7 @@ mod generate;
 mod generated;
 mod git;
 mod gradle_log;
+mod home;
 mod hygiene;
 mod kotlin_bindings;
 mod layers;
@@ -279,8 +280,9 @@ mod rules {
     type Check = (&'static str, fn(&Path) -> Result<Vec<String>, String>);
 
     pub(super) fn run(root: &Path) -> ExitCode {
-        let checks: [Check; 13] = [
+        let checks: [Check; 14] = [
             ("hygiene", crate::hygiene::check),
+            ("home", crate::home::check),
             ("layout", crate::layout::check),
             ("machinery", crate::machinery::check),
             ("buildfiles", crate::buildfiles::check),

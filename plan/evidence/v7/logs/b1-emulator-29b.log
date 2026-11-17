@@ -1,6 +1,6 @@
 INFO         | Android emulator version 37.2.12.0 (build_id 16428233) (CL:N/A)
 INFO         | Graphics backend: gfxstream
-INFO         | Found systemPath /Users/christopherlinnett/Library/Android/sdk/system-images/android-29/google_apis/arm64-v8a/
+INFO         | Found systemPath $HOME/Library/Android/sdk/system-images/android-29/google_apis/arm64-v8a/
 WARNING      | Please update the emulator to one that supports the feature(s): Vulkan
 INFO         | Guest GLES Driver: Auto (ext controls)
 INFO         | emuglConfig_init: vulkan_mode_selected:lavapipe gles_mode_selected:swangle

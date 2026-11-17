@@ -7,7 +7,7 @@ Work was alone. No font was downloaded, no GitHub request was made, no git state
 ## 1. Environment and starting state
 
 - **Simulator:** iPhone 17 Pro, booted, iOS 26.5, as in every round before it. FontProbe was reinstalled by `run-sim.sh`; the other app there was not touched.
-- **Device:** `xcrun devicectl list devices` shows "SeaEl iPhone" **`available (paired)`** this round, so it was re-run (§4). The canonical `review-devicectl.txt` still shows `unavailable`, as it did when it was captured; §1's row explains both states and B6 set the precedent of not promoting the transient connection state.
+- **Device:** `xcrun devicectl list devices` shows the acceptance iPhone **`available (paired)`** this round, so it was re-run (§4). The canonical `review-devicectl.txt` still shows `unavailable`, as it did when it was captured; §1's row explains both states and B6 set the precedent of not promoting the transient connection state.
 - The canonical captures were hashed before anything ran: every `capture/review-*`, `sandbox-canary.txt` and `capture/device-*` matched the §8 record (report `f2844cb0…`), so nothing needed copying to `capture/a6-run/`.
 
 ## 2. A6's fixes, checked by running
@@ -28,7 +28,7 @@ The question was whether face matching can work at all, and what it gives. Both 
 
 `run-sim.sh` and `engine-checks.sh` ran with `CAPTURE_DIR=capture/b7-check`, plus the §5 step-4 typecheck (exit 1, the one expected error, capture byte-identical to canonical) and step-5 devicectl; step 3 rebuilt the iphoneos target unsigned: BUILD SUCCEEDED, `nm` lists the same six `_ecprobe_` functions. Step 6 was not run: it needs GitHub. Compared with `capture/`: **11 review files byte-identical** (the folder lists, family lists and diff, file-families, Arabic names, Han fallback, outline formats, host-checks, typecheck); the report and stdout, stderr and os_log differ only in instance values (40 lines: timestamps, pids, XPC id, `TERM`, ms timings, the body size and SHA they move); `review-devicectl.txt` shows the device available; `review-face-matching.txt` is new content and was promoted to `capture/`.
 
-The device was re-run with `run-device.sh 08452DF6-…` (sources unchanged since the canonical run, so the installed app was reused; the script only launches and copies). Its report differs from the canonical device report in instance values only — timestamp, pid, `TERM`, XPC id, the ms timings, and the `st_dev` volume number of section 1, which moved 822083585 → 838860801 with a remount; every count is the same and `READ-BACK` is OK. With timings normalised, its sections 8 to 10 are byte-identical to the canonical device report's, and against the canonical simulator report they differ exactly in the ways §7 documents. B6's and A6's §7 and §8 claims all hold again.
+The device was re-run with `run-device.sh <device>` (sources unchanged since the canonical run, so the installed app was reused; the script only launches and copies). Its report differs from the canonical device report in instance values only — timestamp, pid, `TERM`, XPC id, the ms timings, and the `st_dev` volume number of section 1, which moved 822083585 → 838860801 with a remount; every count is the same and `READ-BACK` is OK. With timings normalised, its sections 8 to 10 are byte-identical to the canonical device report's, and against the canonical simulator report they differ exactly in the ways §7 documents. B6's and A6's §7 and §8 claims all hold again.
 
 ## 5. Defects found in round B7, and fixes
 

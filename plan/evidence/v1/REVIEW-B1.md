@@ -8,7 +8,7 @@ Round B1 reviewed the whole piece of work (the worker's build round plus round A
 
 - Simulator iPhone 17 Pro `E33474EA-1897-4EF8-9DFB-DD3FFA178C8D`, iOS 26.5 (23F77), only installed runtime — unchanged.
 - Xcode 26.6 (17F113) — unchanged.
-- **Paired iPhone "SeaEl iPhone" (iPhone 12 Pro) was still `unavailable` per `xcrun devicectl list devices`, so the §7 device recipe was NOT run — the device half of V1 stays open.** The §7 commands were sanity-checked against `devicectl device install/process launch/copy from --help` (all flags exist as written).
+- **The paired acceptance iPhone (iPhone 12 Pro) was still `unavailable` per `xcrun devicectl list devices`, so the §7 device recipe was NOT run — the device half of V1 stays open.** The §7 commands were sanity-checked against `devicectl device install/process launch/copy from --help` (all flags exist as written).
 
 ## 2. Everything re-run, with results
 
@@ -62,6 +62,6 @@ Round B1 reviewed the whole piece of work (the worker's build round plus round A
 
 ## 6. Open items after round B1
 
-- §7 device run on "SeaEl iPhone" — not run, device unavailable; V1's device half stays open.
+- §7 device run on the acceptance iPhone — not run, device unavailable; V1's device half stays open.
 - FX-3: decide hiding the 92 dot-named families in `list_fonts` presentation.
 - The plan: choose the bundled CJK font(s) for Simplified/Traditional Chinese.

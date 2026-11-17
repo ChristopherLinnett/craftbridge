@@ -7,7 +7,7 @@ EffectCraft was not re-read beyond what RESULT cites; nothing in this round turn
 ## 1. Environment and starting state
 
 - The simulator is iPhone 17 Pro `E33474EA-1897-4EF8-9DFB-DD3FFA178C8D`: booted, iOS 26.5 (23F77). Third-party apps before and after the round are `com.craftbridge.FontProbe` and `com.example.orchestratorFlutter`. FontProbe stayed installed (`run-sim.sh` reinstalls it), the other app was not touched, and the simulator was left booted.
-- **Device: "SeaEl iPhone" (iPhone 12 Pro) is `unavailable`.** The check capture is byte-identical to the canonical one.
+- **Device: the acceptance iPhone (iPhone 12 Pro) is `unavailable`.** The check capture is byte-identical to the canonical one.
 - I hashed the 17 canonical files (`capture/review-*`, `sandbox-canary.txt`) before the round and checked them again after it: all 17 unchanged. All 22 SHA-256 values in §8 matched before any edit; this round changed none of those files.
 
 ## 2. Round B4's claims and fixes, checked
@@ -83,7 +83,7 @@ Those folders register 263 files where CoreText offers 103, which is a display q
 
 ## 7. Open items
 
-- **Device half of V1:** "SeaEl iPhone" is still `unavailable`; §7's recipe stands.
+- **Device half of V1:** the acceptance iPhone is still `unavailable`; §7's recipe stands.
 - **FX-3, what `list_fonts` shows:** the 92 dot-named and 133 extra visible families. Not decided.
 - **The bundled CJK font:** the owner's call. §4's noto-cjk proposal stands. The family names inside the files and the fallback drawing with them stay unverified until the files are downloaded.
 

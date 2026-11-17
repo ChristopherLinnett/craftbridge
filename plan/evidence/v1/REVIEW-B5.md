@@ -7,7 +7,7 @@ EffectCraft was read only at the pinned rev `103760584a60074c9aaeef686d2d05d89f0
 ## 1. Environment and starting state
 
 - The simulator is iPhone 17 Pro `E33474EA-1897-4EF8-9DFB-DD3FFA178C8D`: booted, iOS 26.5 (23F77), Xcode 26.6 (Build 17F113). `simctl list runtimes` shows that one runtime only (§6). Third-party apps before and after: `com.craftbridge.FontProbe` and `com.example.orchestratorFlutter`; FontProbe stayed installed (`run-sim.sh` reinstalls it), the other app was untouched, the simulator was left booted.
-- **Device: "SeaEl iPhone" (iPhone 12 Pro) is still `unavailable`.** B5's `devicectl` capture reproduced `capture/review-devicectl.txt` byte-identically.
+- **Device: the acceptance iPhone (iPhone 12 Pro) is still `unavailable`.** B5's `devicectl` capture reproduced `capture/review-devicectl.txt` byte-identically.
 - All 22 SHA-256 values §8 lists matched before anything was touched (the 20 source files, the canonical report/stdout pair `f2844cb0…`, `review-host-checks.txt` `20cf25df…`). The kept run reports match their recorded hashes: `a1-run` `e05f2b64…`, `b1-run` `a4694a8f…`, `a2-run` `4c544c06…`, `a3-run` `0e8b07f0…`, and `a4-check` `952f17c2…`.
 - The 17 canonical files (`capture/review-*`, `sandbox-canary.txt`) were hashed before the round and `shasum -c` verified after it: all 17 unchanged.
 
@@ -72,7 +72,7 @@ Those folders register 263 files where CoreText offers 103, which is a display q
 
 ## 7. Open items
 
-- **Device half of V1:** "SeaEl iPhone" is still `unavailable`; §7's recipe stands (with the 257/260 reading of section 7).
+- **Device half of V1:** the acceptance iPhone is still `unavailable`; §7's recipe stands (with the 257/260 reading of section 7).
 - **FX-3, what `list_fonts` shows:** the 92 dot-named and the 133 extra visible families. Not decided.
 - **The bundled CJK font:** the owner's call. §4's noto-cjk proposal stands; the family names inside the files and the fallback drawing with them stay unverified until the files are downloaded.
 

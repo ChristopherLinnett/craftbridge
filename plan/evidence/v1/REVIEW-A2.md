@@ -6,7 +6,7 @@ Round A2 re-ran everything round B1 claimed or fixed, reviewed the whole investi
 
 - Simulator iPhone 17 Pro `E33474EA-1897-4EF8-9DFB-DD3FFA178C8D`, booted, iOS 26.5 (23F77) the only runtime; Xcode 26.6 (17F113). `CARGO_TARGET_DIR` unset, no `~/.cargo/config*`.
 - Before the round, the simulator had two third-party apps: `com.craftbridge.FontProbe` and `com.example.orchestratorFlutter`. FontProbe is still installed (`run-sim.sh` reinstalls it); the other app was not touched; the simulator was left booted.
-- **Device: `xcrun devicectl list devices` shows "SeaEl iPhone" (iPhone 12 Pro, iPhone13,3, `08452DF6-1739-55D5-8C38-622DEDB24E5E`) as `unavailable`** (`capture/review-devicectl.txt`). Nothing was installed or run on a device.
+- **Device: `xcrun devicectl list devices` shows the acceptance iPhone (iPhone 12 Pro, iPhone13,3, `<device>`) as `unavailable`** (`capture/review-devicectl.txt`). Nothing was installed or run on a device.
 
 ## 2. Round B1's claims and fixes, re-run
 
@@ -61,7 +61,7 @@ Also strengthened, not a defect: the `hvgl` finding now cites why EffectCraft ca
 
 ## 5. Open items
 
-- **Device half of V1:** "SeaEl iPhone" was `unavailable`. Nothing was run on a device; the owner decides when to run §7. The device report will also show whether the walk can read the 160 files CoreText does not list.
+- **Device half of V1:** the acceptance iPhone was `unavailable`. Nothing was run on a device; the owner decides when to run §7. The device report will also show whether the walk can read the 160 files CoreText does not list.
 - **FX-3, what `list_fonts` shows** (not decided): the 92 dot-named families and the 133 families iOS does not offer apps (RESULT §3 lists them; section 9 of the report names all of them). The data supports two concrete options, both leaving all faces registered for fallback: hide names that start with a dot, and/or show only faces whose file is among CoreText's 103 (`FaceInfo.data` is `FaceData::File(path)` and `FontSource` is a public trait, so a source can filter `DirectorySource`'s faces by path).
 - **The plan, the bundled CJK font** (not decided): RESULT §4 now proposes noto-cjk's `NotoSansSC-Regular.otf` (8,331,336 B) and `NotoSansTC-Regular.otf` (5,683,368 B), 14.0 MB, SIL OFL 1.1, families on EffectCraft's Simplified and Traditional lists, with the alternatives, their sizes, the Hong Kong caveat and the check to run once the files are downloaded. Downloading them is the owner's call; round A2 downloaded no font.
 

@@ -72,7 +72,7 @@ Measured with a test app's 45-second and 660-second exports on emulator images o
 | D-19 · JNA cannot pass a JNI environment; `NativeWindow::from_surface` needs one | UniFFI Kotlin uses JNA (`evidence/05-mobile-platforms.md` Finding 6); `ndk` `native_window.rs` (Finding 4) | 2026-11-12 | true |
 | D-20 · UniFFI scaffolding needs `unsafe` allowed | uniffi-rs `setup_scaffolding.rs`, `util.rs`; rustc `report_unsafe` (`evidence/05-mobile-platforms.md` Finding 7) | 2026-11-12 | true (read from source; not compiled) |
 | D-21 · `[patch]` applies only at the root workspace; EffectCraft patches hayro and the egui family | Cargo's documented behaviour; `Cargo.toml:223-239` @ `10376058` | 2026-11-12 | true |
-| D-22 · the active `gh` account is ChristopherCfly; ChristopherLinnett's token has `repo` and `workflow`, not `write:packages` | `gh auth status` | 2026-11-12 | true |
+| D-22 · the active `gh` login is another account; ChristopherLinnett's token has `repo` and `workflow`, not `write:packages` | `gh auth status` | 2026-11-12 | true |
 | D-23 · additive changes are minor, breaking major | design choice (B4, B5) | 2026-11-12 | decided |
 | The CLI's document capabilities run on iOS and Android | `analysis/device-probe/conformance-*.log` | 2026-11-12 | true |
 | CPU frames are byte-identical across macOS, iOS and Android | `cmp` of `out-*/cpu.png` and a 60-frame PNG sequence | 2026-11-12 | true |

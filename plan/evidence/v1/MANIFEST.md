@@ -1,7 +1,7 @@
 # V1 evidence: files kept outside the repository
 
 `v1/` holds the text evidence `RESULT.md` cites, copied from `/tmp/craftbridge-v1` (which macOS clears at restart) so the plan record survives. The probe sources here are V1's own measurement code, a record of what ran, not CraftBridge's code.
-Each file below is cited too but not committed; its copy is in `~/dev/artcraft-dev/craftbridge-work-archive/v1/`, at the same path, with this SHA-256.
+Each file below is cited too but not committed; its copy is in the owner's work archive outside the repository, `<archive>/v1/`, at the same path, with this SHA-256.
 
 | File | Bytes | SHA-256 | Why not committed |
 |---|---|---|---|

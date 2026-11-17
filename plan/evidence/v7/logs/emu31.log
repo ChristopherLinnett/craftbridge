@@ -1,6 +1,6 @@
 INFO         | Android emulator version 37.2.12.0 (build_id 16428233) (CL:N/A)
 INFO         | Graphics backend: gfxstream
-INFO         | Found systemPath /Users/christopherlinnett/Library/Android/sdk/system-images/android-31/google_apis/arm64-v8a/
+INFO         | Found systemPath $HOME/Library/Android/sdk/system-images/android-31/google_apis/arm64-v8a/
 INFO         | Saving last run QEMU version for the AVD to 2
 WARNING      | Please update the emulator to one that supports the feature(s): Vulkan
 INFO         | Guest GLES Driver: Auto (ext controls)
@@ -12,14 +12,14 @@ INFO         |   Checking: hasSufficientHwGpu
 INFO         |      Ok: Hardware GPU compatibility checks are not required
 INFO         |   Checking: hasSufficientSystem
 INFO         |      Ok: System requirements to run avd: `Pixel_6_API_31` are met
-INFO         | Storing crashdata in: /tmp/android-christopherlinnett/emu-crash-37.2.12.db, detection is enabled for process: 95200
+INFO         | Storing crashdata in: /tmp/android-$USER/emu-crash-37.2.12.db, detection is enabled for process: 95200
 INFO         | Initializing gfxstream backend
 INFO         | startOpenglesRendererImpl: gpu info
 INFO         | 
 INFO         | initIcdPaths: ICD set to 'lavapipe', using Lavapipe ICD
-INFO         | Setting ICD filenames for the loader = /Users/christopherlinnett/Library/Android/sdk/emulator/lib64/vulkan/lvp_icd.json
-INFO         | SharedLibrary::open for [/Users/christopherlinnett/Library/Android/sdk/emulator/qemu/darwin-aarch64/lib64/vulkan/libvulkan.dylib]
-INFO         | Added library: /Users/christopherlinnett/Library/Android/sdk/emulator/qemu/darwin-aarch64/lib64/vulkan/libvulkan.dylib
+INFO         | Setting ICD filenames for the loader = $HOME/Library/Android/sdk/emulator/lib64/vulkan/lvp_icd.json
+INFO         | SharedLibrary::open for [$HOME/Library/Android/sdk/emulator/qemu/darwin-aarch64/lib64/vulkan/libvulkan.dylib]
+INFO         | Added library: $HOME/Library/Android/sdk/emulator/qemu/darwin-aarch64/lib64/vulkan/libvulkan.dylib
 INFO         | Enabling Vulkan portability.
 INFO         | Selecting Vulkan device: llvmpipe (LLVM 21.1.4, 128 bits), Version: 1.4.330
 INFO         | Using Vulkan externalMemoryMode: OpaqueFd for VkEmulation
@@ -44,7 +44,7 @@ INFO         | Graphics API Version OpenGL ES 3.0 (OpenGL ES 3.1.0 (ANGLE 2.1.1 
 INFO         | Graphics API Extensions GL_OES_EGL_sync GL_OES_EGL_image GL_OES_EGL_image_external GL_OES_depth24 GL_OES_depth32 GL_OES_element_index_uint GL_OES_texture_float GL_OES_texture_float_linear GL_OES_compressed_paletted_texture GL_OES_compressed_ETC1_RGB8_texture GL_OES_depth_texture GL_OES_texture_half_float GL_OES_texture_half_float_linear GL_OES_packed_depth_stencil GL_OES_vertex_half_float GL_OES_standard_derivatives GL_OES_texture_npot GL_OES_rgb8_rgba8 GL_OVR_multiview2 GL_EXT_color_buffer_float GL_EXT_color_buffer_half_float GL_EXT_texture_format_BGRA8888 GL_APPLE_texture_format_BGRA8888 GL_EXT_draw_buffers_indexed GL_EXT_clip_cull_distance 
 INFO         | Graphics Device Extensions N/A
 INFO         | Disabling sparse binding feature support
-INFO         | Sending adb public key [QAAAAMfsSScJ65QpHJj/8y4nhztbGVFlv4/WgazYmxy8Pkl76+BHWiMdvnZWrNK1urXrYr3H6MLLJU8S20zEpGo3gQ+NM59O1X4kF9BETKFluygO8tzXcJsV06rY5ewXYFLhbAlGUM0FUp2skbA0UDp71d43KLMVevJwiiLpOBYsL7WbZ2HKvq6fm/klPrwuWEtBdEhGPXCgpx4C4f3HmvS1ZUiDGFaD3dfitcP9n/fsJv65aYAGZH5sxn0cTLQ3PF2VE2No/xeWahcZcRAQypjhAOamv48yrx+rSMJ9KWAKdm8w1zO6marlE7em/L13Y+FWmK/vobVzlCVlaooIrJuMer75h5Gd8HNNIrN9DtNg+c20GWWj5WfqbK2mSEGIFmOrq2JopewaNVnuzRoqBEijqNwCBtBce2WZ14z9TzGPySihL2s+Hs85QijXquwTMqRUgsLU3sZCu2r+nUmwARFJAJ7s8CzTKjaTm1zG3AQ6BP37Gf4xvowSKamon5Kovssg4C2J16M0IKgyWurswmhhlJmL+VEBfxHDxrN/MiM6loVVQVS2qkpYQO1Ou6PksEFj7E7/QGGw2QLRHAPMYtPzJ9zhuE3kFTf50BM/YASZAoCRcMlPkQt1ljBIcV7AeP1BkWRmnR5FPYzkSyl0huyoGJLYwJmu9pMDggnDrvqFZJmXaE1EAgEAAQA= christopherlinnett@unknown]
+INFO         | Sending adb public key [<adb key> $USER@unknown]
 INFO         | Userspace boot properties:
 INFO         |   androidboot.boot_devices=a003600.virtio_mmio
 INFO         |   androidboot.dalvik.vm.heapsize=512m
@@ -56,7 +56,7 @@ INFO         |   androidboot.hardware.vulkan=ranchu
 INFO         |   androidboot.logcat=*:V
 INFO         |   androidboot.opengles.version=196609
 INFO         |   androidboot.qemu=1
-INFO         |   androidboot.qemu.adb.pubkey=QAAAAMfsSScJ65QpHJj/8y4nhztbGVFlv4/WgazYmxy8Pkl76+BHWiMdvnZWrNK1urXrYr3H6MLLJU8S20zEpGo3gQ+NM59O1X4kF9BETKFluygO8tzXcJsV06rY5ewXYFLhbAlGUM0FUp2skbA0UDp71d43KLMVevJwiiLpOBYsL7WbZ2HKvq6fm/klPrwuWEtBdEhGPXCgpx4C4f3HmvS1ZUiDGFaD3dfitcP9n/fsJv65aYAGZH5sxn0cTLQ3PF2VE2No/xeWahcZcRAQypjhAOamv48yrx+rSMJ9KWAKdm8w1zO6marlE7em/L13Y+FWmK/vobVzlCVlaooIrJuMer75h5Gd8HNNIrN9DtNg+c20GWWj5WfqbK2mSEGIFmOrq2JopewaNVnuzRoqBEijqNwCBtBce2WZ14z9TzGPySihL2s+Hs85QijXquwTMqRUgsLU3sZCu2r+nUmwARFJAJ7s8CzTKjaTm1zG3AQ6BP37Gf4xvowSKamon5Kovssg4C2J16M0IKgyWurswmhhlJmL+VEBfxHDxrN/MiM6loVVQVS2qkpYQO1Ou6PksEFj7E7/QGGw2QLRHAPMYtPzJ9zhuE3kFTf50BM/YASZAoCRcMlPkQt1ljBIcV7AeP1BkWRmnR5FPYzkSyl0huyoGJLYwJmu9pMDggnDrvqFZJmXaE1EAgEAAQA= christopherlinnett@unknown
+INFO         |   androidboot.qemu.adb.pubkey=<adb key> $USER@unknown
 INFO         |   androidboot.qemu.avd_name=Pixel_6_API_31
 INFO         |   androidboot.qemu.camera_hq_edge_processing=0
 INFO         |   androidboot.qemu.camera_protocol_ver=1

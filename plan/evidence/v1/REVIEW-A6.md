@@ -7,7 +7,7 @@ Work was alone. No font was downloaded, no GitHub request was made, no git state
 ## 1. Environment and starting state
 
 - **Simulator:** iPhone 17 Pro, booted, iOS 26.5. Its apps before and after the round: FontProbe and `com.example.orchestratorFlutter`. FontProbe was reinstalled by `run-sim.sh`; the other app was not touched.
-- **Device:** at the start of this round `xcrun devicectl list devices` showed "SeaEl iPhone" as **`unavailable`** again. `devicectl device info apps` could not find it either. So this round did not re-run the device. Its device checks rest on the two device runs already captured: the canonical run and B6's `capture/b6-check/`. Nothing was sent to the phone.
+- **Device:** at the start of this round `xcrun devicectl list devices` showed the acceptance iPhone as **`unavailable`** again. `devicectl device info apps` could not find it either. So this round did not re-run the device. Its device checks rest on the two device runs already captured: the canonical run and B6's `capture/b6-check/`. Nothing was sent to the phone.
 - The canonical captures (`capture/review-*`, `sandbox-canary.txt`, `capture/device-*`) were hashed before the round. After it they were unchanged, apart from the one capture this round added (§4).
 
 ## 2. The device addition and B6's claims, checked
@@ -71,7 +71,7 @@ Compared with `capture/`:
 
 - **FX-3's `list_fonts` filter:** match by family name, by file, or something else, given §4's numbers. It is FX-3's to choose, within the owner's decision.
 - **The bundled fonts:** the family names inside the two Noto files, and the fallback drawing with them, are unverified until FX-3 fetches the files (§4).
-- **Device re-runs:** possible only when "SeaEl iPhone" is connected again; it was `unavailable` during this round.
+- **Device re-runs:** possible only when the acceptance iPhone is connected again; it was `unavailable` during this round.
 
 ## 8. Outside the workspace
 

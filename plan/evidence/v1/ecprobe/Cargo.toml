@@ -11,7 +11,7 @@ publish = false
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-effectcraft-text = { git = "file:///Users/christopherlinnett/dev/artcraft-dev/effectcraft/repository", rev = "103760584a60074c9aaeef686d2d05d89f08155e" }
+effectcraft-text = { git = "file://$HOME/dev/artcraft-dev/effectcraft/repository", rev = "103760584a60074c9aaeef686d2d05d89f08155e" }
 # Only the fallbackcost example needs it, to read each face's cmap for sample characters; the
 # answers themselves come from effectcraft-text's public API. Same version effectcraft-text pins.
 skrifa = "0.44"
