@@ -8,11 +8,14 @@
 # given the folder the same way.
 #
 #   sides = "both" | "oracle" | "plugin"   which sides run it; both by default
-#   [[scenario.fixture]]     from (relative to this file), to (in each side's folder): a file it starts with
+#   [[scenario.fixture]]     from (relative to this file), to (in each side's folder): a file it starts with;
+#                            names_container: its text says <container> where the side's folder goes
 #   fails = true             on a step: the command line ends it with a failure status and prints its answer
 #   [scenario.step.host]     plugins (the plug-in folder the app names, relative to the container), gpu
 #                            (the app is handed the machine's GPU)
-#   [[scenario.step.call]]   kind = "request": method, params, files (a parameter read from a file)
+#   [[scenario.step.call]]   kind = "request": method, params, files (a parameter read from a file), progress
+#                            (the call is one that reports progress, as `export` and `template.render` are;
+#                            cancel_at, a fraction of its frames, is where the listener stops it)
 #                            kind = "frame": params, format = "png" | "rgba8", out
 #                            kind = "mcp": every line of stdin, each reply printed
 #   [[scenario.expect]]      step, output, pointer (RFC 6901), equals or length: a value in a JSON document
@@ -24,10 +27,15 @@
 #                            document a string holds)
 #                            kind = "timings": the same runs, layers, effects and playback were timed, no
 #                            measurement compared
-#   [[scenario.compare]]     kind = "identical": two files are byte for byte the same
+#   [[scenario.folder]]      path (`.` is the side's folder), holds: the names the folder holds when the steps
+#                            are done, on every side that ran, and no others; names that start with a dot
+#                            are the side's own working files
+#   [[scenario.compare]]     kind = "identical": two files are byte for byte the same, or two folders hold
+#                            the same files with the same bytes
 #                            kind = "frames": two decoded images or movies have the same size and, for two
 #                            movies, frame count, and every frame is within 40 dB PSNR of its counterpart
-#                            (D-12); actual_frame / reference_frame pick the one frame compared
+#                            (D-12), or with exact every frame is the same pixel for pixel;
+#                            actual_frame / reference_frame pick the one frame compared
 #                            kind = "pixels": two PNGs' straight RGBA pixels, each within tolerance levels
 #                            in all but allowed_fraction of the pixels and none past cap
 #                            kind = "json": two files are the same JSON document
@@ -301,19 +309,342 @@ tolerance = 1
 allowed_fraction = 0.003
 cap = 4
 
+# The exports below are short, since the gate runs them for every change to the plug-in and the plug-in
+# renders in the runner's debug build. Those of the demo project are the quarter second from 1 s at a
+# quarter of its size, bar T9's two seconds at half, which are the plan's, and T22's, which says why. The
+# span and the size are where the comparison sees a setting the plug-in passes wrongly: the demo's first
+# half second is smooth text on a gradient, over which a VP9 or AV1 export held to 50 kbps comes within
+# D-12 of the oracle's, as an HEVC one does at a tenth of the size; from 1 s it draws rings and ticks, and
+# none does. Each export is held to what plan §28 asks of it, a video to D-12 against the oracle's own
+# file, frame by frame, with the same frame count and size; and the answer to `export` is the one
+# `render --json` prints, bar the seconds the render took.
 [[scenario]]
 id = "T9"
-title = "export H.264, demo, 2 s, half resolution: frame 30 is within D-12 of the oracle's own frame"
-sides = "oracle"
+title = "export H.264, demo, 2 s, half resolution: every frame within D-12 of the oracle's"
 [[scenario.step]]
-args = ["render", "--out", "export.mp4", "--format", "h264", "--end", "2", "--resolution", "half"]
-[[scenario.step]]
-args = ["render-frame", "--frame", "30", "--max-side", "960", "--out", "frame30.png"]
+args = ["render", "--json", "--out", "<container>/export.mp4", "--format", "h264", "--end", "2", "--resolution", "half"]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [{ command = "file.openDemoProject" }] }
+[[scenario.step.call]]
+kind = "request"
+method = "export"
+params = { output = "<container>/export.mp4", format = "h264", end = 2, resolution = "half" }
+progress = {}
+[[scenario.expect]]
+step = 0
+pointer = "/rendered"
+length = 1
+[[scenario.same]]
+kind = "output"
+step = 0
+omit = ["/rendered/0/seconds"]
 [[scenario.compare]]
 kind = "frames"
 actual = "export.mp4"
-actual_frame = 30
-reference = "frame30.png"
+reference = "export.mp4"
+
+[[scenario]]
+id = "T10"
+title = "export HEVC: every frame within D-12 of the oracle's"
+[[scenario.step]]
+args = ["render", "--json", "--out", "<container>/export.mp4", "--format", "hevc", "--start", "1", "--end", "1.25", "--resolution", "quarter"]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [{ command = "file.openDemoProject" }] }
+[[scenario.step.call]]
+kind = "request"
+method = "export"
+params = { output = "<container>/export.mp4", format = "hevc", start = 1, end = 1.25, resolution = "quarter" }
+progress = {}
+[[scenario.same]]
+kind = "output"
+step = 0
+omit = ["/rendered/0/seconds"]
+[[scenario.compare]]
+kind = "frames"
+actual = "export.mp4"
+reference = "export.mp4"
+
+[[scenario]]
+id = "T11"
+title = "export WebM (VP9) and AV1: every frame within D-12 of the oracle's"
+[[scenario.step]]
+args = ["render", "--json", "--out", "<container>/vp9.webm", "--format", "webm", "--webm-codec", "vp9", "--start", "1", "--end", "1.25", "--resolution", "quarter"]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [{ command = "file.openDemoProject" }] }
+[[scenario.step.call]]
+kind = "request"
+method = "export"
+params = { output = "<container>/vp9.webm", format = "webm", webmCodec = "vp9", start = 1, end = 1.25, resolution = "quarter" }
+progress = {}
+[[scenario.step]]
+args = ["render", "--json", "--out", "<container>/av1.webm", "--format", "webm", "--webm-codec", "av1", "--start", "1", "--end", "1.25", "--resolution", "quarter"]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [{ command = "file.openDemoProject" }] }
+[[scenario.step.call]]
+kind = "request"
+method = "export"
+params = { output = "<container>/av1.webm", format = "webm", webmCodec = "av1", start = 1, end = 1.25, resolution = "quarter" }
+progress = {}
+[[scenario.same]]
+kind = "output"
+step = 0
+omit = ["/rendered/0/seconds"]
+[[scenario.same]]
+kind = "output"
+step = 1
+omit = ["/rendered/0/seconds"]
+[[scenario.compare]]
+kind = "frames"
+actual = "vp9.webm"
+reference = "vp9.webm"
+[[scenario.compare]]
+kind = "frames"
+actual = "av1.webm"
+reference = "av1.webm"
+
+[[scenario]]
+id = "T12"
+title = "export ProRes (standard profile): every frame within D-12 of the oracle's"
+[[scenario.step]]
+args = ["render", "--json", "--out", "<container>/export.mov", "--format", "prores", "--prores", "standard", "--start", "1", "--end", "1.25", "--resolution", "quarter"]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [{ command = "file.openDemoProject" }] }
+[[scenario.step.call]]
+kind = "request"
+method = "export"
+params = { output = "<container>/export.mov", format = "prores", prores = "standard", start = 1, end = 1.25, resolution = "quarter" }
+progress = {}
+[[scenario.same]]
+kind = "output"
+step = 0
+omit = ["/rendered/0/seconds"]
+[[scenario.compare]]
+kind = "frames"
+actual = "export.mov"
+reference = "export.mov"
+
+[[scenario]]
+id = "T13"
+title = "export a PNG sequence: the same files, byte for byte"
+[[scenario.step]]
+args = ["render", "--json", "--out", "<container>/seq/frame.png", "--format", "png", "--start", "1", "--end", "1.25", "--resolution", "quarter"]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [{ command = "file.openDemoProject" }] }
+[[scenario.step.call]]
+kind = "request"
+method = "export"
+params = { output = "<container>/seq/frame.png", format = "png", start = 1, end = 1.25, resolution = "quarter" }
+progress = {}
+[[scenario.same]]
+kind = "output"
+step = 0
+omit = ["/rendered/0/seconds"]
+[[scenario.compare]]
+kind = "identical"
+actual = "seq"
+reference = "seq"
+
+[[scenario]]
+id = "T14"
+title = "export GIF: identical decoded frames"
+[[scenario.step]]
+args = ["render", "--json", "--out", "<container>/export.gif", "--format", "gif", "--start", "1", "--end", "1.25", "--resolution", "quarter"]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [{ command = "file.openDemoProject" }] }
+[[scenario.step.call]]
+kind = "request"
+method = "export"
+params = { output = "<container>/export.gif", format = "gif", start = 1, end = 1.25, resolution = "quarter" }
+progress = {}
+[[scenario.same]]
+kind = "output"
+step = 0
+omit = ["/rendered/0/seconds"]
+[[scenario.compare]]
+kind = "frames"
+actual = "export.gif"
+reference = "export.gif"
+exact = true
+
+[[scenario]]
+id = "T15"
+title = "export WAV: the same audio, byte for byte"
+# The demo project's audio is silence, which any writer reproduces: the comp is a tone, so a mix that is
+# wrong in any sample differs. `layer.addItem` takes the item the import answers with, the first the
+# project holds after its own comp.
+[[scenario.fixture]]
+from = "fixtures/tone.wav"
+to = "tone.wav"
+[[scenario.step]]
+args = [
+  "run", "--json", "--empty",
+  "comp.new", '{"name":"Tone","width":64,"height":48,"duration":0.5,"frameRate":10}',
+  "file.import", '{"paths":["<container>/tone.wav"]}',
+  "layer.addItem", '{"comp":1,"item":2}',
+  "file.save", '{"path":"<container>/tone.ecproj"}',
+]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [
+  { command = "comp.new", params = { name = "Tone", width = 64, height = 48, duration = 0.5, frameRate = 10 } },
+  { command = "file.import", params = { paths = ["<container>/tone.wav"] } },
+  { command = "layer.addItem", params = { comp = 1, item = 2 } },
+  { command = "file.save", params = { path = "<container>/tone.ecproj" } },
+] }
+[[scenario.step]]
+args = ["render", "--json", "--project", "<container>/tone.ecproj", "--out", "<container>/export.wav", "--format", "wav"]
+[[scenario.step.call]]
+kind = "request"
+method = "open"
+params = { path = "<container>/tone.ecproj" }
+[[scenario.step.call]]
+kind = "request"
+method = "export"
+params = { output = "<container>/export.wav", format = "wav" }
+progress = {}
+[[scenario.same]]
+kind = "output"
+step = 1
+omit = ["/rendered/0/seconds"]
+[[scenario.compare]]
+kind = "identical"
+actual = "export.wav"
+reference = "export.wav"
+
+[[scenario]]
+id = "T16"
+title = "export with queue: the project's own queue, each item within D-12 of the oracle's and the unticked one not rendered"
+# Three items on the demo project's comp: H.264, a PNG that is unticked, and VP9.
+[[scenario.step]]
+args = [
+  "run", "--json",
+  "renderQueue.add", '{"comp":"EffectCraft Intro","output":"<container>/out/first.mp4","format":"h264","start":1,"end":1.25,"resolution":"quarter"}',
+  "renderQueue.add", '{"comp":"EffectCraft Intro","output":"<container>/out/unticked.png","format":"png","start":1,"end":1.25,"resolution":"quarter"}',
+  "renderQueue.setRender", '{"index":2,"render":false}',
+  "renderQueue.add", '{"comp":"EffectCraft Intro","output":"<container>/out/third.webm","format":"webm","start":1,"end":1.25,"resolution":"quarter"}',
+  "file.save", '{"path":"<container>/q.ecproj"}',
+]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [
+  { command = "file.openDemoProject" },
+  { command = "renderQueue.add", params = { comp = "EffectCraft Intro", output = "<container>/out/first.mp4", format = "h264", start = 1, end = 1.25, resolution = "quarter" } },
+  { command = "renderQueue.add", params = { comp = "EffectCraft Intro", output = "<container>/out/unticked.png", format = "png", start = 1, end = 1.25, resolution = "quarter" } },
+  { command = "renderQueue.setRender", params = { index = 2, render = false } },
+  { command = "renderQueue.add", params = { comp = "EffectCraft Intro", output = "<container>/out/third.webm", format = "webm", start = 1, end = 1.25, resolution = "quarter" } },
+  { command = "file.save", params = { path = "<container>/q.ecproj" } },
+] }
+[[scenario.step]]
+args = ["render", "--json", "--project", "<container>/q.ecproj", "--queue"]
+[[scenario.step.call]]
+kind = "request"
+method = "open"
+params = { path = "<container>/q.ecproj" }
+[[scenario.step.call]]
+kind = "request"
+method = "export"
+params = { queue = true }
+progress = {}
+[[scenario.expect]]
+step = 1
+pointer = "/rendered"
+length = 2
+[[scenario.same]]
+kind = "output"
+step = 1
+omit = ["/rendered/0/seconds", "/rendered/1/seconds"]
+[[scenario.folder]]
+path = "out"
+holds = ["first.mp4", "third.webm"]
+[[scenario.compare]]
+kind = "frames"
+actual = "out/first.mp4"
+reference = "out/first.mp4"
+[[scenario.compare]]
+kind = "frames"
+actual = "out/third.webm"
+reference = "out/third.webm"
+
+[[scenario]]
+id = "T17"
+title = "template.render: the running example's frame byte for byte and its export within D-12 of the oracle's"
+# The running example in small: a Name text control and a Photo media control, made the way the plan's
+# `birthday-card` recipe makes one, on each side. The picture's item is the id the import answers with (66,
+# after the ids the solid and the text layer take), which both sides give alike. Name is "Sam" and Photo a
+# green picture, which the template's own red one is replaced by.
+[[scenario.fixture]]
+from = "fixtures/photo.png"
+to = "photo.png"
+[[scenario.fixture]]
+from = "fixtures/sam.png"
+to = "sam.png"
+[[scenario.fixture]]
+from = "fixtures/sam-values.json"
+to = "values.json"
+names_container = true
+[[scenario.step]]
+args = [
+  "run", "--json", "--empty",
+  "comp.new", '{"name":"Card","width":160,"height":90,"duration":2,"frameRate":10}',
+  "layer.newSolid", '{"comp":1,"name":"Bg","color":"#223344"}',
+  "layer.newText", '{"comp":1,"text":"Hello","name":"Name"}',
+  "file.import", '{"paths":["<container>/photo.png"]}',
+  "layer.addItem", '{"comp":1,"item":66}',
+  "essential.addProperty", '{"comp":1,"layer":"Name","path":"text/sourceText","name":"Name"}',
+  "essential.addMedia", '{"layer":"photo.png","name":"Photo"}',
+  "essential.exportTemplate", '{"comp":1,"path":"<container>/card.ectemplate"}',
+]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [
+  { command = "comp.new", params = { name = "Card", width = 160, height = 90, duration = 2, frameRate = 10 } },
+  { command = "layer.newSolid", params = { comp = 1, name = "Bg", color = "#223344" } },
+  { command = "layer.newText", params = { comp = 1, text = "Hello", name = "Name" } },
+  { command = "file.import", params = { paths = ["<container>/photo.png"] } },
+  { command = "layer.addItem", params = { comp = 1, item = 66 } },
+  { command = "essential.addProperty", params = { comp = 1, layer = "Name", path = "text/sourceText", name = "Name" } },
+  { command = "essential.addMedia", params = { layer = "photo.png", name = "Photo" } },
+  { command = "essential.exportTemplate", params = { comp = 1, path = "<container>/card.ectemplate" } },
+] }
+[[scenario.step]]
+args = ["render-frame", "--json", "--template", "<container>/card.ectemplate", "--values", "<container>/values.json", "--time", "1", "--out", "frame.png"]
+[[scenario.step.call]]
+kind = "frame"
+params = { template = "<container>/card.ectemplate", values = { Name = "Sam", Photo = "<container>/sam.png" }, frame = { time = 1 } }
+format = "png"
+out = "frame.png"
+[[scenario.step]]
+args = ["render", "--json", "--template", "<container>/card.ectemplate", "--values", "<container>/values.json", "--out", "<container>/card.mp4", "--format", "h264"]
+[[scenario.step.call]]
+kind = "request"
+method = "template.render"
+params = { template = "<container>/card.ectemplate", values = { Name = "Sam", Photo = "<container>/sam.png" }, output = { output = "<container>/card.mp4", format = "h264" } }
+progress = {}
+[[scenario.compare]]
+kind = "identical"
+actual = "frame.png"
+reference = "frame.png"
+[[scenario.compare]]
+kind = "frames"
+actual = "card.mp4"
+reference = "card.mp4"
 
 [[scenario]]
 id = "T18"
@@ -425,6 +756,48 @@ params = { time = 1, runs = 2, play = 2 }
 [[scenario.same]]
 kind = "timings"
 step = 0
+
+[[scenario]]
+id = "T22"
+title = "cancel an export at 50 %: Cancelled, and no output file left"
+sides = "plugin"
+# The command line stops a render only by its process being killed, so there is no oracle to compare. The
+# first step is the same export left alone, which writes its file: what the cancelled one leaves out would
+# have been there. The exporter renders frames in batches of at most 16 and looks for a stop after each,
+# and the listener answers at its first tenth-of-a-second beat past half the frames; a stop the exporter
+# meets only after its last batch finds the file written, and the file stays. Sixty frames leave a whole
+# batch after the one that passes half, and a batch at a quarter of the size takes many beats.
+[[scenario.step]]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [{ command = "file.openDemoProject" }] }
+[[scenario.step.call]]
+kind = "request"
+method = "export"
+params = { output = "<container>/control.mp4", format = "h264", end = 2, resolution = "quarter" }
+progress = {}
+[[scenario.step]]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [{ command = "file.openDemoProject" }] }
+[[scenario.step.call]]
+kind = "request"
+method = "export"
+params = { output = "<container>/cancelled.mp4", format = "h264", end = 2, resolution = "quarter" }
+progress = { cancel_at = 0.5 }
+[[scenario.expect]]
+step = 0
+pointer = "/rendered"
+length = 1
+[[scenario.expect]]
+step = 1
+pointer = "/kind"
+equals = "Cancelled"
+[[scenario.folder]]
+path = "."
+holds = ["control.mp4"]
 
 [[scenario]]
 id = "T24"

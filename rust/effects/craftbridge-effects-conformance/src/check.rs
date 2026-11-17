@@ -1,11 +1,12 @@
 //! Running one scenario on each side it names and checking what they produced.
 
-use crate::corpus::{Compare, Expect, Fixture, Same, Scenario};
+use crate::corpus::{Compare, Expect, Fixture, Folder, Same, Scenario, in_folder};
 use crate::documents::{difference, same, set_aside, stream, without_folder};
-use crate::frames::{Clip, conform, pixels};
+use crate::frames::{Clip, Closeness, NAMED, conform, pixels};
 use crate::oracle::{Outcome, Side};
 use crate::timings;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// The two sides a scenario may run on.
@@ -47,6 +48,7 @@ pub(crate) fn run(sides: &Sides, scenario: &Scenario, corpus: &Path) -> Vec<Stri
     for (name, side) in [("oracle", &oracle), ("plug-in", &plugin)] {
         if let Some(side) = side {
             failures.extend(scenario.expects.iter().filter_map(|expect| expected(expect, &side.outputs).map(|failure| format!("{name}: {failure}"))));
+            failures.extend(scenario.folders.iter().filter_map(|folder| held(folder, &side.folder).map(|failure| format!("{name}: {failure}"))));
         }
     }
     // A comparison holds the plug-in's files against the oracle's; a scenario that runs on one side alone
@@ -95,7 +97,68 @@ fn place(fixture: &Fixture, corpus: &Path, folder: &Path) -> Result<(), String> 
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent).map_err(|error| format!("cannot make {}: {error}", parent.display()))?;
     }
-    std::fs::copy(&from, &to).map(drop).map_err(|error| format!("cannot copy the fixture {} to {}: {error}", from.display(), to.display()))
+    let copied = |error: std::io::Error| format!("cannot copy the fixture {} to {}: {error}", from.display(), to.display());
+    if fixture.names_container {
+        let text = std::fs::read_to_string(&from).map_err(copied)?;
+        return std::fs::write(&to, in_folder(&text, folder)).map_err(copied);
+    }
+    std::fs::copy(&from, &to).map(drop).map_err(copied)
+}
+
+/// The failure of one folder rule, if the side's folder does not hold exactly the names it says: the
+/// entries not starting with a dot, which are the side's own working files.
+fn held(rule: &Folder, scratch: &Path) -> Option<String> {
+    let at = scratch.join(&rule.path);
+    let mut names = match names_in(&at) {
+        Ok(names) => names,
+        Err(error) => return Some(format!("{}: {error}", rule.path)),
+    };
+    let mut wanted = rule.holds.clone();
+    names.sort();
+    wanted.sort();
+    (names != wanted).then(|| format!("{} holds {names:?}, expected {wanted:?}", rule.path))
+}
+
+/// The names of what a folder holds, bar the entries whose name starts with a dot.
+fn names_in(folder: &Path) -> Result<Vec<String>, String> {
+    let entries = std::fs::read_dir(folder).map_err(|error| format!("cannot read {}: {error}", folder.display()))?;
+    let mut names = Vec::new();
+    for entry in entries {
+        let name = entry.map_err(|error| format!("cannot read {}: {error}", folder.display()))?.file_name().to_string_lossy().into_owned();
+        if !name.starts_with('.') {
+            names.push(name);
+        }
+    }
+    Ok(names)
+}
+
+/// The files of a folder by name with their bytes: what two folders are compared by. A name that is no
+/// file (a folder inside) is a failure, since nothing here compares one.
+fn files_in(folder: &Path) -> Result<BTreeMap<String, Vec<u8>>, String> {
+    let mut files = BTreeMap::new();
+    for name in names_in(folder)? {
+        let path = folder.join(&name);
+        let bytes = std::fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        files.insert(name, bytes);
+    }
+    Ok(files)
+}
+
+/// The failures of two folders that hold the same files with the same bytes.
+fn identical_folders(actual: &str, reference: &str, ours: &Path, theirs: &Path) -> Vec<String> {
+    let (ours, theirs) = match (files_in(ours), files_in(theirs)) {
+        (Ok(ours), Ok(theirs)) => (ours, theirs),
+        (Err(error), _) | (_, Err(error)) => return vec![error],
+    };
+    if ours.keys().ne(theirs.keys()) {
+        return vec![format!("{actual} holds {:?}, where {reference} holds {:?}", ours.keys().collect::<Vec<_>>(), theirs.keys().collect::<Vec<_>>())];
+    }
+    let differing: Vec<&String> = ours.iter().filter(|(name, bytes)| theirs.get(*name) != Some(*bytes)).map(|(name, _)| name).collect();
+    let mut failures: Vec<String> = differing.iter().take(NAMED).map(|name| format!("{actual}/{name} is not byte-identical to {reference}/{name}")).collect();
+    if differing.len() > NAMED {
+        failures.push(format!("{} more files in {actual} are not byte-identical to {reference}'s", differing.len() - NAMED));
+    }
+    failures
 }
 
 /// The failure of one expectation, if it does not hold.
@@ -176,15 +239,17 @@ fn compared(compare: &Compare, under_test: &Ran, oracle: &Ran) -> Vec<String> {
     let [name_ours, name_theirs] = compare.files();
     let (ours, theirs) = (under_test.folder.join(name_ours), oracle.folder.join(name_theirs));
     match compare {
+        Compare::Identical { actual, reference } if ours.is_dir() && theirs.is_dir() => identical_folders(actual, reference, &ours, &theirs),
         Compare::Identical { actual, reference } => match (std::fs::read(&ours), std::fs::read(&theirs)) {
             (Ok(ours), Ok(theirs)) if ours == theirs => Vec::new(),
             (Ok(_), Ok(_)) => vec![format!("{actual} is not byte-identical to {reference}")],
             (Err(error), _) => vec![format!("{actual}: {error}")],
             (_, Err(error)) => vec![format!("{reference}: {error}")],
         },
-        Compare::Frames { actual, reference, actual_frame, reference_frame } => match (Clip::open(&ours), Clip::open(&theirs)) {
+        Compare::Frames { actual, reference, actual_frame, reference_frame, exact } => match (Clip::open(&ours), Clip::open(&theirs)) {
             (Ok(ours), Ok(theirs)) => {
-                conform(&ours, &theirs, *actual_frame, *reference_frame).into_iter().map(|f| format!("{actual} against {reference}: {f}")).collect()
+                let closeness = if *exact { Closeness::Exact } else { Closeness::D12 };
+                conform(&ours, &theirs, *actual_frame, *reference_frame, closeness).into_iter().map(|f| format!("{actual} against {reference}: {f}")).collect()
             }
             (Err(error), _) | (_, Err(error)) => vec![error],
         },
@@ -247,7 +312,11 @@ mod tests {
                     Ok(text) => text.replace("<HERE>", &folder.display().to_string()).into_bytes(),
                     Err(_) => bytes.clone(),
                 };
-                std::fs::write(folder.join(name), bytes).map_err(|error| error.to_string())?;
+                let file = folder.join(name);
+                if let Some(parent) = file.parent() {
+                    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                }
+                std::fs::write(file, bytes).map_err(|error| error.to_string())?;
             }
             // The folder the step ran in is what a side's own output spells paths with.
             let stdout = self.stdout.replace("<HERE>", &folder.display().to_string());
@@ -476,6 +545,19 @@ mod tests {
     }
 
     #[test]
+    fn a_frames_comparison_that_is_exact_holds_every_pixel_where_d12_allows_a_level() {
+        let compare = |extra: &str| format!("[[scenario.compare]]\nkind = \"frames\"\nactual = \"a.png\"\nreference = \"b.png\"\n{extra}");
+        let png = |shade: u8| png_bytes(16, 16, |_, _| [shade; 3]);
+        let mut oracle = Fake::new("");
+        oracle.files = vec![("a.png", png(101)), ("b.png", png(100))];
+        assert!(alone(&oracle, &scenario("oracle", &compare(""))).is_empty(), "one level is far above 40 dB");
+        let failures = alone(&oracle, &scenario("oracle", &compare("exact = true")));
+        assert_eq!(failures, ["a.png against b.png: frame 0 is not the reference's frame 0, pixel for pixel"]);
+        oracle.files = vec![("a.png", png(100)), ("b.png", png(100))];
+        assert!(alone(&oracle, &scenario("oracle", &compare("exact = true"))).is_empty());
+    }
+
+    #[test]
     fn a_pixels_comparison_holds_the_files_to_its_tolerance() {
         let compare = |extra: &str| format!("[[scenario.compare]]\nkind = \"pixels\"\nactual = \"a.png\"\nreference = \"b.png\"\n{extra}");
         let png = |shade: u8| png_bytes(8, 8, |_, _| [shade; 3]);
@@ -509,5 +591,82 @@ mod tests {
         assert!(both(&b, &a, &scenario("both", compare)).is_empty());
         b.files = vec![("p.json", b"not json".to_vec())];
         assert!(both(&b, &a, &scenario("both", compare)).iter().any(|f| f.contains("not JSON")));
+    }
+
+    #[test]
+    fn a_fixture_that_names_the_container_has_its_sides_folder_written_in_and_any_other_is_copied_as_it_is() {
+        let (corpus, side) = (tempfile::tempdir().expect("scratch"), tempfile::tempdir().expect("scratch"));
+        let text = "{\"at\": \"<container>/sam.png\"}";
+        std::fs::write(corpus.path().join("a.json"), text).expect("written");
+        let fixture = |names_container: bool, to: &str| Fixture { from: "a.json".to_string(), to: to.to_string(), names_container };
+        place(&fixture(true, "named.json"), corpus.path(), side.path()).expect("placed");
+        place(&fixture(false, "plain.json"), corpus.path(), side.path()).expect("placed");
+        let read = |name: &str| std::fs::read_to_string(side.path().join(name)).expect("read");
+        assert_eq!(read("named.json"), format!("{{\"at\": \"{}/sam.png\"}}", side.path().display()));
+        assert_eq!(read("plain.json"), text);
+        assert!(place(&fixture(true, "x"), &corpus.path().join("absent"), side.path()).is_err_and(|error| error.contains("cannot copy the fixture")));
+    }
+
+    const FOLDER: &str = "[[scenario.folder]]\npath = \".\"\nholds = [\"b\", \"a\"]\n";
+
+    #[test]
+    fn a_folder_holds_exactly_the_names_a_scenario_says_on_every_side_that_ran_and_ignores_the_sides_own_dot_files() {
+        let mut oracle = Fake::new("");
+        oracle.files = vec![("a", vec![1]), ("b", vec![2]), (".config/x", vec![3])];
+        assert!(alone(&oracle, &scenario("oracle", FOLDER)).is_empty(), "the order of the names is no matter, and a dot name is not counted");
+        oracle.files = vec![("a", vec![1])];
+        assert_eq!(alone(&oracle, &scenario("oracle", FOLDER)), ["oracle: . holds [\"a\"], expected [\"a\", \"b\"]"]);
+        oracle.files = vec![("a", vec![1]), ("b", vec![2]), ("c", vec![3])];
+        assert_eq!(alone(&oracle, &scenario("oracle", FOLDER)), ["oracle: . holds [\"a\", \"b\", \"c\"], expected [\"a\", \"b\"]"]);
+        // A rule that holds nothing is a folder with no output in it, the cancelled export's.
+        let nothing = "[[scenario.folder]]\npath = \".\"\nholds = []\n";
+        oracle.files = vec![("a", vec![1])];
+        assert!(alone(&oracle, &scenario("oracle", nothing)).iter().any(|f| f.contains("holds [\"a\"], expected []")));
+        oracle.files = Vec::new();
+        assert!(alone(&oracle, &scenario("oracle", nothing)).is_empty());
+        // Each side that ran is held to it, the plug-in alone as well as the oracle.
+        let (good, mut bad) = (Fake::new(""), Fake::new(""));
+        bad.files = vec![("a", vec![1])];
+        assert_eq!(both(&good, &bad, &scenario("both", nothing)), ["plug-in: . holds [\"a\"], expected []"]);
+        assert_eq!(both(&bad, &good, &scenario("both", nothing)), ["oracle: . holds [\"a\"], expected []"]);
+        assert_eq!(both(&Fake::new("garbage"), &bad, &scenario("plugin", nothing)), ["plug-in: . holds [\"a\"], expected []"]);
+    }
+
+    #[test]
+    fn a_folder_that_is_not_there_fails_where_an_empty_one_passes() {
+        let missing = "[[scenario.folder]]\npath = \"out\"\nholds = []\n";
+        let failures = alone(&Fake::new(""), &scenario("oracle", missing));
+        assert!(failures.iter().any(|f| f.starts_with("oracle: out: cannot read ")), "{failures:?}");
+        let mut oracle = Fake::new("");
+        oracle.files = vec![("out/a", vec![1]), ("out/.hidden", vec![2])];
+        assert_eq!(alone(&oracle, &scenario("oracle", missing)), ["oracle: out holds [\"a\"], expected []"]);
+    }
+
+    #[test]
+    fn two_folders_are_identical_when_they_hold_the_same_files_with_the_same_bytes() {
+        let compare = "[[scenario.compare]]\nkind = \"identical\"\nactual = \"seq\"\nreference = \"seq\"\n";
+        let (mut a, mut b) = (Fake::new(""), Fake::new(""));
+        a.files = vec![("seq/f0", vec![1]), ("seq/f1", vec![2])];
+        b.files = vec![("seq/f0", vec![1]), ("seq/f1", vec![2])];
+        assert!(both(&b, &a, &scenario("both", compare)).is_empty());
+        a.files = vec![("seq/f0", vec![1]), ("seq/f1", vec![9])];
+        assert_eq!(both(&b, &a, &scenario("both", compare)), ["seq/f1 is not byte-identical to seq/f1"]);
+        a.files = vec![("seq/f0", vec![1])];
+        assert_eq!(both(&b, &a, &scenario("both", compare)), ["seq holds [\"f0\"], where seq holds [\"f0\", \"f1\"]"]);
+        a.files = vec![("seq/f0", vec![1]), ("seq/f1", vec![2]), ("seq/f2", vec![3])];
+        assert_eq!(both(&b, &a, &scenario("both", compare)), ["seq holds [\"f0\", \"f1\", \"f2\"], where seq holds [\"f0\", \"f1\"]"]);
+        // The first few differing files are named and the rest counted, as a movie's frames are.
+        const NAMES: [&str; 6] = ["seq/f0", "seq/f1", "seq/f2", "seq/f3", "seq/f4", "seq/f5"];
+        a.files = NAMES.iter().map(|name| (*name, vec![1])).collect();
+        b.files = NAMES.iter().map(|name| (*name, vec![2])).collect();
+        let failures = both(&b, &a, &scenario("both", compare));
+        assert_eq!(failures.len(), NAMED + 1, "{failures:?}");
+        assert_eq!(failures.last().map(String::as_str), Some("3 more files in seq are not byte-identical to seq's"));
+        // An empty folder is the same as an empty folder, and a folder is never a file's equal.
+        a.files = vec![("seq/.x", vec![1])];
+        b.files = vec![("seq/.x", vec![2])];
+        assert!(both(&b, &a, &scenario("both", compare)).is_empty(), "the side's own dot files are not output");
+        b.files = vec![("seq", vec![1])];
+        assert!(!both(&b, &a, &scenario("both", compare)).is_empty());
     }
 }
