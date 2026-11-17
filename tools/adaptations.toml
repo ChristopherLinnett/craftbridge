@@ -222,3 +222,15 @@ depends = [
   "the confinement's check of a path, which refuses a relative path and `..` and resolves every link that exists before it compares the path with the roots (crates/automation/src/confine.rs:190-206, :656-666), and the session's file write, which writes beside the file and renames over it, so a link inside the container to a file not there yet is replaced inside the container, never followed out of it (crates/engine/src/services.rs:99-101, crates/engine/src/settings/config.rs:196-236)",
   "the command line's reading of a comp or layer reference, a JSON-or-text value and a decimal option, its props, which passes --depth as that decimal, and its backend, which opens --project with file.open and saves with file.save and file.saveAs (apps/effectcraft-cli/src/main.rs:287-303, :456-507, :746-750)",
 ]
+
+[[adaptation]]
+id = "AD14"
+crate = "craftbridge-core"
+file = "src/surface.rs and src/blit.rs"
+implements = "CORE-2b"
+summary = "The core presents the preview itself: it configures the app's surface from the core's device (Bgra8Unorm on iOS, Rgba8Unorm on Android, never sRGB, Fifo with one frame in flight as the desktop window keeps it, and PostMultiplied alpha where offered, else Opaque, else Inherit, the one mode an Android surface offers, each checked against what the surface reports) and the blit pass in src/blit.rs draws the display frame into it aspect-fit between opaque black bars, un-premultiplying it for a PostMultiplied surface and writing alpha 1 for the others; a resize configures the surface again, an outdated surface is configured again and a lost one answers the Gpu error, as does any error the device reports while a frame is acquired, drawn or shown, and none of these stops the session."
+replaces = "the desktop app's own display: the window surface's configuration, eframe's LOW_LATENCY (apps/effectcraft/src/main.rs:475-482), and the viewers registering the compositor's display texture with egui-wgpu to draw it (crates/ui-egui/src/panels/viewer/frame.rs:176-193, crates/ui-egui/src/panels/viewers.rs:202-215), neither of which a phone has."
+depends = [
+  "Gpu::render_display and DisplayFrame: a premultiplied Rgba8Unorm texture with a full mip chain (crates/gpu/src/lib.rs:138-147, :224-236)",
+  "the desktop window's frame latency, LOW_LATENCY's one frame in flight and the reasons given for it, which the preview surface follows (apps/effectcraft/src/main.rs:475-482)",
+]

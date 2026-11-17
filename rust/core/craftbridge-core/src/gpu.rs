@@ -13,6 +13,9 @@
 //! render then runs on the CPU (L7). A failed adapter or device request is that answer, never a
 //! panic.
 
+use crate::Result;
+use crate::error::CraftError;
+
 /// What the app asked for when it started the engine (plan §14). `Preferred` takes a GPU when
 /// there is one; `CpuOnly` never asks, and everything renders on the CPU (L7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,7 +30,7 @@ pub enum GpuChoice {
 /// tests name each target, so every platform's pick is proven on the machine the tests run on while
 /// the gate's phone builds prove the code compiles for the phones.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Platform {
+pub(crate) enum Platform {
     Ios,
     Android,
     /// Any other target, a desktop: its own backends, Metal on macOS.
@@ -36,14 +39,14 @@ enum Platform {
 
 impl Platform {
     /// The platform this build was compiled for.
-    fn current() -> Platform {
+    pub(crate) fn current() -> Platform {
         Platform::of(std::env::consts::OS)
     }
 
     /// The platform of a target operating system, named as `std::env::consts::OS` names it (the
     /// target's `target_os`; the iOS Simulator's is `ios`). A plain function of the name, rather than
     /// a `cfg!` a host build always folds to `Host`, so the tests pin each phone's pick on the host.
-    fn of(os: &str) -> Platform {
+    pub(crate) fn of(os: &str) -> Platform {
         match os {
             "ios" => Platform::Ios,
             "android" => Platform::Android,
@@ -121,6 +124,29 @@ impl GpuDevice {
             GpuDevice::Device { adapter, device, queue } => Some((adapter, device, queue)),
             GpuDevice::CpuOnly { .. } => None,
         }
+    }
+}
+
+/// Every kind of error a wgpu device reports. wgpu hands an error no open scope captures to its
+/// default handler, which panics, so [`validated`] opens a scope for each kind.
+const CAPTURED: [wgpu::ErrorFilter; 3] = [wgpu::ErrorFilter::Validation, wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal];
+
+/// Run `make`, which works on `device` (creating objects, recording, submitting, acquiring or
+/// presenting a surface's texture), and answer [`CraftError::Gpu`] when the device reports any
+/// error while it ran. Without an open scope wgpu's answer to such an error is a panic, which
+/// AGENTS.md §3 forbids, so all the core's work on a device goes through this. Scopes are
+/// per thread, which is the engine's one thread, and a scope pops only from the top of the stack,
+/// so they are popped in the reverse of the order they were pushed.
+pub(crate) fn validated<T>(device: &wgpu::Device, what: &str, make: impl FnOnce() -> T) -> Result<T> {
+    let scopes = CAPTURED.map(|filter| device.push_error_scope(filter));
+    let made = make();
+    let mut reported = None;
+    for scope in scopes.into_iter().rev() {
+        reported = reported.or(pollster::block_on(scope.pop()));
+    }
+    match reported {
+        Some(error) => Err(CraftError::gpu(format!("{what}: {error}"))),
+        None => Ok(made),
     }
 }
 
@@ -343,6 +369,33 @@ mod tests {
             other => panic!("the host answered a backend a desktop never asks: {other:?}"),
         };
         assert_eq!(gpu.summary(), format!("{} ({backend})", info.name));
+    }
+
+    /// A device error raised while `validated` runs is the `Gpu` error in the caller's words and the
+    /// device's, where with no scope open wgpu would have panicked; work that raises nothing is answered.
+    #[test]
+    fn a_device_error_inside_validated_is_a_gpu_error_not_a_panic() {
+        let device = crate::testing::rig().device;
+        let make = |width| crate::testing::texture(&device, (width, 4), 1, wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureUsages::TEXTURE_BINDING);
+        // A texture with no width is a validation error.
+        let Err(CraftError::Gpu { message }) = validated(&device, "making a texture", || make(0)) else {
+            panic!("a texture of no width must answer a Gpu error");
+        };
+        assert!(message.starts_with("making a texture: "), "{message}");
+        assert!(validated(&device, "making a texture", || make(4)).is_ok());
+    }
+
+    /// `validated` opens a scope for every kind of error a device reports: one it left out would reach
+    /// wgpu's default handler, which panics. The match names every kind, so a kind wgpu adds stops
+    /// this compiling until it is weighed here.
+    #[test]
+    fn every_kind_of_device_error_is_captured() {
+        for filter in [wgpu::ErrorFilter::Validation, wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal] {
+            match filter {
+                wgpu::ErrorFilter::Validation | wgpu::ErrorFilter::OutOfMemory | wgpu::ErrorFilter::Internal => {}
+            }
+            assert!(CAPTURED.contains(&filter), "{filter:?} reaches wgpu's panicking default handler");
+        }
     }
 
     /// The engine hands a `GpuDevice` to its thread, so it must move between threads.

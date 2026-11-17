@@ -1444,6 +1444,13 @@ impl Engine {
 <td><code>get_layer</code>, <code>get_property</code>, <code>set_property</code> and the tools&#39; argument reads (<code>effectcraft: crates/<wbr>automation/<wbr>src/<wbr>tools.rs:143-160</code>, <code>:288-358</code>, <code>:633-677</code>), <code>layer.tree</code>&#39;s depth (<code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>cmd/<wbr>query.rs:157-168</code>), <code>file.open</code>, <code>file.save</code>, <code>file.saveAs</code>, <code>file.newProject</code> (<code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>cmd/<wbr>file.rs:15-31</code>, <code>:43-113</code>, <code>:790-794</code>), the CLI&#39;s reference, value and number reads (<code>effectcraft: apps/<wbr>effectcraft-cli/<wbr>src/<wbr>main.rs:287-303</code>)</td>
 <td>FX-1b</td>
 </tr>
+<tr>
+<td>AD14</td>
+<td><code>craftbridge-core</code> presents the preview itself (§17): it configures the app&#39;s surface from the core&#39;s device — <code>Bgra8Unorm</code> on iOS, <code>Rgba8Unorm</code> on Android, never sRGB, <code>PresentMode::Fifo</code> with one frame in flight as the desktop window keeps it, <code>PostMultiplied</code> alpha where the surface offers it, else <code>Opaque</code>, else <code>Inherit</code>, the one mode an Android surface offers, each checked against what the surface reports — and its blit pass draws the display frame into it, aspect-fit, between opaque black bars; a surface that is outdated is configured again, one that is lost answers the <code>Gpu</code> row, as does any error the device reports while a frame is acquired, drawn or shown, and none of these stops the session</td>
+<td>the desktop app&#39;s own display: the window&#39;s surface configuration, eframe&#39;s <code>LOW_LATENCY</code> (<code>effectcraft: apps/<wbr>effectcraft/<wbr>src/<wbr>main.rs:475-482</code>), and the viewers drawing the compositor&#39;s display texture through egui-wgpu (<code>effectcraft: crates/<wbr>ui-egui/<wbr>src/<wbr>panels/<wbr>viewer/<wbr>frame.rs:176-193</code>, <code>effectcraft: crates/<wbr>ui-egui/<wbr>src/<wbr>panels/<wbr>viewers.rs:202-215</code>), which a phone has no egui to do</td>
+<td><code>Gpu::render_display</code> and its <code>DisplayFrame</code>: premultiplied <code>Rgba8Unorm</code> with a full mip chain (<code>effectcraft: crates/<wbr>gpu/<wbr>src/<wbr>lib.rs:138-147</code>, <code>:224-236</code>); the window&#39;s one frame in flight and the reasons given for it, which the preview surface follows (<code>effectcraft: apps/<wbr>effectcraft/<wbr>src/<wbr>main.rs:475-482</code>)</td>
+<td>CORE-2b</td>
+</tr>
 </tbody></table>
 </div><p><strong>States.</strong></p>
 <ul>
@@ -1555,9 +1562,9 @@ impl Engine {
 <td><code>available_memory()</code>: what the platform says the app may still allocate, <code>os_proc_available_memory()</code> on iOS and <code>MemAvailable</code> from <code>/<wbr>proc/<wbr>meminfo</code> on Android, for AD7 (§15). The core never depends on EffectCraft (PD9), and EffectCraft&#39;s <code>sysinfo</code> has no branch for either platform, so the core reads it itself; the layer table marks <code>craftbridge-core</code> a platform crate for this module (D-20)</td>
 </tr>
 <tr>
-<td><code>src/<wbr>gpu.rs</code>, <code>src/<wbr>surface.rs</code>, <code>src/<wbr>blit.wgsl</code>, <code>src/<wbr>frames.rs</code></td>
+<td><code>src/<wbr>gpu.rs</code>, <code>src/<wbr>surface.rs</code>, <code>src/<wbr>blit.rs</code>, <code>src/<wbr>frames.rs</code></td>
 <td>NEW</td>
-<td>§17</td>
+<td>§17; the blit pass&#39;s WGSL is a string in <code>blit.rs</code>, because the gate refuses an <code>include_str!</code> of any file that is not one of the crate&#39;s own <code>.rs</code> files (AGENTS.md §3), and a test validates it with naga, the WGSL front end wgpu compiles it with, so a broken shader fails the gate rather than a device</td>
 </tr>
 </tbody></table>
 </div><p><strong>Behaviour.</strong></p>
@@ -1584,9 +1591,9 @@ impl Engine {
 </ul>
 <p><strong>Preview into the app&#39;s view (zero copy, PD8).</strong></p>
 <ol>
-<li>The app attaches its <code>CAMetalLayer</code> (iOS) or <code>Surface</code> (Android) once (§20 platform module); the core keeps a <code>wgpu::Surface</code> configured <code>Bgra8Unorm</code> (iOS) or <code>Rgba8Unorm</code> (Android), non-sRGB, <code>PresentMode::Fifo</code>, <code>CompositeAlphaMode::PostMultiplied</code> where offered, else <code>Opaque</code>.</li>
+<li>The app attaches its <code>CAMetalLayer</code> (iOS) or <code>Surface</code> (Android) once (§20 platform module); the core keeps a <code>wgpu::Surface</code> configured <code>Bgra8Unorm</code> (iOS) or <code>Rgba8Unorm</code> (Android), non-sRGB, <code>PresentMode::Fifo</code> with one frame in flight (the desktop window&#39;s <code>LOW_LATENCY</code>, <code>effectcraft: apps/<wbr>effectcraft/<wbr>src/<wbr>main.rs:475-482</code>), <code>CompositeAlphaMode::PostMultiplied</code> where offered, else <code>Opaque</code>, else <code>Inherit</code>: Android&#39;s surfaces offer <code>Inherit</code> alone, because its window manager composites the window (Android&#39;s Vulkan loader, <code>frameworks/<wbr>native/<wbr>vulkan/<wbr>libvulkan/<wbr>swapchain.cpp</code>), so the pass writes alpha 1 there, as for <code>Opaque</code>.</li>
 <li><code>present({comp, time})</code> asks the app crate for a display frame: <code>Gpu::render_display</code> leaves the composited frame on the GPU as premultiplied <code>Rgba8Unorm</code> with mips (<code>effectcraft: crates/<wbr>gpu/<wbr>src/<wbr>lib.rs:143-147</code>, <code>effectcraft: crates/<wbr>gpu/<wbr>src/<wbr>lib.rs:224-236</code>).</li>
-<li>The core&#39;s blit pass (<code>blit.wgsl</code>, one full-screen triangle, linear filtering on the mip chain) scales it into the surface texture with aspect-fit letterboxing, and presents.</li>
+<li>The core&#39;s blit pass (the WGSL in <code>blit.rs</code>, one full-screen triangle drawn into the aspect-fit viewport, linear filtering on the mip chain) scales it into the surface texture between opaque black bars, un-premultiplying it first when the surface is <code>PostMultiplied</code>, and presents (AD14).</li>
 <li>When <code>render_display</code> returns <code>None</code> (the GPU declined the frame), the app crate renders on the CPU (<code>Session::render_rgba8_alpha</code>, <code>crates/<wbr>engine/<wbr>src/<wbr>session/<wbr>render.rs:132-143</code>) and the core uploads it into a reusable texture before the same blit.</li>
 </ol>
 <p><strong>Platform images and PNG (<code>frame</code>).</strong></p>
@@ -1599,7 +1606,7 @@ impl Engine {
 <ul>
 <li><em>GPU attached</em>: Metal or Vulkan, <code>info.gpu = &quot;&lt;adapter&gt; (&lt;backend&gt;)&quot;</code>.</li>
 <li><em>CPU only</em>: <code>CpuOnly</code> chosen, no adapter, device lost, or (iOS) the app is in the background without the continued-processing GPU entitlement (Metal rejects background command buffers, <code>evidence/<wbr>05-mobile-platforms.md</code> Finding 19). The core drops the GPU on the first device-lost error. On iOS the Swift layer calls <code>suspendGpu()</code> on <code>UIApplication.didEnterBackgroundNotification</code> unless the app has told it a GPU background task is running, and <code>resumeGpu()</code> on return to the foreground (§22).</li>
-<li><em>Surface lost</em>: the layer or surface was resized or destroyed; the next <code>present</code> reconfigures or returns <code>Gpu { &quot;no surface&quot; }</code> after <code>detach_preview</code>.</li>
+<li><em>Surface lost</em>: the layer or surface was resized (outdated): the <code>present</code> that finds it configures the surface again and answers <code>Gpu</code>, and the next draws. Destroyed (lost): every <code>present</code> answers <code>Gpu</code> until the app attaches a new surface, and the session is untouched. Any error the device reports while a frame is acquired, drawn or shown answers <code>Gpu</code> too, never wgpu&#39;s default panic, and a frame that failed to draw is not shown. After <code>detach_preview</code> it answers <code>Gpu { &quot;no surface&quot; }</code>.</li>
 </ul>
 <p><strong>Edge cases.</strong> A comp larger than the device&#39;s texture limit: the compositor renders on the CPU for that comp (its existing decline path). A preview during an export: waits (L3); the app shows its last frame.</p>
 <p><strong>Tests.</strong> Desktop: the blit pass against a reference image; CPU and GPU <code>frame</code> outputs equal within the compositor&#39;s own GPU tolerance. Simulator and emulator: <code>present</code> into an offscreen layer and surface, read back. Devices: V3.</p>

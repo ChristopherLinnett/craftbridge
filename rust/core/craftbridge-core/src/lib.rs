@@ -4,6 +4,7 @@
 //! core runs it on its own thread, with the GPU device, folders, progress and cancellation.
 
 pub mod app;
+pub mod blit;
 pub mod cancel;
 pub mod engine;
 pub mod error;
@@ -12,6 +13,7 @@ pub mod folders;
 pub mod frames;
 pub mod gpu;
 pub mod journal;
+pub mod surface;
 #[cfg(test)]
 mod testing;
 
@@ -23,6 +25,7 @@ pub use export::PROGRESS_INTERVAL;
 pub use frames::{FrameBytes, PixelFormat};
 pub use gpu::{GpuChoice, GpuDevice};
 pub use journal::{JOURNAL_FILE, Recovery};
+pub use surface::{Presented, PreviewSurface};
 
 /// The result of a runtime call: what the call answers, or the [`CraftError`] it failed with. The
 /// error has a default so a signature can name just its answer, as the plan's runtime sketches write it.
