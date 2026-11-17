@@ -9,16 +9,17 @@
 //! hooks exist: a helper is a separate process, and a phone starts none, so the commands that need
 //! one answer `Unsupported`, as do the model downloads, which would start the system `curl` (AD11).
 //!
-//! Every call reaches the session through the MCP server built at construction, so the `mcp`
-//! method's line transport and the method table act on one session. The methods the plugin answers
-//! are the plan's §14 rows its method lists name — one for `request`, and one for
-//! `request_with_progress`, which answers `export` through the render runner (AD3) — each with the
-//! result shape and failure words of the EffectCraft command line at the pin (AD10); any other name
-//! either call is given answers `Unsupported`, naming what was asked and the methods that call
-//! answers. The binary `frame` is answered only through
-//! [`CraftApp::frame`](craftbridge_core::CraftApp::frame), since pixels cannot come back through
-//! `request`'s JSON; its request is resolved as the command line's `render-frame` resolves its
-//! flags (AD4).
+//! Every call reaches the session through the MCP server built at construction, so the `mcp` call's
+//! line transport and the method table act on one session. The methods the plugin answers are the
+//! plan's §14 rows its method lists name — one for `request`, `replay` and `timings` among them, and
+//! one for `request_with_progress`, which answers `export` through the render runner (AD3) — each
+//! with the result shape and failure words of the EffectCraft command line at the pin (AD10); `mcp`
+//! is a call of its own, not a row of either list, and `script` is not answered, since a script's
+//! commands reach the session past the confinement; any other name either call is given answers
+//! `Unsupported`, naming what was asked and the methods that call answers. The binary `frame` is
+//! answered only through [`CraftApp::frame`](craftbridge_core::CraftApp::frame), since pixels cannot
+//! come back through `request`'s JSON; its request is resolved as the command line's `render-frame`
+//! resolves its flags (AD4).
 
 mod app;
 mod files;
@@ -27,13 +28,16 @@ mod generated {
     pub(crate) mod version;
 }
 mod info;
+mod mcp;
 mod methods;
 mod plugins;
 mod properties;
 mod reference;
+mod replay;
 mod requests;
 mod runner;
 mod session;
+mod timings;
 
 pub use app::EffectCraftApp;
 pub use requests::{CompRef, RenderRequest, Resolution};

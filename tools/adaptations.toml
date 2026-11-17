@@ -97,10 +97,13 @@ id = "AD6"
 crate = "craftbridge-effects"
 file = "src/timings.rs"
 implements = "FX-1d"
-summary = "Render timings per layer and effect, CPU against GPU, in the shape of the CLI's bench."
+summary = "Render timings per layer and effect, CPU against GPU, in the shape of the CLI's bench: the frame's wall and CPU time over several runs without the layer cache with each layer's and effect's minimum, playback frames without and with the layer cache and its counts, and with an attached accelerator the CPU against the GPU for the comp at full and half size through the Accelerator trait, at the frame the CLI's bench --gpu picks (the CLI's display-path and transfer columns need its own GPU type and are left out); its medians are the CLI's, the upper of two middle values, and its CPU time is the process's, read from the clock the CLI reads. A caller's scale is at most Full, so no call allocates a frame larger than the comp's own."
 replaces = "the CLI's bench (apps/effectcraft-cli/src/main.rs:1265-1350, :1507-1616)."
 depends = [
   "effectcraft_render::Renderer, LayerCache and LayerTiming (crates/render/src/lib.rs:66, crates/render/src/cache.rs:39, crates/render/src/opts.rs:92)",
+  "effectcraft_render::Accelerator, Backend and AutoPick::WARMUP (crates/render/src/accel.rs:12, :62, crates/render/src/auto.rs:95)",
+  "the CLI's bench, bench_play and bench_gpu, whose rows and columns the document follows, the frame bench_gpu times, and its median, minimum and CPU clock (apps/effectcraft-cli/src/main.rs:1059-1085, :1250-1262, :1265-1350, :1507-1616)",
+  "Session::resolve_comp and the comp's frame rate and duration, which pick the comp and the frames timed (crates/engine/src/session/comps.rs:303, crates/project/src/comp.rs:84-85)",
 ]
 
 [[adaptation]]
@@ -144,14 +147,17 @@ depends = [
 [[adaptation]]
 id = "AD9"
 crate = "craftbridge-effects"
-file = "src/app.rs"
-implements = "FX-1a"
-summary = "Confinement that is never optional: the Backend is built headless on the AD1 session and confined before its first command — read roots the container and, when the app names one, the bundle; write root the container alone — so every path the engine reads, writes or renders must pass EffectCraft's own confinement check, and no caller of the library can leave the app's folders open. The app answers through effectcraft_automation::McpServer over this backend."
+file = "src/app.rs and src/replay.rs"
+implements = "FX-1a, FX-1d"
+summary = "Confinement that is never optional: the Backend is built headless on the AD1 session and confined before its first command — read roots the container and, when the app names one, the bundle; write root the container alone — so every path the engine reads, writes or renders must pass EffectCraft's own confinement check, and no caller of the library can leave the app's folders open. The app answers through effectcraft_automation::McpServer over this backend. Commands that run past Backend::exec do not pass its checks, so replay reads its script's lines first and checks each with Confinement::check_command as the one step of an engine.batch, the confinement's own check of a command that runs later than its check, refusing the whole script before any line runs, and with it a command whose destination only a live lookup can tell."
 replaces = "the CLI's opt-in --automation-read-root/--automation-write-root flags, which only its mcp subcommand wires up and which a library session has no command line to be given (apps/effectcraft-cli/src/main.rs:827-831)."
 depends = [
   "Backend::headless and Backend::confine (crates/automation/src/backend.rs:33, :45)",
   "confine::Confinement::new and the checks Backend::exec makes with it before each command, check_command and check_lookup (crates/automation/src/confine.rs:177, :284, :392)",
   "McpServer::new and McpServer::backend (crates/automation/src/server.rs:32, :58)",
+  "replay::run, which runs each line on the session with Session::execute and no check, the format it reads and its limits on size and lines, which it parses with a parser it keeps private, and the start line, which opens its project (crates/engine/src/replay.rs:1-27, :40, :42, :217-325, :402-421, :504-551, crates/engine/src/session/dispatch.rs:9-44)",
+  "the confinement's check of each step of an engine.batch before the batch runs, and its refusal of a step whose destination only a live lookup can tell (crates/automation/src/confine.rs:297-318)",
+  "RUNS_SCRIPTS and the confinement's refusal of every command that runs a script, which a script run on the session would bypass: its app.run reaches any command by id past Backend::exec (crates/engine/src/cmd/scripts.rs:34-35, crates/engine/src/session/dispatch.rs:54-63, crates/script/src/prelude.js:2076)",
 ]
 
 [[adaptation]]
@@ -179,9 +185,9 @@ depends = [
 [[adaptation]]
 id = "AD11"
 crate = "craftbridge-effects"
-file = "src/methods.rs"
-implements = "FX-1a"
-summary = "The model downloads start no process: the engine fetches the official weights by starting the system's curl, which is why its own specs mark roto.model.download and face.model.download desktop-only; the phone has no curl to start and the session starts no process, so every way a call reaches either id answers Unsupported before the engine sees the call — as its own command, as one step of a run, and as a step of an engine.batch, whose step ids the plugin reads as the engine reads them (command, else id, never a $N), one level deep because the engine runs no steps of a batch inside a batch; installing weights from a file inside the container — roto.model.install and face.model.install, which the confinement already routes as file reads — stays open as the phone's way to get weights."
+file = "src/methods.rs, src/replay.rs and src/mcp.rs"
+implements = "FX-1a, FX-1d"
+summary = "The model downloads start no process: the engine fetches the official weights by starting the system's curl, which is why its own specs mark roto.model.download and face.model.download desktop-only; the phone has no curl to start and the session starts no process, so every way a call reaches either id answers Unsupported before the engine sees the call — as its own command, as one step of a run, as a line of a replay script, as a tool call of the MCP server (execute_command, command_run, command_batch and batch, read as the server reads them), and as a step of an engine.batch, whose step ids the plugin reads as the engine reads them (command, else id, never a $N), one level deep because the engine runs no steps of a batch inside a batch; installing weights from a file inside the container — roto.model.install and face.model.install, which the confinement already routes as file reads — stays open as the phone's way to get weights."
 replaces = "nothing in the command line: the CLI runs both downloads with the system's curl, which it has; the refusal is the phone's own, taken in the shape of the confinement's per-command refusal."
 depends = [
   "download, its curl spawn and the two command specs the engine marks desktop-only (crates/engine/src/analysis/models.rs:639, :655, :714-718, :743-747)",
@@ -189,6 +195,8 @@ depends = [
   "the per-command refusal of the confinement, whose wording this mirrors (crates/automation/src/confine.rs:285-286)",
   "file.runScript, which runs the steps of a command script it reads from a file itself and which the confinement withholds as a command that runs scripts, so those steps never reach the engine (crates/engine/src/cmd/file_more.rs:515-549, crates/engine/src/cmd/scripts.rs:34-35)",
   "the download's only callers being its two command specs: no other command runs it (crates/engine/src/analysis/models.rs:720, :749)",
+  "the MCP tools that run a command by id and how each reads its command, params and steps (crates/automation/src/tools.rs:154-174, :202-206, :496-503, :954-967, :1012-1034), the arguments check tools::find and ToolDef::unknown_arg make before the server runs a tool (crates/automation/src/tools.rs:55-62, :97, crates/automation/src/server.rs:184-191), how the server reads a message, a notification and a batch (crates/automation/src/server.rs:63-89), and its result marking for a client that negotiates per request (crates/automation/src/server.rs:281-304)",
+  "script.run, which reaches the download through app.run with no check of the command, so the script method is not answered (crates/script/src/runtime.rs:128-155, crates/engine/src/analysis/models.rs:655)",
 ]
 
 [[adaptation]]

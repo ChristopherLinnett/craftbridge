@@ -38,6 +38,7 @@ const PAYLOAD_PANICKED: &str = "a caught panic's payload panicked as it was drop
 pub(crate) enum Message {
     Request { method: String, params: Value, answer: Sender<Result<Value>> },
     Frame { params: Value, format: PixelFormat, answer: Sender<Result<FrameBytes>> },
+    Mcp { line: String, answer: Sender<Result<Option<String>>> },
     Export { call: ExportCall },
     Close,
 }
@@ -52,6 +53,14 @@ impl Message {
     /// A frame call, built once the engine gives it the channel its answer goes back on.
     pub(crate) fn frame(params: Value, format: PixelFormat) -> impl FnOnce(Sender<Result<FrameBytes>>) -> Message {
         move |answer| Message::Frame { params, format, answer }
+    }
+
+    /// One line of the app's MCP transport, built once the engine gives it the channel its answer goes
+    /// back on: the one line the app replies with, or none for a line that needs no reply (a
+    /// notification).
+    pub(crate) fn mcp(line: &str) -> impl FnOnce(Sender<Result<Option<String>>>) -> Message {
+        let line = line.to_string();
+        move |answer| Message::Mcp { line, answer }
     }
 }
 
@@ -168,6 +177,19 @@ impl Engine {
     /// engine's own calls is refused with `Internal` at once, as [`Engine::request`] does.
     pub fn frame(&self, params: Value, format: PixelFormat) -> Result<FrameBytes> {
         answer_of(self.submit(Message::frame(params, format))?)
+    }
+
+    /// Hand one line of the app's MCP transport to the engine and wait for its reply: the app's
+    /// [`CraftApp::mcp`], run on the engine thread in the order the calls were made, so the MCP
+    /// endpoint and [`Engine::request`] act on one session. `Ok(None)` is a line that needs no reply.
+    /// A line is no exception to export waiting: one made during an export waits behind it in the
+    /// order it was made (plan §13, L3).
+    ///
+    /// Refused and failed as [`Engine::request`] is: a call after close, one made from inside one of
+    /// the engine's own calls, and a panic inside the app all answer `Internal` rather than as a
+    /// reply, since a reply the app never wrote must not read as one.
+    pub fn mcp(&self, line: &str) -> Result<Option<String>> {
+        answer_of(self.submit(Message::mcp(line))?)
     }
 
     /// Hand one call to the engine thread and take the channel its answer comes back on: the one
@@ -289,6 +311,7 @@ fn run(mut app: Box<dyn CraftApp>, incoming: Receiver<Message>, closing: CancelT
             Message::Close => break,
             Message::Request { method, params, answer } => answer_call(&answer, || app.request(&method, params)),
             Message::Frame { params, format, answer } => answer_call(&answer, || app.frame(params, format)),
+            Message::Mcp { line, answer } => answer_call(&answer, || Ok(app.mcp(&line))),
             Message::Export { call } => export::run_export(
                 &mut *app,
                 call,
@@ -464,6 +487,19 @@ mod tests {
                 // A buffer that is not the size it names: the core's own check refuses it.
                 Some("short") => FrameBytes::new(2, 2, format, pixel_of(&params)),
                 _ => FrameBytes::new(1, 1, format, pixel_of(&params)),
+            }
+        }
+
+        /// The fake's MCP endpoint: it answers a line with the thread it ran on and the session's
+        /// value, so a test sees both where it ran and that it reached the same session as `request`.
+        fn mcp(&mut self, line: &str) -> Option<String> {
+            match line {
+                "" => None,
+                "panic" => panic!("mcp boom"),
+                // The line a call sends from inside one of the engine's own calls: it answers what
+                // the engine refused it with.
+                "reenter" => self.own_engine().ok().and_then(|engine| engine.mcp("inner").err()).map(|refused| refused.to_string()),
+                _ => Some(format!("{line}@{}:{}", thread::current().name().unwrap_or("<unnamed>"), self.value)),
             }
         }
     }
@@ -647,18 +683,58 @@ mod tests {
         engine.close().unwrap();
     }
 
+    /// An MCP line is a call like any other: it runs on the engine's thread in the order the calls
+    /// were made, on the one session the requests act on — the reply carries the value a request
+    /// set — a line that needs no reply answers `Ok(None)`, and a panic in the app answers
+    /// `Internal` with the session kept, not as a reply.
+    #[test]
+    fn an_mcp_line_reaches_the_session_a_request_set_and_a_panic_keeps_it() {
+        let (app, _shared) = FakeApp::new();
+        let engine = Engine::start(app).unwrap();
+        engine.request("value_set", json!({ "v": 11 })).unwrap();
+        assert_eq!(engine.mcp("ping").unwrap(), Some("ping@craftbridge-engine:11".to_string()));
+        assert_eq!(engine.mcp("").unwrap(), None, "a line that needs no reply is not a failure");
+        assert_eq!(engine.mcp("panic"), Err(CraftError::Internal { message: "mcp boom".to_string() }));
+        assert_eq!(engine.mcp("again").unwrap(), Some("again@craftbridge-engine:11".to_string()), "the session the panic hit still answers");
+        engine.close().unwrap();
+    }
+
+    /// An MCP line is refused as every other call is: from inside one of the engine's own calls,
+    /// where it would wait for the call that made it, and after close — as an error, never as a
+    /// reply line the app never wrote.
+    #[test]
+    fn an_mcp_line_is_refused_after_close_and_from_inside_a_call() {
+        let (engine, _) = self_aware_engine();
+        let reentered = from_another_thread(&engine, |engine| engine.mcp("reenter"));
+        assert_eq!(reentered, Ok(Ok(Some(REENTERED.to_string()))), "an mcp line waited for itself");
+        engine.close().unwrap();
+        assert_eq!(engine.mcp("ping"), Err(CraftError::Internal { message: "engine is closed".to_string() }));
+    }
+
     /// An app that keeps the trait's default has no frames: `Unsupported`, and the engine serves on.
     #[test]
     fn an_app_without_frames_answers_unsupported_and_keeps_serving() {
-        struct PlainApp;
-        impl CraftApp for PlainApp {
-            fn request(&mut self, _method: &str, params: Value) -> Result<Value> {
-                Ok(params)
-            }
-        }
-        let engine = Engine::start(PlainApp).unwrap();
+        let engine = Engine::start(EchoApp).unwrap();
         assert_eq!(engine.frame(Value::Null, PixelFormat::Png), Err(CraftError::unsupported("this app renders no frames")));
         assert_eq!(engine.request("echo", json!({ "n": 1 })), Ok(json!({ "n": 1 })));
+        engine.close().unwrap();
+    }
+
+    /// An app that answers only `request`, echoing its params: every other call keeps the trait's default.
+    struct EchoApp;
+    impl CraftApp for EchoApp {
+        fn request(&mut self, _method: &str, params: Value) -> Result<Value> {
+            Ok(params)
+        }
+    }
+
+    /// An app with no MCP endpoint keeps the trait's default: no line it is handed has a reply, and
+    /// none is a failure.
+    #[test]
+    fn an_app_without_an_mcp_endpoint_replies_to_no_line() {
+        let engine = Engine::start(EchoApp).unwrap();
+        assert_eq!(engine.mcp(r#"{"jsonrpc": "2.0", "id": 1, "method": "ping"}"#), Ok(None));
+        assert_eq!(engine.request("echo", json!({ "after": "the line" })), Ok(json!({ "after": "the line" })), "the session still answers");
         engine.close().unwrap();
     }
 

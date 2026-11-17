@@ -92,11 +92,12 @@ fn cli(dir: &Path, args: &[&str]) -> std::result::Result<Run, String> {
     Ok(Run { stdout: String::from_utf8_lossy(&output.stdout).into_owned(), stderr: String::from_utf8_lossy(&output.stderr).into_owned() })
 }
 
-/// One confined `mcp` run of the command line: the folder is both of its automation roots, one line
-/// of JSON-RPC is sent, and the text of the one reply it answers is returned. This is the command
-/// line's own confined door — the plugin reaches its session through the same kind of server. The
-/// session is empty, or holds `project`, which the command line opens before it confines itself.
-fn cli_mcp_confined(dir: &Path, project: Option<&Path>, request: Value) -> std::result::Result<Value, String> {
+/// One confined `mcp` session of the command line: the folder is both of its automation roots, the
+/// lines are sent in order, and every reply it answers is returned in order, each the whole JSON-RPC
+/// document. This is the command line's own confined door — the plugin reaches its session through
+/// the same kind of server. The session is empty, or holds `project`, which the command line opens
+/// before it confines itself.
+fn cli_mcp_session(dir: &Path, project: Option<&Path>, lines: &[String]) -> std::result::Result<Vec<Value>, String> {
     let dir_text = dir.display().to_string();
     let project_text = project.map(|project| project.display().to_string());
     let session = match &project_text {
@@ -114,16 +115,23 @@ fn cli_mcp_confined(dir: &Path, project: Option<&Path>, request: Value) -> std::
         .map_err(|e| format!("the mcp run starts: {e}"))?;
     {
         let stdin = child.stdin.as_mut().ok_or("the mcp run takes a line")?;
-        stdin.write_all(request.to_string().as_bytes()).map_err(|e| format!("the line goes in: {e}"))?;
-        stdin.write_all(b"\n").map_err(|e| format!("the line ends: {e}"))?;
+        for line in lines {
+            stdin.write_all(line.as_bytes()).map_err(|e| format!("the line goes in: {e}"))?;
+            stdin.write_all(b"\n").map_err(|e| format!("the line ends: {e}"))?;
+        }
     }
     let output = child.wait_with_output().map_err(|e| format!("the mcp run answers: {e}"))?;
-    let answer = String::from_utf8_lossy(&output.stdout);
-    let reply = answer
+    String::from_utf8_lossy(&output.stdout)
         .lines()
-        .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
-        .find(|reply| reply.get("id") == Some(&json!(1)))
-        .ok_or("the mcp run answers the request")?;
+        .map(|line| serde_json::from_str::<Value>(line.trim()).map_err(|e| format!("the mcp run answers JSON-RPC lines: {e}: {line}")))
+        .collect()
+}
+
+/// One line of the command line's confined `mcp`, answered with the text of its reply to the request
+/// with id 1: the words a refusal through that door is compared in.
+fn cli_mcp_confined(dir: &Path, project: Option<&Path>, request: Value) -> std::result::Result<Value, String> {
+    let replies = cli_mcp_session(dir, project, &[request.to_string()])?;
+    let reply = replies.iter().find(|reply| reply.get("id") == Some(&json!(1))).ok_or("the mcp run answers the request")?;
     // The text of the reply's first content block, read with `pointer` so a reply that carries no
     // such block is reported by what is missing, not by a panic the helper could take on an answer
     // no test wrote (the gate's never-crash lints refuse an unchecked index outside a `#[test]`).
@@ -1165,4 +1173,118 @@ fn the_file_methods_read_the_bundle_and_never_write_it() {
     .expect("every call fails as the command line fails it");
     assert_eq!(std::fs::read(&shipped).expect("the shipped project reads"), shipped_bytes, "the shipped project is as it was");
     assert!(!copy.exists(), "nothing new is written into the bundle");
+}
+
+#[test]
+fn a_replay_is_the_commands_replay() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    let passing = [
+        r#"{"start": "new"}"#,
+        r#"{"command": "comp.new", "params": {"name": "R", "width": 64, "height": 64}}"#,
+        r#"{"expect": {"query": "comp.info", "params": {"comp": 1}, "pointer": "/name", "equals": "R"}}"#,
+        r#"{"expect_no_error": true}"#,
+    ]
+    .join("\n");
+    let failing =
+        [passing.as_str(), r#"{"command": "comp.info", "params": {"comp": "nope"}}"#, r#"{"command": "comp.new", "params": {"name": "after"}}"#, r#"not json"#]
+            .join("\n");
+    for (script, keep_going) in [(passing.as_str(), false), (failing.as_str(), false), (failing.as_str(), true)] {
+        let mut args = vec!["replay", "--json"];
+        if keep_going {
+            args.push("--keep-going");
+        }
+        let file = scratch.root().join("repro.jsonl");
+        std::fs::write(&file, script).expect("the script is written");
+        let file_text = file.display().to_string();
+        args.push(&file_text);
+        let command_line = cli(scratch.root(), &args).expect("the command line ran").doc().expect("the command line printed its report");
+        let plugin = app.request("replay", json!({"script": script, "keepGoing": keep_going})).expect("`replay` answers its report");
+        assert_eq!(plugin, command_line, "the replay report differs for keepGoing={keep_going}");
+    }
+}
+
+/// The words of the benchmark's rows in the command line's text, as `(depth, layer, [effect ids])`
+/// in order: a layer row is indented two spaces and two for each depth, an effect row two more.
+fn bench_shape(text: &str) -> Vec<(usize, String, Vec<String>)> {
+    let mut rows: Vec<(usize, String, Vec<String>)> = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if let Some(effect) = trimmed.strip_prefix("fx ") {
+            if let (Some(row), Some(id)) = (rows.last_mut(), effect.split_whitespace().next()) {
+                row.2.push(id.to_string());
+            }
+        } else if let Some((name, _)) = trimmed.split_once(" process ") {
+            let indent = line.len() - trimmed.len();
+            rows.push((indent.saturating_sub(2) / 2, name.trim_end().to_string(), Vec::new()));
+        }
+    }
+    rows
+}
+
+#[test]
+fn the_timings_have_the_structure_of_the_commands_bench() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let run = cli(scratch.root(), &["bench", "--n", "2", "--time", "1", "--play", "2"]).expect("the command line ran");
+    let expected = bench_shape(&format!("{}\n{}", run.stderr, run.stdout));
+    assert!(!expected.is_empty(), "the command line printed no layer rows: {}", run.summary());
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    app.request("run", json!({"steps": [{"command": "file.openDemoProject"}]})).expect("the demo project opens");
+    let timings = app.request("timings", json!({"time": 1, "runs": 2, "play": 2})).expect("`timings` answers");
+    let layers = timings["frame"]["layers"].as_array().expect("layers");
+    let shape: Vec<(usize, String, Vec<String>)> = layers
+        .iter()
+        .map(|layer| {
+            let effects = layer["effects"].as_array().into_iter().flatten().filter_map(|e| e["id"].as_str().map(str::to_string)).collect();
+            (layer["depth"].as_u64().unwrap_or(0) as usize, layer["layer"].as_str().unwrap_or("").to_string(), effects)
+        })
+        .collect();
+    assert_eq!(shape, expected, "the layers and effects timed differ from the command line's");
+    let text = format!("{}\n{}", run.stderr, run.stdout);
+    for line in ["bench (no cache): 2 runs", "bench-play (no cache): 2 frames", "bench-play (layer cache): 2 frames", "layer cache:"] {
+        assert!(text.contains(line), "the command line no longer prints `{line}`: the structure to match moved");
+    }
+}
+
+/// One MCP session, line for line, against the command line's confined `mcp`: every reply is the whole
+/// JSON-RPC document the command line answers — the handshake, a notification it does not answer,
+/// the tool list, a command that runs, one that fails, a script and a read the confinement refuses,
+/// a JSON-RPC batch, an unknown tool, a line that is no JSON, and a download whose arguments the
+/// server refuses before it runs anything.
+#[test]
+fn an_mcp_session_is_answered_as_the_commands_mcp_answers_it() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let call =
+        |id: u64, name: &str, arguments: Value| json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": arguments}});
+    let lines: Vec<String> = [
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "parity", "version": "1"}}}),
+        json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+        json!({"jsonrpc": "2.0", "id": 3, "method": "ping"}),
+        call(4, "execute_command", json!({"command": "comp.new", "params": {"name": "M", "width": 64, "height": 64}})),
+        call(5, "execute_command", json!({"command": "comp.info", "params": {"comp": "nope"}})),
+        call(6, "run_script", json!({"code": "1"})),
+        call(7, "execute_command", json!({"command": "file.open", "params": {"path": "/etc/hosts"}})),
+        json!([call(8, "command_run", json!({"id": "layer.newSolid", "params": {"comp": 1}})), call(9, "execute_command", json!({"command": "comp.info", "params": {"comp": 1}}))]),
+        call(10, "no_such_tool", json!({})),
+        call(11, "execute_command", json!({"command": "roto.model.download", "params": {"id": "no-such-model"}, "extra": 1})),
+    ]
+    .iter()
+    .map(Value::to_string)
+    .chain(["not json".to_string()])
+    .collect();
+    let mut command_line = cli_mcp_session(scratch.root(), None, &lines).expect("the confined command line answered");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    let mut plugin: Vec<Value> =
+        lines.iter().filter_map(|line| app.mcp(line)).map(|reply| serde_json::from_str(&reply).expect("the plugin answers JSON-RPC lines")).collect();
+    for reply in &mut command_line {
+        scrub(reply, &[scratch.root()]);
+    }
+    for reply in &mut plugin {
+        scrub(reply, &[scratch.path()]);
+    }
+    assert_eq!(plugin.len(), command_line.len(), "the plugin answered other lines than the command line: {plugin:?}");
+    for (mine, theirs) in plugin.iter().zip(&command_line) {
+        assert_eq!(mine, theirs, "the reply differs from the command line's");
+    }
 }

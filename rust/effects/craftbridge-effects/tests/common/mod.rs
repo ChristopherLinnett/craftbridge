@@ -2,6 +2,10 @@
 //! it, and nothing else — no bundle unless the test asks for one, no plug-in folder, no extra fonts.
 //! The helpers answer `Result` like every helper of a test in this repository, so the unwraps sit in
 //! the `#[test]` functions, where the lint rules let them.
+//!
+//! Each test file is its own crate and compiles this module for itself, so a helper one file does
+//! not use is dead code there; the module is the one place every file's helpers live.
+#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 

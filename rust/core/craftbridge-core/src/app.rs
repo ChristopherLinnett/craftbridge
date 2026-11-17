@@ -84,4 +84,13 @@ pub trait CraftApp: Send {
         let _ = (params, format);
         Err(CraftError::unsupported("this app renders no frames"))
     }
+
+    /// Answer one line of the app's MCP transport (a JSON-RPC message) with the one line it replies
+    /// with, or `None` when the line needs no reply, as a notification does. It acts on the same
+    /// session [`CraftApp::request`] does, so an agent driving the session through MCP and the app
+    /// calling it directly see one document. The default is an app with no MCP endpoint, which
+    /// replies to nothing.
+    fn mcp(&mut self, _line: &str) -> Option<String> {
+        None
+    }
 }

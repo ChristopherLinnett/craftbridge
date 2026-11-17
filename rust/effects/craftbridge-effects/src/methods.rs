@@ -94,9 +94,7 @@ pub(crate) fn run_command(backend: &mut Backend, command: &str, params: Value, s
 /// item once the render has ended.
 pub(crate) fn execute(backend: &mut Backend, command: &str, params: Value, step: Option<u32>) -> Result<Value> {
     let params = if params.is_null() { empty_params() } else { params };
-    if let Some(withheld) = wants_a_process(command, &params) {
-        return Err(CraftError::unsupported(said(command, starts_a_process(withheld), step)));
-    }
+    refuse_process(command, &params, step)?;
     backend.exec(command, params.clone()).map_err(|error| map_error(error, &Call { command, params: &params, step, tool: false }))
 }
 
@@ -109,11 +107,39 @@ pub(crate) fn execute(backend: &mut Backend, command: &str, params: Value, step:
 /// container — is the phone's way to get weights, and stays open.
 const NO_PROCESS: [&str; 2] = ["roto.model.download", "face.model.download"];
 
+/// The door itself, which every path that hands a command to the engine passes before the engine
+/// sees it — `exec`, each step of `run`, each line of a `replay` and each tool call of `mcp`: a call
+/// that reaches a model download, by whichever way, is refused as `Unsupported`, and a step of `run`
+/// puts the step's command and index around the words, as it does every other row's.
+pub(crate) fn refuse_process(command: &str, params: &Value, step: Option<u32>) -> Result<()> {
+    match wants_a_process(command, params) {
+        Some(withheld) => Err(CraftError::unsupported(said(command, starts_a_process(withheld), step))),
+        None => Ok(()),
+    }
+}
+
+/// What the confinement refuses of a command that is to run later, asked without running it, for
+/// the paths that run commands past [`Backend::exec`] and so past the checks it makes (`replay`
+/// runs its lines on the session itself). The confinement already checks commands that run later
+/// than its check: the steps of an `engine.batch` (`crates/automation/src/confine.rs`:297-318). So the
+/// command is checked as the one step of a batch, in the confinement's own rule and words: as
+/// `Backend::exec` checks it, and a command whose destination only a live lookup can tell — Save,
+/// Increment and Save, rendering the queue — refused, since the lookup would be of a document the
+/// earlier lines have not yet made.
+pub(crate) fn check_unrun(backend: &Backend, command: &str, params: &Value) -> Result<()> {
+    let Some(confinement) = backend.confinement() else { return Ok(()) };
+    let as_a_step = object([("steps", Value::Array(vec![object([("command", Value::from(command)), ("params", params.clone())])]))]);
+    match confinement.check_command("engine.batch", &as_a_step) {
+        Ok(_) => Ok(()),
+        Err(error) => Err(failure(error, command, params, false)),
+    }
+}
+
 /// The refusal of a withheld command, worded as the confinement words its own (`` `id` is not
 /// available …``) in the engine's voice for a capability this build was put together without, so it
 /// reads like every other refusal of its row; a step of `run` puts the step's command and index
 /// around it, as it does every other row's words.
-fn starts_a_process(withheld: &str) -> String {
+pub(crate) fn starts_a_process(withheld: &str) -> String {
     format!("`{withheld}` is not available in this build: it downloads by starting the system `curl`, and this build starts no process")
 }
 
@@ -124,7 +150,7 @@ fn starts_a_process(withheld: &str) -> String {
 /// substitutes only in the parameters (:85) — and only one level deep, because a `batch` inside a
 /// batch runs no steps at all: the engine refuses the nested one before it runs (`NOT_IN_BATCH`,
 /// `crates/engine/src/cmd/batch.rs`:14,:82).
-fn wants_a_process<'a>(command: &'a str, params: &'a Value) -> Option<&'a str> {
+pub(crate) fn wants_a_process<'a>(command: &'a str, params: &'a Value) -> Option<&'a str> {
     if NO_PROCESS.contains(&command) {
         return Some(command);
     }
