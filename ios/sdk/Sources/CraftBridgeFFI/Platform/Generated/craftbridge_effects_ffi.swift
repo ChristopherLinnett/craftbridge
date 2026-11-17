@@ -512,11 +512,12 @@ private struct FfiConverterString: FfiConverter {
     }
 }
 /// Start an EffectCraft engine in the app's `folders`, answering its handle or the [`CraftError`]
-/// that refused it: folders that would not prepare, an app that would not build from them, a panic
-/// while it was built (`Internal`), or the thread the engine runs on refusing to start.
+/// that refused it: a processor the library cannot run on (`Unsupported`, answered before any of
+/// EffectCraft's code runs), folders that would not prepare, an app that would not build from them, a
+/// panic while it was built (`Internal`), or the thread the engine runs on refusing to start.
 ///
 /// The app it starts is EffectCraft's, built for the folders the app names (plan §19), and it starts
-/// with the core's `Engine::start_in`, so every export the engine runs from then on is journaled:
+/// with the core's `Engine::start_in_with`, so every export the engine runs from then on is journaled:
 /// the start deals first with the files the pending-export journal still lists, deleting the ones an
 /// export the system killed wrote and leaving the ones it never reached, and clears the journal
 /// (plan §16, D-17); [`Engine::recovery`] reports what it did.
@@ -551,7 +552,7 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if uniffi_craftbridge_effects_ffi_checksum_func_start_effects_engine() != 47083 {
+    if uniffi_craftbridge_effects_ffi_checksum_func_start_effects_engine() != 50053 {
         return InitializationResult.apiChecksumMismatch
     }
 

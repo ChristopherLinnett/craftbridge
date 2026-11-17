@@ -20,8 +20,9 @@ pub mod surface;
 mod testing;
 
 /// The platform's own calls, the one place hand-written `unsafe` may sit in this crate (AGENTS.md §4):
-/// how much memory the app may still allocate on every target, and on iOS the faces CoreText offers an
-/// app (plan §19, AD2, AD7).
+/// how much memory the app may still allocate on every target, on Android arm64 the kernel's
+/// capability bits every engine start checks first (plan §16, PD11), and on iOS the faces CoreText
+/// offers an app (plan §19, AD2, AD7).
 #[allow(unsafe_code)]
 pub mod platform;
 

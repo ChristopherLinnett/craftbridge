@@ -11,6 +11,7 @@ use crate::frames::{FrameBytes, PixelFormat};
 use crate::gpu::GpuChoice;
 use crate::gpu_lifecycle::GpuLifecycle;
 use crate::journal::{Journal, Recovery};
+use crate::platform::cpu;
 use crate::preview::SurfaceMaker;
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -167,36 +168,77 @@ impl Engine {
     /// and `info.gpu` says why. Every start names its `gpu`, so no engine stays on the CPU because
     /// its caller did not choose. It keeps no pending-export journal, so a kill mid-export leaves its
     /// partial files and a call it answers `Cancelled` leaves what its app wrote: an app's own engine
-    /// starts with [`Engine::start_in`].
+    /// starts in its folders, with [`Engine::start_in_with`] (or [`Engine::start_in`] for an app
+    /// already built). Like every start, it first refuses a processor the build cannot run on (see
+    /// [`Engine::start_in_with`]).
     ///
     /// # Errors
     ///
-    /// Only when the thread itself cannot start; a session that fails to build is the app crate's own
-    /// `start` to judge.
+    /// [`CraftError::Unsupported`] on a processor the build cannot run on, or when the thread itself
+    /// cannot start; a session that fails to build is the app crate's own `start` to judge.
     pub fn start<A: CraftApp + 'static>(app: A, gpu: GpuChoice) -> Result<Engine> {
-        Self::spawn(app, None, Recovery::default(), gpu)
+        Self::launch(None, || Ok(app), gpu)
     }
 
-    /// Start one engine in the app's `folders` on the GPU `gpu` allows, the start an app crate's
-    /// constructor makes with the app's own choice: prepare them, deal with the files the
-    /// pending-export journal still lists (deleting those an export the system killed was writing)
-    /// and clear it, then start as [`Engine::start`] does, with every export from then on journaled
+    /// Start one engine in the app's `folders` on the GPU `gpu` allows, for an app already built:
+    /// first refuse a processor the build cannot run on, as every start does (see
+    /// [`Engine::start_in_with`]), then prepare the folders, deal with the files the pending-export
+    /// journal still lists (deleting those an export the system killed was writing) and clear it, then
+    /// start the engine's thread as [`Engine::start`] does, with every export from then on journaled
     /// (plan §16, D-17). What the journal step did is [`Engine::recovery`]; a journal it cannot read
-    /// or a file it cannot delete never fails the start.
+    /// or a file it cannot delete never fails the start. The app is already built, so an app crate
+    /// whose build runs the Craft app's own code starts with [`Engine::start_in_with`] instead.
     ///
     /// # Errors
     ///
-    /// What [`Folders::prepare`] refuses, or the thread that cannot start.
+    /// What [`Engine::start`] refuses, or what [`Folders::prepare`] refuses.
     pub fn start_in<A: CraftApp + 'static>(folders: &Folders, app: A, gpu: GpuChoice) -> Result<Engine> {
-        let journal = Journal::new(folders, &folders.prepare()?)?;
-        let recovery = journal.recover();
-        Self::spawn(app, Some(journal), recovery, gpu)
+        Self::launch(Some(folders), || Ok(app), gpu)
+    }
+
+    /// Start as [`Engine::start_in`] does, building the app here, from the same `folders`, once the
+    /// start has checked that the processor can run it and has prepared them, so `build` is handed
+    /// folders that exist. This is the start every app crate's constructor makes: on an Android arm64
+    /// phone whose processor lacks half-precision arithmetic (FEAT_FP16, which the library is built
+    /// for) the start is refused as [`CraftError::Unsupported`], in words that name the missing
+    /// feature, before `build` runs and before the folders are touched, so no Craft app code runs
+    /// there. The check reads the kernel's
+    /// capability bits, since the compiler's own feature detection reads true on a build that has the
+    /// feature compiled in. iOS and the x86_64 emulator take no half-precision path and have no floor.
+    ///
+    /// # Errors
+    ///
+    /// What [`Engine::start_in`] refuses, and whatever `build` fails with.
+    pub fn start_in_with<A: CraftApp + 'static>(folders: &Folders, build: impl FnOnce(&Folders) -> Result<A>, gpu: GpuChoice) -> Result<Engine> {
+        Self::launch(Some(folders), || build(folders), gpu)
     }
 
     /// What the start did about the pending-export journal.
     #[must_use]
     pub fn recovery(&self) -> &Recovery {
         &self.recovery
+    }
+
+    /// Every start's one path: the processor check first, so nothing else runs on a processor the
+    /// build cannot run on; then the folders, so an app built here is built from folders that exist,
+    /// which is also how an app crate's tests see that its app is built inside a start that checked
+    /// first; then the app, built where the start says; then the journal; then the thread.
+    fn launch<A: CraftApp + 'static>(folders: Option<&Folders>, build: impl FnOnce() -> Result<A>, gpu: GpuChoice) -> Result<Engine> {
+        cpu::require_fp16(cpu::kernel_hwcap())?;
+        let prepared = match folders {
+            Some(folders) => Some((folders, folders.prepare()?)),
+            None => None,
+        };
+        let app = build()?;
+        let (journal, recovery) = match prepared {
+            Some((folders, confinement)) => {
+                let journal = Journal::new(folders, &confinement)?;
+                let recovery = journal.recover();
+                (Some(journal), recovery)
+            }
+            None => (None, Recovery::default()),
+        };
+        Self::spawn(app, journal, recovery, gpu)
     }
 
     fn spawn<A: CraftApp + 'static>(app: A, journal: Option<Journal>, recovery: Recovery, gpu: GpuChoice) -> Result<Engine> {
@@ -1453,5 +1495,92 @@ mod tests {
         assert_ne!(call(&first, "thread_id").unwrap(), call(&second, "thread_id").unwrap());
         first.close().unwrap();
         second.close().unwrap();
+    }
+
+    // The capability bits an Android arm64 phone's kernel can answer, which the cases below combine:
+    // each half-precision bit alone, neither, and both.
+    use crate::platform::cpu::{HWCAP_ASIMDHP as ASIMDHP, HWCAP_FPHP as FPHP};
+
+    /// A start built through `start_in_with` on a phone whose kernel answers `hwcap`, with the
+    /// constructions its builder ran, how many of them found the folders already made, and the
+    /// container it was given.
+    fn start_on(hwcap: Option<u64>) -> (Result<Engine>, usize, usize, tempfile::TempDir) {
+        let scratch = tempfile::tempdir().unwrap();
+        let folders = crate::folders::Folders::inside(scratch.path().join("container"), "");
+        let built = std::sync::atomic::AtomicUsize::new(0);
+        let from_made_folders = std::sync::atomic::AtomicUsize::new(0);
+        let started = cpu::tests::handed_in(hwcap, || {
+            Engine::start_in_with(
+                &folders,
+                |folders| {
+                    built.fetch_add(1, Ordering::SeqCst);
+                    if folders.config.is_dir() {
+                        from_made_folders.fetch_add(1, Ordering::SeqCst);
+                    }
+                    Ok(FakeApp::new().0)
+                },
+                GpuChoice::CpuOnly,
+            )
+        });
+        (started, built.load(Ordering::SeqCst), from_made_folders.load(Ordering::SeqCst), scratch)
+    }
+
+    /// A processor that lacks either half-precision bit is refused in the words that name the missing
+    /// feature, before the app is built and before the folders are made: no Craft app code runs there.
+    #[test]
+    fn a_processor_below_the_floor_is_refused_before_the_app_is_built() {
+        for bits in [0, FPHP, ASIMDHP, 0b11] {
+            let (started, built, _, scratch) = start_on(Some(bits));
+            let expected = cpu::require_fp16(Some(bits)).unwrap_err();
+            assert!(matches!(expected, CraftError::Unsupported { .. }), "{expected:?}");
+            assert_eq!(started.err(), Some(expected), "bits {bits:#x}");
+            assert_eq!(built, 0, "bits {bits:#x}: the app was built on a refused processor");
+            assert!(!scratch.path().join("container").exists(), "bits {bits:#x}: a refused start touched the folders");
+        }
+    }
+
+    /// The refusal names the feature the processor lacks, and only that one.
+    #[test]
+    fn the_refusal_names_the_missing_feature() {
+        let words = |bits| match start_on(Some(bits)).0.err() {
+            Some(CraftError::Unsupported { message }) => message,
+            other => panic!("expected Unsupported, got {other:?}"),
+        };
+        let lacks_scalar = words(ASIMDHP);
+        assert!(lacks_scalar.contains("HWCAP_FPHP") && !lacks_scalar.contains("HWCAP_ASIMDHP"), "{lacks_scalar}");
+        let lacks_vector = words(FPHP);
+        assert!(lacks_vector.contains("HWCAP_ASIMDHP") && !lacks_vector.contains("HWCAP_FPHP"), "{lacks_vector}");
+        let lacks_both = words(0);
+        assert!(lacks_both.contains("HWCAP_FPHP") && lacks_both.contains("HWCAP_ASIMDHP"), "{lacks_both}");
+    }
+
+    /// A processor with both bits starts, builds its app once, from folders the start has already
+    /// made, and answers calls; so does a build with no floor at all (the x86_64 emulator, iOS and the
+    /// desktop). An app crate leans on the folders being made first to show its app is built inside
+    /// the start, after the check, and not before the start began.
+    #[test]
+    fn a_processor_with_both_bits_and_a_build_with_no_floor_start() {
+        for hwcap in [Some(FPHP | ASIMDHP), Some(u64::MAX), None] {
+            let (started, built, from_made_folders, _scratch) = start_on(hwcap);
+            let engine = started.unwrap_or_else(|error| panic!("{hwcap:?} refused: {error}"));
+            assert_eq!(built, 1, "{hwcap:?}");
+            assert_eq!(from_made_folders, 1, "{hwcap:?}: the app was built before the start made its folders");
+            assert_eq!(call(&engine, "value_get"), Ok(Value::from(0)), "{hwcap:?}");
+            engine.close().unwrap();
+        }
+    }
+
+    /// The other two starts go through the same check, so no way into the engine skips it: an app
+    /// already built is refused and its folders are left alone.
+    #[test]
+    fn every_start_is_refused_below_the_floor() {
+        let scratch = tempfile::tempdir().unwrap();
+        let folders = crate::folders::Folders::inside(scratch.path().join("container"), "");
+        let refused = cpu::require_fp16(Some(0)).unwrap_err();
+        cpu::tests::handed_in(Some(0), || {
+            assert_eq!(Engine::start(FakeApp::new().0, GpuChoice::CpuOnly).err(), Some(refused.clone()));
+            assert_eq!(Engine::start_in(&folders, FakeApp::new().0, GpuChoice::CpuOnly).err(), Some(refused.clone()));
+        });
+        assert!(!scratch.path().join("container").exists(), "a refused start touched the folders");
     }
 }

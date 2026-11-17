@@ -633,6 +633,7 @@ version = "0.1.0"
 dependencies = [
  "craftbridge-media",
  "craftbridge-process",
+ "libc",
  "objc2-core-foundation",
  "objc2-core-text",
  "oneshot",
