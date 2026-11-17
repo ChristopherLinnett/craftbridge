@@ -18,8 +18,11 @@ tempfile.workspace = true
 craftbridge-process.workspace = true
 effectcraft-media.workspace = true
 effectcraft-time.workspace = true
-
-[dev-dependencies]
+# The plug-in side of every scenario: the runner starts itself with the plug-in's calls (`--plugin-step`),
+# so both sides run as processes under one environment.
+craftbridge-core.workspace = true
+craftbridge-effects.workspace = true
+# Writes the PNG of a straight-RGBA frame and reads a PNG back as the pixels it holds.
 image.workspace = true
 
 [lints]

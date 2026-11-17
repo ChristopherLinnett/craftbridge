@@ -1,10 +1,13 @@
-//! The oracle: the EffectCraft command line, built from the pinned official revision by
-//! `tools/oracle.sh`. Behind a trait so the comparison is tested without it.
+//! A side of a scenario, and the one way either is started: as a process, in a cleared environment holding
+//! only its configuration folder. The oracle is the EffectCraft command line, built from the pinned
+//! official revision by `tools/oracle.sh`; the plug-in side is this runner started again (`plugin.rs`).
+//! Behind a trait so the comparison is tested without either.
 
+use crate::corpus::{Step, in_folder};
 use craftbridge_process::Group;
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 /// What one invocation did.
@@ -16,12 +19,22 @@ pub(crate) struct Outcome {
     pub(crate) stderr: String,
 }
 
-pub(crate) trait Oracle {
-    /// Runs the oracle with `args` in `folder`, which holds every file the invocation reads or writes.
-    fn run(&self, folder: &Path, args: &[String]) -> Result<Outcome, String>;
+pub(crate) trait Side {
+    /// Runs the step in `folder`, which holds every file the step reads or writes.
+    fn run(&self, folder: &Path, step: &Step) -> Result<Outcome, String>;
 }
 
-/// The command-line binary. A step that outlives `timeout` is killed with everything it started, so a
+/// The one variable a side is given: where EffectCraft keeps its settings. The command line reads it
+/// itself, and the plug-in's host reads it for the app's configuration folder, so a side's settings are
+/// its scenario's own on both.
+pub(crate) const CONFIG_VARIABLE: &str = "EFFECTCRAFT_CONFIG_DIR";
+
+/// The configuration folder of a side that runs in `folder`.
+pub(crate) fn config_folder(folder: &Path) -> PathBuf {
+    folder.join(".config")
+}
+
+/// A binary run as a step. A step that outlives `timeout` is killed with everything it started, so a
 /// hung export fails the gate instead of holding it, and leaves no helper running on the machine; and so
 /// is a step the runner leaves running when it is interrupted or killed itself.
 pub(crate) struct Cli {
@@ -32,12 +45,24 @@ pub(crate) struct Cli {
 /// How often a running step is looked at again.
 const POLL: Duration = Duration::from_millis(20);
 
-impl Oracle for Cli {
-    fn run(&self, folder: &Path, args: &[String]) -> Result<Outcome, String> {
+impl Side for Cli {
+    fn run(&self, folder: &Path, step: &Step) -> Result<Outcome, String> {
+        self.invoke(folder, &step.args, &step.stdin)
+    }
+}
+
+impl Cli {
+    /// Runs the binary with `args` in `folder`, reading `stdin` as lines; each says where `folder` goes.
+    pub(crate) fn invoke(&self, folder: &Path, args: &[String], stdin: &[String]) -> Result<Outcome, String> {
+        let args: Vec<String> = args.iter().map(|arg| in_folder(arg, folder)).collect();
         // Output goes to files, not pipes: nothing then has to be read while the process runs, and a step
         // that prints a lot cannot block on a full pipe.
         let stdout_path = folder.join(".oracle-stdout");
         let stderr_path = folder.join(".oracle-stderr");
+        let stdin_path = folder.join(".oracle-stdin");
+        let lines: String = stdin.iter().map(|line| format!("{}\n", in_folder(line, folder))).collect();
+        std::fs::write(&stdin_path, lines).map_err(|error| format!("cannot write {}: {error}", stdin_path.display()))?;
+        let input = File::open(&stdin_path).map_err(|error| format!("cannot open {}: {error}", stdin_path.display()))?;
         let create = |path: &Path| File::create(path).map_err(|error| format!("cannot create {}: {error}", path.display()));
         // The step runs in a process group of its own, which is what a timeout stops: whatever the step
         // starts joins its group, and a kill of the step alone leaves those running. A terminal's Ctrl-C
@@ -45,19 +70,20 @@ impl Oracle for Cli {
         // when the runner ends first, however it ends.
         let mut step = Group::spawn(
             Command::new(&self.binary)
-                .args(args)
+                .args(&args)
                 .current_dir(folder)
-                // The oracle inherits nothing from the runner's environment and is given one variable, its
+                // A side inherits nothing from the runner's environment and is given one variable, its
                 // configuration folder, the scenario's own. EffectCraft, the Craft libraries and the crates
                 // under them read settings from variables spelt with no common prefix (font folders, the
                 // compositor, the GPU adapter, thread counts, the locale, the time zone, the user's own font
                 // folder through HOME, the loader's DYLD_ ones), and more with every pin, so no list of what to
-                // drop stays complete: a variable the oracle is not given is one it reads at its default, which
+                // drop stays complete: a variable a side is not given is one it reads at its default, which
                 // is EffectCraft as it is, whatever shell starts the gate. It needs none to run; what stays the
-                // machine's is the system itself, its own fonts among it.
+                // machine's is the system itself, its own fonts among it. The plug-in side starts here too,
+                // so both sides have the one environment this call makes.
                 .env_clear()
-                .env("EFFECTCRAFT_CONFIG_DIR", folder.join(".config"))
-                .stdin(Stdio::null())
+                .env(CONFIG_VARIABLE, config_folder(folder))
+                .stdin(input)
                 .stdout(create(&stdout_path)?)
                 .stderr(create(&stderr_path)?),
         )
@@ -90,7 +116,6 @@ impl Oracle for Cli {
 mod tests {
     use super::*;
     use craftbridge_process::{group_has_live_process, signal_group};
-    use std::os::unix::fs::PermissionsExt;
 
     /// How long the step the timeout test stops would run if nothing stopped it: longer than any bound a
     /// stop gives its group, so an orphan a stop missed is caught while it still runs — one that ended
@@ -102,10 +127,7 @@ mod tests {
     /// or a freshly written script waiting for the system's first-run scan, holds a step far past any pace
     /// a test might guess, and no test's pace depends on it.
     fn script(folder: &Path, body: &str) -> Cli {
-        let binary = folder.join("oracle.sh");
-        std::fs::write(&binary, format!("#!/bin/sh\n{body}\n")).expect("write the script");
-        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).expect("make it executable");
-        Cli { binary, timeout: crate::STEP_TIMEOUT }
+        Cli { binary: crate::testing::executable(folder, "oracle.sh", body), timeout: crate::STEP_TIMEOUT }
     }
 
     /// The oracle's whole environment is its configuration folder: whatever the runner's process holds (HOME,
@@ -115,11 +137,8 @@ mod tests {
     fn the_oracle_is_given_its_configuration_folder_and_nothing_of_the_runners_environment() {
         let scratch = tempfile::tempdir().expect("scratch");
         let dir = scratch.path().to_path_buf();
-        let outcome = script(&dir, "exec /usr/bin/env").run(&dir, &[]).expect("runs");
-        let shells_own = ["PWD", "OLDPWD", "SHLVL", "_"];
-        let given: Vec<&str> = outcome.stdout.lines().filter(|line| !shells_own.iter().any(|name| line.starts_with(&format!("{name}=")))).collect();
-        assert_eq!(given, [format!("EFFECTCRAFT_CONFIG_DIR={}", dir.join(".config").display())], "{}", outcome.stdout);
-        assert!(std::env::var_os("HOME").is_some(), "the runner's own environment holds what must not reach the oracle");
+        let outcome = script(&dir, "exec /usr/bin/env").invoke(&dir, &[], &[]).expect("runs");
+        crate::testing::assert_only_the_configuration_folder(&outcome.stdout, &dir);
     }
 
     #[test]
@@ -127,18 +146,31 @@ mod tests {
         let scratch = tempfile::tempdir().expect("scratch");
         let dir = scratch.path().to_path_buf();
         let cli = script(&dir, "echo \"$1 $2\"; pwd >&2; echo made > out.txt");
-        let outcome = cli.run(&dir, &["a b".to_string(), "c".to_string()]).expect("runs");
+        let outcome = cli.invoke(&dir, &["a b".to_string(), "c".to_string()], &[]).expect("runs");
         assert!(outcome.success);
         assert_eq!(outcome.stdout.trim(), "a b c");
         assert!(outcome.stderr.trim().ends_with(dir.file_name().and_then(|name| name.to_str()).unwrap_or("?")), "{}", outcome.stderr);
         assert!(dir.join("out.txt").is_file());
     }
 
+    /// The lines a step reads reach its standard input, one to a line, and a step's arguments and lines name
+    /// its folder where they say the container is.
+    #[test]
+    fn lines_reach_the_step_on_its_input_and_the_container_is_the_folder_in_arguments_and_lines() {
+        let scratch = tempfile::tempdir().expect("scratch");
+        let dir = scratch.path().to_path_buf();
+        let outcome =
+            script(&dir, "echo \"$1\"; cat").invoke(&dir, &["<container>/a".to_string()], &["x <container>".to_string(), "y".to_string()]).expect("runs");
+        assert_eq!(outcome.stdout, format!("{0}/a\nx {0}\ny\n", dir.display()));
+        let silent = script(&dir, "cat").invoke(&dir, &[], &[]).expect("runs");
+        assert_eq!(silent.stdout, "", "a step with no lines reads an empty input");
+    }
+
     #[test]
     fn a_failing_step_reports_how_it_ended() {
         let scratch = tempfile::tempdir().expect("scratch");
         let dir = scratch.path().to_path_buf();
-        let outcome = script(&dir, "echo no >&2; exit 3").run(&dir, &[]).expect("runs");
+        let outcome = script(&dir, "echo no >&2; exit 3").invoke(&dir, &[], &[]).expect("runs");
         assert!(!outcome.success && outcome.ended.contains('3') && outcome.stderr.trim() == "no");
     }
 
@@ -149,7 +181,7 @@ mod tests {
         let mut cli = script(&dir, &format!("exec sleep {}", OUTLASTING_STEP.as_secs()));
         cli.timeout = Duration::from_millis(200);
         let started = Instant::now();
-        let error = cli.run(&dir, &[]).err().unwrap_or_default();
+        let error = cli.invoke(&dir, &[], &[]).err().unwrap_or_default();
         let elapsed = started.elapsed();
         assert!(error.contains("was stopped"), "{error}");
         // The step starts after `started` and cannot end by itself sooner than `OUTLASTING_STEP` after it,
@@ -170,10 +202,10 @@ mod tests {
         let scratch = tempfile::tempdir().expect("scratch");
         let dir = scratch.path().to_path_buf();
         let mut cli = script(&dir, &format!("[ \"$1\" = once ] && exit 0\nps -o pgid= -p $$ > group\n{body}"));
-        assert!(cli.run(&dir, &["once".to_string()]).is_ok_and(|outcome| outcome.success), "the script never ran to its end");
+        assert!(cli.invoke(&dir, &["once".to_string()], &[]).is_ok_and(|outcome| outcome.success), "the script never ran to its end");
         for seconds in [1, 4, 16] {
             cli.timeout = Duration::from_secs(seconds);
-            let error = cli.run(&dir, &[]).err().unwrap_or_default();
+            let error = cli.invoke(&dir, &[], &[]).err().unwrap_or_default();
             if let Some(group) = std::fs::read_to_string(dir.join("group")).ok().and_then(|text| text.trim().parse::<u32>().ok()) {
                 let left = group_has_live_process(group).unwrap();
                 if left {
@@ -215,6 +247,6 @@ mod tests {
         let scratch = tempfile::tempdir().expect("scratch");
         let dir = scratch.path().to_path_buf();
         let cli = Cli { binary: dir.join("nothing-here"), timeout: crate::STEP_TIMEOUT };
-        assert!(cli.run(&dir, &[]).err().unwrap_or_default().contains("nothing-here"));
+        assert!(cli.invoke(&dir, &[], &[]).err().unwrap_or_default().contains("nothing-here"));
     }
 }

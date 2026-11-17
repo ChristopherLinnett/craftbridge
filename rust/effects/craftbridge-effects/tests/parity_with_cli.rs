@@ -1206,48 +1206,6 @@ fn a_replay_is_the_commands_replay() {
     }
 }
 
-/// The words of the benchmark's rows in the command line's text, as `(depth, layer, [effect ids])`
-/// in order: a layer row is indented two spaces and two for each depth, an effect row two more.
-fn bench_shape(text: &str) -> Vec<(usize, String, Vec<String>)> {
-    let mut rows: Vec<(usize, String, Vec<String>)> = Vec::new();
-    for line in text.lines() {
-        let trimmed = line.trim_start();
-        if let Some(effect) = trimmed.strip_prefix("fx ") {
-            if let (Some(row), Some(id)) = (rows.last_mut(), effect.split_whitespace().next()) {
-                row.2.push(id.to_string());
-            }
-        } else if let Some((name, _)) = trimmed.split_once(" process ") {
-            let indent = line.len() - trimmed.len();
-            rows.push((indent.saturating_sub(2) / 2, name.trim_end().to_string(), Vec::new()));
-        }
-    }
-    rows
-}
-
-#[test]
-fn the_timings_have_the_structure_of_the_commands_bench() {
-    let scratch = Scratch::new().expect("a scratch folder");
-    let run = cli(scratch.root(), &["bench", "--n", "2", "--time", "1", "--play", "2"]).expect("the command line ran");
-    let expected = bench_shape(&format!("{}\n{}", run.stderr, run.stdout));
-    assert!(!expected.is_empty(), "the command line printed no layer rows: {}", run.summary());
-    let mut app = scratch.app().expect("the app starts from prepared folders");
-    app.request("run", json!({"steps": [{"command": "file.openDemoProject"}]})).expect("the demo project opens");
-    let timings = app.request("timings", json!({"time": 1, "runs": 2, "play": 2})).expect("`timings` answers");
-    let layers = timings["frame"]["layers"].as_array().expect("layers");
-    let shape: Vec<(usize, String, Vec<String>)> = layers
-        .iter()
-        .map(|layer| {
-            let effects = layer["effects"].as_array().into_iter().flatten().filter_map(|e| e["id"].as_str().map(str::to_string)).collect();
-            (layer["depth"].as_u64().unwrap_or(0) as usize, layer["layer"].as_str().unwrap_or("").to_string(), effects)
-        })
-        .collect();
-    assert_eq!(shape, expected, "the layers and effects timed differ from the command line's");
-    let text = format!("{}\n{}", run.stderr, run.stdout);
-    for line in ["bench (no cache): 2 runs", "bench-play (no cache): 2 frames", "bench-play (layer cache): 2 frames", "layer cache:"] {
-        assert!(text.contains(line), "the command line no longer prints `{line}`: the structure to match moved");
-    }
-}
-
 /// One MCP session, line for line, against the command line's confined `mcp`: every reply is the whole
 /// JSON-RPC document the command line answers — the handshake, a notification it does not answer,
 /// the tool list, a command that runs, one that fails, a script and a read the confinement refuses,

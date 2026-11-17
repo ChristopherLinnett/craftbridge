@@ -1,15 +1,17 @@
-//! Runs the EffectCraft conformance corpus (`conformance/effects/corpus.toml`, plan §28) against the
-//! EffectCraft command line, the oracle, and compares what it produces with what the corpus says it must:
-//! values in its JSON output, and files byte for byte or, for an encoded export, frame by frame within the
-//! 40 dB PSNR of D-12.
+//! Runs the EffectCraft conformance corpus (`conformance/effects/corpus.toml`, plan §28) on the EffectCraft
+//! command line, the oracle, and on the plug-in, `craftbridge-effects`, and compares what each produces with
+//! what the corpus says it must and with each other: values in the JSON output, documents, and files byte
+//! for byte or, for an encoded export, frame by frame within the 40 dB PSNR of D-12.
 //!
 //! ```text
 //! craftbridge-effects-conformance --oracle <effectcraft-cli> [--corpus <corpus.toml>] [--scenario <id>]…
 //! craftbridge-effects-conformance --list [--corpus <corpus.toml>]
 //! ```
 //!
-//! `tools/oracle.sh` builds the oracle from the pinned official revision. Exit status: 0 when every
-//! scenario passed, 1 when one failed (each is named), 2 for a bad command line or corpus.
+//! `tools/oracle.sh` builds the oracle from the pinned official revision. The plug-in runs as this runner
+//! started again for each step (`--plugin-step`, which is not for a person), so both sides are processes
+//! in the one environment `oracle.rs` makes. Exit status: 0 when every scenario passed, 1 when one failed
+//! (each is named), 2 for a bad command line or corpus.
 
 // Every line goes through `say!` or `complain!`: `print!`, `dbg!` and their kin panic on a closed pipe,
 // and the runner's output is piped, so a line written any other way would crash it where its reader stops
@@ -21,13 +23,18 @@
 
 mod check;
 mod corpus;
+mod documents;
 mod frames;
+mod host;
 mod oracle;
+mod plugin;
 #[cfg(test)]
 mod testing;
+mod timings;
 
 use corpus::Corpus;
 use oracle::Cli;
+use plugin::Plugin;
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -50,7 +57,7 @@ macro_rules! complain {
     }};
 }
 
-/// Longest a single oracle invocation may take. The slowest one in the corpus is an export of a few
+/// Longest a single step of either side may take. The slowest one in the corpus is an export of a few
 /// seconds; a step this far past that is hung.
 const STEP_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -59,6 +66,8 @@ struct Options {
     corpus: PathBuf,
     only: Vec<String>,
     list: bool,
+    /// The plan of one step the plug-in makes, which is what this process then does (see `plugin.rs`).
+    plugin_step: Option<String>,
 }
 
 /// The corpus beside the repository's other platform-independent data: this crate is at
@@ -73,7 +82,7 @@ fn default_corpus() -> PathBuf {
 /// The arguments as the system gives them: a path is any bytes the system allows, and a flag or a scenario
 /// id that is no UTF-8 is an error the runner names, never the panic `std::env::args` would raise.
 fn parse_options(args: impl IntoIterator<Item = OsString>) -> Result<Options, String> {
-    let mut options = Options { oracle: None, corpus: default_corpus(), only: Vec::new(), list: false };
+    let mut options = Options { oracle: None, corpus: default_corpus(), only: Vec::new(), list: false, plugin_step: None };
     let mut args = args.into_iter();
     while let Some(flag) = args.next() {
         let flag = flag.into_string().map_err(|flag| format!("unknown argument {flag:?}"))?;
@@ -86,10 +95,14 @@ fn parse_options(args: impl IntoIterator<Item = OsString>) -> Result<Options, St
                 options.only.push(id);
             }
             "--list" => options.list = true,
+            plugin::FLAG => {
+                let plan = value("the step's calls")?.into_string().map_err(|_| "the step's calls are not UTF-8".to_string())?;
+                options.plugin_step = Some(plan);
+            }
             other => return Err(format!("unknown argument {other:?}")),
         }
     }
-    if options.oracle.is_none() && !options.list {
+    if options.oracle.is_none() && !options.list && options.plugin_step.is_none() {
         return Err("--oracle <effectcraft-cli> is required (tools/oracle.sh builds it from the pin)".to_string());
     }
     Ok(options)
@@ -109,11 +122,16 @@ fn run(options: &Options) -> Result<bool, String> {
     let Some(binary) = &options.oracle else { return Err("--oracle is required".to_string()) };
     // Absolute, because every step runs in its own scratch folder, where a relative path leads nowhere.
     let binary = std::fs::canonicalize(binary).map_err(|error| format!("cannot find the oracle {}: {error}", binary.display()))?;
-    let cli = Cli { binary, timeout: STEP_TIMEOUT };
+    let oracle = Cli { binary, timeout: STEP_TIMEOUT };
+    let me = std::env::current_exe().map_err(|error| format!("cannot find the runner's own binary: {error}"))?;
+    let plugin = Plugin(Cli { binary: me, timeout: STEP_TIMEOUT });
+    let sides = check::Sides { oracle: &oracle, plugin: &plugin };
+    // The corpus's own folder, which a scenario's fixtures are read from.
+    let folder = options.corpus.parent().unwrap_or(Path::new("."));
     let (mut ran, mut failed) = (0_usize, Vec::new());
     for scenario in chosen {
         ran += 1;
-        let failures = check::run(&cli, scenario);
+        let failures = check::run(&sides, scenario, folder);
         if failures.is_empty() {
             say!("conformance: {} ok: {}", scenario.id, scenario.title);
         } else {
@@ -130,6 +148,16 @@ fn run(options: &Options) -> Result<bool, String> {
     Ok(failed.is_empty())
 }
 
+/// One step of the plug-in's: the calls in `plan` made on an app, what the step prints written to standard
+/// output. The step's lines are read from standard input only when a call answers them.
+fn step_host(plan: &str) -> Result<(), String> {
+    let stdin = std::io::read_to_string(std::io::stdin()).map_err(|error| format!("cannot read the step's input: {error}"))?;
+    let container = std::env::current_dir().map_err(|error| format!("no working folder: {error}"))?;
+    let config = std::env::var_os(oracle::CONFIG_VARIABLE).map(PathBuf::from).ok_or_else(|| format!("{} is not set", oracle::CONFIG_VARIABLE))?;
+    say!("{}", host::run(plan, &stdin, &container, config)?);
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let options = match parse_options(std::env::args_os().skip(1)) {
         Ok(options) => options,
@@ -138,6 +166,15 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    if let Some(plan) = &options.plugin_step {
+        return match step_host(plan) {
+            Ok(_) => ExitCode::SUCCESS,
+            Err(error) => {
+                complain!("craftbridge-effects-conformance: {error}");
+                ExitCode::from(2)
+            }
+        };
+    }
     match run(&options) {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
@@ -162,6 +199,13 @@ mod tests {
         assert!(parsed(&["--list"]).is_ok_and(|options| options.list));
         let options = parsed(&["--oracle", "cli", "--scenario", "T1", "--scenario", "T5", "--corpus", "c.toml"]).expect("parses");
         assert_eq!((options.only, options.corpus), (vec!["T1".to_string(), "T5".to_string()], PathBuf::from("c.toml")));
+    }
+
+    #[test]
+    fn a_plug_in_step_needs_its_calls_and_no_oracle() {
+        let options = parsed(&["--plugin-step", "{\"host\":{},\"calls\":[]}"]).expect("parses without an oracle");
+        assert_eq!(options.plugin_step.as_deref(), Some("{\"host\":{},\"calls\":[]}"));
+        assert!(parsed(&["--plugin-step"]).err().is_some_and(|error| error.contains("needs the step's calls")));
     }
 
     #[test]

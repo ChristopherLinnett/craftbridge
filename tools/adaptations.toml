@@ -145,7 +145,7 @@ depends = [
   { item = "AutoPick::WARMUP", at = [{ file = "crates/render/src/auto.rs", lines = ["95"] }] },
   { item = "the CLI's bench command, whose options choose the project, the comp, the frame, the scale and the number of runs and which hands the run to bench, bench_play or bench_gpu", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1059-1085"] }] },
   { item = "the CLI's median, minimum and CPU clock", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1250-1262"] }] },
-  { item = "the CLI's render_timed, bench and bench_play, whose rows and columns the document follows", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1265-1350"] }] },
+  { item = "the CLI's render_timed, bench and bench_play, whose rows and columns the document follows and whose text the conformance runner reads for T21: the runs of the `bench (no cache)` heading, the layer rows (` process `) and effect rows (`fx `), the frames of the two `bench-play` headings and the `layer cache` line", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1265-1350"] }] },
   { item = "the CLI's bench_gpu, whose rows and columns the document follows and which picks the frame it times", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1507-1616"] }] },
   { item = "Session::resolve_comp", at = [{ file = "crates/engine/src/session/comps.rs", lines = ["303"] }] },
   { item = "the comp's frame rate and duration, which pick the frames timed", at = [{ file = "crates/project/src/comp.rs", lines = ["84-85"] }] },
