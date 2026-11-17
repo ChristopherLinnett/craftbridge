@@ -40,6 +40,8 @@
 //! A comp that is not there fails in the command line's words whatever the format, so an app that
 //! asks for the same frame as PNG or as pixels hears one refusal.
 
+use std::borrow::Cow;
+
 use craftbridge_core::{CraftError, FrameBytes, PixelFormat, Result};
 use effectcraft_automation::{Backend, Error};
 use effectcraft_engine::EngineError;
@@ -214,11 +216,19 @@ pub struct RenderRequest {
 }
 
 impl RenderRequest {
+    /// The parameters of an `export` call as an object of the fields it takes, refused otherwise: what
+    /// the command line's own parser refuses of its flags, an option it does not know, before it reads
+    /// any of them.
+    pub(crate) fn fields(params: &Value) -> Result<Cow<'_, Map<String, Value>>> {
+        let obj = object_params(params, EXPORT)?;
+        reject_unknown(&obj, EXPORT, &FIELDS)?;
+        Ok(obj)
+    }
+
     /// Read the parameters of an `export` call. Absent parameters are an empty request, which
     /// [`RenderRequest::to_queue_params`] then refuses for naming no output.
     pub fn from_params(params: &Value) -> Result<Self> {
-        let obj = object_params(params, EXPORT)?;
-        reject_unknown(&obj, EXPORT, &FIELDS)?;
+        let obj = Self::fields(params)?;
         if bool_param(&obj, "queue", EXPORT)?.unwrap_or(false) {
             return Ok(Self { queue: true, ..Self::default() });
         }
@@ -339,8 +349,7 @@ const DEFAULT_FRAME_RATE: f64 = 30.0;
 /// or the raw pixels the compositor rendered, with the size check and the premultiplied conversion
 /// those take in the core's own [`FrameBytes::new`].
 pub(crate) fn frame(backend: &mut Backend, params: &Value, format: PixelFormat) -> Result<FrameBytes> {
-    let request = FrameRequest::parse(params)?.resolve(backend)?;
-    request.render(backend, format)
+    FrameRequest::parse(params)?.frame(backend, format)
 }
 
 /// The moment a frame is rendered at.
@@ -361,7 +370,7 @@ enum Size {
 }
 
 /// The request as the app wrote it, checked for its shape.
-struct FrameRequest {
+pub(crate) struct FrameRequest {
     comp: Option<Value>,
     moment: Moment,
     size: Size,
@@ -376,10 +385,22 @@ struct Resolved {
     transparent: bool,
 }
 
+/// The fields a frame request takes.
+const FRAME_FIELDS: [&str; 6] = ["comp", "time", "frame", "maxSide", "scale", "transparent"];
+
 impl FrameRequest {
-    fn parse(params: &Value) -> Result<Self> {
+    /// The request as an object of the fields a frame takes, and of those in `also`, which a caller
+    /// refuses in words of its own, refused otherwise: what the command line's own parser refuses of
+    /// its flags before it reads any of them.
+    pub(crate) fn fields<'a>(params: &'a Value, also: &[&str]) -> Result<Cow<'a, Map<String, Value>>> {
         let obj = object_params(params, METHOD)?;
-        reject_unknown(&obj, METHOD, &["comp", "time", "frame", "maxSide", "scale", "transparent"])?;
+        let known: Vec<&str> = FRAME_FIELDS.iter().chain(also).copied().collect();
+        reject_unknown(&obj, METHOD, &known)?;
+        Ok(obj)
+    }
+
+    pub(crate) fn parse(params: &Value) -> Result<Self> {
+        let obj = Self::fields(params, &[])?;
         let moment = match (number_param(&obj, "time", METHOD)?, number_param(&obj, "frame", METHOD)?) {
             (Some(_), Some(_)) => return Err(CraftError::invalid_params("`frame`: give `time` or `frame`, not both")),
             (Some(seconds), None) => Moment::Seconds(seconds),
@@ -396,6 +417,12 @@ impl FrameRequest {
         // called as it calls it; `get_comp` is given null, as the command line gives it.
         let comp = Some(reference(&obj, "comp", METHOD)?).filter(|comp| !comp.is_null());
         Ok(Self { comp, moment, size, transparent: bool_param(&obj, "transparent", METHOD)?.unwrap_or(false) })
+    }
+
+    /// Render the frame asked for and answer it as `format`, the figures that depend on the comp
+    /// settled first.
+    pub(crate) fn frame(self, backend: &mut Backend, format: PixelFormat) -> Result<FrameBytes> {
+        self.resolve(backend)?.render(backend, format)
     }
 
     /// Settle the figures that depend on the comp, asking the comp for them the way the command line

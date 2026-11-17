@@ -68,7 +68,7 @@ fn files_in(dir: &Path) -> Result<BTreeMap<String, Vec<u8>>, String> {
 }
 
 /// Whether two output folders hold the same files with the same bytes, naming what differs.
-fn same_files(plugin: &Path, command_line: &Path) -> Result<usize, String> {
+pub(super) fn same_files(plugin: &Path, command_line: &Path) -> Result<usize, String> {
     let (ours, theirs) = (files_in(plugin)?, files_in(command_line)?);
     if ours.keys().ne(theirs.keys()) {
         return Err(format!("the plugin wrote {:?}, the command line {:?}", ours.keys().collect::<Vec<_>>(), theirs.keys().collect::<Vec<_>>()));
@@ -302,19 +302,26 @@ fn the_projects_own_queue_exports_as_the_command_lines_queue() {
 /// engine keeps its settings and caches in: what an export could have left behind.
 pub(super) fn outputs_in(scratch: &Scratch) -> Result<Vec<PathBuf>, String> {
     let working = [&scratch.folders.config, &scratch.folders.cache, &scratch.folders.models];
+    let mut found = entries_under(scratch.path(), &working)?;
+    found.retain(|path| !scratch.path().join(path).is_dir());
+    Ok(found)
+}
+
+/// Every file and folder under `root` but those in `skip` and below them, by its path inside `root`,
+/// sorted.
+pub(super) fn entries_under(root: &Path, skip: &[&PathBuf]) -> Result<Vec<PathBuf>, String> {
     let mut found = Vec::new();
-    let mut folders = vec![scratch.path().to_path_buf()];
+    let mut folders = vec![root.to_path_buf()];
     while let Some(folder) = folders.pop() {
         for entry in std::fs::read_dir(&folder).map_err(|e| format!("{}: {e}", folder.display()))? {
             let path = entry.map_err(|e| e.to_string())?.path();
-            if working.contains(&&path) {
+            if skip.contains(&&path) {
                 continue;
             }
             if path.is_dir() {
-                folders.push(path);
-            } else {
-                found.push(path.strip_prefix(scratch.path()).map_err(|e| e.to_string())?.to_path_buf());
+                folders.push(path.clone());
             }
+            found.push(path.strip_prefix(root).map_err(|e| e.to_string())?.to_path_buf());
         }
     }
     found.sort();

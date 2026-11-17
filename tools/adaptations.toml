@@ -123,14 +123,42 @@ depends = [
 [[adaptation]]
 id = "AD5"
 crate = "craftbridge-effects"
-file = "src/runner.rs"
+file = "src/templates.rs and src/staging.rs"
 implements = "FX-1f"
-summary = "Templates: open an .ectemplate, apply values, render a frame or an export, and surface missing-font warnings."
-replaces = "the CLI's --template handling (apps/effectcraft-cli/src/template.rs)."
+summary = "Templates: open an .ectemplate and apply values as the CLI's --template does (the values checked on a scratch copy before the import, the template imported without a comp, an instance of it in a wrapper comp the duplicate of its own), export the instance through the render runner (AD3) so its files are listed before they are written, render its frame through the frame call, refuse an output that is the template, import a template whose folder, as named, lies outside the container's write root from a copy in the container's cache, through the one staging any import that writes beside its source can go through, so the media the import writes beside it land inside the container, and surface the template's missing fonts as the warnings file.findMissing reports."
+replaces = "the CLI's --template handling (apps/effectcraft-cli/src/template.rs, whole, and its wiring in apps/effectcraft-cli/src/main.rs)."
 depends = [
-  { item = "the essential commands", at = [{ file = "crates/engine/src/cmd/essential.rs" }] },
-  { item = "the templates commands", at = [{ file = "crates/engine/src/home/templates.rs" }] },
-  { item = "the command line's `--template` handling, whole", at = [{ file = "apps/effectcraft-cli/src/template.rs" }] },
+  { item = "the CLI's template module, whose validate, values, preflight, prepare and instantiate the runner mirrors", at = [{ file = "apps/effectcraft-cli/src/template.rs" }] },
+  { item = "the CLI's --template wiring: validate before every command, and prepare on the session before render-frame and render, in place of the project or the demo render opens", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["626", "790-796", "894-900"] }] },
+  { item = "essential.importTemplate, the template's import, and read_template, which it and the scratch check read a template with", at = [{ file = "crates/engine/src/cmd/essential.rs", lines = ["878", "911-974", "1052-1060"] }] },
+  { item = "the import's media writes: each `media/<item>/<file>` entry written to `<stem> Media/<item>/<file>` beside the template through FsServices::write_file, the atomic write of a temporary file named from a counter of the engine's own and renamed over the name, which is why the runner lists none of them in the pending-export journal", at = [
+    { file = "crates/engine/src/cmd/essential.rs", lines = ["897-909"] },
+    { file = "crates/engine/src/services.rs", lines = ["99-101"] },
+    { file = "crates/engine/src/settings/config.rs", lines = ["196-236"] },
+  ] },
+  { item = "essential.set, which sets a control's value or media on the instance", at = [{ file = "crates/engine/src/cmd/essential.rs", lines = ["620", "1061"] }] },
+  { item = "EssentialGraphics::flat and EgKind, which tell a Media Replacement control", at = [{ file = "crates/project/src/essential.rs", lines = ["49", "181"] }] },
+  { item = "offset_ids, which moves the scratch copy's ids as the import does", at = [{ file = "crates/project/src/essential.rs", lines = ["714"] }] },
+  { item = "project.duplicate, comp.open, edit.clear, layer.setSwitch, layer.addItem and file.import, which make the instance", at = [
+    { file = "crates/engine/src/cmd/project_items.rs", lines = ["285"] },
+    { file = "crates/engine/src/cmd/comp.rs", lines = ["311"] },
+    { file = "crates/engine/src/cmd/edit.rs", lines = ["1005"] },
+    { file = "crates/engine/src/cmd/layer.rs", lines = ["78", "109"] },
+    { file = "crates/engine/src/cmd/file.rs", lines = ["798"] },
+  ] },
+  { item = "file.findMissing, which names the text layers whose font is missing", at = [{ file = "crates/engine/src/cmd/file_more.rs", lines = ["341-382", "1257"] }] },
+  { item = "Session::edit, which names the wrapper and keeps the instance's last partial frame", at = [{ file = "crates/engine/src/session/edit.rs", lines = ["10"] }] },
+  { item = "Session::new and Session::services, the scratch session and the file read", at = [
+    { file = "crates/engine/src/session/dispatch.rs", lines = ["4"] },
+    { file = "crates/engine/src/lib.rs", lines = ["123"] },
+  ] },
+  { item = "Backend::headless, the unconfined backend the scratch check runs its commands through", at = [{ file = "crates/automation/src/backend.rs", lines = ["33"] }] },
+  { item = "Project::fix_next_id, which the scratch copy's ids are settled with after the offset, as the import settles them", at = [{ file = "crates/project/src/item.rs", lines = ["333"] }] },
+  { item = "effectcraft_engine::guard::guarded, which turns a panic of the scratch check into an error", at = [{ file = "crates/engine/src/system/guard.rs", lines = ["24"] }] },
+  { item = "Backend::confinement, Confinement::check and Access, with which staging asks of the folder holding a source as it is named, where the import writes beside it (essential.importTemplate takes its media folder from the path it is given, not where a link leads), whether the session may write there or only read, and checks the copy it makes", at = [
+    { file = "crates/automation/src/backend.rs", lines = ["53"] },
+    { file = "crates/automation/src/confine.rs", lines = ["31", "190"] },
+  ] },
 ]
 
 [[adaptation]]
@@ -278,7 +306,7 @@ id = "AD10"
 crate = "craftbridge-effects"
 file = "src/methods.rs and src/info.rs"
 implements = "FX-1a, FX-1b (the disk's refusals)"
-summary = "The answer table: info beside get_project's document, commands as list_commands, exec as one command's result and run as the list of {command, result}, each in the command line's shapes; every automation and engine error is mapped onto one CraftError row — a command or setting the confinement withholds and a capability the build lacks answer Unsupported; a file access outside the confinement, a write with nowhere inside it to go, and a file the engine reports it cannot read or write answer Io; an unknown command, an unknown parameter and a parameter the confinement cannot check answer InvalidParams; a missing comp, item, layer or property answers NotFound, in each of the engine's phrasings; everything else answers CommandFailed, a refusal one command passes on from another it ran as the failure of the command that was run; and every failed step of a run names its step, in CommandFailed's step and in the words of every other row, as the CLI's run words it."
+summary = "The answer table: info beside get_project's document, commands as list_commands, exec as one command's result and run as the list of {command, result}, each in the command line's shapes; every automation and engine error is mapped onto one CraftError row — a command or setting the confinement withholds and a capability the build lacks answer Unsupported; a file access outside the confinement, a write with nowhere inside it to go, and a file the engine reports it cannot read or write answer Io; an unknown command, an unknown parameter and a parameter the confinement cannot check answer InvalidParams; a missing comp, item, layer, property or control answers NotFound, in each of the engine's phrasings; everything else answers CommandFailed, a refusal one command passes on from another it ran as the failure of the command that was run; and every failed step of a run names its step, in CommandFailed's step and in the words of every other row, as the CLI's run words it."
 replaces = "the CLI's info, exec and run printing (apps/effectcraft-cli/src/main.rs:630-745); a library has no process to print, so the plugin re-speaks those documents and errors through CraftError."
 depends = [
   { item = "effectcraft_automation::Error and what each variant displays", at = [{ file = "crates/automation/src/lib.rs", lines = ["33"] }] },
@@ -347,8 +375,9 @@ depends = [
     { file = "crates/engine/src/cmd/scripts.rs", lines = ["84", "238"] },
   ] },
   { item = "the engine's refusals of what a file holds, which open the same way, `cannot import` and `cannot export`, so a wider match on `cannot` cannot take the disk sentences in", at = [{ file = "crates/engine/src/cmd/aep.rs", lines = ["47", "57", "128"] }] },
-  { item = "the sentences a missing comp, layer, item or property is refused in — the missing thing alone or followed by the reference it names: `no layer 9` as a command's own refusal and as a plain one, `no such layer`, `no such item`, `no item `name``, `no property `path`` — told from the sentences that open alike about something else, `no layers`, `no layer uses motion blur`, `no compatible unlocked property`", at = [
+  { item = "the sentences a missing comp, layer, item, property or control is refused in — the missing thing alone or followed by the reference it names: `no layer 9` as a command's own refusal and as a plain one, `no such layer`, `no such item`, `no item `name``, `no property `path``, `no control named `name`` and `no control 9 on this instance` — told from the sentences that open alike about something else, `no layers`, `no layer uses motion blur`, `no compatible unlocked property`", at = [
     { file = "crates/engine/src/cmd/params.rs", lines = ["138", "160"] },
+    { file = "crates/engine/src/cmd/essential.rs", lines = ["37", "624"] },
     { file = "crates/engine/src/cmd/rig3d.rs", lines = ["70"] },
     { file = "crates/engine/src/cmd/footage_panel.rs", lines = ["151"] },
     { file = "crates/engine/src/cmd/layer/timing.rs", lines = ["220"] },

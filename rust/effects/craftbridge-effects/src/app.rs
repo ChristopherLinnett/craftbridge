@@ -13,7 +13,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 
 use crate::runner::{self, ListOutputs, Progress};
-use crate::{files, info, mcp, methods, plugins, properties, replay, requests, session, timings};
+use crate::{files, info, mcp, methods, plugins, properties, replay, session, templates, timings};
 
 /// A hosted EffectCraft session: the MCP server built at construction, which owns the headless
 /// [`Backend`] and the confined session behind it (plan §19).
@@ -30,6 +30,9 @@ pub struct EffectCraftApp {
     /// can name in `info.gpu` the failure that ended it (§17). The engine reads the same notice and
     /// calls `drop_gpu` between two calls once it has a report; the app never polls it.
     gpu_failure: Option<GpuFailure>,
+    /// The app's cache folder, inside the container, where a source the session may not write beside
+    /// is copied to be read ([`crate::staging`]).
+    cache: PathBuf,
     /// The app's place in the iOS plug-in gate's folder list, held while the app lives (§19).
     _admission: plugins::Admission,
 }
@@ -57,7 +60,14 @@ impl EffectCraftApp {
         let mut backend = Backend::headless(session::build(platform, folders));
         let confinement = EngineConfinement::new(roots.read_roots(), &[roots.write_root().to_path_buf()]).map_err(|error| CraftError::io(error.to_string()))?;
         backend.confine(confinement);
-        Ok(Self { server: McpServer::new(backend), gpu_failure: None, _admission: admission })
+        Ok(Self { server: McpServer::new(backend), gpu_failure: None, cache: folders.cache.clone(), _admission: admission })
+    }
+
+    /// The parameters of a call this app answers, with a template the session may not write beside
+    /// replaced by a copy inside the container ([`templates::staged`]): the one place every call that
+    /// names a template passes through, once it is known to answer the method.
+    fn staged(&mut self, method: &str, params: Value) -> Result<Value> {
+        templates::staged(self.server.backend(), &self.cache, method, params)
     }
 }
 
@@ -67,7 +77,7 @@ type Method = fn(&mut Backend, &Value) -> Result<Value>;
 /// The methods of the plan's §14 table `request` answers, by name. It is the one list of them: the
 /// dispatch reads it, and the refusal of every other name recites it, so the refusal names what
 /// `request` answers truly whatever a build adds to it.
-const METHODS: [(&str, Method); 13] = [
+const METHODS: [(&str, Method); 14] = [
     ("info", info::info),
     ("commands", methods::commands),
     ("exec", methods::exec),
@@ -81,6 +91,7 @@ const METHODS: [(&str, Method); 13] = [
     ("new", files::new),
     ("replay", replay::replay),
     ("timings", timings::timings),
+    ("template.open", templates::open),
 ];
 
 /// One method that runs long enough to report progress: the backend, the parameters, the listener
@@ -89,7 +100,7 @@ type ProgressMethod = for<'a> fn(&mut Backend, &Value, Progress<'a>, ListOutputs
 
 /// The methods `request_with_progress` answers, by name, the one list of them as [`METHODS`] is of
 /// `request`'s: the dispatch reads it and so does its refusal.
-const PROGRESS_METHODS: [(&str, ProgressMethod); 1] = [("export", runner::export)];
+const PROGRESS_METHODS: [(&str, ProgressMethod); 2] = [("export", runner::export), ("template.render", templates::render)];
 
 impl CraftApp for EffectCraftApp {
     /// Answer one method of the plan's §14 table through the function [`METHODS`] names for it.
@@ -101,7 +112,10 @@ impl CraftApp for EffectCraftApp {
     /// (plan §16), so a name refused here can be one the app answers through another call.
     fn request(&mut self, method: &str, params: Value) -> Result<Value> {
         match METHODS.iter().find(|(name, _)| *name == method) {
-            Some((_, answer)) => answer(self.server.backend(), &params),
+            Some((_, answer)) => {
+                let params = self.staged(method, params)?;
+                answer(self.server.backend(), &params)
+            }
             None => Err(CraftError::unsupported(not_answered(method, "request", METHODS.iter().map(|(name, _)| *name)))),
         }
     }
@@ -118,15 +132,21 @@ impl CraftApp for EffectCraftApp {
         list_outputs: &mut dyn FnMut(&[PathBuf]) -> Result<()>,
     ) -> Result<Value> {
         match PROGRESS_METHODS.iter().find(|(name, _)| *name == method) {
-            Some((_, answer)) => answer(self.server.backend(), &params, on_progress, list_outputs),
+            Some((_, answer)) => {
+                let params = self.staged(method, params)?;
+                answer(self.server.backend(), &params, on_progress, list_outputs)
+            }
             None => Err(CraftError::unsupported(not_answered(method, "request_with_progress", PROGRESS_METHODS.iter().map(|(name, _)| *name)))),
         }
     }
 
     /// Render one frame (plan §14's binary `frame`): the request is resolved as `render-frame`
-    /// resolves its flags. It has no row in [`METHODS`], so `request` keeps refusing the name.
+    /// resolves its flags, and when it names a `template` the frame is that template's instance, as
+    /// `render-frame --template` renders it. It has no row in [`METHODS`], so `request` keeps refusing
+    /// the name.
     fn frame(&mut self, params: Value, format: PixelFormat) -> Result<FrameBytes> {
-        requests::frame(self.server.backend(), &params, format)
+        let params = self.staged(templates::FRAME, params)?;
+        templates::frame(self.server.backend(), &params, format)
     }
 
     /// Answer one line of the MCP transport through the server built at construction, which owns the

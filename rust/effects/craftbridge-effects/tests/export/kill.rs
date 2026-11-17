@@ -9,6 +9,7 @@
 
 use super::super::common::Scratch;
 use super::super::scratch::folders_in;
+use super::super::template;
 use super::outputs_in;
 use craftbridge_core::{CancelToken, Engine, GpuChoice};
 use craftbridge_effects::EffectCraftApp;
@@ -18,6 +19,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// The method of the exports that need no template.
+const EXPORT: &str = "export";
+
 /// The variable that makes this binary run one export, as the child, instead of the tests: the case
 /// it names is the JSON of [`Case`].
 const CHILD: &str = "CRAFTBRIDGE_EXPORT_TO_KILL";
@@ -26,21 +30,25 @@ const CHILD: &str = "CRAFTBRIDGE_EXPORT_TO_KILL";
 const PATIENCE: Duration = Duration::from_secs(120);
 
 /// The names of [`cases`], in the order they run.
-const CASES: [&str; 4] = ["single", "sequence", "segmented", "queue"];
+const CASES: [&str; 5] = ["single", "sequence", "segmented", "queue", "template"];
 
-/// One export: the commands that set the project up, the request, and the file names that show the
-/// export has begun writing and the number of files it writes when it is left to finish.
+/// One export: the method that answers it, whether the demo project is opened first, the commands that
+/// set the project up, the request, and the file names that show the export has begun writing and the
+/// number of files it writes when it is left to finish.
 struct Case {
     name: &'static str,
+    method: &'static str,
+    demo: bool,
     setup: Vec<(&'static str, Value)>,
     request: Value,
     begun: String,
     finished: usize,
 }
 
-/// The four kinds of render the journal covers, over the demo project cut to a short, small render
+/// The five kinds of render the journal covers, over the demo project cut to a short, small render
 /// that still takes the child far longer than the parent needs to see its first file: a single file,
-/// an image sequence, a segmented sequence and the whole queue. `dir` is the container.
+/// an image sequence, a segmented sequence, the whole queue and a template's instance, which sets
+/// its own project up. `dir` is the container.
 fn cases(dir: &Path) -> Vec<Case> {
     let at = |name: &str| dir.join(name).display().to_string();
     let quarter = json!({"end": 4, "resolution": "quarter"});
@@ -50,10 +58,28 @@ fn cases(dir: &Path) -> Vec<Case> {
         request
     };
     vec![
-        Case { name: "single", setup: vec![], request: with(json!({"output": at("single.mp4"), "format": "h264"})), begun: "single".into(), finished: 1 },
-        Case { name: "sequence", setup: vec![], request: with(json!({"output": at("seq.png"), "format": "png"})), begun: "seq_".into(), finished: 120 },
+        Case {
+            name: "single",
+            method: EXPORT,
+            demo: true,
+            setup: vec![],
+            request: with(json!({"output": at("single.mp4"), "format": "h264"})),
+            begun: "single".into(),
+            finished: 1,
+        },
+        Case {
+            name: "sequence",
+            method: EXPORT,
+            demo: true,
+            setup: vec![],
+            request: with(json!({"output": at("seq.png"), "format": "png"})),
+            begun: "seq_".into(),
+            finished: 120,
+        },
         Case {
             name: "segmented",
+            method: EXPORT,
+            demo: true,
             setup: vec![
                 ("prefs.set", json!({"key": "export.segmentSequences", "value": true})),
                 ("prefs.set", json!({"key": "export.segmentSequenceFiles", "value": 10})),
@@ -64,6 +90,8 @@ fn cases(dir: &Path) -> Vec<Case> {
         },
         Case {
             name: "queue",
+            method: EXPORT,
+            demo: true,
             setup: vec![
                 ("renderQueue.add", json!({"format": "h264", "output": at("first.mp4"), "end": 1, "resolution": "quarter"})),
                 ("renderQueue.add", json!({"format": "png", "output": at("second.png"), "end": 4, "resolution": "quarter"})),
@@ -72,11 +100,26 @@ fn cases(dir: &Path) -> Vec<Case> {
             begun: "second_".into(),
             finished: 121,
         },
+        Case {
+            name: "template",
+            method: template::RENDER,
+            demo: false,
+            setup: vec![],
+            request: json!({"template": at(template::FILE), "values": {"Name": "Sam", "Photo": at(template::REPLACEMENT)}, "output": {"output": at("card.png"), "format": "png"}}),
+            begun: "card_".into(),
+            finished: template::FRAMES,
+        },
     ]
 }
 
 fn case_json(dir: &Path, case: &Case) -> Value {
-    json!({"container": dir, "setup": case.setup.iter().map(|(command, params)| json!([command, params])).collect::<Vec<_>>(), "request": case.request})
+    json!({
+        "container": dir,
+        "method": case.method,
+        "demo": case.demo,
+        "setup": case.setup.iter().map(|(command, params)| json!([command, params])).collect::<Vec<_>>(),
+        "request": case.request,
+    })
 }
 
 /// Start the app in `container` as an app crate's constructor does, with the journal on.
@@ -88,12 +131,16 @@ fn start(container: &Path) -> Result<Engine, String> {
 
 /// Set the demo project up as the case says and run its export to the end, answering what it answered.
 fn export_of(engine: &Engine, case: &Value) -> Result<Value, String> {
-    engine.request("exec", json!({"command": "file.openDemoProject"})).map_err(|error| error.to_string())?;
+    if case["demo"].as_bool().unwrap_or(true) {
+        engine.request("exec", json!({"command": "file.openDemoProject"})).map_err(|error| error.to_string())?;
+    }
     for step in case["setup"].as_array().into_iter().flatten() {
         let (command, params) = (step[0].as_str().unwrap_or_default(), step[1].clone());
         engine.request("exec", json!({"command": command, "params": params})).map_err(|error| format!("{command}: {error}"))?;
     }
-    engine.request_with_progress("export", case["request"].clone(), |_, _, _| {}, &CancelToken::new()).map_err(|error| error.to_string())
+    engine
+        .request_with_progress(case["method"].as_str().unwrap_or(EXPORT), case["request"].clone(), |_, _, _| {}, &CancelToken::new())
+        .map_err(|error| error.to_string())
 }
 
 /// The child: runs only when the parent names a case, and otherwise passes at once, so a plain run of
@@ -182,11 +229,12 @@ fn a_finished_render_keeps_its_files_across_a_restart() {
     for name in CASES {
         let scratch = Scratch::new().expect("a scratch folder");
         let case = case_in(&scratch, name).expect("a case of that name");
+        let before = outputs_in(&scratch).expect("the container reads");
         let engine = start(scratch.path()).expect("the app starts");
         export_of(&engine, &case_json(scratch.path(), &case)).unwrap_or_else(|error| panic!("{}: {error}", case.name));
         engine.close().expect("the engine closes");
         let finished = outputs_in(&scratch).expect("the container reads");
-        assert_eq!(finished.len(), case.finished, "{}: the render wrote every file: {finished:?}", case.name);
+        assert_eq!(finished.len() - before.len(), case.finished, "{}: the render wrote every file: {finished:?}", case.name);
 
         let engine = start(scratch.path()).expect("the app starts again");
         let recovery = engine.recovery().clone();
@@ -196,7 +244,15 @@ fn a_finished_render_keeps_its_files_across_a_restart() {
     }
 }
 
-/// The case `name` with its files in `scratch`'s container.
+/// The case `name` with its files in `scratch`'s container. The template's is made first, and opened
+/// once so the media the engine extracts beside it is there before the files an export writes are
+/// counted: the extraction is not the export's.
 fn case_in(scratch: &Scratch, name: &str) -> Result<Case, String> {
+    if name == "template" {
+        template::make(scratch, template::SIZE, template::SECONDS, "Arial")?;
+        let engine = start(scratch.path())?;
+        engine.request("template.open", json!({"template": scratch.path().join(template::FILE).display().to_string()})).map_err(|error| error.to_string())?;
+        engine.close().map_err(|error| error.to_string())?;
+    }
     cases(scratch.path()).into_iter().find(|case| case.name == name).ok_or_else(|| format!("no case named {name}"))
 }
