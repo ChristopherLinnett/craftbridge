@@ -20,17 +20,25 @@
 //!   is judged on its own (above): a Swift call leaves out a defaulted parameter wherever it stands, and
 //!   the Kotlin facade takes every argument by name, so no call hands a value to a key that took another's
 //!   place.
-//! - A tool an app can call that became `bridgeOnly`, or whose input schema changed other than by a new
-//!   optional property, an optional property that was required, or a description: the app's input is no
-//!   longer one the tool takes. A tool that was `bridgeOnly` is none an app can call: CraftBridge runs the
-//!   engine headless, which hides and refuses every such tool, so nothing that becomes of it breaks an app.
+//! - A tool an app can call whose input schema changed other than by a new optional property, an
+//!   optional property that was required, or a description: the app's input is no longer one the tool
+//!   takes.
+//! - A command or tool that became refused under confinement (`refusedUnderConfinement`), or a tool that
+//!   became `bridgeOnly`: CraftBridge runs the engine headless and always confined, so it can call
+//!   neither what a headless engine hides nor what the confinement refuses — yet an app written against
+//!   the old surface could call the entry until it was taken away.
+//!
+//! A tool that was `bridgeOnly` or refused is none an app can call, and no facade gives it a method, so
+//! nothing else that becomes of it breaks an app. A refused command is not so: both facades keep its
+//! typed method, which an app may have written a call to, so its removal and every change to its keys
+//! break that call's build as they break any command's, and only its refusal is judged by the mark.
 //!
 //! Everything else is compatible and still listed: a new command, a new optional key wherever it stands, a
 //! new enum word, a key that became optional, a new tool, a changed label, `journal` flag, `params` text or
-//! description — a changed `params` text is not listed beside a command whose keys changed, since it is the
-//! very text those changes came from. A new enum word stays compatible only while the facades give an enum
-//! key a type no Swift `switch` or Kotlin `when` covers exhaustively, and a new optional key before another
-//! only while every Kotlin call names its arguments.
+//! description, a refusal that was lifted — a changed `params` text is not listed beside a command whose
+//! keys changed, since it is the very text those changes came from. A new enum word stays compatible only
+//! while the facades give an enum key a type no Swift `switch` or Kotlin `when` covers exhaustively, and a
+//! new optional key before another only while every Kotlin call names its arguments.
 
 use crate::model::{Command, Key, Surface, Tool};
 use serde_json::{Map, Value};
@@ -125,7 +133,9 @@ fn pairs<'a, T>(old: &BTreeMap<&'a str, &'a T>, new: &BTreeMap<&'a str, &'a T>) 
 }
 
 fn compare_command(old: &Command, new: &Command, changes: &mut Vec<Change>) {
-    let Command { id: _, label: _, params: _, journal: _, keys: _ } = old;
+    // A refused command keeps its typed method in both facades, so every rule on its keys judges it as it
+    // judges any command's (module docs); only the refusal itself is judged by the mark, below.
+    let Command { id: _, label: _, params: _, journal: _, refused_under_confinement: _, keys: _ } = old;
     let before = changes.len();
     let (old_keys, new_keys) = (by(&old.keys, |key| &key.name), by(&new.keys, |key| &key.name));
     for (name, pair) in pairs(&old_keys, &new_keys) {
@@ -147,9 +157,9 @@ fn compare_command(old: &Command, new: &Command, changes: &mut Vec<Change>) {
             changes.push(Change::changed(Kind::Command, &old.id, format!("{what} {} -> {}", quoted(was), quoted(is)), false));
         }
     }
-    if old.journal != new.journal {
-        changes.push(Change::changed(Kind::Command, &old.id, format!("journal {} -> {}", old.journal, new.journal), false));
-    }
+    changes.extend(flipped(Kind::Command, &old.id, "journal", (old.journal, new.journal), false));
+    let called = !old.refused_under_confinement;
+    changes.extend(flipped(Kind::Command, &old.id, "refusedUnderConfinement", (old.refused_under_confinement, new.refused_under_confinement), called));
 }
 
 fn compare_key(subject: &str, old: &Key, new: &Key, changes: &mut Vec<Change>) {
@@ -203,23 +213,31 @@ fn names_of(keys: &[Key]) -> Vec<&str> {
     keys.iter().map(|key| key.name.as_str()).collect()
 }
 
-/// Can an app call the tool? CraftBridge runs the engine headless, and a headless engine hides and refuses
-/// every `bridgeOnly` tool, which needs the desktop app's control channel.
+/// A flag of a command or tool, named as the surface spells it, if it flipped, breaking an app as
+/// `breaking` says. A flag that withholds the entry from apps (`bridgeOnly`, `refusedUnderConfinement`)
+/// breaks exactly when an app could call the entry before: becoming set takes away a call the app made,
+/// and ceasing to be set only frees one. Any other flag (`journal`) changes nothing a call is typed by.
+fn flipped(kind: Kind, subject: &str, flag: &str, (was, is): (bool, bool), breaking: bool) -> Option<Change> {
+    (was != is).then(|| Change::changed(kind, subject, format!("{flag} {was} -> {is}"), breaking))
+}
+
+/// Can an app call the tool? CraftBridge runs the engine headless and always confined: a headless
+/// engine hides and refuses every `bridgeOnly` tool, which needs the desktop app's control channel, and
+/// the confinement answers every refused tool with its refusal before the tool runs.
 fn callable(tool: &Tool) -> bool {
-    !tool.bridge_only
+    !(tool.bridge_only || tool.refused_under_confinement)
 }
 
 /// A tool no app can call breaks no app, whatever becomes of it; its changes are still listed.
 fn compare_tool(old: &Tool, new: &Tool, changes: &mut Vec<Change>) {
-    let Tool { name: _, description: _, bridge_only: _, input_schema: _ } = old;
+    let Tool { name: _, description: _, bridge_only: _, refused_under_confinement: _, input_schema: _ } = old;
     let subject = old.name.as_str();
     let called = callable(old);
     if old.description != new.description {
         changes.push(Change::changed(Kind::Tool, subject, "description".to_string(), false));
     }
-    if old.bridge_only != new.bridge_only {
-        changes.push(Change::changed(Kind::Tool, subject, format!("bridgeOnly {} -> {}", old.bridge_only, new.bridge_only), called));
-    }
+    changes.extend(flipped(Kind::Tool, subject, "bridgeOnly", (old.bridge_only, new.bridge_only), called));
+    changes.extend(flipped(Kind::Tool, subject, "refusedUnderConfinement", (old.refused_under_confinement, new.refused_under_confinement), called));
     for (detail, breaking) in schema_changes(&old.input_schema, &new.input_schema) {
         changes.push(Change::changed(Kind::Tool, subject, format!("input {detail}"), called && breaking));
     }
@@ -349,16 +367,28 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// The one command the command tests split apart: three keys, one required, one with a word list.
+    fn sample_command() -> Command {
+        Command::of(
+            "a.b",
+            "A label",
+            vec![Key::raw("one", false, "bool", None), Key::raw("two", true, "string", None), Key::raw("mode", false, "enum", Some(&["on", "off"]))],
+        )
+    }
+
     /// The changes between a surface of one command and the same surface with `edit` applied to it.
     fn one_command(edit: impl FnOnce(&mut Command)) -> Vec<Change> {
-        let old = Surface::of(
-            vec![Command::of(
-                "a.b",
-                "A label",
-                vec![Key::raw("one", false, "bool", None), Key::raw("two", true, "string", None), Key::raw("mode", false, "enum", Some(&["on", "off"]))],
-            )],
-            vec![],
-        );
+        command_changes(false, edit)
+    }
+
+    /// A surface of [`sample_command`] alone, marked refused under confinement or not.
+    fn sample_surface(refused: bool) -> Surface {
+        Surface::of(vec![Command { refused_under_confinement: refused, ..sample_command() }], vec![])
+    }
+
+    /// [`one_command`] with the command marked refused under confinement on both sides, or not.
+    fn command_changes(refused: bool, edit: impl FnOnce(&mut Command)) -> Vec<Change> {
+        let old = sample_surface(refused);
         let mut new = old.clone();
         edit(new.commands.first_mut().unwrap());
         compare(&old, &new)
@@ -369,14 +399,13 @@ mod tests {
         command.keys.get_mut(at).unwrap()
     }
 
+    /// The one tool the tool tests split apart, open to apps: two properties, one required.
+    fn sample_tool() -> Tool {
+        Tool::of("t", json!({"type": "object", "properties": {"x": {"type": "integer", "description": "d"}, "y": {"type": "string"}}, "required": ["x"]}))
+    }
+
     fn one_tool(edit: impl FnOnce(&mut Tool)) -> Vec<Change> {
-        let old = Surface::of(
-            vec![],
-            vec![Tool::of(
-                "t",
-                json!({"type": "object", "properties": {"x": {"type": "integer", "description": "d"}, "y": {"type": "string"}}, "required": ["x"]}),
-            )],
-        );
+        let old = Surface::of(vec![], vec![sample_tool()]);
         let mut new = old.clone();
         edit(new.tools.first_mut().unwrap());
         compare(&old, &new)
@@ -539,16 +568,80 @@ mod tests {
         assert_eq!(only(&compare(&only_bridge, &open)), ("t", Verb::Changed, "bridgeOnly true -> false", false));
     }
 
-    #[test]
-    fn nothing_that_becomes_of_a_tool_no_app_can_call_breaks() {
-        let mut old = Surface::of(vec![], vec![Tool::of("ui", json!({"type": "object", "properties": {"x": {"type": "integer"}}, "required": ["x"]}))]);
-        old.tools.first_mut().unwrap().bridge_only = true;
-        assert_eq!(only(&compare(&old, &Surface::of(vec![], vec![]))), ("ui", Verb::Removed, "", false));
+    /// Nothing that becomes of a tool no app can call breaks, whether it hides behind the bridge or the
+    /// refusal: its changes stay listed, and none of them takes a call away, the other mark it gains
+    /// included. `mark` sets on [`sample_tool`] the mark that keeps apps from it, before anything else
+    /// becomes of it.
+    fn nothing_is_lost_from_an_uncallable_tool(mark: fn(&mut Tool)) {
+        let mut tool = sample_tool();
+        mark(&mut tool);
+        let old = Surface::of(vec![], vec![tool]);
+        assert_eq!(only(&compare(&old, &Surface::of(vec![], vec![]))), ("t", Verb::Removed, "", false));
         let mut changed = old.clone();
         changed.tools.first_mut().unwrap().input_schema = json!({"type": "object", "properties": {}, "required": ["y"], "additionalProperties": false});
         let changes = compare(&old, &changed);
         assert_eq!(changes.len(), 3, "each change is still listed: {changes:?}");
         assert!(!is_breaking(&changes), "{changes:?}");
+        let mut both = old.clone();
+        let tool = both.tools.first_mut().unwrap();
+        (tool.bridge_only, tool.refused_under_confinement) = (true, true);
+        let gained = compare(&old, &both);
+        assert_eq!(gained.len(), 1, "the one mark it lacked: {gained:?}");
+        assert!(!is_breaking(&gained), "{gained:?}");
+    }
+
+    #[test]
+    fn nothing_that_becomes_of_a_tool_no_app_can_call_breaks() {
+        nothing_is_lost_from_an_uncallable_tool(|tool| tool.bridge_only = true);
+    }
+
+    #[test]
+    fn a_command_or_tool_that_became_refused_breaks_and_one_released_does_not() {
+        // Becoming refused takes away a call the app made, as becoming `bridgeOnly` does: the flip is
+        // judged on what the app could call before, both ways, for both kinds of entry.
+        assert_eq!(only(&one_command(|c| c.refused_under_confinement = true)), ("a.b", Verb::Changed, "refusedUnderConfinement false -> true", true));
+        assert_eq!(only(&one_tool(|t| t.refused_under_confinement = true)), ("t", Verb::Changed, "refusedUnderConfinement false -> true", true));
+        let old = Surface::of(vec![Command::of("a.b", "A label", vec![])], vec![Tool::of("t", json!({}))]);
+        let mut refused = old.clone();
+        refused.commands.first_mut().unwrap().refused_under_confinement = true;
+        refused.tools.first_mut().unwrap().refused_under_confinement = true;
+        let released = compare(&refused, &old);
+        assert_eq!(
+            released.iter().map(|change| (change.subject.as_str(), change.detail.as_str(), change.breaking)).collect::<Vec<_>>(),
+            [("a.b", "refusedUnderConfinement true -> false", false), ("t", "refusedUnderConfinement true -> false", false)],
+            "ceasing to be refused only frees a call"
+        );
+    }
+
+    /// Both facades keep a refused command's typed method, so whatever breaks a call written to it breaks
+    /// it whether or not the engine refuses the call: each edit judges a refused command exactly as it
+    /// judges the same command open to apps.
+    #[test]
+    fn a_refused_command_breaks_as_any_command_does() {
+        type Edit = fn(&mut Command);
+        let edits: [(Edit, bool); 8] = [
+            (|c| drop(c.keys.remove(0)), true),
+            (|c| c.keys.push(Key::raw("three", true, "bool", None)), true),
+            (|c| key_at(c, 0).required = true, true),
+            (|c| key_at(c, 0).key_type = "json".to_string(), true),
+            (|c| *key_at(c, 2) = Key::raw("mode", false, "enum", Some(&["on"])), true),
+            (|c| key_at(c, 2).values = None, true),
+            (|c| c.keys.swap(0, 1), true),
+            (|c| c.label = "Another label".to_string(), false),
+        ];
+        for (edit, breaking) in edits {
+            let callable = command_changes(false, edit);
+            assert_eq!(is_breaking(&callable), breaking, "{callable:?}");
+            assert_eq!(command_changes(true, edit), callable);
+        }
+        let removed = |refused| compare(&sample_surface(refused), &Surface::of(vec![], vec![]));
+        assert_eq!(only(&removed(true)), ("a.b", Verb::Removed, "", true), "its method is gone from both facades");
+        assert_eq!(removed(true), removed(false));
+    }
+
+    #[test]
+    fn nothing_that_becomes_of_a_refused_tool_breaks() {
+        nothing_is_lost_from_an_uncallable_tool(|tool| tool.refused_under_confinement = true);
     }
 
     #[test]
