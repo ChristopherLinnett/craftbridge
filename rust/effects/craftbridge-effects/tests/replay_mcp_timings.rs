@@ -2,11 +2,11 @@
 //! downloads (AD11) and the confinement (L5) held on every path that hands a command to the engine,
 //! the shapes of the answers, and the one thing not built, `script`.
 
-mod common;
+mod scratch;
 
-use common::Scratch;
 use craftbridge_core::{CraftApp, CraftError};
 use effectcraft_automation::confine::Confinement;
+use scratch::Scratch;
 use serde_json::{Value, json};
 
 const DOWNLOAD_WORDS: &str = "is not available in this build: it downloads by starting the system `curl`, and this build starts no process";

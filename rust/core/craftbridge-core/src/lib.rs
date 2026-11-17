@@ -17,6 +17,13 @@ pub mod surface;
 #[cfg(test)]
 mod testing;
 
+/// The platform's own calls, the one place hand-written `unsafe` may sit in this crate (AGENTS.md §4).
+/// iOS is the first platform with anything to ask its system about: the faces CoreText offers an app
+/// (plan §19, AD2). Every other platform asks nothing yet, so the module compiles only on iOS.
+#[cfg(target_os = "ios")]
+#[allow(unsafe_code)]
+pub mod platform;
+
 pub use app::CraftApp;
 pub use cancel::CancelToken;
 pub use engine::Engine;

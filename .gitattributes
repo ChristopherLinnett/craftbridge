@@ -2,6 +2,7 @@
 *.bat text eol=crlf
 *.jar binary
 *.png binary
+*.otf binary
 # A verification's records are kept byte for byte as the run wrote them (CRLF console captures included),
 # so the SHA-256s their RESULT.md and MANIFEST.md give stay true in every checkout.
 plan/evidence/v1/** -text

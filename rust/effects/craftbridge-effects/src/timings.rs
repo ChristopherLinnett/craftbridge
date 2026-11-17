@@ -313,7 +313,6 @@ fn differing_percent(cpu: &Image, gpu: &Image) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use craftbridge_core::folders::Folders;
     use serde_json::json;
 
     /// The median `bench` reports: the middle value, the upper of the two middle ones for an even
@@ -331,15 +330,7 @@ mod tests {
     /// one, and then the call's refusal for want of a GPU is what is checked.
     #[test]
     fn the_gpu_section_compares_both_sizes_when_an_accelerator_is_attached() {
-        let folders = Folders {
-            container: "/app".into(),
-            bundle: None,
-            config: "/app/config".into(),
-            cache: "/app/cache".into(),
-            models: "/app/models".into(),
-            plugins: None,
-            fonts: Vec::new(),
-        };
+        let folders = crate::session::tests::folders(None);
         let mut backend = Backend::headless(crate::session::build(&folders));
         backend.exec("file.openDemoProject", json!({})).expect("the demo opens");
         let Ok(gpu) = effectcraft_gpu::Gpu::try_headless() else {
