@@ -10,7 +10,7 @@ use craftbridge_core::Result;
 use effectcraft_automation::Backend;
 use serde_json::Value;
 
-use crate::methods::{empty_params, object, object_params, reject_unknown, run_command, string_param};
+use crate::methods::{empty_params, execute, object, object_params, reject_unknown, string_param};
 
 /// `open`: the project at `path`, which replaces the session's.
 pub(crate) fn open(backend: &mut Backend, params: &Value) -> Result<Value> {
@@ -39,5 +39,5 @@ fn file_command(backend: &mut Backend, params: &Value, method: &str, command: &s
     let obj = object_params(params, method)?;
     reject_unknown(&obj, method, known)?;
     let arguments = string_param(&obj, "path", method)?.map_or_else(empty_params, |path| object([("path", Value::from(path))]));
-    run_command(backend, command, arguments, None)
+    execute(backend, command, arguments, None)
 }

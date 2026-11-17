@@ -2,10 +2,11 @@
 //! construction (plan §14, §16).
 //!
 //! The server runs a tool's command through the confined backend, so the confinement holds on this
-//! path as on every other. The model downloads are the one thing the backend does not withhold, so
-//! the door that withholds them (AD11) is held here too: a tool call that reaches one is answered
-//! as a failed tool call, in the words every other path refuses it in, and the server never sees it.
-//! The tools also run their commands past `methods::run_command`, so each reply to a tool call that
+//! path as on every other. The model downloads and the renders no one has listed the files of are
+//! what the backend does not withhold, so the door that withholds them (AD11, AD3) is held here too:
+//! a tool call that reaches one is answered as a failed tool call, in the words every other path
+//! refuses it in, and the server never sees it.
+//! The tools also run their commands past `methods::execute`, so each reply to a tool call that
 //! runs a command passes through the font listing filter (AD2) before it is written.
 
 use effectcraft_automation::server::call_result;
@@ -13,9 +14,9 @@ use effectcraft_automation::{Error, McpServer, tools};
 use serde_json::{Map, Value};
 
 use crate::fonts::{TEXT_FONTS, filtered};
-use crate::methods::{empty_params, object, starts_a_process, wants_a_process};
+use crate::methods::{empty_params, object, withheld};
 
-/// The tools that run a command by its id, and so can reach a model download or a font listing, by
+/// The tools that run a command by its id, and so can reach a withheld command or a font listing, by
 /// how they name it: one command, or a list of steps.
 const ONE_COMMAND: [&str; 2] = ["execute_command", "command_run"];
 const COMMAND_LISTS: [&str; 2] = ["command_batch", "batch"];
@@ -37,8 +38,8 @@ struct Commands {
     steps: Vec<Option<Step>>,
 }
 
-/// Answer one line as the server does, with the one difference that a message reaching a model
-/// download is refused, and each tool reply's font listings are trimmed.
+/// Answer one line as the server does, with the one difference that a message reaching a withheld
+/// command is refused, and each tool reply's font listings are trimmed.
 pub(crate) fn answer(server: &mut McpServer, line: &str) -> Option<String> {
     answer_with(server, line, filtered)
 }
@@ -60,8 +61,8 @@ fn handle(server: &mut McpServer, message: &Value, filter: Filter) -> Option<Val
             let replies: Vec<Value> = batch.iter().filter_map(|inner| handle(server, inner, filter)).collect();
             (!replies.is_empty()).then_some(Value::Array(replies))
         }
-        _ => match download_in(message) {
-            Some(command) => refusal(message, &command),
+        _ => match withheld_in(message) {
+            Some(words) => refusal(message, words),
             None => server.handle(message).map(|reply| listed(message, reply, filter)),
         },
     }
@@ -103,10 +104,11 @@ fn commands_in(message: &Value) -> Option<Commands> {
     Some(Commands { rows: true, steps: steps.as_array()?.iter().map(step_of).collect() })
 }
 
-/// The model download a `tools/call` request reaches, if it does.
-fn download_in(message: &Value) -> Option<String> {
+/// The words of the refusal of the first command a `tools/call` request reaches that the door
+/// withholds, a model download or a render nothing has listed, if it reaches one.
+fn withheld_in(message: &Value) -> Option<String> {
     let commands = commands_in(message)?;
-    commands.steps.iter().flatten().find_map(|(command, params)| wants_a_process(command, params)).map(str::to_string)
+    commands.steps.iter().flatten().find_map(|(command, params)| withheld(command, params))
 }
 
 /// The command one step of a tool call runs: the tool's `command`, else `id`, with its `params`.
@@ -156,9 +158,9 @@ fn listed(message: &Value, mut reply: Value, filter: Filter) -> Value {
 /// whose `isError` is set and whose text is the refusal. A client that negotiates per request names
 /// its revision in `_meta`, and the server then marks results `resultType: complete`
 /// (`crates/automation/src/server.rs`:281-304), so the refusal is marked the same way.
-fn refusal(message: &Value, command: &str) -> Option<Value> {
+fn refusal(message: &Value, words: String) -> Option<Value> {
     let id = message.get("id")?.clone();
-    let mut result = call_result(Err(Error::BadArgs(starts_a_process(command))));
+    let mut result = call_result(Err(Error::BadArgs(words)));
     let modern =
         message.pointer("/params/_meta/io.modelcontextprotocol~1protocolVersion").and_then(Value::as_str).is_some_and(|version| version >= "2026-07-28");
     if let Some(fields) = result.as_object_mut().filter(|_| modern) {

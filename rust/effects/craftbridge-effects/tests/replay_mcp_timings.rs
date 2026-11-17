@@ -1,5 +1,5 @@
 //! The behaviours of the `replay`, `mcp` and `timings` rows: the door that withholds the model
-//! downloads (AD11) and the confinement (L5) held on every path that hands a command to the engine,
+//! downloads (AD11) and the renders no one has listed the files of (AD3), and the confinement (L5) held on every path that hands a command to the engine,
 //! the shapes of the answers, and the one thing not built, `script`.
 
 mod scratch;
@@ -11,15 +11,21 @@ use serde_json::{Value, json};
 
 const DOWNLOAD_WORDS: &str = "is not available in this build: it downloads by starting the system `curl`, and this build starts no process";
 
+const RENDER_WORDS: &str = "is not available in this build: it starts a render whose files the pending-export journal cannot list, and `export` lists them";
+
 /// The two commands that start a process, which the door withholds on every path.
 const DOWNLOADS: [&str; 2] = ["roto.model.download", "face.model.download"];
+
+/// The five commands that have the exporter write a render nothing has listed, which the door
+/// withholds on every path.
+const RENDERS: [&str; 5] = ["renderQueue.render", "file.watchFolder", "file.watchFolder.poll", "render.saveCurrentPreview", "file.exportTimeline"];
 
 /// A file outside the container, which the confinement refuses to read.
 const OUTSIDE: &str = "/etc/hosts";
 
 /// The door's refusal of `id`, in the words every path refuses it in.
 fn withheld(id: &str) -> String {
-    format!("`{id}` {DOWNLOAD_WORDS}")
+    format!("`{id}` {}", if DOWNLOADS.contains(&id) { DOWNLOAD_WORDS } else { RENDER_WORDS })
 }
 
 /// What the confinement itself answers `command` with, built over the scratch app's own roots: the
@@ -74,8 +80,8 @@ fn a_replay_runs_its_lines_and_reports_as_the_command_line_does() {
 
 /// Every spelling a replay line gives a command — its `command`, an `expect` query, a step of an
 /// `engine.batch` by `command` or by `id`, and the `start` line's project — refused whole before any
-/// line runs, in the words of the door or the confinement and on their rows: each model download,
-/// a read outside the container, a script, and a command whose destination only a live lookup can
+/// line runs, in the words of the door or the confinement and on their rows: each model download and
+/// each render nothing has listed, a read outside the container, a script, and a command whose destination only a live lookup can
 /// tell, which the confinement refuses in a batch.
 #[test]
 fn a_replay_is_refused_whole_by_the_door_and_the_confinement_before_any_line_runs() {
@@ -88,12 +94,15 @@ fn a_replay_is_refused_whole_by_the_door_and_the_confinement_before_any_line_run
     let unsupported: fn(&CraftError) -> bool = |e| matches!(e, CraftError::Unsupported { .. });
     let io: fn(&CraftError) -> bool = |e| matches!(e, CraftError::Io { .. });
     let invalid: fn(&CraftError) -> bool = |e| matches!(e, CraftError::InvalidParams { .. });
-    for id in DOWNLOADS {
+    // Export Timeline that renders nothing, which the door reads past, ahead of a withheld step.
+    let quiet = json!({"command": "file.exportTimeline", "params": {"path": "quiet.xml", "prerender": "none"}});
+    for id in DOWNLOADS.into_iter().chain(RENDERS) {
         for line in [
             json!({"command": id, "params": weights}),
             json!({"expect": {"query": id, "params": weights}}),
             in_a_batch(json!({"command": id, "params": weights})),
             in_a_batch(json!({"id": id, "params": weights})),
+            json!({"command": "engine.batch", "params": {"steps": [quiet, {"command": id, "params": weights}]}}),
         ] {
             refused.push((line, withheld(id), unsupported));
         }
@@ -150,16 +159,16 @@ fn mcp_answers_on_the_session_the_methods_act_on() {
     assert!(matches!(app.request("mcp", json!({})).expect_err("refused"), CraftError::Unsupported { .. }));
 }
 
-/// Each model download, by every tool that runs a command and every way the server reads one —
+/// Each model download and each render nothing has listed, by every tool that runs a command and every way the server reads one —
 /// `command` or `id`, parameters as JSON or as text, a step of `command_batch`, of `batch` (steps as
 /// JSON or as text) and of an `engine.batch` run as one command — refused in the door's words, alone
 /// and inside a JSON-RPC batch, where the other messages are answered as the server answers them.
 #[test]
-fn mcp_withholds_the_model_downloads_on_every_tool_that_runs_a_command() {
+fn mcp_withholds_the_model_downloads_and_unlisted_renders_on_every_tool_that_runs_a_command() {
     let scratch = Scratch::new().expect("a scratch folder");
     let mut app = scratch.app().expect("the app starts");
     let weights = json!({"id": "classical"});
-    for id in DOWNLOADS {
+    for id in DOWNLOADS.into_iter().chain(RENDERS) {
         let step = json!({"command": id, "params": weights});
         let id_step = json!({"id": id, "params": weights});
         let in_a_batch = json!({"command": "engine.batch", "params": {"steps": [{"command": "comp.new"}, id_step]}});
@@ -193,6 +202,29 @@ fn mcp_withholds_the_model_downloads_on_every_tool_that_runs_a_command() {
         assert!(app.mcp(&notification.to_string()).is_none());
     }
     assert_eq!(comp_count(&mut app).expect("a count"), 0, "a refused call ran nothing, the batch's earlier steps included");
+}
+
+/// The door's one exception holds on the paths that read it: an Export Timeline that renders nothing
+/// is answered by `mcp` and run by `replay`, and does not let a withheld step after it through.
+#[test]
+fn a_timeline_export_that_renders_nothing_passes_the_door_on_mcp_and_replay() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts");
+    let at = |name: &str| scratch.path().join(name).display().to_string();
+    let quiet = |name: &str| json!({"command": "file.exportTimeline", "params": {"comp": 1, "path": at(name), "prerender": "none"}});
+    let made = reply(&mut app, &tool_call(1, "execute_command", json!({"command": "comp.new", "params": {"name": "Card"}}))).expect("answered");
+    assert_eq!(made["result"]["isError"], json!(false), "{made}");
+    let answered = reply(&mut app, &tool_call(2, "execute_command", quiet("mcp.xml"))).expect("answered");
+    assert_eq!(answered["result"]["isError"], json!(false), "{answered}");
+    let batched = reply(&mut app, &tool_call(3, "command_batch", json!({"steps": [quiet("batch.xml"), {"command": "renderQueue.render"}]}))).expect("answered");
+    assert_eq!(batched["result"]["isError"], json!(true), "{batched}");
+    assert!(text_of(&batched).expect("text").contains(&withheld("renderQueue.render")), "{batched}");
+    let script = format!("{}\n{}\n", json!({"command": "comp.new", "params": {"name": "Card"}}), quiet("replay.xml"));
+    let report = app.request("replay", json!({"script": script})).expect("a replay of a quiet export runs");
+    assert_eq!(report["ok"], json!(true), "{report}");
+    for name in ["mcp.xml", "replay.xml"] {
+        assert!(std::path::Path::new(&at(name)).exists(), "{name} was written");
+    }
 }
 
 /// A call whose arguments the server refuses before it runs the tool runs nothing, so the door leaves
@@ -252,38 +284,76 @@ fn mcp_keeps_the_confinement_and_withholds_scripts() {
     assert!(text_of(&script).expect("text").contains(&words), "{script}");
 }
 
-/// Every tool the server offers, each argument it takes given a model download in the shape that
-/// argument takes — one at a time and all at once, alone and inside a JSON-RPC batch — reaches no
-/// download: the engine's own refusal of a model id it does not know, which it makes before it
-/// starts anything, is how a call that got past the door shows itself. A pin that adds a tool which
-/// runs a command, under any argument name, fails here until the door reads it.
+/// Every line that names `id` to a tool the server offers: each argument the tool takes given `id`
+/// in the shape that argument takes, one at a time and all at once, alone and inside a JSON-RPC
+/// batch. A pin that adds a tool which runs a command, under any argument name, adds lines here.
+fn lines_naming(id: &str, params: &Value) -> Vec<String> {
+    let mut lines = Vec::new();
+    for tool in effectcraft_automation::tools::available(false) {
+        let schema = tool.input_schema();
+        let keys: Vec<String> = schema.get("properties").and_then(Value::as_object).map(|p| p.keys().cloned().collect()).unwrap_or_default();
+        let given = |key: &str| match key {
+            "params" => params.clone(),
+            "steps" => json!([{"command": id, "params": params}, {"id": id, "params": params}]),
+            _ => json!(id),
+        };
+        let mut argument_sets: Vec<Value> = keys.iter().map(|key| json!({key.as_str(): given(key)})).collect();
+        argument_sets.push(Value::Object(keys.iter().map(|key| (key.clone(), given(key))).collect()));
+        for arguments in argument_sets {
+            let call = tool_call(1, tool.name, arguments);
+            lines.extend([call.to_string(), json!([call]).to_string()]);
+        }
+    }
+    lines
+}
+
+/// Every tool the server offers, given a model download in every shape its arguments take, reaches
+/// no download: the engine's own refusal of a model id it does not know, which it makes before it
+/// starts anything, is how a call that got past the door shows itself.
 #[test]
 fn no_tool_reaches_a_model_download_past_the_door() {
     let scratch = Scratch::new().expect("a scratch folder");
     let mut app = scratch.app().expect("the app starts");
     let unknown = json!({"id": "no-such-model"});
-    for tool in effectcraft_automation::tools::available(false) {
-        let schema = tool.input_schema();
-        let keys: Vec<String> = schema.get("properties").and_then(Value::as_object).map(|p| p.keys().cloned().collect()).unwrap_or_default();
-        for id in DOWNLOADS {
-            let given = |key: &str| match key {
-                "params" => unknown.clone(),
-                "steps" => json!([{"command": id, "params": unknown}, {"id": id, "params": unknown}]),
-                _ => json!(id),
-            };
-            let mut argument_sets: Vec<Value> = keys.iter().map(|key| json!({key.as_str(): given(key)})).collect();
-            argument_sets.push(Value::Object(keys.iter().map(|key| (key.clone(), given(key))).collect()));
-            for arguments in argument_sets {
-                let call = tool_call(1, tool.name, arguments);
-                for line in [call.to_string(), json!([call]).to_string()] {
-                    let answer = app.mcp(&line).unwrap_or_default();
-                    for reached in [format!("invalid parameters for `{id}`: unknown model"), format!("invalid parameters for `{id}`: missing `id`")] {
-                        assert!(!answer.contains(&reached), "{line} reached the download: {answer}");
-                    }
-                }
+    for id in DOWNLOADS {
+        for line in lines_naming(id, &unknown) {
+            let answer = app.mcp(&line).unwrap_or_default();
+            for reached in [format!("invalid parameters for `{id}`: unknown model"), format!("invalid parameters for `{id}`: missing `id`")] {
+                assert!(!answer.contains(&reached), "{line} reached the download: {answer}");
             }
         }
     }
+}
+
+/// Every tool the server offers, given each render nothing has listed in every shape its arguments
+/// take, starts no render: with an item queued before each call, nothing renders and nothing is
+/// written, which is how a call that got past the door shows itself. Some tools change the project
+/// (the undo among them), so the item is queued again whenever a call has taken it out.
+#[test]
+fn no_tool_starts_an_unlisted_render_past_the_door() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts");
+    let output = scratch.path().join("queued.mp4");
+    let exec = |app: &mut craftbridge_effects::EffectCraftApp, command: &str, params: Value| app.request("exec", json!({"command": command, "params": params}));
+    for (command, params) in [
+        ("comp.new", json!({"name": "Card", "width": 32, "height": 24, "duration": 0.5, "frameRate": 10})),
+        ("layer.newSolid", json!({"comp": 1, "name": "Bg"})),
+    ] {
+        exec(&mut app, command, params).expect("the project builds");
+    }
+    let before = std::fs::read_dir(scratch.path()).expect("the container reads").count();
+    for id in RENDERS {
+        for line in lines_naming(id, &json!({"comp": 1, "path": scratch.path().join("cut.xml")})) {
+            let queue = exec(&mut app, "renderQueue.list", json!({})).expect("the queue lists");
+            if queue["items"].as_array().is_none_or(Vec::is_empty) {
+                exec(&mut app, "renderQueue.add", json!({"comp": 1, "format": "h264", "output": output})).expect("an item queues");
+            }
+            app.mcp(&line);
+            let queue = exec(&mut app, "renderQueue.list", json!({})).expect("the queue lists");
+            assert!(queue["rendering"] == json!(false) && !output.exists(), "{line} started a render: {queue}");
+        }
+    }
+    assert_eq!(std::fs::read_dir(scratch.path()).expect("the container reads").count(), before, "a refused call wrote nothing");
 }
 
 #[test]

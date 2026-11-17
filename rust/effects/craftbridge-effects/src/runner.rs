@@ -7,21 +7,27 @@
 //! session itself — the queue's items, the render's progress and the stop — the runner reads through
 //! the same `Session` calls, and it also waits on the render's thread, which no command does: only
 //! once that thread has ended has a stopped exporter removed the files it opened.
+//!
+//! The runner is also the only caller that starts a render: it lists every file the render may write
+//! before it starts, which the door refuses every other call to do, so a render the system kills
+//! leaves files the next start can delete.
 
 use craftbridge_core::{CraftError, PROGRESS_INTERVAL, Result};
 use effectcraft_automation::Backend;
 use effectcraft_engine::Session;
 use effectcraft_engine::project::render_queue::RenderStatus;
 use serde_json::Value;
+use std::path::PathBuf;
 
-use crate::methods::{execute, lacks_capability, object};
+use crate::methods::{RENDER, execute, execute_listed_render, lacks_capability, object};
+use crate::outputs;
 use crate::requests::RenderRequest;
 
 /// The caller's progress listener: `(done, total, seconds left)`, answering `false` to stop.
 pub(crate) type Progress<'a> = &'a mut dyn FnMut(u64, u64, Option<f64>) -> bool;
 
-/// The command that names a render's failures, as `exec` names the same failure.
-const RENDER: &str = "renderQueue.render";
+/// The core's lister of the files an export may write: each call adds to the export's list.
+pub(crate) type ListOutputs<'a> = &'a mut dyn FnMut(&[PathBuf]) -> Result<()>;
 
 /// How the render ended as the watch saw it.
 #[derive(Debug, PartialEq, Eq)]
@@ -32,13 +38,14 @@ enum Ended {
     Stopped,
 }
 
-/// `export`: queue the request (or take the project's own queue), render it in the background, report
+/// `export`: queue the request (or take the project's own queue), list every file the render may
+/// write with `list_outputs`, render it in the background, report
 /// its progress every [`PROGRESS_INTERVAL`] and answer `{rendered: [{comp, output, seconds}]}`, or
 /// stop the render as soon as `on_progress` answers `false`.
 ///
 /// The progress is the current item's frames, as the command line's progress lines give it: a
 /// request renders one item, and a queue's items each count their own frames.
-pub(crate) fn export(backend: &mut Backend, params: &Value, on_progress: Progress<'_>) -> Result<Value> {
+pub(crate) fn export(backend: &mut Backend, params: &Value, on_progress: Progress<'_>, list_outputs: ListOutputs<'_>) -> Result<Value> {
     let request = RenderRequest::from_params(params)?;
     if let Some(queued) = request.to_queue_params()? {
         // The request is the only item the render may write, so every item the project had already
@@ -49,7 +56,10 @@ pub(crate) fn export(backend: &mut Backend, params: &Value, on_progress: Progres
         execute(backend, "renderQueue.add", queued, None)?;
     }
     let attempted: Vec<u64> = session(backend)?.project.render_queue.iter().filter(|item| item.is_queued()).map(|item| item.id).collect();
-    if let Err(refused) = execute(backend, RENDER, object([("wait", Value::Bool(false))]), None) {
+    // The file names are known only now: the render writes `card_00000.png` on for a PNG sequence asked
+    // for at `card.png`. A refusal to list stops the export before any file is written.
+    outputs::list_queued(session(backend)?, list_outputs)?;
+    if let Err(refused) = execute_listed_render(backend, object([("wait", Value::Bool(false))])) {
         // The engine refuses a render whose every item is refused with a sentence about an empty
         // queue; the reason each item got is the one that says why.
         return Err(match report(session(backend)?, &attempted) {
@@ -161,6 +171,11 @@ mod tests {
         }
     }
 
+    /// A lister for the tests that are not about the listing.
+    fn unlisted(_: &[PathBuf]) -> Result<()> {
+        Ok(())
+    }
+
     struct Rig {
         backend: Backend,
         written: Arc<AtomicBool>,
@@ -197,10 +212,15 @@ mod tests {
         let mut rig = rig(5);
         let mut heard = Vec::new();
         let output = out(&rig, "a.mp4");
-        let answer = export(&mut rig.backend, &serde_json::json!({"output": output, "format": "h264"}), &mut |done, total, _| {
-            heard.push((done, total));
-            true
-        })
+        let answer = export(
+            &mut rig.backend,
+            &serde_json::json!({"output": output, "format": "h264"}),
+            &mut |done, total, _| {
+                heard.push((done, total));
+                true
+            },
+            &mut unlisted,
+        )
         .expect("the export renders");
         assert_eq!(answer["rendered"][0]["comp"], "A");
         assert_eq!(answer["rendered"][0]["output"], output.as_str());
@@ -213,7 +233,7 @@ mod tests {
         let other = out(&rig, "other.mp4");
         rig.backend.exec("renderQueue.add", serde_json::json!({"output": other, "format": "h264"})).expect("another item is queued");
         let output = out(&rig, "mine.mp4");
-        export(&mut rig.backend, &serde_json::json!({"output": output, "format": "h264"}), &mut |_, _, _| true).expect("the export renders");
+        export(&mut rig.backend, &serde_json::json!({"output": output, "format": "h264"}), &mut |_, _, _| true, &mut unlisted).expect("the export renders");
         assert_eq!(rig.started.load(Ordering::SeqCst), 1, "only the requested item reached the exporter");
         let items = queue(&mut rig);
         assert_eq!(items, [(1, false, "Unqueued".to_string()), (2, true, "Done".to_string())]);
@@ -225,7 +245,8 @@ mod tests {
         let mut rig = rig(1);
         let own = out(&rig, "own.mp4");
         rig.backend.exec("renderQueue.add", serde_json::json!({"output": own, "format": "h264"})).expect("an item is queued");
-        let answer = export(&mut rig.backend, &serde_json::json!({"queue": true, "output": "ignored"}), &mut |_, _, _| true).expect("the queue renders");
+        let answer =
+            export(&mut rig.backend, &serde_json::json!({"queue": true, "output": "ignored"}), &mut |_, _, _| true, &mut unlisted).expect("the queue renders");
         assert_eq!(answer["rendered"].as_array().map(Vec::len), Some(1));
         assert_eq!(queue(&mut rig).len(), 1, "nothing was added");
     }
@@ -236,11 +257,16 @@ mod tests {
         let written = rig.written.clone();
         let output = out(&rig, "c.mp4");
         let mut calls = 0;
-        let stopped = export(&mut rig.backend, &serde_json::json!({"output": output, "format": "h264"}), &mut |_, _, _| {
-            calls += 1;
-            // Stop only once the exporter has written its output, so the stop has something to remove.
-            !(calls >= 3 && written.load(Ordering::SeqCst))
-        });
+        let stopped = export(
+            &mut rig.backend,
+            &serde_json::json!({"output": output, "format": "h264"}),
+            &mut |_, _, _| {
+                calls += 1;
+                // Stop only once the exporter has written its output, so the stop has something to remove.
+                !(calls >= 3 && written.load(Ordering::SeqCst))
+            },
+            &mut unlisted,
+        );
         assert_eq!(stopped, Err(CraftError::Cancelled));
         assert!(!Path::new(&output).exists(), "a stopped render leaves no output");
         assert!(!rig.backend.session().expect("a session").is_rendering(), "the render's thread has wound down on return");
@@ -252,7 +278,8 @@ mod tests {
         let mut rig = rig(1);
         // The fake exporter cannot write inside a folder that is not there.
         let output = out(&rig, "missing/x.mp4");
-        let error = export(&mut rig.backend, &serde_json::json!({"output": output, "format": "h264"}), &mut |_, _, _| true).expect_err("the item fails");
+        let error =
+            export(&mut rig.backend, &serde_json::json!({"output": output, "format": "h264"}), &mut |_, _, _| true, &mut unlisted).expect_err("the item fails");
         match error {
             CraftError::CommandFailed { command, message, step } => {
                 assert_eq!((command.as_str(), step), (RENDER, None));
@@ -266,10 +293,31 @@ mod tests {
     fn a_format_the_exporter_lacks_is_unsupported() {
         let mut rig = rig(1);
         let output = out(&rig, "x.gif");
-        let error = export(&mut rig.backend, &serde_json::json!({"output": output, "format": "gif"}), &mut |_, _, _| true).expect_err("not offered");
+        let mut asked = Vec::new();
+        let error = export(&mut rig.backend, &serde_json::json!({"output": output, "format": "gif"}), &mut |_, _, _| true, &mut |paths| {
+            asked.extend(paths.iter().cloned());
+            Ok(())
+        })
+        .expect_err("not offered");
+        assert!(asked.is_empty(), "a render that writes nothing lists nothing: {asked:?}");
         match error {
             CraftError::Unsupported { message } => assert!(message.starts_with("A: ") && message.ends_with("export is not available"), "{message}"),
             other => panic!("an export format the build lacks is `Unsupported`, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_refused_listing_stops_the_export_before_the_exporter_is_reached() {
+        let mut rig = rig(3);
+        let output = out(&rig, "listed.mp4");
+        let mut asked = Vec::new();
+        let refused = export(&mut rig.backend, &serde_json::json!({"output": output, "format": "h264"}), &mut |_, _, _| true, &mut |paths| {
+            asked.extend(paths.iter().cloned());
+            Err(CraftError::io("the journal cannot be written"))
+        });
+        assert_eq!(refused, Err(CraftError::io("the journal cannot be written")));
+        assert_eq!(rig.started.load(Ordering::SeqCst), 0, "the exporter was never reached");
+        assert!(!Path::new(&output).exists());
+        assert_eq!(asked, [PathBuf::from(&output), PathBuf::from(out(&rig, "listed_RenderLog.txt"))]);
     }
 }

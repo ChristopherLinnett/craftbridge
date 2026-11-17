@@ -10,6 +10,8 @@
 //! runs would fail here, and the corpus's D-12 comparison (the conformance runner) is where such a
 //! difference is measured.
 
+mod kill;
+
 use super::common::Scratch;
 use super::{cli, cli_run, scrub, scrubbed, steps_document};
 use craftbridge_core::{CancelToken, CraftError, Engine};
@@ -298,7 +300,7 @@ fn the_projects_own_queue_exports_as_the_command_lines_queue() {
 
 /// Every file in the container, by its path inside it, bar the app's own working folders, which the
 /// engine keeps its settings and caches in: what an export could have left behind.
-fn outputs_in(scratch: &Scratch) -> Result<Vec<PathBuf>, String> {
+pub(super) fn outputs_in(scratch: &Scratch) -> Result<Vec<PathBuf>, String> {
     let working = [&scratch.folders.config, &scratch.folders.cache, &scratch.folders.models];
     let mut found = Vec::new();
     let mut folders = vec![scratch.path().to_path_buf()];
