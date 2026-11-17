@@ -5,7 +5,7 @@
 //! resolved graph as well. The flags differ, but the reading, the error text and the shape of a package are
 //! defined once here.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// A package as `cargo metadata` describes it, kept small: only the fields a rule needs.
@@ -176,10 +176,10 @@ pub(crate) enum Graph {
     Resolved,
 }
 
-/// Run cargo metadata and read it. `--locked` because the gate reads the graph `Cargo.lock` pins and never
-/// writes it: a lock file that needs updating fails here instead of changing under the change being
-/// checked.
-pub(crate) fn read(rust_dir: &Path, graph: Graph) -> Result<Vec<Crate>, String> {
+/// Run cargo metadata and parse what it printed. `--locked` because the gate reads the graph `Cargo.lock`
+/// pins and never writes it: a lock file that needs updating fails here instead of changing under the
+/// change being checked.
+fn run(rust_dir: &Path, graph: Graph) -> Result<Metadata, String> {
     let mut command = Command::new(env!("CARGO"));
     command.current_dir(rust_dir).arg("metadata").arg("--format-version").arg("1").arg("--locked");
     command.arg(match graph {
@@ -191,7 +191,25 @@ pub(crate) fn read(rust_dir: &Path, graph: Graph) -> Result<Vec<Crate>, String> 
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("cargo metadata exited with {}: {}", output.status, stderr.trim()));
     }
-    packages(&parse(&output.stdout)?)
+    parse(&output.stdout)
+}
+
+/// Run cargo metadata and read its packages.
+pub(crate) fn read(rust_dir: &Path, graph: Graph) -> Result<Vec<Crate>, String> {
+    packages(&run(rust_dir, graph)?)
+}
+
+/// The folder cargo builds the workspace in, as `cargo metadata` names it. `cargo dylint` takes the folder
+/// it builds the lint library under from the same answer for the same workspace, so Cargo's own answer is
+/// the one that agrees with it however the folder is set: `CARGO_TARGET_DIR`, which `tools/env.sh` sets
+/// for every gate (to the pre-push hook's own folder in a hook), the configuration's `build.target-dir`,
+/// or the workspace's `target/`.
+pub(crate) fn target_directory(rust_dir: &Path) -> Result<PathBuf, String> {
+    target_directory_of(&run(rust_dir, Graph::Workspace)?)
+}
+
+fn target_directory_of(metadata: &Metadata) -> Result<PathBuf, String> {
+    metadata.get("target_directory").and_then(Metadata::as_str).map(PathBuf::from).ok_or_else(|| "cargo metadata has no `target_directory`".to_string())
 }
 
 #[cfg(test)]
@@ -274,6 +292,13 @@ mod tests {
         let json = r#"{"packages": [{"name": "a", "id": "a#1", "version": "1", "manifest_path": "/a/Cargo.toml"}]}"#;
         let parsed = packages(&serde_json::from_str::<Metadata>(json).unwrap()).unwrap();
         assert!(parsed[0].dependencies.is_empty() && parsed[0].library_targets.is_empty() && parsed[0].source.is_none());
+    }
+
+    #[test]
+    fn the_build_folder_is_the_one_cargo_names() {
+        let named = serde_json::json!({"target_directory": "/push/target-1"});
+        assert_eq!(target_directory_of(&named).unwrap(), PathBuf::from("/push/target-1"));
+        assert_eq!(target_directory_of(&serde_json::json!({})).unwrap_err(), "cargo metadata has no `target_directory`");
     }
 
     #[test]

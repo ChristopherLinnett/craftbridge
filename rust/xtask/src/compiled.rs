@@ -222,12 +222,21 @@ pub(crate) fn dep_info_files(text: &str) -> BTreeSet<String> {
 /// configuration it lints by, so a change to it lints again: the workspace manifest, which holds the lint
 /// table, the crate's own manifest and `rust/clippy.toml`. Those hold no code, and `rules: lints` reads
 /// each. The lint library's run records the library it loads, as built by `cargo dylint` from the gate's
-/// own sources, which the rules read where they sit.
-pub(crate) fn judge(root: &Path, workspace_dir: &Path, crate_name: &str, crate_dir: &Path, read: &BTreeSet<String>) -> Result<Vec<String>, String> {
+/// own sources, which the rules read where they sit. That build is passed only where `cargo dylint` puts
+/// it, under `target_directory`, the folder cargo names for the workspace, which the pre-push hook moves
+/// for each gate.
+pub(crate) fn judge(
+    root: &Path,
+    workspace_dir: &Path,
+    target_directory: &Path,
+    crate_name: &str,
+    crate_dir: &Path,
+    read: &BTreeSet<String>,
+) -> Result<Vec<String>, String> {
     let lint_configuration = [workspace_dir.join("Cargo.toml"), crate_dir.join("Cargo.toml"), root.join(crate::machinery::CLIPPY_CONFIGURATION)];
     let own: BTreeSet<PathBuf> =
         scan::walk(crate_dir, ".rs")?.into_iter().map(|file| file.path).chain(lint_configuration).filter_map(|path| std::fs::canonicalize(path).ok()).collect();
-    let lint_library_builds = std::fs::canonicalize(root.join("rust").join("target")).ok().map(|target| target.join("dylint").join("libraries"));
+    let lint_library_builds = std::fs::canonicalize(target_directory).ok().map(|target| target.join("dylint").join("libraries"));
     let mut errors = Vec::new();
     for file in read {
         let path = workspace_dir.join(file);
@@ -245,7 +254,7 @@ pub(crate) fn judge(root: &Path, workspace_dir: &Path, crate_name: &str, crate_d
     Ok(errors)
 }
 
-/// Is `path` the gate's lint library as `cargo dylint` builds it: under the workspace target folder's
+/// Is `path` the gate's lint library as `cargo dylint` builds it: under the workspace's build folder's
 /// `dylint/libraries`, named `lib<name>@<toolchain>.<extension>`, the form dylint loads a library under?
 fn is_lint_library_build(path: &Path, builds: &Path) -> bool {
     let prefix = format!("lib{}@", crate::machinery::lint_library_name());
@@ -266,6 +275,7 @@ fn errors(root: &Path, rust_dir: &Path, artifacts: &[Artifact]) -> Result<Vec<St
             members.insert(package.id.clone(), (package, workspace_dir.clone()));
         }
     }
+    let target_directory = crate::meta::target_directory(rust_dir)?;
     let folders = rustc_folders(artifacts);
     let mut dep_infos: BTreeMap<PathBuf, &(crate::meta::Crate, PathBuf)> = BTreeMap::new();
     let mut errors = Vec::new();
@@ -281,7 +291,7 @@ fn errors(root: &Path, rust_dir: &Path, artifacts: &[Artifact]) -> Result<Vec<St
     for (dep_info, (package, workspace_dir)) in dep_infos {
         let text = std::fs::read_to_string(&dep_info).map_err(|error| format!("{}: {error}", dep_info.display()))?;
         let crate_dir = Path::new(&package.manifest_path).parent().unwrap_or(workspace_dir);
-        for error in judge(root, workspace_dir, &package.name, crate_dir, &dep_info_files(&text))? {
+        for error in judge(root, workspace_dir, &target_directory, &package.name, crate_dir, &dep_info_files(&text))? {
             if seen.insert(error.clone()) {
                 errors.push(error);
             }
@@ -511,7 +521,7 @@ mod tests {
         .into_iter()
         .map(str::to_string)
         .collect();
-        let errors = judge(&scratch.0, &scratch.0.join("rust"), "x", &scratch.0.join("rust/core/x"), &read).unwrap();
+        let errors = judge(&scratch.0, &scratch.0.join("rust"), &scratch.0.join("rust/target"), "x", &scratch.0.join("rust/core/x"), &read).unwrap();
         assert_eq!(errors.len(), 4, "the lint configuration clippy records is no code: {errors:?}");
         for refused in [
             "rust/core/x/src/hidden.txt: x's compilation reads it",
@@ -523,26 +533,100 @@ mod tests {
         }
     }
 
+    const TOOLCHAIN: &str = "nightly-2026-08-20-aarch64-apple-darwin";
+
+    /// What judging a crate `x` that read the files `read` (and its own source) says, with the workspace
+    /// building in `target_directory`, a path relative to the scratch root.
+    fn judged_in(scratch: &Scratch, target_directory: &str, read: &[&String]) -> Vec<String> {
+        scratch.write("rust/Cargo.toml", "");
+        scratch.write("rust/core/x/Cargo.toml", "");
+        scratch.write("rust/core/x/src/lib.rs", "");
+        for file in read {
+            scratch.write(&format!("rust/{file}"), "");
+        }
+        let read: BTreeSet<String> = ["core/x/src/lib.rs".to_string()].into_iter().chain(read.iter().map(|file| file.to_string())).collect();
+        judge(&scratch.0, &scratch.0.join("rust"), &scratch.0.join(target_directory), "x", &scratch.0.join("rust/core/x"), &read).unwrap()
+    }
+
+    /// The path `cargo dylint` gives a lint library's build in the build folder `builds`.
+    fn built_under(builds: &str, name: &str) -> String {
+        format!("{builds}/dylint/libraries/{TOOLCHAIN}/release/lib{name}@{TOOLCHAIN}.dylib")
+    }
+
     /// The lint library's run records the library dylint loads; that build of the gate's own sources is
     /// the one file outside a crate it may read, and only where `cargo dylint` builds it, under its name.
     #[test]
     fn the_lint_library_dylint_loads_is_no_crate_code_but_a_look_alike_is() {
         let scratch = Scratch::new("compiled-lint-library");
-        scratch.write("rust/Cargo.toml", "");
-        scratch.write("rust/core/x/Cargo.toml", "");
-        scratch.write("rust/core/x/src/lib.rs", "");
-        let builds = "target/dylint/libraries/nightly-2026-08-20-aarch64-apple-darwin/release";
-        let library = format!("{builds}/libnever_crash_lints@nightly-2026-08-20-aarch64-apple-darwin.dylib");
-        let other = format!("{builds}/libsomething_else@nightly-2026-08-20-aarch64-apple-darwin.dylib");
-        let elsewhere = "target/debug/libnever_crash_lints@nightly-2026-08-20-aarch64-apple-darwin.dylib".to_string();
-        for file in [&library, &other, &elsewhere] {
-            scratch.write(&format!("rust/{file}"), "");
-        }
-        let read: BTreeSet<String> = ["core/x/src/lib.rs".to_string(), library, other, elsewhere].into_iter().collect();
-        let errors = judge(&scratch.0, &scratch.0.join("rust"), "x", &scratch.0.join("rust/core/x"), &read).unwrap();
+        let library = built_under("../target", "never_crash_lints");
+        let other = built_under("../target", "something_else");
+        let elsewhere = format!("../target/debug/lib{}@{TOOLCHAIN}.dylib", "never_crash_lints");
+        let errors = judged_in(&scratch, "target", &[&library, &other, &elsewhere]);
         assert_eq!(errors.len(), 2, "{errors:?}");
         assert!(errors.iter().any(|e| e.contains("libsomething_else@")), "another library: {errors:?}");
-        assert!(errors.iter().any(|e| e.starts_with("rust/target/debug/libnever_crash_lints@")), "outside dylint's own folder: {errors:?}");
+        assert!(errors.iter().any(|e| e.starts_with("target/debug/libnever_crash_lints@")), "outside dylint's own folder: {errors:?}");
+    }
+
+    /// The pre-push hook gates each commit with its own build folder, so `cargo dylint` builds the library
+    /// there, and the folder is the one cargo names, not `rust/target`.
+    #[test]
+    fn the_lint_library_built_in_the_folder_the_hook_names_is_accepted_and_one_built_outside_any_is_refused() {
+        let scratch = Scratch::new("compiled-moved-target");
+        let moved = "pushed/target-7";
+        let in_the_hook_s_folder = built_under(&format!("../{moved}"), "never_crash_lints");
+        let in_the_default_folder = built_under("target", "never_crash_lints");
+        let outside_any_build_folder = built_under("../unrelated", "never_crash_lints");
+        let errors = judged_in(&scratch, moved, &[&in_the_hook_s_folder, &in_the_default_folder, &outside_any_build_folder]);
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(errors.iter().any(|e| e.starts_with("rust/target/dylint/libraries/") && e.contains("compilation reads it, but it is not")), "{errors:?}");
+        assert!(errors.iter().any(|e| e.starts_with("unrelated/dylint/libraries/")), "{errors:?}");
+        assert!(!errors.iter().any(|e| e.contains("pushed/")), "the folder the hook names is accepted: {errors:?}");
+    }
+
+    /// The child half of the test below, run with the build folder in `CARGO_TARGET_DIR` as the hook's gate
+    /// has it: the whole path from cargo's messages, through cargo's own answer for the build folder, to the
+    /// verdict on the library's dep-info, with the lint library's real crate.
+    #[test]
+    #[ignore = "run by the_build_folder_cargo_names_is_where_the_lint_library_is_accepted, in a gate's environment"]
+    fn child_judges_the_lint_library_s_run_in_the_build_folder_cargo_names() {
+        let Some(scratch) = std::env::var_os("XTASK_COMPILED_SCRATCH") else { return };
+        let scratch = Path::new(&scratch);
+        let root = crate::repo_root();
+        let library = crate::meta::read(&root.join(crate::machinery::LINT_LIBRARY), crate::meta::Graph::Workspace).unwrap();
+        let target = crate::meta::target_directory(&root.join("rust")).unwrap();
+        assert_eq!(target, scratch.join("pushed/target-7"), "cargo names the folder the environment sets");
+        let artifact = Artifact {
+            package_id: library[0].id.clone(),
+            target_name: "never-crash-lints".to_string(),
+            target_kinds: vec!["lib".to_string()],
+            filenames: vec![scratch.join("deps/libnever_crash_lints-0123456789abcdef.rmeta").to_string_lossy().into_owned()],
+            executable: None,
+        };
+        let found = errors(&root, &root.join("rust"), &[artifact]).unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].contains("unrelated/dylint/libraries/"), "{found:?}");
+    }
+
+    #[test]
+    fn the_build_folder_cargo_names_is_where_the_lint_library_is_accepted() {
+        let scratch = Scratch::new("compiled-cargo-target");
+        let under = |folder: &str| scratch.0.join(built_under(folder, "never_crash_lints"));
+        let in_the_hook_s_folder = under("pushed/target-7");
+        let outside_any_build_folder = under("unrelated");
+        for library in [&in_the_hook_s_folder, &outside_any_build_folder] {
+            std::fs::create_dir_all(library.parent().unwrap()).unwrap();
+            std::fs::write(library, "").unwrap();
+        }
+        scratch.write(
+            "deps/never_crash_lints-0123456789abcdef.d",
+            format!("deps/libnever_crash_lints-0123456789abcdef.rmeta: src/lib.rs {} {}\n", in_the_hook_s_folder.display(), outside_any_build_folder.display()),
+        );
+        scratch.write("deps/libnever_crash_lints-0123456789abcdef.rmeta", "");
+        crate::scratch::rerun(
+            "compiled::tests::child_judges_the_lint_library_s_run_in_the_build_folder_cargo_names",
+            &[("XTASK_COMPILED_SCRATCH", scratch.0.as_os_str()), ("CARGO_TARGET_DIR", scratch.0.join("pushed/target-7").as_os_str())],
+            "the run in the build folder cargo names did not accept the library there and refuse the one outside",
+        );
     }
 
     /// The lint library is a workspace of its own the gate compiles too, so a unit of it is judged like a
