@@ -1,8 +1,10 @@
 //! What MediaCodec is told about a stream, and the bytes it is fed: which streams the Android decoder takes,
 //! which of the device's decoders count as hardware, and the Annex B byte stream MediaCodec reads where an
-//! MP4 sample holds length-prefixed NAL units.
+//! MP4 sample holds length-prefixed NAL units; and when the end of a stream has been drained.
 //!
 //! Safe code, so every target tests it; the platform module only makes the calls.
+
+use std::time::{Duration, Instant};
 
 use filmcraft_codecs::hw::{NalCodec, NalStreamInfo, StreamInfo};
 use filmcraft_isobmff::SampleEntry;
@@ -196,6 +198,31 @@ pub(crate) fn annex_b(info: &NalStreamInfo, sample: &[u8]) -> Result<Vec<u8>, &'
         return Err("the sample is not whole NAL units");
     }
     Ok(units.into_iter().flat_map(|unit| START_CODE.iter().chain(unit)).copied().collect())
+}
+
+/// The pictures a codec gives at the end of a stream: what `queue_the_end` returns (the pictures ready
+/// when the end of the stream is queued), then what each `read` returns (the pictures ready, and whether the
+/// end of the stream came out with them), until the end comes. A codec that has not ended the stream within
+/// `stall` of its end being queued may still hold pictures nothing will ask it for again, so that is an
+/// error, as a failed call is: the decoder's caller then replays the stream in software rather than end it
+/// short. Every failure of a drain is decided here, so the host tests pin them all.
+pub(crate) fn until_the_end<T>(
+    stall: Duration,
+    queue_the_end: impl FnOnce() -> Result<Vec<T>, String>,
+    mut read: impl FnMut() -> Result<(Vec<T>, bool), String>,
+) -> Result<Vec<T>, String> {
+    let mut pictures = queue_the_end()?;
+    let deadline = Instant::now() + stall;
+    loop {
+        let (more, end) = read()?;
+        pictures.extend(more);
+        if end {
+            return Ok(pictures);
+        }
+        if Instant::now() >= deadline {
+            return Err("the decoder never ended the stream".into());
+        }
+    }
 }
 
 #[cfg(test)]
@@ -425,5 +452,35 @@ mod tests {
         let mut none = nal();
         none.length_size = 0;
         assert_eq!(annex_b(&none, &[0, 0, 0, 1, 0x65]), Err("the sample is not whole NAL units"), "no length size");
+    }
+
+    #[test]
+    fn a_drain_gives_what_the_end_and_each_read_gives_until_the_stream_ends_and_every_failure_is_an_error() {
+        let long = Duration::from_secs(3600);
+        let mut reads = [(vec![2], false), (Vec::new(), false), (vec![3, 4], true)].into_iter();
+        assert_eq!(until_the_end(long, || Ok(vec![1]), || Ok(reads.next().unwrap())), Ok(vec![1, 2, 3, 4]), "every picture, in order, then the end");
+        // An end read in time is the end, however late the clock is by then; with no end in time, the pictures
+        // read so far are not the stream's whole tail.
+        assert_eq!(until_the_end(Duration::ZERO, || Ok(vec![]), || Ok((vec![5], true))), Ok(vec![5]));
+        assert_eq!(until_the_end(Duration::ZERO, || Ok(vec![]), || Ok((vec![6], false))), Err("the decoder never ended the stream".into()));
+        let failed = "waiting for a picture failed (ErrorUnknown)";
+        assert_eq!(until_the_end(long, || Ok(vec![]), || Err::<(Vec<u8>, bool), _>(failed.into())), Err(failed.into()));
+        // A codec that cannot take the end is not read from.
+        let refused = "waiting for an input buffer failed (ErrorUnknown)";
+        let mut reads_made = 0;
+        let read = || -> Result<(Vec<u8>, bool), String> {
+            reads_made += 1;
+            Ok((vec![7], true))
+        };
+        assert_eq!(until_the_end(long, || Err(refused.into()), read), Err(refused.into()));
+        assert_eq!(reads_made, 0, "no read after a refused end");
+        // The time allowed runs from the end being queued, however long the queue took: a codec that waited for
+        // an input buffer still has all of it to end the stream.
+        let slow_queue = || {
+            std::thread::sleep(Duration::from_millis(300));
+            Ok(Vec::new())
+        };
+        let mut slow_reads = [(vec![8], false), (vec![9], true)].into_iter();
+        assert_eq!(until_the_end(Duration::from_millis(200), slow_queue, || Ok(slow_reads.next().unwrap())), Ok(vec![8, 9]));
     }
 }
