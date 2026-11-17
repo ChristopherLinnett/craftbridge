@@ -17,6 +17,7 @@
           "label": { "type": "string" },
           "params": { "type": "string" },
           "journal": { "type": "boolean" },
+          "refusedUnderConfinement": { "type": "boolean" },
           "keys": {
             "type": "array",
             "items": {
@@ -34,6 +35,18 @@
         }
       }
     },
-    "tools": { "type": "array", "items": { "type": "object", "required": ["name", "inputSchema"] } }
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "inputSchema"],
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "bridgeOnly": { "type": "boolean" },
+          "refusedUnderConfinement": { "type": "boolean" }
+        }
+      }
+    }
   }
 }

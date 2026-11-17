@@ -28,6 +28,12 @@ pub(crate) struct Command {
     pub(crate) label: String,
     pub(crate) params: String,
     pub(crate) journal: bool,
+    /// Whether the engine refuses this command outright while file access is confined, as
+    /// [`crate::refused`] reads it from the engine: an app's calls all go through the confinement, so
+    /// the engine answers every call of a refused command with its refusal, though both facades keep
+    /// its typed method.
+    #[serde(rename = "refusedUnderConfinement", default)]
+    pub(crate) refused_under_confinement: bool,
     /// In the order the `params` text lists them, which a typed method keeps for its parameters.
     pub(crate) keys: Vec<Key>,
 }
@@ -69,6 +75,12 @@ pub(crate) struct Tool {
     pub(crate) description: String,
     #[serde(default)]
     pub(crate) bridge_only: bool,
+    /// Whether the confinement refuses this tool outright on the headless engine CraftBridge runs, as
+    /// [`crate::refused`] reads it from the engine: CraftBridge runs confined, so a refused tool is
+    /// none an app can call. A `bridgeOnly` tool is never marked, though a bridged engine's
+    /// confinement may refuse it too: the headless engine refuses it as bridge-only first.
+    #[serde(default)]
+    pub(crate) refused_under_confinement: bool,
     pub(crate) input_schema: Value,
 }
 
@@ -118,7 +130,7 @@ impl Command {
     /// A command as a test writes one, journalled and with no `params` text of its own: every test module
     /// builds its commands here, so a field the surface gains is given its test value once.
     pub(crate) fn of(id: &str, label: &str, keys: Vec<Key>) -> Self {
-        Command { id: id.to_string(), label: label.to_string(), params: "{}".to_string(), journal: true, keys }
+        Command { id: id.to_string(), label: label.to_string(), params: "{}".to_string(), journal: true, refused_under_confinement: false, keys }
     }
 }
 
@@ -154,11 +166,11 @@ impl Surface {
 #[cfg(test)]
 impl Tool {
     /// A tool as a test writes one: no description of its own, and open to apps, which is the tool the
-    /// diff's rules on what an app loses judge; a test whose rule needs `bridgeOnly` says so on the tool
-    /// it built. Every test module builds its tools here, so a field the surface gains is given its test
-    /// value once, as [`Command::of`] does for commands.
+    /// diff's rules on what an app loses judge; a test whose rule needs a `bridgeOnly` tool or one the
+    /// confinement refuses says so on the tool it built. Every test module builds its tools here, so a
+    /// field the surface gains is given its test value once, as [`Command::of`] does for commands.
     pub(crate) fn of(name: &str, input_schema: Value) -> Self {
-        Tool { name: name.to_string(), description: String::new(), bridge_only: false, input_schema }
+        Tool { name: name.to_string(), description: String::new(), bridge_only: false, refused_under_confinement: false, input_schema }
     }
 }
 
@@ -187,7 +199,8 @@ mod tests {
         let text = r#"{"app":"effectcraft","engineVersion":"1","pin":"0123abcd","commands":[{"id":"a","label":"l","params":"{}","journal":false,"keys":[{"name":"k","required":true,"type":"bool"}]}],"tools":[{"name":"t","inputSchema":{}}]}"#;
         let read = Surface::parse(text).unwrap();
         assert_eq!(read.commands.first().and_then(|command| command.keys.first()).map(|key| key.doc.as_str()), Some(""));
-        assert_eq!(read.tools.first().map(|tool| (tool.description.as_str(), tool.bridge_only)), Some(("", false)));
+        assert!(!read.commands.first().is_some_and(|command| command.refused_under_confinement), "a file written before the refusal mark still reads");
+        assert_eq!(read.tools.first().map(|tool| (tool.description.as_str(), tool.bridge_only, tool.refused_under_confinement)), Some(("", false, false)));
         for missing in ["engineVersion", "pin", "commands", "tools", "app"] {
             let mut value: Value = serde_json::from_str(text).unwrap();
             value.as_object_mut().unwrap().remove(missing);

@@ -186,8 +186,9 @@ fn namespace_of(path: &[&str]) -> Result<Namespace, String> {
 
 fn method_of(command: &Command, last: &str, namespace: &str) -> Result<Method, String> {
     // Read whole, so a field the surface gains stops this build until the facade says what it does with
-    // it, as the diff must; `journal` changes nothing a call is typed by.
-    let Command { id, label, params, journal: _, keys } = command;
+    // it, as the diff must; `journal` and the confinement's refusal change nothing a call is typed by:
+    // a refused command keeps a typed method, and the confined engine itself answers the call's refusal.
+    let Command { id, label, params, journal: _, refused_under_confinement: _, keys } = command;
     let name = member_name(last, namespace).map_err(|error| format!("command `{id}`: {error}"))?;
     let typed = keys.iter().map(|key| param_of(id, &name, key)).collect::<Result<Vec<_>, _>>()?;
     let mut seen = BTreeSet::new();
@@ -415,7 +416,7 @@ pub(crate) fn assert_facade_names_are_refused(check: fn(&[Namespace]) -> Result<
 /// weigh whatever else its language bans.
 #[cfg(test)]
 pub(crate) fn assert_pin_emitted_once(render: fn(&[Namespace]) -> Vec<(String, String)>, call_marker: &str) -> Vec<(String, String)> {
-    let commands = crate::surface::commands();
+    let commands = crate::surface::commands().unwrap();
     let namespaces = plan(&commands).unwrap();
     let emitted = render(&namespaces);
     assert_eq!(emitted.len(), namespaces.len());
@@ -639,7 +640,7 @@ mod tests {
 
     #[test]
     fn every_command_at_the_pin_is_planned_once() {
-        let commands = crate::surface::commands();
+        let commands = crate::surface::commands().unwrap();
         let namespaces = plan(&commands).unwrap();
         let methods: usize = namespaces.iter().map(|namespace| namespace.methods.len()).sum();
         assert_eq!(methods, commands.len());

@@ -1,13 +1,18 @@
 //! The API surface: every command and tool of the pinned engine, with each command's keys typed by
-//! [`crate::types`], as the JSON `generated/api-surface.json` holds.
+//! [`crate::types`] and each entry marked refused if the confined engine refuses it ([`crate::refused`]),
+//! as the JSON `generated/api-surface.json` holds.
 //!
 //! Everything is read from EffectCraft's own registry through its public functions, never from its
 //! sources: `command_specs` for the commands, `params_schema` for the keys a command takes and which of
-//! them are required, and the automation crate's tool catalogue. The output is a pure function of the
-//! pinned engine and the pin, so a regeneration is byte for byte the file that was committed.
+//! them are required, and the automation crate's tool catalogue. The refusal marks are read the same
+//! way — through the refusal itself, which EffectCraft answers publicly for a command or a tool it
+//! withholds while confined — never from a list of refused names, which EffectCraft keeps private. The
+//! output is a pure function of the pinned engine and the pin, so a regeneration is byte for byte the
+//! file that was committed.
 
 use crate::model::{Command, Key, Surface, Tool};
 use crate::types::type_key;
+use effectcraft_automation::confine::Confinement;
 use effectcraft_automation::tools;
 use effectcraft_engine::commands::{accepted_params, params_schema};
 use effectcraft_engine::{CommandSpec, command_specs};
@@ -38,21 +43,23 @@ pub(crate) fn build(pin: &str) -> Result<Surface, String> {
 /// named one command twice is refused where each path takes its reading: [`Surface::ensure_unique`]
 /// writes the file, and a facade cannot hold a member twice — two commands of one id would be two
 /// methods of one name, which [`crate::facade`] refuses while naming both.
-pub(crate) fn commands() -> Vec<Command> {
+pub(crate) fn commands() -> Result<Vec<Command>, String> {
     commands_of(command_specs())
 }
 
-/// The commands of the given registry, by id.
-fn commands_of(specs: &[CommandSpec]) -> Vec<Command> {
-    let mut commands = specs.iter().map(command_of).collect::<Vec<_>>();
+/// The commands of the given registry, by id, each marked as the confined engine answers it.
+fn commands_of(specs: &[CommandSpec]) -> Result<Vec<Command>, String> {
+    let confinement = crate::refused::confinement()?;
+    let mut commands = specs.iter().map(|spec| command_of(spec, &confinement)).collect::<Vec<_>>();
     commands.sort_by(|left, right| left.id.cmp(&right.id));
-    commands
+    Ok(commands)
 }
 
 /// The surface of the given registry: kept apart from [`build`] so a test can hand it a registry of its own.
 fn surface_of(pin: &str, engine_version: &str, specs: &[CommandSpec], catalogue: &[tools::ToolDef]) -> Result<Surface, String> {
-    let commands = commands_of(specs);
-    let mut tools = catalogue.iter().map(tool_of).collect::<Vec<_>>();
+    let commands = commands_of(specs)?;
+    let mut prober = crate::refused::Tools::open()?;
+    let mut tools = catalogue.iter().map(|tool| tool_of(tool, &mut prober)).collect::<Result<Vec<_>, _>>()?;
     tools.sort_by(|left, right| left.name.cmp(&right.name));
     let surface = Surface { app: "effectcraft".to_string(), engine_version: engine_version.to_string(), pin: pin.to_string(), commands, tools };
     surface.ensure_unique()?;
@@ -68,8 +75,15 @@ pub(crate) fn check_pin(pin: &str) -> Result<(), String> {
     }
 }
 
-fn command_of(spec: &CommandSpec) -> Command {
-    Command { id: spec.id.to_string(), label: spec.label.to_string(), params: spec.params.to_string(), journal: spec.journal, keys: keys_of(spec) }
+fn command_of(spec: &CommandSpec, confinement: &Confinement) -> Command {
+    Command {
+        id: spec.id.to_string(),
+        label: spec.label.to_string(),
+        params: spec.params.to_string(),
+        journal: spec.journal,
+        refused_under_confinement: crate::refused::command_refused(confinement, spec.id),
+        keys: keys_of(spec),
+    }
 }
 
 /// A command's keys in the order its `params` text lists them, which a typed method keeps for its
@@ -90,8 +104,14 @@ fn keys_of(spec: &CommandSpec) -> Vec<Key> {
     pieces.iter().map(|(key, piece)| Key::typed(key, required.contains(&key.as_str()), &type_key(key, piece), piece)).collect()
 }
 
-fn tool_of(tool: &tools::ToolDef) -> Tool {
-    Tool { name: tool.name.to_string(), description: tool.description.to_string(), bridge_only: tool.bridge_only, input_schema: tool.input_schema() }
+fn tool_of(tool: &tools::ToolDef, prober: &mut crate::refused::Tools) -> Result<Tool, String> {
+    Ok(Tool {
+        name: tool.name.to_string(),
+        description: tool.description.to_string(),
+        bridge_only: tool.bridge_only,
+        refused_under_confinement: prober.refused(tool)?,
+        input_schema: tool.input_schema(),
+    })
 }
 
 /// How many keys the surface types each way, for the run's report.
@@ -138,6 +158,49 @@ mod tests {
         }
     }
 
+    /// Every mark on the surface is the pinned engine's own answer to the same question, asked afresh
+    /// here: a mark written from any list of names held here instead of read from the refusals would
+    /// part from the engine's answers the moment EffectCraft moved one of its lists. A command is asked
+    /// of the confinement's own check, not through the function the surface asks it with, which a list
+    /// could stand in for; a tool's mark is shown to be the backend's answer in [`crate::refused`].
+    #[test]
+    fn every_mark_is_the_engines_own_answer() {
+        let surface = surface();
+        let confinement = crate::refused::confinement().unwrap();
+        for command in &surface.commands {
+            let answer = confinement.check_command(&command.id, &json!({})).err().map(|error| error.to_string());
+            assert_eq!(command.refused_under_confinement, answer == Some(crate::refused::refusal(&command.id)), "`{}`", command.id);
+        }
+        let mut prober = crate::refused::Tools::open().unwrap();
+        for tool in &surface.tools {
+            let asked = tools::find(&tool.name).is_some_and(|def| prober.refused(def).unwrap());
+            assert_eq!(tool.refused_under_confinement, asked, "`{}`", tool.name);
+        }
+    }
+
+    /// At this pin the one tool a headless app could call that the confinement refuses is `script_ui`:
+    /// every other refused tool is `bridgeOnly` besides, and a headless engine never lets an app near
+    /// one in the first place.
+    #[test]
+    fn the_surface_marks_script_ui_and_no_other_tool() {
+        let surface = surface();
+        let marked: Vec<&str> = surface.tools.iter().filter(|tool| tool.refused_under_confinement).map(|tool| tool.name.as_str()).collect();
+        assert_eq!(marked, ["script_ui"]);
+    }
+
+    /// The commands refused outright while confined are all marked — script runners and code runners
+    /// both — and no other command is, not one whose confined check answers an error of its own.
+    #[test]
+    fn the_surface_marks_the_commands_refused_under_confinement() {
+        let surface = surface();
+        for refused in ["script.run", "file.installScript", "window.scriptPanel", "library.install", "file.executeFile", "effect.helpers.load"] {
+            assert!(command(&surface, refused).refused_under_confinement, "{refused} is refused by the confined engine");
+        }
+        for callable in ["edit.undo", "comp.new", "help.exportRepro", "file.open"] {
+            assert!(!command(&surface, callable).refused_under_confinement, "{callable} is callable under confinement");
+        }
+    }
+
     #[test]
     fn the_header_names_the_app_the_engine_and_the_pin() {
         let surface = surface();
@@ -154,12 +217,17 @@ mod tests {
             .and_then(Value::as_array)
             .and_then(|commands| commands.iter().find(|c| c.get("id") == Some(&json!("layer.newText"))))
             .unwrap();
-        for field in ["id", "label", "params", "keys", "journal"] {
+        for field in ["id", "label", "params", "keys", "journal", "refusedUnderConfinement"] {
             assert!(command.get(field).is_some(), "layer.newText lacks {field}");
         }
         for key in command.get("keys").and_then(Value::as_array).unwrap() {
             for field in ["name", "required", "type", "doc"] {
                 assert!(key.get(field).is_some(), "{key} lacks {field}");
+            }
+        }
+        for tool in written.get("tools").and_then(Value::as_array).unwrap() {
+            for field in ["name", "description", "bridgeOnly", "refusedUnderConfinement", "inputSchema"] {
+                assert!(tool.get(field).is_some(), "{tool} lacks {field}");
             }
         }
         assert_eq!(Surface::parse(&text).unwrap(), surface());
