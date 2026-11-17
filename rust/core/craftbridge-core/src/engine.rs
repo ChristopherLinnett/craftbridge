@@ -6,7 +6,9 @@ use crate::app::CraftApp;
 use crate::cancel::CancelToken;
 use crate::error::CraftError;
 use crate::export::{self, ExportCall};
+use crate::folders::Folders;
 use crate::frames::{FrameBytes, PixelFormat};
+use crate::journal::{Journal, Recovery};
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::panic::{self, AssertUnwindSafe};
@@ -76,26 +78,56 @@ pub struct Engine {
     closing: CancelToken,
     /// The engine thread's id, so a call from inside one of the engine's own calls is told apart.
     id: ThreadId,
+    /// What the start did about the pending-export journal it found (empty for an engine started
+    /// without folders, which keeps no journal).
+    recovery: Recovery,
 }
 
 impl Engine {
-    /// Start one engine: spawn its thread and run `app`'s session there, and answer with the handle
-    /// every call goes through. The later steps of plan §16's `start` (folders, the GPU, the
-    /// decoders) arrive around this spawn, which is the step that defines the thread and the inbox.
+    /// Start one engine with no folders: spawn its thread and run `app`'s session there, and answer
+    /// with the handle every call goes through. It keeps no pending-export journal, so a kill
+    /// mid-export leaves its partial files: an app's own engine starts with [`Engine::start_in`].
+    /// The later steps of plan §16's `start` (the GPU, the decoders) arrive around this spawn, which
+    /// is the step that defines the thread and the inbox.
     ///
     /// [`Result::Err`] only when the thread itself cannot start; a session that fails to build is the
     /// app crate's own `start` to judge, once the steps around this one exist.
     pub fn start<A: CraftApp + 'static>(app: A) -> Result<Engine> {
+        Self::spawn(app, None, Recovery::default())
+    }
+
+    /// Start one engine in the app's `folders`, the start an app crate's constructor makes: prepare
+    /// them, deal with the files the pending-export journal still lists (deleting those an export
+    /// the system killed was writing) and clear it, then start as [`Engine::start`] does, with every
+    /// export from then on journaled (plan §16, D-17). What the journal step did is
+    /// [`Engine::recovery`]; a journal it cannot read or a file it cannot delete never fails the start.
+    ///
+    /// # Errors
+    ///
+    /// What [`Folders::prepare`] refuses, or the thread that cannot start.
+    pub fn start_in<A: CraftApp + 'static>(folders: &Folders, app: A) -> Result<Engine> {
+        let journal = Journal::new(folders, &folders.prepare()?)?;
+        let recovery = journal.recover();
+        Self::spawn(app, Some(journal), recovery)
+    }
+
+    /// What the start did about the pending-export journal.
+    #[must_use]
+    pub fn recovery(&self) -> &Recovery {
+        &self.recovery
+    }
+
+    fn spawn<A: CraftApp + 'static>(app: A, journal: Option<Journal>, recovery: Recovery) -> Result<Engine> {
         let (inbox, incoming) = mpsc::channel();
         let closing = CancelToken::new();
         let thread = thread::Builder::new()
             .name(THREAD_NAME.to_string())
             .spawn({
                 let closing = closing.clone();
-                move || run(Box::new(app), incoming, closing)
+                move || run(Box::new(app), incoming, closing, journal)
             })
             .map_err(|error| CraftError::internal(format!("cannot start the engine thread: {error}")))?;
-        Ok(Engine { id: thread.thread().id(), inbox: Mutex::new(Some(inbox)), thread: Mutex::new(Some(thread)), closing })
+        Ok(Engine { id: thread.thread().id(), inbox: Mutex::new(Some(inbox)), thread: Mutex::new(Some(thread)), closing, recovery })
     }
 
     /// Make one call and wait for the engine's answer.
@@ -250,14 +282,18 @@ fn answer_of<T>(waiting: Receiver<Result<T>>) -> Result<T> {
 /// that arrive are taken into `pending` at the export's beats, in order, and run from there before
 /// anything made after them (plan §13, L3); `pending` is why the loop takes its next message from
 /// it before it waits on the inbox.
-fn run(mut app: Box<dyn CraftApp>, incoming: Receiver<Message>, closing: CancelToken) -> Result<()> {
+fn run(mut app: Box<dyn CraftApp>, incoming: Receiver<Message>, closing: CancelToken, journal: Option<Journal>) -> Result<()> {
     let mut pending: VecDeque<Message> = VecDeque::new();
     while let Some(message) = next_message(&mut pending, &incoming) {
         match message {
             Message::Close => break,
             Message::Request { method, params, answer } => answer_call(&answer, || app.request(&method, params)),
             Message::Frame { params, format, answer } => answer_call(&answer, || app.frame(params, format)),
-            Message::Export { call } => export::run_export(&mut *app, call, export::EngineSide { inbox: &incoming, pending: &mut pending, closing: &closing }),
+            Message::Export { call } => export::run_export(
+                &mut *app,
+                call,
+                export::EngineSide { inbox: &incoming, pending: &mut pending, closing: &closing, journal: journal.as_ref() },
+            ),
         }
     }
     // Calls queued behind the close are refused now, not after the session's drop has run: those

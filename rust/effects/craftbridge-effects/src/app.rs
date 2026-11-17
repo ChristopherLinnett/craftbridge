@@ -8,6 +8,7 @@ use craftbridge_core::{CraftApp, CraftError, FrameBytes, PixelFormat, Result};
 use effectcraft_automation::confine::Confinement as EngineConfinement;
 use effectcraft_automation::{Backend, McpServer};
 use serde_json::Value;
+use std::path::PathBuf;
 
 use crate::runner::{self, Progress};
 use crate::{files, info, methods, properties, requests, session};
@@ -86,7 +87,17 @@ impl CraftApp for EffectCraftApp {
     /// Answer one method of the plan's §14 table that reports progress through the function
     /// [`PROGRESS_METHODS`] names for it. Every other name answers `Unsupported`, as the core's
     /// default for an app with no such call does, naming the methods this call does answer.
-    fn request_with_progress(&mut self, method: &str, params: Value, on_progress: &mut dyn FnMut(u64, u64, Option<f64>) -> bool) -> Result<Value> {
+    ///
+    /// `list_outputs` is taken and not yet called: the files a render writes depend on the export
+    /// settings each queued item resolves, and that listing is the runner's own piece of work, so
+    /// until it exists a killed export leaves its partial files for the journal to know nothing of.
+    fn request_with_progress(
+        &mut self,
+        method: &str,
+        params: Value,
+        on_progress: &mut dyn FnMut(u64, u64, Option<f64>) -> bool,
+        _list_outputs: &mut dyn FnMut(&[PathBuf]) -> Result<()>,
+    ) -> Result<Value> {
         match PROGRESS_METHODS.iter().find(|(name, _)| *name == method) {
             Some((_, answer)) => answer(self.server.backend(), &params, on_progress),
             None => Err(CraftError::unsupported(not_answered(method, "request_with_progress", PROGRESS_METHODS.iter().map(|(name, _)| *name)))),

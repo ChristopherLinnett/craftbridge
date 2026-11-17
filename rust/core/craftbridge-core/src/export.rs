@@ -28,6 +28,7 @@ use crate::app::CraftApp;
 use crate::cancel::CancelToken;
 use crate::engine::{Message, guarded};
 use crate::error::CraftError;
+use crate::journal::{Journal, Pending};
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, Sender};
@@ -70,11 +71,14 @@ pub(crate) struct EngineSide<'a> {
     pub(crate) inbox: &'a Receiver<Message>,
     pub(crate) pending: &'a mut VecDeque<Message>,
     pub(crate) closing: &'a CancelToken,
+    /// Where an export lists the files it is about to write, when the engine has folders.
+    pub(crate) journal: Option<&'a Journal>,
 }
 
 /// Run one export on the engine thread (plan §16 behaviour 3, plan §19's sequence): take the
 /// `info` answer the calls during it will be given, run the app's own loop behind the never-crash
-/// guard with the engine's beat as its progress closure, and answer the caller.
+/// guard with the engine's beat as its progress closure and the journal's list as its lister, clear
+/// what it listed, and answer the caller.
 pub(crate) fn run_export(app: &mut dyn CraftApp, call: ExportCall, side: EngineSide<'_>) {
     let ExportCall { method, params, cancel, mut progress, answer } = call;
     // A stop is asked by the caller's token, or by a close, which stops every export (plan §16
@@ -86,16 +90,24 @@ pub(crate) fn run_export(app: &mut dyn CraftApp, call: ExportCall, side: EngineS
         return;
     }
     let info = guarded(|| app.request(INFO_METHOD, Value::Null)).flatten();
+    // What the app lists while it runs, so a kill before it ends leaves files the next start deletes;
+    // the list is cleared below however the call ends, a panic included.
+    let mut listed = side.journal.map(Journal::pending);
     let mut stopped = false;
     let ran = guarded(|| {
-        app.request_with_progress(&method, params, &mut |done, total, seconds_left| {
-            answer_queued(side.inbox, side.pending, &info);
-            // The caller's listener is app-side code too: it is run behind the same guard as a
-            // call, and its failure is dropped, so the export continues (plan §16's edge case).
-            let _ = guarded(|| progress(done, total, seconds_left));
-            stopped = stopped || stop_asked();
-            !stopped
-        })
+        app.request_with_progress(
+            &method,
+            params,
+            &mut |done, total, seconds_left| {
+                answer_queued(side.inbox, side.pending, &info);
+                // The caller's listener is app-side code too: it is run behind the same guard as a
+                // call, and its failure is dropped, so the export continues (plan §16's edge case).
+                let _ = guarded(|| progress(done, total, seconds_left));
+                stopped = stopped || stop_asked();
+                !stopped
+            },
+            &mut |outputs| listed.as_mut().map_or(Ok(()), |listed| listed.list(outputs)),
+        )
     });
     let outcome = match ran {
         // A panic is answered as one in any call is: `Internal`, with the session kept.
@@ -105,7 +117,20 @@ pub(crate) fn run_export(app: &mut dyn CraftApp, call: ExportCall, side: EngineS
         Ok(_) if stopped => Err(CraftError::Cancelled),
         Ok(answered) => answered,
     };
-    let _ = answer.send(outcome);
+    let _ = answer.send(match listed {
+        Some(listed) => cleared(outcome, listed),
+        None => outcome,
+    });
+}
+
+/// Clear the export's entries now it has ended, whatever its outcome. A success whose entries cannot
+/// be cleared is answered as the failure to clear: the entries would make the next start delete the
+/// finished files, and the app must hear that rather than a success.
+fn cleared(outcome: Result<Value>, listed: Pending) -> Result<Value> {
+    match (listed.clear(), outcome) {
+        (Err(failure), Ok(_)) => Err(failure),
+        (_, outcome) => outcome,
+    }
 }
 
 /// The engine's beat during an export: every call that arrived while the app was running it comes
@@ -130,6 +155,7 @@ mod tests {
     use crate::frames::{FrameBytes, PixelFormat};
     use crate::testing::{DEADLINE, Gate, close_begun, eventually, queue_call, recv};
     use serde_json::json;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
     use std::sync::mpsc::{self, RecvTimeoutError};
     use std::sync::{Arc, Mutex};
@@ -265,7 +291,13 @@ mod tests {
             FrameBytes::new(1, 1, format, vec![1, 2, 3, 255])
         }
 
-        fn request_with_progress(&mut self, method: &str, params: Value, on_progress: &mut dyn FnMut(u64, u64, Option<f64>) -> bool) -> Result<Value> {
+        fn request_with_progress(
+            &mut self,
+            method: &str,
+            params: Value,
+            on_progress: &mut dyn FnMut(u64, u64, Option<f64>) -> bool,
+            _list_outputs: &mut dyn FnMut(&[PathBuf]) -> Result<()>,
+        ) -> Result<Value> {
             self.shared.log(&format!("export {method} {params}"));
             if self.shared.panics_in_export.load(Ordering::SeqCst) {
                 panic!("boom in export");
