@@ -66,6 +66,32 @@ pub(crate) fn reader_format(depth: Depth) -> ReaderFormat {
     }
 }
 
+/// The `color-format` a decoder is asked to write the pictures of `format`'s reader in, by
+/// `MediaCodecInfo.CodecCapabilities`' numbers: `COLOR_FormatYUV420Flexible` for the 8-bit reader and
+/// `COLOR_FormatYUVP010` for the 10-bit one. A decoder writing to a surface and asked for none writes a layout of
+/// its own choosing, and the acceptance phone's Qualcomm decoders choose a compressed one the CPU cannot read,
+/// whatever reader the surface is; asked for one of these, they write pictures the reader's planes describe.
+pub(crate) fn color_format(format: ReaderFormat) -> i32 {
+    match format {
+        ReaderFormat::Yuv420 => 0x7F42_0888,
+        ReaderFormat::P010 => 54,
+    }
+}
+
+/// The row and pixel strides of the three planes of an image of the 8-bit reader, `planes` planes of `strides`,
+/// when they describe planes that can be read; an error naming the image's `format` when they do not. The
+/// platform describes a linear 4:2:0 picture so whatever format code it carries (Qualcomm's decoders give their own
+/// linear NV12 one, not `YUV_420_888`'s). It gives a picture it cannot describe, such as the compressed one those
+/// decoders write when asked for no colour format, chroma planes with no strides and planes with no memory, so
+/// such a picture is refused before any plane of it is read: the platform answers a read of such a plane with no
+/// address, of which the bindings would make a slice.
+pub(crate) fn described_planes(format: i32, planes: i32, strides: [(i32, i32); 3]) -> Result<[(i32, i32); 3], String> {
+    if planes != 3 || strides.iter().any(|&(row, pixel)| row <= 0 || pixel <= 0) {
+        return Err(format!("the decoded picture, in format {format:#x}, is not planes the platform describes: {planes} planes, strides {strides:?}"));
+    }
+    Ok(strides)
+}
+
 /// Where the picture is in a decoded image whose crop rectangle is `rect` (left, top, right, bottom): the
 /// rectangle must be the stream's own picture size, since the image reader was made for it.
 pub(crate) fn crop_of(rect: (i32, i32, i32, i32), layout: &Layout) -> Result<Crop, String> {
@@ -300,6 +326,34 @@ mod tests {
     }
 
     #[test]
+    fn each_reader_asks_its_decoder_for_the_colour_format_its_planes_describe() {
+        // `MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible` and `COLOR_FormatYUVP010`.
+        assert_eq!(color_format(ReaderFormat::Yuv420), 0x7F42_0888);
+        assert_eq!(color_format(ReaderFormat::P010), 54);
+    }
+
+    #[test]
+    fn an_8_bit_image_is_read_only_as_three_planes_the_platform_describes_whatever_its_format_code() {
+        // The acceptance phone's Qualcomm decoders write their own linear NV12 (0x7FA30C04): chroma interleaved two
+        // bytes apart, every row 256 bytes. A planar YUV_420_888 image is read as well.
+        let nv12 = [(256, 1), (256, 2), (256, 2)];
+        assert_eq!(described_planes(0x7FA3_0C04, 3, nv12), Ok(nv12));
+        let planar = [(160, 1), (80, 1), (80, 1)];
+        assert_eq!(described_planes(0x23, 3, planar), Ok(planar));
+        // Their compressed layout (0x7FA30C06), which they write when asked for no colour format, has chroma planes
+        // the platform gives no strides.
+        assert_eq!(
+            described_planes(0x7FA3_0C06, 3, [(256, 1), (0, 0), (0, 0)]),
+            Err("the decoded picture, in format 0x7fa30c06, is not planes the platform describes: 3 planes, strides [(256, 1), (0, 0), (0, 0)]".into())
+        );
+        for (planes, strides) in
+            [(1, nv12), (4, nv12), (3, [(256, 1), (256, 0), (256, 2)]), (3, [(-256, 1), (256, 2), (256, 2)]), (3, [(256, 1), (256, 2), (0, 2)])]
+        {
+            assert!(described_planes(0x23, planes, strides).is_err(), "{planes} planes, strides {strides:?}");
+        }
+    }
+
+    #[test]
     fn a_decoded_images_crop_is_the_streams_size_at_a_non_negative_offset_and_nothing_else() {
         let info = nal();
         let taken = layout(|_| {});
@@ -409,7 +463,7 @@ mod tests {
         // frame's own sequence header), so only a phone's hardware decoder reads these bytes. The record's
         // marker and version byte, then its profile and level, then the sequence header OBU.
         assert_eq!(record[..4], [0x81, 0x00, 0x0C, 0x00]);
-        assert_eq!(record[4..], [0x0A, 0x0A, 0x00, 0x00, 0x00, 0x02, 0xAF, 0xF7, 0x9B, 0x5F, 0x30, 0x08]);
+        assert_eq!(record[4..], [0x0A, 0x0D, 0x00, 0x00, 0x00, 0x03, 0xB4, 0xFF, 0x73, 0x6B, 0xE6, 0x40, 0x40, 0x40, 0x41]);
         assert_eq!(codec_specific_data(&avc_entry(), &av1()), Err("the sample entry has no av1C"), "an entry with no record");
         for (_, sample) in av1_samples() {
             assert_eq!(input(&av1(), &sample), Ok(sample.clone()), "no start codes and no length prefixes");
