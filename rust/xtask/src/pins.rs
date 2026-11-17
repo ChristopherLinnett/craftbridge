@@ -24,14 +24,14 @@ use std::process::ExitCode;
 /// is built for.
 pub(crate) const TOOLCHAIN: &str = "rust/rust-toolchain.toml";
 
-/// The version catalog the Android build reads; the pins named below are the levels the doctor checks the
-/// machine has installed.
+/// The version catalog the Android build reads; the pins named below are what the scripts read of it.
 pub(crate) const CATALOG: &str = "android/sdk/gradle/libs.versions.toml";
 
-/// The catalog keys the doctor's checks read, and the gate beside them: the levels of the platform the
-/// machine installs, which the update loop's newer-release step also leaves alone, there being no
-/// repository of newer ones (`rust/xtask/src/versions.rs`).
-pub(crate) const CATALOG_PINS: [&str; 3] = ["android-compileSdk", "android-buildTools", "jdk"];
+/// The catalog keys the scripts read: the levels of the platform the machine installs, which the doctor
+/// checks, and the oldest Android API, the level `tools/env.sh` builds the native library for. None is a
+/// release a repository holds newer ones of, so the update loop's newer-release step leaves them alone
+/// (`rust/xtask/src/versions.rs`).
+pub(crate) const CATALOG_PINS: [&str; 4] = ["android-compileSdk", "android-minSdk", "android-buildTools", "jdk"];
 
 /// The configurations the Swift package ships as: the Debug a developer builds, and the Release a library
 /// is shipped in. An `#if !DEBUG` compiles code no Debug build sees, so both ship.
@@ -210,10 +210,11 @@ mod tests {
     /// mixed, an array over several lines, comments, and spacing none of the old text readers knew.
     const TOOLCHAIN_OTHER_FORM: &str = "toolchain = {\n  channel = '1.99.1',\n  components = [ 'rustfmt', \"clippy\" ],\n  targets = [\n    'aarch64-apple-ios', # device\n    \"aarch64-apple-ios-sim\",\n    'aarch64-linux-android',\n    'x86_64-linux-android',\n  ]\n}\n";
 
-    const CATALOG_BASIC: &str = "[versions]\nandroid-compileSdk = \"37\"\nandroid-buildTools = \"37.0.0\"\njdk = \"21\"\n";
+    const CATALOG_BASIC: &str = "[versions]\nandroid-compileSdk = \"37\"\nandroid-minSdk = \"29\"\nandroid-buildTools = \"37.0.0\"\njdk = \"21\"\n";
 
     /// The same catalog written as one inline table of literal strings with odd spacing.
-    const CATALOG_OTHER_FORM: &str = "versions = {\n  android-compileSdk = '37',\n  android-buildTools = \"37.0.0\", # the AGP's own pin\n  jdk = '21',\n}\n";
+    const CATALOG_OTHER_FORM: &str =
+        "versions = {\n  android-compileSdk = '37',\n  android-minSdk = '29',\n  android-buildTools = \"37.0.0\", # the AGP's own pin\n  jdk = '21',\n}\n";
 
     /// The pins of two scratch trees, one written every way the tools read and one written canonically.
     fn scratch_with(toolchain: &str, catalog: &str, tag: &str) -> crate::scratch::Scratch {
@@ -236,6 +237,7 @@ mod tests {
                 "rust-target=aarch64-linux-android",
                 "rust-target=x86_64-linux-android",
                 "android-compileSdk=37",
+                "android-minSdk=29",
                 "android-buildTools=37.0.0",
                 "jdk=21",
             ]
@@ -253,11 +255,15 @@ mod tests {
         assert!(error.contains("android-compileSdk") && error.contains(CATALOG), "the gap names the key and the file: {error}");
         let not_a_version = scratch_with(
             TOOLCHAIN_BASIC,
-            "[versions]\nandroid-compileSdk = \"37\"\nandroid-buildTools = { require = \"37.0.0\" }\njdk = \"21\"\n",
+            "[versions]\nandroid-compileSdk = \"37\"\nandroid-minSdk = \"29\"\nandroid-buildTools = { require = \"37.0.0\" }\njdk = \"21\"\n",
             "pins-table",
         );
         assert!(pins(&not_a_version.0).unwrap_err().contains("android-buildTools"), "a version table is not a version the doctor can check");
-        let a_number = scratch_with(TOOLCHAIN_BASIC, "[versions]\nandroid-compileSdk = \"37\"\nandroid-buildTools = \"37.0.0\"\njdk = 21\n", "pins-number");
+        let a_number = scratch_with(
+            TOOLCHAIN_BASIC,
+            "[versions]\nandroid-compileSdk = \"37\"\nandroid-minSdk = \"29\"\nandroid-buildTools = \"37.0.0\"\njdk = 21\n",
+            "pins-number",
+        );
         assert!(pins(&a_number.0).unwrap_err().contains("jdk"), "a number is no version Gradle reads, so it is no pin either");
     }
 

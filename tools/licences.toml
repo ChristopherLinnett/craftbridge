@@ -20,6 +20,15 @@
 # What the Kotlin plugin puts on every module's runtime classpath: this ships inside the AAR.
 "org.jetbrains.kotlin:kotlin-stdlib" = "Apache-2.0"
 "org.jetbrains:annotations" = "Apache-2.0"
+# What the generated bindings call through (what ships inside the AAR): JNA offers the Apache-2.0 licence
+# beside the LGPL, and CraftBridge takes it under Apache-2.0 (AGENTS.md §8).
+"net.java.dev.jna:jna" = "Apache-2.0"
+# The coroutines the generated bindings' async calls suspend on, which ship inside the AAR too: the module
+# the catalog names, the JVM artifact it resolves to and the platform that aligns them. The detekt tooling
+# below resolves the same modules.
+"org.jetbrains.kotlinx:kotlinx-coroutines-bom" = "Apache-2.0"
+"org.jetbrains.kotlinx:kotlinx-coroutines-core" = "Apache-2.0"
+"org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm" = "Apache-2.0"
 # The detekt analyser the gate runs (plan D-28) and the pieces the build's own rules compile and test
 # against, with every module their resolution pulls in — read off each module's own POM. They run in the
 # build and in the rules' tests; nothing here ships inside an AAR.
@@ -74,8 +83,6 @@
 # The rules' test runner: kotlin-test bound to Apache-2.0 TestNG, so no EPL-1.0 JUnit reaches the
 # tests' classpaths.
 "org.jetbrains.kotlin:kotlin-test-testng" = "Apache-2.0"
-"org.jetbrains.kotlinx:kotlinx-coroutines-bom" = "Apache-2.0"
-"org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm" = "Apache-2.0"
 "org.jetbrains.kotlinx:kotlinx-html-jvm" = "Apache-2.0"
 "org.jetbrains.kotlinx:kotlinx-serialization-bom" = "Apache-2.0"
 "org.jetbrains.kotlinx:kotlinx-serialization-core" = "Apache-2.0"

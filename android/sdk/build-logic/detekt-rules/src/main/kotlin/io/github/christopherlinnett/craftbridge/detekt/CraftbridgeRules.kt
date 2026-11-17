@@ -19,6 +19,8 @@ import dev.detekt.api.SetupContext
 import dev.detekt.api.config
 import dev.detekt.core.suppressors.isSuppressedBy
 import org.jetbrains.kotlin.analysis.api.analyze
+import org.jetbrains.kotlin.analysis.api.components.KaDiagnosticCheckerFilter
+import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
 import org.jetbrains.kotlin.analysis.api.types.symbol
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.name.ClassId
@@ -248,6 +250,43 @@ class FileWideSuppressionBackstop : FileProcessListener {
                 )
             }
         return Detektion(result.issues + issues, result.rules, result.notifications, result.metrics, result.userData)
+    }
+}
+
+/**
+ * A suppression of one of the compiler's own errors, which leaves the error unreported and the code it
+ * covers compiled under rules the compiler calls unspecified. The compiler warns on each one, and under
+ * warnings as errors that warning is the build's refusal of it, but the convention plugin turns the
+ * warning off for every compilation: a compiler option reaches the whole compilation, and the generated
+ * bindings must suppress the two errors explicit API mode reports on the helpers UniFFI writes with no
+ * visibility. So the refusal is made here instead, on every run but the bindings' (written.yml), and
+ * their folder alone is exempt.
+ *
+ * Which suppression covers an error is the compiler's own answer, not a list kept here: the analysis
+ * reports each as the warning the compilation no longer prints, for every error the suppression names
+ * however its annotation is spelt, and each such warning is a finding.
+ */
+class ErrorSuppression(
+    config: Config,
+) : Rule(config, "a suppression of a compiler error compiles code the compiler has refused"),
+    RequiresAnalysisApi {
+    override fun visitKtFile(file: KtFile) {
+        // No call to super on purpose: the compiler's analysis of the file answers for all of it at once.
+        val suppressed =
+            analyze(file) {
+                file
+                    .collectDiagnostics(KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
+                    .filterIsInstance<KaFirDiagnostic.ErrorSuppression>()
+                    .map { it.psi to it.diagnosticName }
+            }
+        for ((argument, error) in suppressed) {
+            report(
+                Finding(
+                    Entity.from(argument),
+                    "this suppresses the compiler's error $error: fix the code instead; only the generated bindings may (AGENTS.md §10)",
+                ),
+            )
+        }
     }
 }
 

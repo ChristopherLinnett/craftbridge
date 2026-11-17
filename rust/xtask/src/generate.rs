@@ -38,6 +38,12 @@ pub(crate) fn generators() -> Vec<Generator> {
         Generator { name: "effects-kotlin-facade", output_dir: crate::effects_api::KOTLIN_OUTPUT_DIR, generate: crate::effects_api::generate_kotlin },
         Generator { name: "effects-version", output_dir: crate::effects_api::VERSION_OUTPUT_DIR, generate: crate::effects_api::generate_version },
         Generator { name: "swift-bindings", output_dir: crate::swift_bindings::OUTPUT_DIR, generate: crate::swift_bindings::generate },
+        Generator { name: "kotlin-bindings-core", output_dir: crate::kotlin_bindings::CORE_OUTPUT_DIR, generate: crate::kotlin_bindings::generate_core },
+        Generator {
+            name: "kotlin-bindings-effects",
+            output_dir: crate::kotlin_bindings::EFFECTS_OUTPUT_DIR,
+            generate: crate::kotlin_bindings::generate_effects,
+        },
     ]
 }
 
@@ -517,5 +523,11 @@ mod tests {
         assert!(registry.iter().any(|generator| generator.name == "effects-kotlin-facade" && generator.output_dir.ends_with("/craftbridge/effects")));
         assert!(registry.iter().any(|generator| generator.name == "effects-version" && generator.output_dir == crate::effects_api::VERSION_OUTPUT_DIR));
         assert!(registry.iter().any(|generator| generator.name == "swift-bindings" && generator.output_dir == crate::swift_bindings::OUTPUT_DIR));
+        assert!(registry.iter().any(|generator| generator.name == "kotlin-bindings-core" && generator.output_dir == crate::kotlin_bindings::CORE_OUTPUT_DIR));
+        assert!(
+            registry.iter().any(|generator| generator.name == "kotlin-bindings-effects" && generator.output_dir == crate::kotlin_bindings::EFFECTS_OUTPUT_DIR)
+        );
+        // The bindings' folders sit beside the facade's, never in it: each generator replaces its own folder whole.
+        assert!(!crate::kotlin_bindings::EFFECTS_OUTPUT_DIR.starts_with(crate::effects_api::KOTLIN_OUTPUT_DIR));
     }
 }

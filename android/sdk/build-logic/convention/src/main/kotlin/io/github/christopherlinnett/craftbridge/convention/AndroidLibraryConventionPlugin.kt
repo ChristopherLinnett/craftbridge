@@ -33,6 +33,18 @@ private val dayDependentLintChecks = setOf("AndroidGradlePluginVersion", "Gradle
 private val agpCompilerArgs = setOf("-Xuse-inline-scopes-numbers")
 
 /**
+ * The generated bindings are exempt from explicit API mode, and from nothing else: each of their files
+ * suppresses the two diagnostics that mode reports (`cargo xtask generate` writes that line, see
+ * `rust/xtask/src/kotlin_bindings.rs`), since UniFFI declares its helpers with no visibility. The compiler
+ * warns about every suppressed error, which warnings as errors would turn into a failed build; no compiler
+ * option reaches less than the whole compilation, and no annotation silences that warning, so it is
+ * silenced here for every file. The refusal it made moves to detekt, whose `ErrorSuppression` reads every
+ * file but the bindings' folder ([GENERATED_BINDINGS]) and fails on any suppression of a compiler error:
+ * written code, its tests and the command facade beside the bindings keep the mode whole.
+ */
+private const val QUIET_ERROR_SUPPRESSION = "-Xdont-warn-on-error-suppression"
+
+/**
  * The Android library setup every CraftBridge module shares: SDK levels, Java and Kotlin rules,
  * Lint strictness, the consumer R8 rules, where generated Kotlin is compiled from and what the unit
  * tests run on. A module's build file applies this plugin and names only its namespace and
@@ -48,6 +60,15 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
             // skipped task prunes, so the module's tasks take turns at its build folder: otherwise a
             // module losing its last sources fails the build on some runs and not others.
             takeTurnsAtBuildFolder()
+            // JNA ships its native dispatch library in an AAR the POM does not name (see [JnaAar]); the
+            // catalog names the module once.
+            dependencies.components.withModule(
+                catalogLibrary("jna")
+                    .get()
+                    .module
+                    .toString(),
+                JnaAar::class.java,
+            )
 
             extensions.configure<LibraryExtension> {
                 compileSdk = catalogVersion("android-compileSdk").toInt()
@@ -90,6 +111,7 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                 explicitApi()
                 compilerOptions {
                     allWarningsAsErrors.set(true)
+                    freeCompilerArgs.add(QUIET_ERROR_SUPPRESSION)
                 }
             }
 
@@ -183,7 +205,7 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                     val task = this as KotlinCompilationTask<*>
                     val options = task.compilerOptions
                     if (!options.allWarningsAsErrors.get() || options.suppressWarnings.get() ||
-                        (options.freeCompilerArgs.get() - agpCompilerArgs).isNotEmpty()
+                        (options.freeCompilerArgs.get() - agpCompilerArgs - QUIET_ERROR_SUPPRESSION).isNotEmpty()
                     ) {
                         throw GradleException(
                             "$module changes Kotlin's warnings as errors, which craftbridge.android.library sets for every module",

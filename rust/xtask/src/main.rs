@@ -4,8 +4,9 @@
 //! `cargo xtask compiled`, and the lint library's run under its lock, `cargo xtask dylint …`; the file
 //! lists its stages read, `cargo xtask files <kind>`; the pins the doctor and the gate read,
 //! `cargo xtask pins` and `cargo xtask swift-builds`; the Swift stage's formatter check,
-//! `cargo xtask swift-format`; and the XCFramework `tools/build-xcframework.sh` builds,
-//! `cargo xtask xcframework`.
+//! `cargo xtask swift-format`; the XCFramework `tools/build-xcframework.sh` builds,
+//! `cargo xtask xcframework`; and the 16 KB alignment `tools/build-android.sh` hands over,
+//! `cargo xtask elf-alignment <llvm-readelf> <library>…`.
 //!
 //! The rules in `AGENTS.md` that no compiler, formatter or linter already enforces are checked here,
 //! behind one command, so a change cannot merge with one broken. Each check lives in its own module: a
@@ -23,6 +24,7 @@ mod compiled;
 mod direction;
 mod duplicates;
 mod effects_api;
+mod elf_alignment;
 mod filelock;
 mod files;
 mod generate;
@@ -30,6 +32,7 @@ mod generated;
 mod git;
 mod gradle_log;
 mod hygiene;
+mod kotlin_bindings;
 mod layers;
 mod layout;
 mod licences;
@@ -233,6 +236,7 @@ fn dispatch(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
         ["swift-format"] => swift_format::run(&root),
         ["swift-lint"] => swift_lint::run(&root),
         ["pins"] => pins::run(&root),
+        ["elf-alignment", readelf, libraries @ ..] => elf_alignment::run(readelf, libraries),
         ["swift-builds"] => pins::builds(&root),
         ["xcframework"] => xcframework::run(&root),
         _ => {
@@ -260,6 +264,7 @@ fn usage() {
     eprintln!("       cargo xtask swift-format");
     eprintln!("       cargo xtask swift-lint");
     eprintln!("       cargo xtask pins");
+    eprintln!("       cargo xtask elf-alignment <llvm-readelf> <library>...   (every library aligned to 16 KB pages)");
     eprintln!("       cargo xtask swift-builds");
     eprintln!("       cargo xtask xcframework   (through tools/build-xcframework.sh: the native library's XCFramework, joined again only when it changed)")
 }
