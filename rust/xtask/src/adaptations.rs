@@ -98,6 +98,13 @@ impl Span {
     fn written(first: u64, last: u64) -> String {
         if first == last { first.to_string() } else { format!("{first}-{last}") }
     }
+
+    /// The first and last lines, as the reader read them, for a test that plants a change at a span's
+    /// edges and beside them without reading the list's text a second way.
+    #[cfg(test)]
+    pub(crate) fn ends(&self) -> (u64, u64) {
+        (self.first, self.last)
+    }
 }
 
 /// One place an item occupies: a file, and its lines there.

@@ -675,6 +675,17 @@ mod tests {
         (1..=lines).map(|line| if Some(line) == changed { format!("changed {line}\n") } else { format!("line {line}\n") }).collect()
     }
 
+    /// Whether a place is EffectCraft's command line, whose code the entries that mirror it list.
+    fn command_line(place: &crate::adaptations::Location) -> bool {
+        place.repository == Repository::Effectcraft && place.file.starts_with("apps/effectcraft-cli/")
+    }
+
+    /// The ids a printed report names for a recheck, each read off its own `RECHECK` line, so one id
+    /// that begins another (`AD1`, `AD13`) is never taken for it.
+    fn rechecked(printed: &str) -> BTreeSet<&str> {
+        printed.lines().filter_map(|line| line.strip_prefix("upstream: RECHECK ")).filter_map(|rest| rest.split(' ').next()).collect()
+    }
+
     const FIXTURE_LIST: &str = r#"
 [[adaptation]]
 id = "AD1"
@@ -822,6 +833,149 @@ depends = [{ item = "queue", at = [{ file = "crates/engine/src/render_queue.rs" 
             (1..=40).map(|line| if line == 15 { "\0 a NUL byte on a listed line\n".to_string() } else { format!("line {line}\n") }).collect();
         let found = compared(&with_nul);
         assert_eq!(found.recheck.iter().map(|recheck| recheck.id.as_str()).collect::<Vec<_>>(), ["AD1"], "{found:?}");
+    }
+
+    /// The real list, compared between fixture revisions the way step 3 compares it between the pin's,
+    /// with one line of EffectCraft's command line changed at a time: the first and the last line of
+    /// every place the list names there, and the line on either side of each. Every plant names, in
+    /// the update loop's report, exactly the adaptations with a place that holds the changed line, so a
+    /// change inside the code an adaptation mirrors names it and a change beside that code names it
+    /// only where another of its places holds the line. The places, the files and the fixture's length
+    /// are read off the list, so the test states no second copy of any of them. Only the command
+    /// line's places are compared: every other place lies in a file no fixture revision holds, so its
+    /// diff is empty and it can name nothing.
+    #[test]
+    fn a_fixture_revision_in_the_command_line_code_the_real_list_names_names_those_adaptations() {
+        let list: Vec<Adaptation> = crate::adaptations::read(&crate::repo_root())
+            .unwrap()
+            .into_iter()
+            .map(|entry| Adaptation {
+                relies: entry
+                    .relies
+                    .iter()
+                    .map(|item| crate::adaptations::Relies {
+                        item: item.item.clone(),
+                        at: item.at.iter().filter(|place| command_line(place)).cloned().collect(),
+                    })
+                    .filter(|item| !item.at.is_empty())
+                    .collect(),
+                ..entry
+            })
+            .collect();
+        let places: Vec<&crate::adaptations::Location> = list.iter().flat_map(|entry| &entry.relies).flat_map(|item| &item.at).collect();
+        assert!(!places.is_empty(), "the list names no command-line code to plant in");
+        // Long enough to hold every listed line and the line after the last of them.
+        let length = places.iter().flat_map(|place| &place.lines).map(|span| span.ends().1).max().unwrap_or(1) + 2;
+        let files: BTreeSet<&str> = places.iter().map(|place| place.file.as_str()).collect();
+        let mut plants: BTreeSet<(&str, u64)> = BTreeSet::new();
+        for place in &places {
+            let edges: Vec<(u64, u64)> =
+                if place.lines.is_empty() { vec![(1, length)] } else { place.lines.iter().map(crate::adaptations::Span::ends).collect() };
+            for (first, last) in edges {
+                let lines = [first - 1, first, last, last + 1].into_iter().filter(|line| (1..=length).contains(line));
+                plants.extend(lines.map(|line| (place.file.as_str(), line)));
+            }
+        }
+        let unchanged = numbered(length as usize, None);
+        let before: Vec<(&str, &str)> = files.iter().map(|file| (*file, unchanged.as_str())).collect();
+        let cache = crate::upstream::official_scratch("update-command-line-plants");
+        let old = crate::git::commit_files(&cache.0, None, "old", &before);
+        for (file, line) in plants {
+            let changed = numbered(length as usize, Some(line as usize));
+            let after: Vec<(&str, &str)> = files.iter().map(|name| (*name, if *name == file { changed.as_str() } else { unchanged.as_str() })).collect();
+            let new = crate::git::commit_files(&cache.0, Some(&old), "new", &after);
+            let revisions = CacheRevisions { changed: vec![(Repository::Effectcraft, crate::upstream::Cache::at(cache.0.clone()).unwrap(), old.clone(), new)] };
+            let found = crate::adaptations::compare(&list, &revisions).unwrap();
+            let holds = |place: &crate::adaptations::Location| {
+                place.file == file
+                    && (place.lines.is_empty()
+                        || place.lines.iter().any(|span| {
+                            let (first, last) = span.ends();
+                            first <= line && line <= last
+                        }))
+            };
+            let expected: BTreeSet<&str> =
+                list.iter().filter(|entry| entry.relies.iter().flat_map(|item| &item.at).any(holds)).map(|entry| entry.id.as_str()).collect();
+            assert_eq!(found.recheck.iter().map(|recheck| recheck.id.as_str()).collect::<BTreeSet<_>>(), expected, "{file} line {line}: {found:?}");
+            assert!(found.moved.is_empty(), "{file} line {line}: a line changed in place moves nothing: {found:?}");
+            let printed = report(&revs("old"), &revs("new"), &found, &SurfaceDiff { breaking: false, report: String::new() }, true, None);
+            assert_eq!(rechecked(&printed), expected, "the report for a change to {file} line {line}: {printed}");
+        }
+    }
+
+    /// The entries that follow the command line are the ones the loop must be able to name when it
+    /// changes: an entry with no place in the command line's code would be named by no change to it,
+    /// and the plants above, read off the list, would not miss it.
+    #[test]
+    fn every_entry_that_mirrors_the_command_line_lists_command_line_code() {
+        let list = crate::adaptations::read(&crate::repo_root()).unwrap();
+        for id in ["AD1", "AD3", "AD4", "AD5", "AD6", "AD10", "AD13"] {
+            let entry = list.iter().find(|entry| entry.id == id).unwrap();
+            assert!(entry.relies.iter().flat_map(|item| &item.at).any(command_line), "{id} lists no command-line code, though it mirrors the command line");
+        }
+    }
+
+    /// The pinned EffectCraft as Cargo checked it out to build the workspace: the checkout holding a crate
+    /// the resolved graph takes from EffectCraft's repository.
+    fn pinned_effectcraft() -> PathBuf {
+        let app = crate::layers::app_by_noun("effects").unwrap();
+        let crates = crate::meta::read(&crate::repo_root().join("rust"), crate::meta::Graph::Resolved).unwrap();
+        let built = crates.iter().find(|krate| krate.source.as_deref().is_some_and(|source| crate::layers::from_repository(source, app.repository))).unwrap();
+        Path::new(&built.manifest_path).ancestors().find(|folder| crate::git::is_checkout(folder)).unwrap().to_path_buf()
+    }
+
+    /// What the language's own lexer finds in a source file: the first and last line of every bracketed
+    /// group, at every depth (the blocks, the argument lists and the attributes), and the lines that
+    /// hold a token, a doc comment included.
+    #[derive(Default)]
+    struct Code {
+        groups: Vec<(usize, usize)>,
+        token_lines: BTreeSet<usize>,
+    }
+
+    impl Code {
+        fn read(&mut self, tokens: proc_macro2::TokenStream) {
+            for tree in tokens {
+                let span = tree.span();
+                self.token_lines.extend(span.start().line..=span.end().line);
+                if let proc_macro2::TokenTree::Group(group) = tree {
+                    self.groups.push((group.span_open().start().line, group.span_close().end().line));
+                    self.read(group.stream());
+                }
+            }
+        }
+    }
+
+    /// Every place the list names in the command line is whole code at the pin: no group of its tokens
+    /// opens inside the place and closes outside it, or the other way round, and the place starts and
+    /// ends on a line of code, so it neither runs past the end of the file nor ends on a blank line.
+    /// A place that stops short of the line closing its block lets a line added inside the block past,
+    /// since an added line touches a span only between two of its lines, so the change names no
+    /// adaptation; one that runs past the end of its code takes in code its entry does not mirror. The
+    /// plants above read their places off the list, so only the pin's own code can say a place is cut.
+    #[test]
+    fn every_command_line_place_the_list_names_is_whole_code_at_the_pin() {
+        let checkout = pinned_effectcraft();
+        let list = crate::adaptations::read(&crate::repo_root()).unwrap();
+        let mut cut = Vec::new();
+        for entry in &list {
+            for place in entry.relies.iter().flat_map(|item| &item.at).filter(|place| command_line(place)) {
+                let text = std::fs::read_to_string(checkout.join(&place.file)).unwrap();
+                let mut code = Code::default();
+                code.read(text.parse().unwrap());
+                for span in &place.lines {
+                    let (first, last) = span.ends();
+                    let inside = |line: usize| (first..=last).contains(&(line as u64));
+                    for (open, close) in code.groups.iter().filter(|(open, close)| inside(*open) != inside(*close)) {
+                        cut.push(format!("{} lists {} lines {}, which cut the group of lines {open}-{close}", entry.id, place.file, span.text));
+                    }
+                    for edge in [first, last].into_iter().filter(|edge| !code.token_lines.contains(&(*edge as usize))) {
+                        cut.push(format!("{} lists {} lines {}, whose line {edge} holds no code", entry.id, place.file, span.text));
+                    }
+                }
+            }
+        }
+        assert!(cut.is_empty(), "command-line places that are not whole code at the pin: {cut:#?}");
     }
 
     #[test]

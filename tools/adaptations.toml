@@ -79,7 +79,7 @@ crate = "craftbridge-effects"
 file = "src/requests.rs and src/runner.rs"
 implements = "FX-1c"
 summary = "RenderRequest — one field per render flag of EffectCraft's CLI, mapped to the render-queue parameters with the CLI's names, defaults and errors — and the render runner: unqueue the project's other items, add this one, render without waiting, poll at each progress report (every PROGRESS_INTERVAL, the CLI's 100 ms), report progress, stop on cancel and wait for the render to wind down, report failed items. The runner answers the core's request_with_progress for `export`. The failed items are reported in the CLI's joined `comp: reason` words, and a render started through exec, run or an engine.batch is refused instead (AD19)."
-replaces = "the CLI's flag handling and its queue-and-wait loop, which live in its binary (apps/effectcraft-cli/src/main.rs:886-1034, and the failed-item report :860-870)."
+replaces = "the CLI's flag handling and its queue-and-wait loop, which live in its binary (apps/effectcraft-cli/src/main.rs:886-1034, and the failed-item report :858-871)."
 depends = [
   { item = "the renderQueue.add command and its spec, whose parameters the render request is mapped to", at = [{ file = "crates/engine/src/cmd/render_queue.rs", lines = ["548", "1060-1064"] }] },
   { item = "the renderQueue.setRender command and its spec", at = [{ file = "crates/engine/src/cmd/render_queue.rs", lines = ["595", "1069"] }] },
@@ -99,6 +99,8 @@ depends = [
   { item = "OutputFormat::from_name", at = [{ file = "crates/project/src/render_queue.rs", lines = ["632"] }] },
   { item = "Project::item", at = [{ file = "crates/project/src/item.rs", lines = ["225"] }] },
   { item = "the exporter's cancel contract: a cancelled export removes the files it opened for that output and returns the error `cancelled`", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["103-106", "119"] }] },
+  { item = "the command line's `render`: its flag handling and its queue-and-wait loop, which `RenderRequest` and the runner follow", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["886-1034"] }] },
+  { item = "the failed-item report of `renderQueue.render`, whose joined `comp: reason` words the runner's export report repeats", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["858-871"] }] },
 ]
 
 [[adaptation]]
@@ -115,6 +117,10 @@ depends = [
   { item = "no_comp, the words render_output refuses a missing comp with, as BadArgs, before it renders anything; the raw formats ask render_with for them and the plugin maps them to NotFound", at = [{ file = "crates/automation/src/backend.rs", lines = ["142", "181-186"] }] },
   { item = "the comp.info figures `frameRate`, `width` and `height`, which the CLI and the plugin read through the get_comp tool", at = [{ file = "crates/engine/src/cmd/query.rs", lines = ["80-91"] }, { file = "crates/automation/src/tools.rs", lines = ["284-286"] }] },
   { item = "effectcraft_time::Tick::from_seconds_f64", at = [{ file = "crates/time/src/lib.rs", lines = ["31"] }] },
+  { item = "the command line's `render-frame`: its flags, defaults and resolutions, which `FrameRequest` follows", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["789-821"] }] },
+  { item = "the command line's reading of a comp reference, `reference`, which `render-frame` reads its `--comp` with and `FrameRequest` reads its `comp` as", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["292-298"] }] },
+  { item = "the command line's usage line for `render-frame`, which gives `--time` and `--frame`, and `--max-side` and `--scale`, as alternatives, so `FrameRequest` refuses a request naming both of a pair", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["114"] }] },
+  { item = "the command line's `render` and `bench` handing their `--comp` text to the engine as it came, which `reference` is contrasted with and `export` and `timings` follow", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["906-908", "1072-1074"] }] },
 ]
 
 [[adaptation]]
@@ -127,6 +133,7 @@ replaces = "the CLI's --template handling (apps/effectcraft-cli/src/template.rs)
 depends = [
   { item = "the essential commands", at = [{ file = "crates/engine/src/cmd/essential.rs" }] },
   { item = "the templates commands", at = [{ file = "crates/engine/src/home/templates.rs" }] },
+  { item = "the command line's `--template` handling, whole", at = [{ file = "apps/effectcraft-cli/src/template.rs" }] },
 ]
 
 [[adaptation]]
@@ -135,7 +142,7 @@ crate = "craftbridge-effects"
 file = "src/timings.rs"
 implements = "FX-1d"
 summary = "Render timings per layer and effect, CPU against GPU, in the shape of the CLI's bench: the frame's wall and CPU time over several runs without the layer cache with each layer's and effect's minimum, playback frames without and with the layer cache and its counts, and with an attached accelerator the CPU against the GPU for the comp at full and half size through the Accelerator trait, at the frame the CLI's bench --gpu picks (the CLI's display-path and transfer columns need its own GPU type and are left out); its medians are the CLI's, the upper of two middle values, and its CPU time is the process's, read from the clock the CLI reads. A caller's scale is at most Full, so no call allocates a frame larger than the comp's own."
-replaces = "the CLI's bench (apps/effectcraft-cli/src/main.rs:1265-1350, :1507-1616)."
+replaces = "the CLI's bench (apps/effectcraft-cli/src/main.rs:1264-1347, :1502-1613)."
 depends = [
   { item = "effectcraft_render::Renderer", at = [{ file = "crates/render/src/lib.rs", lines = ["66"] }] },
   { item = "LayerCache", at = [{ file = "crates/render/src/cache.rs", lines = ["39"] }] },
@@ -143,10 +150,11 @@ depends = [
   { item = "effectcraft_render::Accelerator", at = [{ file = "crates/render/src/accel.rs", lines = ["62"] }] },
   { item = "effectcraft_render::Backend", at = [{ file = "crates/render/src/accel.rs", lines = ["12"] }] },
   { item = "AutoPick::WARMUP", at = [{ file = "crates/render/src/auto.rs", lines = ["95"] }] },
-  { item = "the CLI's bench command, whose options choose the project, the comp, the frame, the scale and the number of runs and which hands the run to bench, bench_play or bench_gpu", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1059-1085"] }] },
+  { item = "the CLI's bench command, whose options choose the project, the comp, the frame, the scale and the number of runs and which hands the run to bench, bench_play or bench_gpu", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1059-1086"] }] },
   { item = "the CLI's median, minimum and CPU clock", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1250-1262"] }] },
-  { item = "the CLI's render_timed, bench and bench_play, whose rows and columns the document follows and whose text the conformance runner reads for T21: the runs of the `bench (no cache)` heading, the layer rows (` process `) and effect rows (`fx `), the frames of the two `bench-play` headings and the `layer cache` line", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1265-1350"] }] },
-  { item = "the CLI's bench_gpu, whose rows and columns the document follows and which picks the frame it times", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1507-1616"] }] },
+  { item = "the CLI's render_timed, bench and bench_play, whose rows and columns the document follows and whose text the conformance runner reads for T21: the runs of the `bench (no cache)` heading, the layer rows (` process `) and effect rows (`fx `), the frames of the two `bench-play` headings and the `layer cache` line", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1264-1347"] }] },
+  { item = "the CLI's time_ms, the median of a number of runs after one warm-up run, which bench_gpu takes each of its times with", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1349-1360"] }] },
+  { item = "the CLI's bench_gpu, whose rows and columns the document follows and which picks the frame it times", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1502-1613"] }] },
   { item = "Session::resolve_comp", at = [{ file = "crates/engine/src/session/comps.rs", lines = ["303"] }] },
   { item = "the comp's frame rate and duration, which pick the frames timed", at = [{ file = "crates/project/src/comp.rs", lines = ["84-85"] }] },
 ]
@@ -348,6 +356,10 @@ depends = [
   ] },
   { item = "engine.batch, which answers a failed step as its own failure rather than passing the step's on", at = [{ file = "crates/engine/src/cmd/batch.rs", lines = ["114"] }] },
   { item = "APP_VERSION, which the codegen writes into the generated ENGINE_VERSION that info reports, as the command line reports its own version, the workspace version both share", at = [{ file = "crates/project/src/settings.rs", lines = ["13"] }] },
+  { item = "the command line's info, whose document, an absent active comp kept as null, info answers beside the plugin's identity", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["630-671"] }] },
+  { item = "the command line's commands and `exec --list`, which answer through one listing: the list_commands tool with its filter, enabled-only and schemas arguments, which commands calls the same way", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["672-673", "1036-1055"] }] },
+  { item = "the command line's exec, one command's result, its params `{}` when none are given", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["676-690"] }] },
+  { item = "the command line's run: every step read before the first runs, the steps' `{command, result}` in order, and a failed step named by its command and its index from zero", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["691-745"] }] },
 ]
 
 [[adaptation]]
@@ -415,11 +427,13 @@ depends = [
   { item = "file.saveAs and its refusal `missing `path``", at = [{ file = "crates/engine/src/cmd/file.rs", lines = ["110-113", "794"] }] },
   { item = "the confinement's check of a path, which refuses a relative path and `..` and resolves every link that exists before it compares the path with the roots", at = [{ file = "crates/automation/src/confine.rs", lines = ["190-206", "656-666"] }] },
   { item = "the session's file write, which writes beside the file and renames over it, so a link inside the container to a file not there yet is replaced inside the container, never followed out of it", at = [{ file = "crates/engine/src/services.rs", lines = ["99-101"] }, { file = "crates/engine/src/settings/config.rs", lines = ["196-236"] }] },
-  { item = "the command line's reading of a decimal option", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["287-290"] }] },
+  { item = "the command line's reading of a decimal option", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["287-289"] }] },
   { item = "the command line's reading of a comp or layer reference", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["292-298"] }] },
   { item = "the command line's reading of a JSON-or-text value", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["300-303"] }] },
-  { item = "the command line's props, which passes --depth as that decimal", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["746-750"] }] },
+  { item = "the command line's props, the get_layer arguments it builds, which pass --depth as that decimal, and what it answers with the tool's document", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["746-766"] }] },
   { item = "the command line's backend, which opens --project with file.open and saves with file.save and file.saveAs", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["456-507"] }] },
+  { item = "the command line's get, the get_property arguments it builds from its own", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["767-772"] }] },
+  { item = "the command line's set, the set_property arguments it builds from its own, a value or an expression", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["773-788"] }] },
 ]
 
 [[adaptation]]
