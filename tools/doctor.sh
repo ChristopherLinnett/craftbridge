@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Checks every prerequisite of the CraftBridge build and prints the fix for each gap.
 #
-#   tools/doctor.sh                  everything: the gate's needs, the mobile builds, GitHub access
-#   tools/doctor.sh --gate           only what tools/ci.sh needs (it runs this first)
-#   tools/doctor.sh --install-hooks  also run the gate before every push
+#   tools/doctor.sh         everything: the gate's needs, the mobile builds, GitHub access
+#   tools/doctor.sh --gate  only what tools/ci.sh needs (it runs this first)
 #
 # Exit status 1 when anything required is missing.
 set -euo pipefail
@@ -11,12 +10,10 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 
 mode=full
-install_hooks=0
 for arg in "$@"; do
   case "$arg" in
     --gate) mode=gate ;;
-    --install-hooks) install_hooks=1 ;;
-    *) echo "usage: tools/doctor.sh [--gate] [--install-hooks]" >&2; exit 2 ;;
+    *) echo "usage: tools/doctor.sh [--gate]" >&2; exit 2 ;;
   esac
 done
 
@@ -238,10 +235,6 @@ done
 
 # The gate's other tools.
 if has shellcheck; then ok "shellcheck $(shellcheck --version | sed -n 's/^version: //p')"; else gap "shellcheck" "brew install shellcheck"; fi
-# The pre-push hook's tests start every push through perl, which sets the signals they interrupt it with
-# back to their defaults: no shell can for a signal it was started ignoring, as a background job's
-# SIGINT is, and Rust's std has no call that does.
-if has perl; then ok "perl $(perl -e 'printf "%vd", $^V') (starts the pre-push hook's test pushes)"; else gap "perl (starts the pre-push hook's test pushes)" "brew install perl"; fi
 node_major="$(node --version 2>/dev/null | sed -n 's/^v\([0-9]*\).*/\1/p' || true)"
 if [ -n "$node_major" ] && [ "$node_major" -ge 20 ] && has npx; then ok "Node.js $(node --version) (runs $CRAFTBRIDGE_JSCPD)"; else gap "Node.js 20 or later" "brew install node"; fi
 # The plan stage rebuilds the plan's views with the kit's own builders, on the same Node the line above
@@ -281,17 +274,6 @@ if [ "$mode" = full ]; then
     done
     if grep -qx "write:packages" <<<"$scopes"; then ok "GitHub token for $owner: write:packages"; else note "GitHub token for $owner lacks write:packages, which only publishing the Android libraries needs: $(refresh write:packages)"; fi
   fi
-fi
-
-if [ "$install_hooks" = 1 ]; then
-  # Written to the repository's shared configuration, so every worktree of it gets the setting at once;
-  # the path is relative, so each runs its own tools/hooks/pre-push.
-  git -C "$CRAFTBRIDGE_ROOT" config core.hooksPath tools/hooks
-  ok "git hooks: tools/hooks, for every worktree of this repository (each push is gated on every commit it carries, checked out into a temporary worktree of its own)"
-elif [ "$(git -C "$CRAFTBRIDGE_ROOT" config --get core.hooksPath 2>/dev/null || true)" = "tools/hooks" ]; then
-  ok "git hooks: tools/hooks"
-else
-  note "the gate does not run before pushes here: tools/doctor.sh --install-hooks"
 fi
 
 exit "$missing"

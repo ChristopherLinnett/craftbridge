@@ -105,7 +105,7 @@ mod tests {
         scratch.write("android/sdk/gradlew", "#!/bin/sh\n");
         scratch.write("tools/ci.sh", "\n");
         scratch.write("tools/generated/run.sh", "\n");
-        scratch.write("tools/hooks/pre-push", "#!/usr/bin/env bash\n");
+        scratch.write("tools/launch", "#!/usr/bin/env bash\n");
         scratch.write("conformance/run", "#!/usr/bin/env sh\n");
         scratch.write("rust/Cargo.toml", "\n");
         scratch.write("rust/target/debug/build/x/out/gen.rs", "\n");
@@ -120,7 +120,7 @@ mod tests {
                 "ios/sdk/Sources/CraftBridgeEffects/Generated/LayerCommands.swift",
             ]
         );
-        assert_eq!(listed(&scratch.0, "shell").unwrap(), ["conformance/run", "tools/ci.sh", "tools/generated/run.sh", "tools/hooks/pre-push"]);
+        assert_eq!(listed(&scratch.0, "shell").unwrap(), ["conformance/run", "tools/ci.sh", "tools/generated/run.sh", "tools/launch"]);
         assert_eq!(
             listed(&scratch.0, "duplicates").unwrap(),
             [
@@ -132,7 +132,7 @@ mod tests {
                 "ios/sdk/Sources/CraftBridge/build/Inside.swift",
                 "rust/core/x/src/lib.rs",
                 "tools/ci.sh",
-                "tools/hooks/pre-push",
+                "tools/launch",
             ]
         );
         assert!(listed(&scratch.0, "nope").is_err());

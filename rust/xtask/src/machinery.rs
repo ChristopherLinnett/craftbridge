@@ -84,10 +84,11 @@ const MACHINERY: &[&str] = &[
     // Android libraries the Android stage packages from `jniLibs`.
     "tools/build-xcframework.sh",
     "tools/build-android.sh",
-    "tools/hooks/",
+    ".github/workflows/ci.yml",
     "rust/xtask/",
     "rust/effects/craftbridge-effects-conformance/",
-    // The runner and the pre-push tests stop the processes they start through it.
+    // The runner stops the processes it starts through it, and xtask's tests rerun one of their own in a
+    // changed environment through it.
     "rust/craftbridge-process/",
     LINT_LIBRARY,
     CARGO_CONFIGURATION,

@@ -1,5 +1,5 @@
 //! Host-only process support, shared by every host tool that starts a process and must leave nothing of it
-//! behind: the conformance runner's oracle steps and the pre-push tests' pushes — and by the core's tests,
+//! behind, the conformance runner's oracle steps among them — and by the core's tests,
 //! which reach no host tool even in their tests (AGENTS.md §2) and so take this crate instead.
 //!
 //! A process started in a process group of its own takes everything it starts into that group. Stopping

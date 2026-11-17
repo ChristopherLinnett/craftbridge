@@ -3,8 +3,8 @@
 //! Git exports its repository variables (`GIT_DIR`, `GIT_INDEX_FILE` and the rest of
 //! `git rev-parse --local-env-vars`) to a hook and to everything a hook, `git rebase --exec` or
 //! `git bisect run` starts. A command that then runs `git -C <folder>` acts on the repository those
-//! variables name, with `<folder>` taken as the top of its work tree: in a linked worktree's pre-push hook
-//! a check would read the pushing worktree's index as if `android/` were the root, and a test's
+//! variables name, with `<folder>` taken as the top of its work tree: in a hook of a linked worktree a
+//! check would read that worktree's index as if `android/` were the root, and a test's
 //! `git init` and `git add` in a scratch folder would set `core.bare` in the shared configuration and
 //! stage the scratch files into that index. So every command here starts with those variables removed and
 //! finds its repository from the folder it is given, whoever started the gate.

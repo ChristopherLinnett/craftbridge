@@ -484,9 +484,8 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
 pub(crate) const DYLINT_TARGET: &str = "rust/target";
 
 /// Take the one lock every run that builds in [`DYLINT_TARGET`] takes turns on: a file made in it, so the
-/// lock sits where those runs build. A pre-push gate builds in the hook's own folder instead, one gate at a
-/// time and beside no test, and its lock here costs it nothing. Hold the returned file for the whole run:
-/// bound to `_` it would be let go at once.
+/// lock sits where those runs build. Hold the returned file for the whole run: bound to `_` it would be let
+/// go at once.
 pub(crate) fn hold_dylint_lock(root: &Path) -> Result<std::fs::File, String> {
     let target = root.join(DYLINT_TARGET);
     std::fs::create_dir_all(&target).map_err(|error| format!("could not create {}: {error}", target.display()))?;

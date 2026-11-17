@@ -42,8 +42,7 @@ pub(crate) fn generate_version(out_dir: &Path) -> Result<(), String> {
 
 /// The commit Cargo builds for the pin `rust/Cargo.toml` writes, in full.
 fn pinned_commit(root: &Path) -> Result<String, String> {
-    let manifest = crate::scan::read_text(&root.join("rust/Cargo.toml"))?;
-    let pin = crate::upstream::pins_from_manifest(&manifest).map_err(|errors| errors.join("; "))?;
+    let pin = crate::upstream::manifest_pin(root)?;
     crate::upstream::locked_effectcraft_commit(&crate::scan::read_text(&root.join("rust/Cargo.lock"))?, &pin)
 }
 

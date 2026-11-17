@@ -1,0 +1,190 @@
+# The full gate: tools/ci.sh, every stage of it, on GitHub-hosted runners for every pull request to main and
+# every push to it (AGENTS.md §12). Locally a change runs only the checks for what it touches; a merge waits
+# for nothing here, and a failure on main is fixed on a branch of its own when it fires.
+#
+# One job per runner kind, each running tools/ci.sh: every stage runs even after one fails, and the job ends
+# `ci: failed: <stages>`, naming each failed stage. tools/ci.sh refuses a stage name it does not know before
+# any stage runs, so a misspelt name fails the job. The Linux job runs the stages LINUX_STAGES names; the
+# macOS job runs every other stage, `tools/ci.sh --except $LINUX_STAGES`, so a stage tools/ci.sh gains runs
+# there with no list here to extend:
+# - Linux, the stages that read the same there: rustfmt, cargo-deny over the lockfiles, the plan's views on
+#   Node, the Gradle build on the JVM, and jscpd.
+# - macOS, on the newest arm64 image: the Swift stages and the doctor, which need Xcode and its tools; the
+#   rules, which ask SwiftPM through xcrun; every stage that compiles the workspace, for the host, whose
+#   code compiles differently on macOS (`cfg(target_os = "macos")`), the host the SDK is built and tested
+#   on, and for the phones, iOS among them; and shell, because Homebrew's shellcheck is the release the
+#   doctor's fix installs, while Ubuntu's is an older one whose checks differ.
+# No stage is left out: none needs a device, a simulator or an emulator. A stage a hosted runner cannot run
+# would be added to the macOS job's `--except`, here, with its reason. The device acceptance runs (plan §28)
+# are no stage of the gate and stay with the machine that has the devices.
+#
+# Every tool the repository pins comes from that pin, never a second list here: the Rust toolchains from
+# rust/rust-toolchain.toml and the lint library's, as rustup reads them; the Xcode, cargo-dylint and
+# SwiftLint releases from tools/env.sh; the phone targets and the JDK from `cargo xtask pins`; the plan
+# kit's packages from plan/package-lock.json. cargo-deny, cargo-ndk and shellcheck have no pinned release,
+# and the doctor takes any, so each is the newest, installed by the doctor's own fix. Both images carry the
+# Android platform and build tools the repository pins, which the doctor checks on macOS and the Gradle
+# build needs on Linux; the macOS image also carries the NDK r28 the doctor and rust_mobile take
+# (tools/env.sh). The Gradle build compiles no native code, so the Linux job needs no NDK, and Ubuntu's
+# image holds no r28.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels the run it supersedes. Each push to main is a run of its own, so
+# every commit main takes is checked.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # A hosted build starts from nothing and is never rebuilt in place, so incremental state only fills the
+  # disk; the gate leaves the switch alone because it changes what a build costs, never what a check reads
+  # (tools/refused-switches.tsv).
+  CARGO_INCREMENTAL: "0"
+  LINUX_STAGES: rust_fmt rust_deny plan_views android duplicates
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  gate:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # Both jobs finish, so one run names every failed stage on either runner.
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            runner: macos-26
+          - name: Linux
+            runner: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Downloads only, keyed on the lockfiles that decide them: a build folder of every stage is larger than
+      # the cache a repository has.
+      - name: Cache Cargo's downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust/**/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - name: Cache Gradle's downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches/
+            ~/.gradle/wrapper/
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/sdk/**/*.gradle.kts', 'android/sdk/**/*.versions.toml', 'android/sdk/**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+      # SwiftPM fetches only the published packages ios/sdk/Package.resolved records; while the package takes
+      # none, there is no such file and nothing to cache.
+      - name: Cache SwiftPM's downloads
+        if: runner.os == 'macOS' && hashFiles('ios/sdk/Package.resolved') != ''
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm/
+          key: swiftpm-${{ hashFiles('ios/sdk/Package.resolved') }}
+          restore-keys: swiftpm-
+
+      # The image's default Xcode can move to another release; the build is made with the pinned one.
+      - name: Select the Xcode tools/env.sh pins
+        if: runner.os == 'macOS'
+        run: |
+          source tools/env.sh
+          sudo xcode-select --switch "/Applications/Xcode_$CRAFTBRIDGE_XCODE.app"
+          xcodebuild -version
+
+      # tools/ci.sh refuses to start without both pinned toolchains, the lint library's nightly included,
+      # whichever stages it runs, and installs nothing itself (tools/env.sh).
+      - name: Install the pinned Rust toolchains
+        run: |
+          source tools/env.sh
+          (cd rust && rustup toolchain install)
+          (cd "$CRAFTBRIDGE_LINT_LIBRARY" && rustup toolchain install)
+      - name: Read the pins
+        id: pins
+        run: (cd rust && cargo xtask pins) | tee -a "$GITHUB_OUTPUT"
+      # The lint library's runs check the phone targets with its own nightly, whose pin lists no targets.
+      - name: Add the phone targets to the lint library's toolchain
+        if: runner.os == 'macOS'
+        run: |
+          source tools/env.sh
+          pins="$(cd rust && cargo xtask pins)"
+          craftbridge_load_pins <<<"$pins"
+          # shellcheck disable=SC2086 # one target per word, split on purpose
+          (cd "$CRAFTBRIDGE_LINT_LIBRARY" && rustup target add $CRAFTBRIDGE_RUST_TARGETS)
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: ${{ steps.pins.outputs.jdk }}
+
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny
+      - name: Install the cargo-dylint release tools/env.sh pins
+        if: runner.os == 'macOS'
+        run: |
+          source tools/env.sh
+          cargo install --locked "cargo-dylint@$CRAFTBRIDGE_DYLINT"
+      # The doctor asks for it, and rust_mobile's Android targets take the NDK's compilers through it
+      # (tools/env.sh); the android stage's Gradle build runs no cargo, so the Linux job needs none.
+      - name: Install cargo-ndk
+        if: runner.os == 'macOS'
+        run: cargo install --locked cargo-ndk
+      - name: Install the SwiftLint release tools/env.sh pins
+        if: runner.os == 'macOS'
+        run: |
+          source tools/env.sh
+          bin="$RUNNER_TEMP/swiftlint"
+          mkdir -p "$bin"
+          curl -fsSL "$CRAFTBRIDGE_SWIFTLINT_URL" | tar -xz -C "$bin" swiftlint
+          chmod +x "$bin/swiftlint"
+          echo "$bin" >>"$GITHUB_PATH"
+      - name: Install shellcheck
+        if: runner.os == 'macOS'
+        run: brew install shellcheck
+      - name: Install the plan kit's packages as plan/package-lock.json pins them
+        working-directory: plan
+        run: npm ci
+
+      # The rules and the oracle read the pinned EffectCraft from the machine's upstream cache, which a fresh
+      # runner lacks: the update script, run on the revision the tree already holds, makes the cache, fetches
+      # that revision into it and writes nothing in the tree.
+      - name: Fetch the pinned EffectCraft into the upstream cache
+        if: runner.os == 'macOS'
+        run: |
+          rev="$(cd rust && cargo xtask upstream pin)"
+          tools/update-upstream.sh "$rev"
+
+      # xtask starts cargo itself, by the path it was built with, so no RUSTUP_TOOLCHAIN reaches that cargo,
+      # and cargo runs each dependency's compiler in the dependency's own folder, where rustup picks the
+      # toolchain from whatever pin the dependency ships (dashmap asks for 1.85, which the runner lacks) or
+      # else the image's default, the pin only while the two happen to match. So the gate runs with the one
+      # RUSTUP_TOOLCHAIN it lets through, rust/'s pin as rustup resolves it, which tools/env.sh strips from
+      # every command run in another folder, the lint library's; a toolchain rustup cannot resolve is left
+      # for the gate to name.
+      - name: The gate, tools/ci.sh
+        run: |
+          pinned="$(source tools/env.sh && craftbridge_toolchain_status_in "$CRAFTBRIDGE_ROOT/rust")"
+          if [ "${pinned%% *}" = ok ]; then export RUSTUP_TOOLCHAIN="${pinned#ok }"; fi
+          # shellcheck disable=SC2086 # one stage per word, split on purpose
+          if [ "$RUNNER_OS" = Linux ]; then
+            tools/ci.sh $LINUX_STAGES
+          else
+            tools/ci.sh --except $LINUX_STAGES
+          fi

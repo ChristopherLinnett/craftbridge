@@ -14,6 +14,50 @@ craftbridge_require() {
   fi
 }
 
+# A script's own folder for the run, `craftbridge_remove_on_exit <folder> [<cleanup>]`, removed on every way
+# out of it, and the script's verdict kept. Bash 3.2, the bash macOS ships, ends a script that meets an unset
+# variable under `set -u` with the status of its EXIT trap, which a plain removal leaves 0, so the script
+# would pass having stopped half-way, the gate's whole run among them. So an end with 0 is a pass only once
+# the script has said so, `craftbridge_passed=1` before it ends; every other end keeps its own status: an
+# `exit` with one, a failure `set -e` stops on, a signal. A script that leaves more behind than its folder
+# names its own cleanup, a function of the script, which runs first, while the folder is still there. It runs
+# in a subshell under `set -e`, as a command of its own: inside the test of an `if`, a `!` or a `&&`, `set -e`
+# stops nothing, and a failure would count only if it were the cleanup's last command; and inside the trap,
+# bash 3.2 ends a subshell that meets an unset variable with 0 unless `set -e` is on in it. So an unset
+# variable or any failing command ends only the cleanup, and the folder still goes. A cleanup that fails, or a
+# folder that will not go, fails the run, since it left something behind. The trap is the script's one EXIT
+# trap, for one folder, so a second call, which would take the first folder's place and leave it behind, is
+# refused, as is a cleanup that names no function, which would never run; either refusal still removes the
+# folder it was handed.
+craftbridge_remove_on_exit() {
+  if [ -n "${craftbridge_run_folder:-}" ]; then
+    rm -rf "$1"
+    echo "$(basename "$0" .sh): craftbridge_remove_on_exit is called once a run, and $craftbridge_run_folder is this run's folder: make $1 inside it" >&2
+    exit 1
+  fi
+  craftbridge_run_folder="$1"
+  craftbridge_run_cleanup=""
+  craftbridge_passed=""
+  craftbridge_status=1
+  craftbridge_left=0
+  trap 'craftbridge_status=$?
+    set +e
+    if [ -n "$craftbridge_run_cleanup" ]; then
+      (set -e; "$craftbridge_run_cleanup")
+      craftbridge_left=$?
+    fi
+    rm -rf "$craftbridge_run_folder" || craftbridge_left=1
+    if [ "$craftbridge_status" = 0 ] && { [ "$craftbridge_left" != 0 ] || [ "${craftbridge_passed:-}" != 1 ]; }; then craftbridge_status=1; fi
+    exit "$craftbridge_status"' EXIT
+  if [ -n "${2:-}" ]; then
+    if ! declare -F "$2" >/dev/null; then
+      echo "$(basename "$0" .sh): craftbridge_remove_on_exit names the cleanup $2, which is no function" >&2
+      exit 1
+    fi
+    craftbridge_run_cleanup="$2"
+  fi
+}
+
 # The pins come from `cargo xtask pins` (rust/xtask/src/pins.rs), which parses rust/rust-toolchain.toml
 # and the version catalog with the `toml` crate, the parser rustup itself reads the toolchain file with.
 # No script picks a pin out of either file by text: a text reader knows one spelling of each value, while
@@ -189,13 +233,7 @@ export CRAFTBRIDGE_DYLINT="6.4.0"
 # folder between worktrees, whose gates would then reuse each other's artifacts. A machine-wide
 # CARGO_BUILD_TARGET would send the host build of xtask to a <triple>/ folder, where the gate, which
 # starts the binary from debug/, would not find it.
-# The pre-push hook gates each pushed commit in a temporary worktree of its own, and with
-# CRAFTBRIDGE_PUSH_TARGET names the one build folder all its gates share, kept warm from push to push.
-# That sharing is safe where a machine-wide folder is not: the hook runs one gate at a time and checks each
-# commit out only once the gate before it has finished, so every file a gate builds is newer than every
-# artifact in the folder, and Cargo, which judges a workspace crate by file times, rebuilds it rather than
-# take another tree's artifacts for it. With no hook naming a folder, each tree keeps its own rust/target.
-export CARGO_TARGET_DIR="${CRAFTBRIDGE_PUSH_TARGET:-$CRAFTBRIDGE_ROOT/rust/target}"
+export CARGO_TARGET_DIR="$CRAFTBRIDGE_ROOT/rust/target"
 unset CARGO_BUILD_TARGET
 
 # Every cargo command the scripts run, and never while the repository root holds a Cargo configuration.

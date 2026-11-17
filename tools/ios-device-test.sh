@@ -108,12 +108,7 @@ uninstall() {
     installed=""
   fi
 }
-# shellcheck disable=SC2329 # run by the EXIT trap below
-cleanup() {
-  uninstall
-  rm -rf "$work"
-}
-trap cleanup EXIT
+craftbridge_remove_on_exit "$work" uninstall
 trap 'exit 1' INT TERM
 
 # The team the profile belongs to: the profile is a signed plist, which the system's own tools read.
@@ -336,4 +331,5 @@ for package in "${packages[@]}"; do
   done <<<"$binaries"
 done
 [ "$total_tests" -gt 0 ] || die "no test ran on the phone"
+craftbridge_passed=1
 exit "$status"
