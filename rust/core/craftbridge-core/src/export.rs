@@ -77,8 +77,8 @@ pub(crate) struct EngineSide<'a> {
 
 /// Run one export on the engine thread (plan §16 behaviour 3, plan §19's sequence): take the
 /// `info` answer the calls during it will be given, run the app's own loop behind the never-crash
-/// guard with the engine's beat as its progress closure and the journal's list as its lister, clear
-/// what it listed, and answer the caller.
+/// guard with the engine's beat as its progress closure and the journal's list as its lister, delete
+/// what it listed when it is answered `Cancelled`, clear it, and answer the caller.
 pub(crate) fn run_export(app: &mut dyn CraftApp, call: ExportCall, side: EngineSide<'_>) {
     let ExportCall { method, params, cancel, mut progress, answer } = call;
     // A stop is asked by the caller's token, or by a close, which stops every export (plan §16
@@ -123,10 +123,15 @@ pub(crate) fn run_export(app: &mut dyn CraftApp, call: ExportCall, side: EngineS
     });
 }
 
-/// Clear the export's entries now it has ended, whatever its outcome. A success whose entries cannot
-/// be cleared is answered as the failure to clear: the entries would make the next start delete the
+/// Settle the export's entries now it has ended, whatever its outcome. A `Cancelled` answer first
+/// deletes what the call listed, so the caller that was told no file was made finds none; a file the
+/// disk will not let go of is answered in its place, naming it. A success whose entries cannot be
+/// cleared is answered as the failure to clear: the entries would make the next start delete the
 /// finished files, and the app must hear that rather than a success.
 fn cleared(outcome: Result<Value>, listed: Pending) -> Result<Value> {
+    if matches!(outcome, Err(CraftError::Cancelled)) {
+        return listed.remove().and(outcome);
+    }
     match (listed.clear(), outcome) {
         (Err(failure), Ok(_)) => Err(failure),
         (_, outcome) => outcome,

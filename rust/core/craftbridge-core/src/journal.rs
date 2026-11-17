@@ -5,8 +5,10 @@
 //! the system kills mid-export leaves the partial output behind. So while an export runs, the app
 //! lists in `pending-exports.json`, in the config folder, every file it is about to write, before it
 //! writes the first (`CraftApp::request_with_progress`), and the engine clears them when the export
-//! ends, whatever its outcome. At the next start each file the journal still lists is dealt with as
-//! the clean cancel the kill prevented would have dealt with it, and the journal is cleared.
+//! ends, whatever its outcome; an export it answers `Cancelled` has its files deleted first, by the
+//! rules below, since the caller was told none was made. At the next start each file the journal
+//! still lists is dealt with as the clean cancel the kill prevented would have dealt with it, and the
+//! journal is cleared.
 //!
 //! A writer makes the folders a file's path needs, so the journal also keeps, apart from the files,
 //! each folder of a listed file's path that was not there when the file was listed. The next start
@@ -23,7 +25,10 @@
 //!   the file that was at its path when it was listed, if one was. A start deletes a listed file only
 //!   when it is not that file, so a finished file the export was about to replace but never reached
 //!   (a later item of a queue, the rest of an older sequence, a kill between listing and writing)
-//!   stays as it was, as a clean cancel leaves it.
+//!   stays as it was, as a clean cancel leaves it. A file that could not be deleted stays listed for
+//!   the next start, until an export lists its path again and takes its entry over, keeping what
+//!   was there before: a finished file that export writes there is never deleted for the older entry,
+//!   and one that fails leaves whatever is there, as a failed export leaves its own files.
 //! * **Only regular files, and empty folders an export made, inside the container are touched.**
 //!   Entries are stored relative to the container, because the absolute path of an iOS app's
 //!   container can change between one launch and the next (an update moves it). A start joins each
@@ -132,8 +137,9 @@ static KNOWN: Mutex<BTreeMap<PathBuf, Known>> = Mutex::new(BTreeMap::new());
 /// What one journal holds, as this process wrote it while holding it.
 #[derive(Debug, Default)]
 struct Known {
-    /// Entries no export runs for now (files a start could not delete, and what a killed run left),
-    /// kept for a start to deal with.
+    /// Entries no export runs for now (files a start or a cancelled export could not delete, and what
+    /// a killed run left), kept for a start to deal with, or for an export that lists the same file
+    /// to take over.
     held: Vec<Entry>,
     /// The entries of the exports running in this process now.
     running: Vec<Entry>,
@@ -164,7 +170,7 @@ pub struct Recovery {
     /// the journal, since no later start would act on them.
     pub refused: Vec<(PathBuf, String)>,
     /// Listed files and folders that could not be deleted, with why. They stay listed, so the next
-    /// start tries again.
+    /// start tries again, unless an export lists one of those files first and takes its entry over.
     pub failed: Vec<(PathBuf, String)>,
     /// What the start found about the journal files themselves: one it could not read, set aside or
     /// clear, each journal an earlier start set aside that is still unread, and each it read now,
@@ -180,7 +186,8 @@ pub(crate) struct Journal {
     root: PathBuf,
 }
 
-/// The entries one export has listed, cleared with [`Pending::clear`] when the export ends.
+/// The entries one export has listed, cleared with [`Pending::clear`] when the export ends, or with
+/// [`Pending::remove`], which first deletes what they name, when it is cancelled.
 #[derive(Debug)]
 pub(crate) struct Pending {
     journal: Journal,
@@ -328,52 +335,7 @@ impl Journal {
                 }
             }
         }
-        // The files first, in the order they were listed, then the folders their writers made, the
-        // deepest first, so each folder is looked at once what the export put in it has gone.
-        let (files, mut folders): (Vec<Entry>, Vec<Entry>) = stale.into_iter().partition(|entry| matches!(entry.kind, Kind::File(_)));
-        folders.sort_by(|a, b| depth(&b.path).cmp(&depth(&a.path)).then_with(|| b.path.cmp(&a.path)));
-        folders.dedup();
-        let mut held = Vec::new();
-        for entry in files.into_iter().chain(folders) {
-            // A file another engine of this process is writing now belongs to that export, not to a
-            // killed one, whatever an older entry says, and so does a folder that holds one.
-            let below = Path::new(&entry.path);
-            let ours = |listed: &Entry| match entry.kind {
-                Kind::File(_) => listed.path == entry.path,
-                Kind::Folder => Path::new(&listed.path).starts_with(below),
-            };
-            if running.iter().any(ours) {
-                continue;
-            }
-            // A folder that holds a file this start could not delete stays listed with it, for the
-            // start that deletes the file.
-            if entry.kind == Kind::Folder && held.iter().any(ours) {
-                held.push(entry);
-                continue;
-            }
-            let target = match entry_in(&self.root, below) {
-                Ok(target) => target,
-                Err(refusal) => {
-                    recovery.refused.push((PathBuf::from(entry.path), refusal.to_string()));
-                    continue;
-                }
-            };
-            let settled = match entry.kind {
-                Kind::File(found) => settle(&target, found),
-                Kind::Folder => settle_folder(&target),
-            };
-            match settled {
-                Ok(Settled::Absent) => {}
-                Ok(Settled::Untouched) => recovery.untouched.push(target),
-                Ok(Settled::Removed) => recovery.removed.push(target),
-                Err(Refusal::NotAFile(what)) => recovery.refused.push((target, format!("it is {what}, not a file an export writes"))),
-                Err(Refusal::NotAFolder(what)) => recovery.refused.push((target, format!("it is {what}, not a folder a writer makes"))),
-                Err(Refusal::Disk(reason)) => {
-                    recovery.failed.push((target, reason));
-                    held.push(entry);
-                }
-            }
-        }
+        let held = self.deal_with_all(stale, &running, &mut recovery);
         let state = Known { held, running, lock };
         match self.write(&state.entries()) {
             // The set-aside journals stay for a start that can write the journal, since what they
@@ -405,6 +367,52 @@ impl Journal {
             known.insert(self.file.clone(), state);
         }
         recovery
+    }
+
+    /// Deal with every entry of `stale` as a start does, into `recovery`, and answer those the disk
+    /// would not let it delete, which stay listed for the next start. The files go first, in the order
+    /// they were listed, then the folders their writers made, the deepest first, so each folder is
+    /// looked at once what the export put in it has gone. An entry that a running export of this
+    /// process (`running`) lists belongs to that export, whatever an older entry says, so it is left.
+    fn deal_with_all(&self, stale: Vec<Entry>, running: &[Entry], recovery: &mut Recovery) -> Vec<Entry> {
+        let (files, mut folders): (Vec<Entry>, Vec<Entry>) = stale.into_iter().partition(|entry| matches!(entry.kind, Kind::File(_)));
+        folders.sort_by(|a, b| depth(&b.path).cmp(&depth(&a.path)).then_with(|| b.path.cmp(&a.path)));
+        folders.dedup();
+        let mut held = Vec::new();
+        for entry in files.into_iter().chain(folders) {
+            if running.iter().any(|listed| entry.claims(listed)) {
+                continue;
+            }
+            // A folder that holds a file this start could not delete stays listed with it, for the
+            // start that deletes the file.
+            if entry.kind == Kind::Folder && held.iter().any(|listed| entry.claims(listed)) {
+                held.push(entry);
+                continue;
+            }
+            let target = match entry_in(&self.root, Path::new(&entry.path)) {
+                Ok(target) => target,
+                Err(refusal) => {
+                    recovery.refused.push((PathBuf::from(entry.path), refusal.to_string()));
+                    continue;
+                }
+            };
+            let settled = match entry.kind {
+                Kind::File(found) => settle(&target, found),
+                Kind::Folder => settle_folder(&target),
+            };
+            match settled {
+                Ok(Settled::Absent) => {}
+                Ok(Settled::Untouched) => recovery.untouched.push(target),
+                Ok(Settled::Removed) => recovery.removed.push(target),
+                Err(Refusal::NotAFile(what)) => recovery.refused.push((target, format!("it is {what}, not a file an export writes"))),
+                Err(Refusal::NotAFolder(what)) => recovery.refused.push((target, format!("it is {what}, not a folder a writer makes"))),
+                Err(Refusal::Disk(reason)) => {
+                    recovery.failed.push((target, reason));
+                    held.push(entry);
+                }
+            }
+        }
+        held
     }
 
     /// What the journal holds, read by a process that has just taken it, when no export of any process
@@ -638,10 +646,12 @@ impl Pending {
         }
         let mut known = lock(&KNOWN);
         let state = self.journal.hold(&mut known)?;
-        let mut listed = state.entries();
+        let held = taken_over(&state.held, &mut entries);
+        let mut listed: Vec<Entry> = held.iter().chain(&state.running).cloned().collect();
         listed.extend(entries.iter().cloned());
         let written = self.journal.write(&listed);
         if written.is_ok() {
+            state.held = held;
             state.running.extend(entries.iter().cloned());
         }
         // A process with no export running holds no lock.
@@ -661,6 +671,21 @@ impl Pending {
     /// wrote, finished or not, so the error says that and the caller must pass it on rather than
     /// answer success.
     pub(crate) fn clear(self) -> Result<()> {
+        self.end(false)
+    }
+
+    /// End an export that was cancelled: delete what it wrote by the rules a start deletes by (a file
+    /// it wrote, a folder it made that holds nothing now; a file still as it was when it was listed,
+    /// and a folder that holds anything else, stay), then clear its entries. A file the disk will not
+    /// let go of stays listed for the next start, and the error names it, since the caller must not
+    /// hear a plain cancel while a file of the export is still there. A folder the disk will not
+    /// remove, which then holds nothing of the export, stays listed for the next start too, and like
+    /// entries that cannot be cleared once every file has gone, it is no error.
+    pub(crate) fn remove(self) -> Result<()> {
+        self.end(true)
+    }
+
+    fn end(self, remove: bool) -> Result<()> {
         let Self { journal, listed, .. } = self;
         if listed.is_empty() {
             return Ok(());
@@ -682,17 +707,52 @@ impl Pending {
         for entry in &listed {
             take_one(&mut state.running, entry);
         }
+        let mut removal = Recovery::default();
+        // Whether the disk would not let go of a file the cancelled export wrote.
+        let mut file_kept = false;
+        if remove {
+            let held = journal.deal_with_all(listed.clone(), &state.running, &mut removal);
+            file_kept = held.iter().any(|entry| matches!(entry.kind, Kind::File(_)));
+            state.held.extend(held);
+        }
         let written = journal.write(&state.entries());
         // The process's last export with the journal has ended: the lock goes, and another process may
         // take the journal.
         if state.running.is_empty() {
             known.remove(&journal.file);
         }
-        written.map_err(|error| uncleared(error.to_string()))
+        // The files are dealt with before the folders, so a file the disk kept is the first failure. A
+        // folder the disk would not remove holds nothing of the export by then, since one that holds
+        // a file the disk kept is held with it unremoved, so it stays listed for the next start and
+        // is no reason on its own to answer anything but the cancel.
+        match removal.failed.first().filter(|_| file_kept) {
+            Some((path, why)) => Err(CraftError::io(format!(
+                "the export was cancelled but {} could not be removed ({why}){}, so they stay listed in the pending-export journal and the next start tries again",
+                path.display(),
+                match removal.failed.len().saturating_sub(1) {
+                    0 => String::new(),
+                    more => format!(", nor {more} more"),
+                }
+            ))),
+            // Every file the cancelled export wrote is gone, so nothing of it is left for the caller to
+            // copy, and the plain cancel is the answer: an entry the journal could not clear names a
+            // path that is empty now, which a later export that lists it takes over.
+            None if remove => Ok(()),
+            None => written.map_err(|error| uncleared(error.to_string())),
+        }
     }
 }
 
 impl Entry {
+    /// Whether `listed` is this entry's, or lies under it: a file is claimed by the entry of its own
+    /// path, and a folder by every entry below it.
+    fn claims(&self, listed: &Entry) -> bool {
+        match self.kind {
+            Kind::File(_) => listed.path == self.path,
+            Kind::Folder => Path::new(&listed.path).starts_with(&self.path),
+        }
+    }
+
     /// The file entry a journal's JSON holds, or none for one that is not an entry.
     fn file_from(value: &Value) -> Option<Self> {
         let path = value.get(PATH)?.as_str()?.to_string();
@@ -808,6 +868,25 @@ fn bounded(reader: impl Read) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     reader.take(MAX_JOURNAL_BYTES.saturating_add(1)).read_to_end(&mut bytes)?;
     Ok(bytes)
+}
+
+/// Hand `listing` the held entries of the files it lists again, and answer the entries still held. A
+/// file a start or a cancelled export could not delete stays listed for the next start, which deletes
+/// whatever is at its path then unless it is still the file that was there before that export; an
+/// export that lists the path again would otherwise have the finished file it writes there deleted.
+/// So the new entry takes the held one's place, with the file that was there before the export that
+/// left it: what is at the path is deleted only if this export is killed or cancelled, and the file
+/// it finishes is kept.
+fn taken_over(held: &[Entry], listing: &mut [Entry]) -> Vec<Entry> {
+    let same_file = |a: &Entry, b: &Entry| matches!((a.kind, b.kind), (Kind::File(_), Kind::File(_))) && a.path == b.path;
+    for listed in listing.iter_mut() {
+        // The first held entry of the path is the oldest, the nearest to what was there before any
+        // export wrote it.
+        if let Some(older) = held.iter().find(|entry| same_file(entry, listed)) {
+            listed.kind = older.kind;
+        }
+    }
+    held.iter().filter(|entry| !listing.iter().any(|listed| same_file(listed, entry))).cloned().collect()
 }
 
 /// Remove one entry equal to `entry` from `entries`: two exports may list the same file, and each
@@ -1131,6 +1210,326 @@ mod tests {
         at_listed.open();
         assert_eq!(export.join().unwrap(), Err(CraftError::Cancelled));
         assert!(!sand.file().exists(), "a stopped export left its entry");
+        Ok(())
+    }
+
+    /// Where an export that listed `exports/card.mp4` (its folder not there yet) is when it learns it is
+    /// stopped. The script's own steps fix the order, so no test depends on how long anything took.
+    #[derive(Clone, Copy, Debug)]
+    enum Reached {
+        /// Before it wrote anything.
+        BeforeTheFirstFrame,
+        /// With a partial file written.
+        HalfWay,
+        /// With the whole file written and every frame done, so the stop lands once the job has
+        /// finished but before the call ends, and the app answers success.
+        AfterTheLastFrame,
+        /// With the whole file written, the app stops of its own accord and answers `Cancelled`,
+        /// though nothing asked it to stop: the engine answers that, so it deletes as it does for a
+        /// stop it asked for.
+        ByItself,
+        /// Never stopped.
+        NotStopped,
+    }
+
+    /// The export of `exports/card.mp4`, which the writer makes the folder for, stopped at `reached`.
+    /// An app that left its file where it stopped is the case the engine must clean up after: the
+    /// real exporter removes its file at a stop only if it sees the stop before it finishes.
+    fn stopped_at(reached: Reached, container: PathBuf, cancel: CancelToken) -> Script {
+        Box::new(move |on_progress, list_outputs| {
+            let (folder, file) = (container.join("exports"), container.join("exports/card.mp4"));
+            list_outputs(std::slice::from_ref(&file))?;
+            fs::create_dir_all(&folder).unwrap();
+            if matches!(reached, Reached::HalfWay | Reached::AfterTheLastFrame | Reached::ByItself | Reached::NotStopped) {
+                fs::write(&file, b"half a movie").unwrap();
+            }
+            if matches!(reached, Reached::AfterTheLastFrame | Reached::ByItself | Reached::NotStopped) {
+                assert!(on_progress(1, 2, None), "nothing has stopped it yet");
+                fs::write(&file, b"the whole movie").unwrap();
+            }
+            if !matches!(reached, Reached::ByItself | Reached::NotStopped) {
+                cancel.cancel();
+            }
+            let go_on = on_progress(2, 2, None);
+            match (reached, go_on) {
+                (Reached::ByItself | Reached::NotStopped, true) | (_, false) => (),
+                (reached, go_on) => panic!("a stop at {reached:?} was answered {go_on}"),
+            }
+            match reached {
+                Reached::AfterTheLastFrame | Reached::NotStopped => Ok(json!({"rendered": 1})),
+                Reached::ByItself => Err(CraftError::Cancelled),
+                _ => Err(CraftError::command_failed("export", "stopped by its caller", None)),
+            }
+        })
+    }
+
+    /// An export answered `Cancelled` has removed every file it listed and the folder it made, whether
+    /// it was stopped before its first frame, half way or after its last, or stopped itself, and what
+    /// is not its own is left; one that finishes answers success with its file whole.
+    #[test]
+    fn an_export_answered_cancelled_leaves_none_of_its_listed_files_and_one_that_finishes_keeps_them() -> Test {
+        // Every case is run and the faults listed together, so a fault in one never hides another.
+        let mut faults = Vec::new();
+        for reached in [Reached::BeforeTheFirstFrame, Reached::HalfWay, Reached::AfterTheLastFrame, Reached::ByItself, Reached::NotStopped] {
+            let sand = Sandbox::new()?;
+            let earlier = sand.put("earlier.mp4", b"a finished movie");
+            let cancel = CancelToken::new();
+            let engine = sand.start_running(stopped_at(reached, sand.folders.container.clone(), cancel.clone()))?;
+            let answered = engine.request_with_progress("export", Value::Null, |_, _, _| {}, &cancel);
+            let (folder, file) = (sand.folders.container.join("exports"), sand.folders.container.join("exports/card.mp4"));
+            let mut fault = |what: &str| faults.push(format!("{reached:?}: {what}"));
+            match reached {
+                Reached::NotStopped => {
+                    if answered != Ok(json!({"rendered": 1})) {
+                        fault(&format!("answered {answered:?}"));
+                    }
+                    if fs::read(&file).ok().as_deref() != Some(b"the whole movie".as_slice()) {
+                        fault("a finished export lost its file");
+                    }
+                }
+                _ => {
+                    if answered != Err(CraftError::Cancelled) {
+                        fault(&format!("answered {answered:?}"));
+                    }
+                    if file.exists() || folder.exists() {
+                        fault("left its file or its folder");
+                    }
+                }
+            }
+            if fs::read(&earlier).ok().as_deref() != Some(b"a finished movie".as_slice()) {
+                fault("a file that is not the export's was touched");
+            }
+            if sand.file().exists() {
+                fault("its entries outlived the export");
+            }
+        }
+        assert!(faults.is_empty(), "{faults:#?}");
+        Ok(())
+    }
+
+    /// The deletion is the journal's own: a listed file that was there as it is now, and a folder that
+    /// holds a file the export did not write, are left, as a restart leaves them.
+    #[test]
+    fn a_cancelled_export_deletes_by_the_journals_rules() -> Test {
+        let sand = Sandbox::new()?;
+        let kept = sand.put("old/card_00000.png", b"an earlier frame");
+        let (written, foreign) = (sand.folders.container.join("old/card_00001.png"), sand.folders.container.join("made/notes.txt"));
+        let made = sand.folders.container.join("made/deep/card_00002.png");
+        let outputs = [kept.clone(), written.clone(), made.clone()];
+        let cancel = CancelToken::new();
+        let stop = cancel.clone();
+        let script: Script = Box::new(move |on_progress, list_outputs| {
+            list_outputs(&outputs)?;
+            fs::write(&outputs[1], b"a frame").unwrap();
+            fs::create_dir_all(outputs[2].parent().unwrap()).unwrap();
+            fs::write(&outputs[2], b"a frame").unwrap();
+            fs::write(outputs[2].parent().unwrap().parent().unwrap().join("notes.txt"), b"not the export's").unwrap();
+            stop.cancel();
+            assert!(!on_progress(1, 3, None));
+            Ok(Value::Null)
+        });
+        let engine = sand.start_running(script)?;
+        assert_eq!(engine.request_with_progress("export", Value::Null, |_, _, _| {}, &cancel), Err(CraftError::Cancelled));
+        assert_eq!(fs::read(&kept)?, b"an earlier frame", "a file that was there as it is now stays");
+        assert!(!written.exists() && !made.exists(), "what the export wrote goes");
+        assert!(foreign.is_file(), "a folder that holds what the export did not write stays with it");
+        assert!(!sand.folders.container.join("made/deep").exists(), "the empty folder the export made goes");
+        assert!(!sand.file().exists());
+        Ok(())
+    }
+
+    /// Run, on an engine started in `sand`, an export of `files` that writes each whole in the folders
+    /// it makes, after which `locked` takes no more changes, and that is cancelled then: an export
+    /// cancelled while the disk refuses the engine what it does at the end. Answers the engine and
+    /// what the export answered.
+    #[cfg(unix)]
+    fn cancelled_while_refused(sand: &Sandbox, files: &[PathBuf], locked: &Path) -> std::result::Result<(Engine, Result<Value>), CraftError> {
+        use std::os::unix::fs::PermissionsExt;
+        let cancel = CancelToken::new();
+        let (stop, listed, locked) = (cancel.clone(), files.to_vec(), locked.to_path_buf());
+        let engine = sand.start_running(Box::new(move |on_progress, list_outputs| {
+            list_outputs(&listed)?;
+            for file in &listed {
+                fs::create_dir_all(file.parent().unwrap()).unwrap();
+                fs::write(file, b"a whole movie").unwrap();
+            }
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o500)).unwrap();
+            stop.cancel();
+            assert!(!on_progress(1, 1, None));
+            Ok(Value::Null)
+        }))?;
+        let answered = engine.request_with_progress("export", Value::Null, |_, _, _| {}, &cancel);
+        Ok((engine, answered))
+    }
+
+    /// What the disk refuses a cancelled export at its end.
+    #[cfg(unix)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Refused {
+        /// Its files: their folder takes no changes, so they stay.
+        Files,
+        /// The folder it made: the folder above takes no changes, so the files go and the folder stays.
+        Folder,
+        /// The clear: the journal's folder takes no changes.
+        Journal,
+    }
+
+    /// A cancelled export the disk refuses something at its end. A file it will not let go of is not
+    /// answered as a plain cancel: the error names it, and it stays listed, so the next start removes
+    /// it. A folder it made that will not go once its files have gone holds nothing of the export, so
+    /// the plain cancel is answered, and it stays listed for the next start to remove. Entries the
+    /// journal will not clear once every file has gone leave the plain cancel too, since nothing of
+    /// the export is left to copy: they name a path that is empty now, and a later export that lists
+    /// it takes the entry over, so the file that export finishes there survives the next start.
+    #[cfg(unix)]
+    #[test]
+    fn a_cancelled_export_the_disk_refuses_at_its_end_says_so_only_while_a_file_of_it_is_left() -> Test {
+        use std::os::unix::fs::PermissionsExt;
+        for refused in [Refused::Files, Refused::Folder, Refused::Journal] {
+            let sand = Sandbox::new()?;
+            if !permissions_hold(&sand)? {
+                return Ok(());
+            }
+            let (folder, file, sound) =
+                (sand.folders.container.join("exports"), sand.folders.container.join("exports/card.mp4"), sand.folders.container.join("exports/card.wav"));
+            let locked = match refused {
+                Refused::Files => folder.clone(),
+                Refused::Folder => sand.folders.container.clone(),
+                Refused::Journal => sand.folders.config.clone(),
+            };
+            let (engine, answered) = cancelled_while_refused(&sand, &[file.clone(), sound.clone()], &locked)?;
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o700))?;
+            let still = if refused == Refused::Folder { r#"{"path":"exports"}"# } else { "card.mp4" };
+            assert!(fs::read_to_string(sand.file())?.contains(still), "{refused:?}: what the disk kept is no longer listed");
+            match refused {
+                Refused::Files => {
+                    let why = io::Error::from_raw_os_error(13);
+                    let named = format!(
+                        "the export was cancelled but {} could not be removed ({why}), nor 1 more, so they stay listed in the pending-export journal and the next start tries again",
+                        sand.real("exports/card.mp4").display()
+                    );
+                    assert_eq!(answered, Err(CraftError::io(named)));
+                    assert!(file.exists() && sound.exists(), "a file the disk would not let go of is gone");
+                }
+                Refused::Folder => {
+                    assert_eq!(answered, Err(CraftError::Cancelled), "a folder that holds nothing of the export was answered");
+                    assert!(!file.exists() && !sound.exists() && folder.is_dir(), "the files went, or the folder the disk kept");
+                }
+                Refused::Journal => {
+                    assert_eq!(answered, Err(CraftError::Cancelled));
+                    assert!(!file.exists() && !sound.exists() && !folder.exists(), "the cancelled export left a file or its folder");
+                    let mut later = sand.journal().pending();
+                    later.list(std::slice::from_ref(&file))?;
+                    sand.put("exports/card.mp4", b"the finished movie");
+                    later.clear()?;
+                }
+            }
+            engine.close()?;
+            sand.journal().process_ended();
+            let restarted = sand.start()?;
+            if refused == Refused::Journal {
+                assert_eq!(fs::read(&file)?, b"the finished movie", "the next start deleted a finished file: {:?}", restarted.recovery());
+            } else {
+                assert!(!file.exists() && !sound.exists() && !folder.exists(), "{refused:?}: {:?}", restarted.recovery());
+            }
+        }
+        Ok(())
+    }
+
+    /// What left the entry of a path that a later export lists again.
+    #[cfg(unix)]
+    #[derive(Clone, Copy, Debug)]
+    enum LeftBy {
+        /// A start that could not delete the partial file a killed run wrote.
+        Start,
+        /// A cancelled export that could not delete its partial file.
+        Cancel,
+        /// A run killed before it wrote over the finished file at the path, whose entry no start has
+        /// dealt with yet, since the start found another process holding the journal.
+        KilledRunThatNeverWrote,
+    }
+
+    /// How the export that lists the path again ends.
+    #[cfg(unix)]
+    #[derive(Clone, Copy, Debug)]
+    enum Then {
+        /// It writes the file whole and finishes.
+        Finishes,
+        /// It is cancelled before it writes.
+        IsCancelled,
+        /// It is killed before it writes.
+        IsKilled,
+    }
+
+    /// An entry a start or a cancel could not deal with stays listed, and an export that lists its path
+    /// again takes the entry over with what was there before the run that left it. The file that
+    /// export finishes there survives the next start. One stopped before it writes, by a cancel or a
+    /// kill, has the partial file the earlier run left deleted, and a finished file that was there
+    /// before that run kept, as the earlier entry would have had them.
+    #[cfg(unix)]
+    #[test]
+    fn an_export_that_lists_a_path_still_listed_takes_its_entry_over() -> Test {
+        use std::os::unix::fs::PermissionsExt;
+        // Every case is run and the faults listed together, so a fault in one never hides another.
+        let mut faults = Vec::new();
+        for left in [LeftBy::Start, LeftBy::Cancel, LeftBy::KilledRunThatNeverWrote] {
+            for then in [Then::Finishes, Then::IsCancelled, Then::IsKilled] {
+                let sand = Sandbox::new()?;
+                if !permissions_hold(&sand)? {
+                    return Ok(());
+                }
+                let (locked, path) = (sand.folders.container.join("locked"), sand.folders.container.join("locked/card.mp4"));
+                let lock_up = |mode| fs::set_permissions(&locked, fs::Permissions::from_mode(mode));
+                let engine = match left {
+                    LeftBy::Start => {
+                        sand.put("locked/card.mp4", b"half");
+                        sand.write_journal_with(&[entry("locked/card.mp4")], &[entry("locked")]);
+                        lock_up(0o500)?;
+                        sand.start()?
+                    }
+                    LeftBy::Cancel => {
+                        let (engine, answered) = cancelled_while_refused(&sand, std::slice::from_ref(&path), &locked)?;
+                        assert!(answered.is_err(), "the cancelled export removed a file it could not");
+                        engine
+                    }
+                    LeftBy::KilledRunThatNeverWrote => {
+                        sand.put("locked/card.mp4", b"a finished movie");
+                        let mut killed = sand.journal().pending();
+                        killed.list(std::slice::from_ref(&path))?;
+                        killed.killed();
+                        let other = lock_handle(&sand)?;
+                        other.lock()?;
+                        sand.start()?
+                    }
+                };
+                lock_up(0o700)?;
+                assert!(fs::read_to_string(sand.file())?.contains("card.mp4"), "{left:?}: the path is not listed");
+                let mut export = sand.journal().pending();
+                export.list(std::slice::from_ref(&path))?;
+                match then {
+                    Then::Finishes => {
+                        fs::write(&path, b"the finished movie")?;
+                        export.clear()?;
+                    }
+                    Then::IsCancelled => export.remove()?,
+                    Then::IsKilled => export.killed(),
+                }
+                engine.close()?;
+                sand.journal().process_ended();
+                let restarted = sand.start()?;
+                let due: Option<&[u8]> = match (then, left) {
+                    (Then::Finishes, _) => Some(b"the finished movie"),
+                    (_, LeftBy::KilledRunThatNeverWrote) => Some(b"a finished movie"),
+                    _ => None,
+                };
+                let now = fs::read(&path).ok();
+                if now.as_deref() != due {
+                    let (now, due) = (now.as_deref().map(String::from_utf8_lossy), due.map(String::from_utf8_lossy));
+                    faults.push(format!("{left:?}, then {then:?}: the next start left {now:?} where {due:?} was due ({:?})", restarted.recovery()));
+                }
+            }
+        }
+        assert!(faults.is_empty(), "{faults:#?}");
         Ok(())
     }
 
@@ -2009,6 +2408,34 @@ mod tests {
         release.open();
         assert_eq!(export.join().unwrap(), Ok(Value::Null));
         assert_eq!(fs::read(&output)?, b"being written");
+        Ok(())
+    }
+
+    /// A cancelled export never deletes a file another export of the process is still writing, even
+    /// one it wrote to itself: the file is the running export's, whose own end deals with it.
+    #[test]
+    fn a_cancelled_export_leaves_a_file_another_running_export_writes() -> Test {
+        let sand = Sandbox::new()?;
+        let output = sand.folders.container.join("card.mp4");
+        let (script, listed, release) = held_export(&output, true);
+        let first = Arc::new(sand.start_running(script)?);
+        let export = exporting(&first);
+        assert!(listed.wait(), "the export never listed its output");
+
+        let cancel = CancelToken::new();
+        let (stop, written) = (cancel.clone(), output.clone());
+        let second = sand.start_running(Box::new(move |on_progress, list_outputs| {
+            list_outputs(std::slice::from_ref(&written))?;
+            fs::write(&written, b"written over by the cancelled export").unwrap();
+            stop.cancel();
+            assert!(!on_progress(1, 1, None));
+            Ok(Value::Null)
+        }))?;
+        assert_eq!(second.request_with_progress("export", Value::Null, |_, _, _| {}, &cancel), Err(CraftError::Cancelled));
+        assert!(output.is_file(), "a cancelled export deleted a file another export of the process is writing");
+        release.open();
+        assert_eq!(export.join().unwrap(), Ok(Value::Null));
+        assert!(!sand.file().exists(), "an entry outlived both exports");
         Ok(())
     }
 

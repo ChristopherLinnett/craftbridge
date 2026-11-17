@@ -166,7 +166,8 @@ impl Engine {
     /// cannot be had, or that the app cannot take, is no failure to start: the engine runs on the CPU
     /// and `info.gpu` says why. Every start names its `gpu`, so no engine stays on the CPU because
     /// its caller did not choose. It keeps no pending-export journal, so a kill mid-export leaves its
-    /// partial files: an app's own engine starts with [`Engine::start_in`].
+    /// partial files and a call it answers `Cancelled` leaves what its app wrote: an app's own engine
+    /// starts with [`Engine::start_in`].
     ///
     /// # Errors
     ///
@@ -243,10 +244,15 @@ impl Engine {
     /// export (plan §16's edge case). A cancel is `cancel` set from any thread, needing no call to
     /// the engine: the app is told to stop at its next report, and the call answers
     /// [`CraftError::Cancelled`]; a token already set when the export's turn comes answers that
-    /// without running it. An `info` call made meanwhile is answered at the export's next report
-    /// with the state the app described when the export began. Every other call waits in the order
-    /// it was made until the export ends. A call made from inside one of this engine's own calls is
-    /// refused with `Internal` at once, as [`Engine::request`] does.
+    /// without running it. On an engine started in the app's folders ([`Engine::start_in`]) a call
+    /// answered `Cancelled` leaves none of the files its app listed for it and wrote, nor a folder
+    /// made for them that then holds nothing, deleted by the pending-export journal's rules whenever
+    /// the stop landed: a listed file still as it was when listed stays, a file the disk will not let
+    /// go of is answered as [`CraftError::Io`], naming it, and a folder it will not remove, which then
+    /// holds nothing of the call, stays for the next start. An `info` call made meanwhile is answered
+    /// at the export's next report with the state the app described when the export began. Every
+    /// other call waits in the order it was made until the export ends. A call made from inside one
+    /// of this engine's own calls is refused with `Internal` at once, as [`Engine::request`] does.
     pub fn request_with_progress<F>(&self, method: &str, params: Value, on_progress: F, cancel: &CancelToken) -> Result<Value>
     where
         F: FnMut(u64, u64, Option<f64>) + Send + 'static,

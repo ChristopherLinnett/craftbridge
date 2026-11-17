@@ -764,9 +764,10 @@ sides = "plugin"
 # The command line stops a render only by its process being killed, so there is no oracle to compare. The
 # first step is the same export left alone, which writes its file: what the cancelled one leaves out would
 # have been there. The exporter renders frames in batches of at most 16 and looks for a stop after each,
-# and the listener answers at its first tenth-of-a-second beat past half the frames; a stop the exporter
-# meets only after its last batch finds the file written, and the file stays. Sixty frames leave a whole
-# batch after the one that passes half, and a batch at a quarter of the size takes many beats.
+# and the listener answers at its first tenth-of-a-second beat past half the frames. A stop the exporter
+# meets only after its last batch finds the file written, and the engine then removes it with every other
+# file the cancelled export listed, so the folder holds the control's file alone either way. Sixty frames
+# leave a whole batch after the one that passes half, and a batch at a quarter of the size takes many beats.
 [[scenario.step]]
 [[scenario.step.call]]
 kind = "request"
