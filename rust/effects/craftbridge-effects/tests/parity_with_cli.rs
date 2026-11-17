@@ -1249,12 +1249,11 @@ fn an_mcp_session_is_answered_as_the_commands_mcp_answers_it() {
     }
 }
 
-/// T18's half that the phone's confinement can answer: the scenario's two calls — `script.run` of
-/// `app.project.numItems`, and of a script that fails — through the command line's confined `mcp`
-/// and the plugin's `exec`. `script.run` is a command that runs scripts, so both confined doors
-/// refuse each before its script runs, and they refuse in the same words. Running the script, and
-/// reporting its output and error position alike, needs a session with script-running open, which
-/// the phone's confinement refuses on purpose; how scripts run on the phone is an open decision.
+/// T18: the scenario's two calls — `script.run` of `app.project.numItems`, and of a script that
+/// fails — through the command line's confined `mcp` and the plugin's `exec`. `script.run` is a
+/// command that runs scripts, so both confined doors refuse each before its script runs, and they
+/// refuse in the same words. The phone build runs no script (PD13), so there is no output or error
+/// position to compare.
 #[test]
 fn the_confined_script_refusal_is_the_commands_refusal() {
     let scratch = Scratch::new().expect("a scratch folder");

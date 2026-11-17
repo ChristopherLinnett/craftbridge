@@ -66,7 +66,7 @@ fn pinned_targets() -> Result<Vec<(String, bool)>, String> {
 
 /// Android takes the feature, and only the feature: the device-feasibility finding is an Android
 /// panic, which the feature removes, and an Android boa with any feature the desktop's lacks would
-/// run scripts and expressions the command line, the conformance oracle, cannot.
+/// run expressions the command line, the conformance oracle, cannot.
 #[test]
 fn android_builds_boa_with_jsvalue_enum_and_nothing_more() {
     let mut expected = host_features().expect("the host graph answers");

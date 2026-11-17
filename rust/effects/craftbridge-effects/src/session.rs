@@ -4,8 +4,8 @@
 //! conventions and starts external helper processes; a phone has neither. This builds the same
 //! session through the engine's public fields alone: the app's [`Folders`] supply what the desktop
 //! host derives, the media importer is EffectCraft's own and the exporter is CraftBridge's (AD7), and the
-//! one thing deliberately missing is the helper hooks, so a script or a command that wants a helper
-//! finds none and answers that helpers are not available, and nothing here can start a process.
+//! one thing deliberately missing is the helper hooks, so a command that wants a helper finds none
+//! and answers that helpers are not available, and nothing here can start a process.
 
 use std::sync::Arc;
 
@@ -35,7 +35,7 @@ fn exporter() -> Arc<PooledExporter> {
 }
 
 /// Build the session (plan §19, steps 1 and 2): every field from public inputs, the plug-in hooks from the
-/// PD13 switch for `platform`, no helper hooks, and then EffectCraft's own scripting install. The
+/// PD13 switch for `platform`, no helper hooks, and then EffectCraft's own script-runner install. The
 /// platform is a parameter so a test can build the iOS session's shape on the host and pin its
 /// policy there, while the gate's phone builds prove the code compiles for the phones.
 pub(crate) fn build(platform: Platform, folders: &Folders) -> Session {
@@ -59,7 +59,9 @@ pub(crate) fn build(platform: Platform, folders: &Folders) -> Session {
         ..Default::default()
     };
     // The one call EffectCraft's own host makes after filling the fields: it installs the script
-    // runner and ScriptUI dispatches over the commands, leaving every switch at its default.
+    // runner and ScriptUI dispatches over the commands, leaving every switch at its default. No
+    // call of the phone's reaches the runner: the confinement refuses every command that runs a
+    // script, and a script would reach the engine past it (PD13).
     effectcraft_script::install(&mut session);
     // AD2 (plan §19, step 1): then the phone's fonts. The platform's font folders are registered
     // through EffectCraft's one registration entry, and the font-list filter is set from the same
@@ -141,9 +143,9 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_session_runs_scripting() {
+    fn the_session_is_built_as_effectcrafts_own_host_builds_it() {
         let session = build(Platform::current(), &folders(None));
-        assert!(session.script.is_some(), "scripts run on both platforms (PD13)");
+        assert!(session.script.is_some(), "EffectCraft's own install is made, though the confinement refuses every command that reaches it");
     }
 
     #[test]

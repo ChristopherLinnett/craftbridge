@@ -18,9 +18,10 @@
 //! the kept faces' styles, and `count` counts what survives. Where the platform answers no face
 //! list — the desktop build, Android — every listing passes through untouched.
 //!
-//! A script, and anything a script drives, keeps seeing the full registry: an adaptation that
-//! trimmed what a script reads would be a different product, so scripts seeing the whole registry
-//! is an accepted difference, which the integration guides are to state (plan §25).
+//! Code inside EffectCraft's own dispatch (an `engine.batch`'s `$N` references, a replay's `expect`
+//! steps) keeps seeing the full registry: an adaptation that trimmed what that code reads would be
+//! a different product, so it is an accepted difference, which the integration guides are to state
+//! (plan §25).
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -30,10 +31,8 @@ use craftbridge_core::folders::Folders;
 use effectcraft_text::fonts::{self as text_fonts, Face, FaceData};
 use serde_json::Value;
 
-/// The command whose listings this module trims, and the `engine.execute` method step that carries it.
+/// The command whose listings this module trims.
 pub(crate) const TEXT_FONTS: &str = "text.fonts";
-/// The command `engine.batch` steps and `file.runScript`'s `engine.execute` steps name it through.
-const ENGINE_EXECUTE: &str = "engine.execute";
 /// The one font folder Android is defined to have; `Folders.fonts` comes after it.
 #[cfg(target_os = "android")]
 const ANDROID_SYSTEM_FONTS: &str = "/system/fonts";
@@ -94,11 +93,14 @@ fn grown(known: Option<FaceList>, later: Option<FaceList>) -> Option<FaceList> {
 }
 
 /// Trim one successful command's answer to what an app may see, when that command is a font
-/// listing, a `text.fonts` step of an `engine.batch`, or one of a `file.runScript`. It answers in
-/// `methods::execute`, the entry `exec` and every `run` step pass; a path that hands the engine's
+/// listing or an `engine.batch` with a `text.fonts` step. It answers in `methods::execute`, the
+/// entry `exec` and every `run` step pass; a path that hands the engine's
 /// answers to the app past that entry — the `mcp` line, whose tools run their commands on the backend
 /// directly — must answer its listings through this function too, or the app sees faces the phone
-/// hides. The render runner's calls through `methods::execute` answer no listing.
+/// hides. The render runner's calls through `methods::execute` answer no listing. No answer of a
+/// `file.runScript`, whose command list the engine would run itself, reaches an app: every session
+/// this crate builds is confined, and the confinement refuses every command that runs a script
+/// (PD13), so no such answer is read here.
 pub(crate) fn filtered(command: &str, params: &Value, value: Value) -> Value {
     // Read once and held for the call: an engine start writes the list only before its own first
     // command, so the read never waits on one for long.
@@ -112,7 +114,6 @@ fn filtered_by(list: Option<&FaceList>, command: &str, params: &Value, value: Va
     match command {
         TEXT_FONTS => trimmed(list, value),
         "engine.batch" => filter_step_results(list, steps_of(params), value),
-        "file.runScript" => filter_run_script(list, params, value),
         _ => value,
     }
 }
@@ -274,11 +275,10 @@ fn kept_origin(list: &FaceList, face: &Face) -> Option<&'static str> {
     }
 }
 
-/// Trim the `results` of a `{steps, results}` answer, pairing them by position as the engine
-/// writes them: it pushes one result per step and answers an error at the first step that fails
-/// (`crates/engine/src/cmd/batch.rs`, `file_more.rs`), so row i belongs to step i. Steps come from
-/// the request when it carried them (a batch, inline script steps), or from the command-list file
-/// this module read.
+/// Trim the `results` of a batch's `{steps, results}` answer, pairing them by position with the
+/// steps the request carried, as the engine writes them: it pushes one result per step and answers
+/// an error at the first step that fails (`crates/engine/src/cmd/batch.rs`), so row i belongs to
+/// step i.
 fn filter_step_results(list: &FaceList, steps: Option<&Vec<Value>>, value: Value) -> Value {
     let Some(steps) = steps else { return value };
     let Some(results) = value.get("results").and_then(Value::as_array).cloned() else { return value };
@@ -295,74 +295,10 @@ fn steps_of(params: &Value) -> Option<&Vec<Value>> {
     params.get("steps").and_then(Value::as_array)
 }
 
-/// Is this step of a batch or script command list a `text.fonts` call, however it is written: by
-/// its `command`/`id`, or as an `engine.execute` method step (`file.runScript`'s second form)?
+/// Is this step of a batch a `text.fonts` call, named as the engine reads a step: by its
+/// `command`, or else its `id`?
 fn step_is_text_fonts(step: &Value) -> bool {
-    if step.get("command").or_else(|| step.get("id")).and_then(Value::as_str) == Some(TEXT_FONTS) {
-        return true;
-    }
-    step.get("method").and_then(Value::as_str) == Some(ENGINE_EXECUTE)
-        && step.get("params").and_then(|params| params.get("id")).and_then(Value::as_str) == Some(TEXT_FONTS)
-}
-
-/// Trim a `file.runScript` answer, reading its request in the order the engine does
-/// (`crates/engine/src/cmd/file_more.rs`, `run_script`): `recent` first; then a named script, when
-/// neither a `path` nor `steps` comes with it; then a JavaScript file, a `path` with no `steps`;
-/// then the command list — the inline `steps` array, or else the file at `path`, read here the way
-/// the engine reads it, because the engine runs those steps itself and never brings their ids back
-/// through this door. Script code answers from the full registry (the accepted difference), so its
-/// answer passes through. So does a `recent` re-run: the engine resolves it from the session's own
-/// list of recent scripts, which this door does not read; no session this crate builds runs one,
-/// since each is confined and the confinement refuses every script runner.
-fn filter_run_script(list: &FaceList, params: &Value, value: Value) -> Value {
-    if params.get("recent").is_some() {
-        return value;
-    }
-    let path = params.get("path").and_then(Value::as_str);
-    let steps = params.get("steps");
-    if params.get("name").and_then(Value::as_str).is_some() && params.get("path").is_none() && steps.is_none() {
-        return value;
-    }
-    if steps.is_none() && path.is_some_and(is_js_script) {
-        return value;
-    }
-    match (steps, path) {
-        (Some(Value::Array(steps)), _) => filter_step_results(list, Some(steps), value),
-        (_, Some(path)) => match read_command_list(path) {
-            Some(steps) => filter_step_results(list, Some(&steps), value),
-            None => value,
-        },
-        _ => value,
-    }
-}
-
-/// JavaScript script files, as `file.runScript` tells them from command lists
-/// (`crates/engine/src/cmd/file_more.rs`: `.js`/`.jsx`, and `.jsxbin` is a script file too — its
-/// refusal comes from the engine).
-fn is_js_script(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
-    lower.ends_with(".js") || lower.ends_with(".jsx") || lower.ends_with(".jsxbin")
-}
-
-/// Read a command-list file the way `file.runScript` does: its bytes as text, invalid UTF-8
-/// replaced; one JSON array, or else one JSON object per line with `//` and `#` comments skipped.
-/// Unreadable, empty, or a line that is no JSON is answered `None` — the engine failed on that
-/// file, or it is something else; nothing is trimmed.
-fn read_command_list(path: &str) -> Option<Vec<Value>> {
-    let bytes = std::fs::read(path).ok()?;
-    let text = String::from_utf8_lossy(&bytes);
-    if let Ok(Value::Array(steps)) = serde_json::from_str::<Value>(&text) {
-        return Some(steps);
-    }
-    let mut steps: Vec<Value> = Vec::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
-            continue;
-        }
-        steps.push(serde_json::from_str(line).ok()?);
-    }
-    (!steps.is_empty()).then_some(steps)
+    step.get("command").or_else(|| step.get("id")).and_then(Value::as_str) == Some(TEXT_FONTS)
 }
 
 #[cfg(test)]
@@ -454,10 +390,6 @@ pub(crate) mod tests {
     /// A `{steps, results}` answer whose first row is the registry's listing.
     fn answer_of_one_listing() -> Value {
         json!({ "steps": 1, "results": [raw_listing()] })
-    }
-
-    fn first_row(answer: &Value) -> Value {
-        answer.get("results").and_then(Value::as_array).and_then(|rows| rows.first()).cloned().unwrap_or(Value::Null)
     }
 
     #[test]
@@ -577,82 +509,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_script_run_sees_the_full_registry() {
-        let list = bundled_only();
-        let answer = answer_of_one_listing();
-        // A JavaScript file's answer is the script's own, and named/recent scripts run script code.
-        for params in [
-            json!({ "path": "/app/Scripts/scan.js" }),
-            json!({ "name": "Scan" }),
-            json!({ "recent": 1 }),
-            json!({ "recent": 0, "steps": [{ "command": TEXT_FONTS }] }),
-        ] {
-            assert_eq!(filtered_by(Some(&list), "file.runScript", &params, answer.clone()), answer, "{params} runs script code");
-        }
-    }
-
-    /// The engine reads a `file.runScript` request in one order: a name runs only when neither a
-    /// path nor steps come with it, a `.js` path only when no steps do, and inline steps win.
-    #[test]
-    fn a_script_request_is_read_in_the_engines_order() {
-        let list = bundled_only();
-        let dir = tempfile::tempdir().expect("a scratch folder");
-        let list_file = dir.path().join("listing.json");
-        std::fs::write(&list_file, "[{\"command\": \"text.fonts\"}]").expect("write the list");
-        let path = list_file.to_string_lossy().to_string();
-        for params in [
-            json!({ "name": "Scan", "steps": [{ "command": TEXT_FONTS }] }),
-            json!({ "name": "Scan", "path": path }),
-            json!({ "path": "/app/Scripts/scan.js", "steps": [{ "command": TEXT_FONTS }] }),
-            json!({ "steps": "not an array", "path": path }),
-        ] {
-            let trimmed = filtered_by(Some(&list), "file.runScript", &params, answer_of_one_listing());
-            assert!(trimmed_to_the_bundled(&first_row(&trimmed)), "{params} runs a command list, whose listing row is trimmed");
-        }
-    }
-
-    #[test]
-    fn a_script_commands_list_is_read_as_effectcraft_reads_it() {
-        let list = bundled_only();
-        let dir = tempfile::tempdir().expect("a scratch folder");
-        let answer = json!({ "steps": 2, "results": [raw_listing(), { "ok": true }] });
-        let files: [(&str, &[u8]); 4] = [
-            ("listing.json", b"[{\"command\": \"text.fonts\"}, {\"command\": \"comp.new\"}]"),
-            ("listing.jsonl", b"// step one\n\n{\"command\": \"text.fonts\"}\n# not a step\n{\"id\": \"project.save\"}\n"),
-            // An `engine.execute` method step is the same call wearing another coat.
-            ("method.jsonl", b"{\"method\": \"engine.execute\", \"params\": {\"id\": \"text.fonts\"}}\n{\"command\": \"comp.new\"}\n"),
-            // The engine reads the file's bytes with invalid UTF-8 replaced, so a stray byte in a comment runs.
-            ("latin1.jsonl", b"// caf\xe9\n{\"command\": \"text.fonts\"}\n{\"command\": \"comp.new\"}\n"),
-        ];
-        for (name, bytes) in files {
-            let file = dir.path().join(name);
-            std::fs::write(&file, bytes).expect("write the list");
-            let trimmed = filtered_by(Some(&list), "file.runScript", &json!({ "path": file }), answer.clone());
-            assert!(trimmed_to_the_bundled(&first_row(&trimmed)), "{name}: the command list's text.fonts row is trimmed");
-            assert_eq!(trimmed.get("results").and_then(Value::as_array).map(Vec::len), Some(2), "{name}: every row stays");
-        }
-    }
-
-    #[test]
-    fn a_step_is_found_however_the_list_writes_it() {
+    fn a_step_is_found_as_the_engine_reads_it() {
         assert!(step_is_text_fonts(&json!({ "command": TEXT_FONTS })));
         assert!(step_is_text_fonts(&json!({ "id": TEXT_FONTS })));
-        assert!(step_is_text_fonts(&json!({ "method": "engine.execute", "params": { "id": TEXT_FONTS } })));
-        assert!(
-            step_is_text_fonts(&json!({ "command": TEXT_FONTS, "method": "engine.execute", "params": { "id": "comp.new" } })),
-            "a `command` is read first, as the engine reads it"
-        );
+        assert!(step_is_text_fonts(&json!({ "command": TEXT_FONTS, "id": "comp.new" })), "a `command` is read first, as the engine reads it");
+        assert!(!step_is_text_fonts(&json!({ "command": "comp.new", "id": TEXT_FONTS })), "an `id` beside a `command` is never read");
         assert!(!step_is_text_fonts(&json!({ "command": "comp.new" })));
-        assert!(!step_is_text_fonts(&json!({ "method": "engine.execute", "params": { "id": "comp.new" } })));
-        assert!(!step_is_text_fonts(&json!({ "method": "layer.setText" })));
-    }
-
-    #[test]
-    fn a_js_script_is_not_a_command_list() {
-        assert!(is_js_script("/app/Scripts/run.JS"));
-        assert!(is_js_script("scan.jsx"));
-        assert!(is_js_script("packed.jsxbin"));
-        assert!(!is_js_script("commands.json"));
-        assert!(!is_js_script("commands.jsonl"));
+        // A batch step has no `engine.execute` method form: the engine refuses one before it runs.
+        assert!(!step_is_text_fonts(&json!({ "method": "engine.execute", "params": { "id": TEXT_FONTS } })));
     }
 }

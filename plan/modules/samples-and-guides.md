@@ -10,7 +10,7 @@
 | `conformance/effects/birthday-card.jsonl` | NEW | the running example's template, made reproducibly by replaying it with the EffectCraft CLI: `templates.create` from "Social Square 1080×1080", `essential.addProperty` for Name and `essential.addMedia` for Photo, `essential.exportTemplate` to `Birthday Card.ectemplate` |
 | `ios/samples/PostcardStudio/` | NEW | SwiftUI app using `ios/sdk/` by local path: pick a photo, type a name, live preview in an `MTKView`'s layer, export with a progress bar, share |
 | `android/samples/postcard-studio/` | NEW | Jetpack Compose app with the same steps, preview in a `SurfaceView`; its own Gradle build, including `android/sdk/` as an app would |
-| `docs/integration-ios.md`, `docs/integration-android.md` | NEW | adding the package, folders, starting an engine, preview, export, errors; the font listing (AD2): every app-facing call lists the phone's own families plus the bundled ones, while scripts, `engine.batch`'s `$N` references and `replay`'s `expect` steps see every registered face |
+| `docs/integration-ios.md`, `docs/integration-android.md` | NEW | adding the package, folders, starting an engine, preview, export, errors; that scripts are not part of the phone build and an app runs the engine's calls in succession instead (PD13); the font listing (AD2): every app-facing call lists the phone's own families plus the bundled ones, while `engine.batch`'s `$N` references and `replay`'s `expect` steps see every registered face |
 | `docs/background-exports.md` | NEW | the recipes of PD14 (below) |
 | `docs/generated/commands.md` | NEW, generated | every command with its keys and types, from `api-surface.json` |
 | `docs/updating.md` | NEW | the update loop for maintainers (§24) |

@@ -23,7 +23,7 @@ One Swift package in `ios/sdk/`, `Package.swift` at its top (PD19), iOS 17 (PD11
 - `Frame` → `CVPixelBuffer` (`kCVPixelFormatType_32BGRA`, from `Bgra8Premultiplied`) and `CGImage`.
 - `BackgroundPolicy`: `.cpuWhenBackgrounded` (default: `suspendGpu` on entering the background, `resumeGpu` on return) or `.keepGpu` for apps running a `BGContinuedProcessingTask` with the GPU entitlement (§17, §25).
 
-**`CraftBridgeEffects`:** `EffectsEngine.start(folders:gpu:)`, `exec`, `run`, `props`, `get`, `set`, `frame`, `export`, `templates.open` and `templates.render` (returning a `TemplateInstance` with `set(_:_:)` and `set(_:media:)`), `script`, `replay`, `timings`, `mcp`, and the generated command namespaces. These are the calls used in §5.
+**`CraftBridgeEffects`:** `EffectsEngine.start(folders:gpu:)`, `exec`, `run`, `props`, `get`, `set`, `frame`, `export`, `templates.open` and `templates.render` (returning a `TemplateInstance` with `set(_:_:)` and `set(_:media:)`), `replay`, `timings`, `mcp`, and the generated command namespaces. These are the calls used in §5.
 
 **Build.** `tools/build-xcframework.sh` builds `craftbridge-effects-ffi` with `--release` for `aarch64-apple-ios` and `aarch64-apple-ios-sim` with `IPHONEOS_DEPLOYMENT_TARGET=17.0`, runs `cargo xtask generate`, whose registered generator writes the Swift bindings into `Generated/` (§20), and joins the two static libraries with `xcodebuild -create-xcframework` into `ios/sdk/Frameworks/`.
 

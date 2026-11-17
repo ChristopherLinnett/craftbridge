@@ -7,12 +7,14 @@
 
 mod common;
 mod scratch;
+mod withheld;
 
 use common::{EVERY_FORMAT, Scratch};
 use craftbridge_core::{CraftApp, CraftError, Engine, GpuChoice, GpuDevice, GpuFailure, PixelFormat};
 use craftbridge_effects::EffectCraftApp;
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
+use withheld::assert_withheld_every_way;
 
 fn request(app: &mut EffectCraftApp, method: &str, params: Value) -> Result<Value, CraftError> {
     app.request(method, params)
@@ -210,40 +212,6 @@ fn helper_needing_command_answers_unsupported_and_starts_nothing() {
     let plug_ins = request(&mut app, "exec", json!({"command": "effect.plugins.list"})).expect("the plug-in list answers");
     assert_eq!(plug_ins.get("helpers"), Some(&json!(false)), "the engine sees no helper hooks: {plug_ins}");
     assert_eq!(plug_ins.get("wasm"), Some(&json!(false)), "the engine sees no plug-in loader without a plug-in folder: {plug_ins}");
-}
-
-/// Every way a call reaches one command the plug-in withholds — on its own, as a step of `run`, and
-/// as a step of an engine batch in both the spellings with which a batch step names its command,
-/// alone and as a step of `run` — answers the §14 `Unsupported` row in `words`, before the engine
-/// sees the call, so nothing runs. The answer says what was not refused.
-fn assert_withheld_every_way(app: &mut EffectCraftApp, command: &str, params: &Value, words: &str) -> Result<(), String> {
-    let refusal = |app: &mut EffectCraftApp, method: &str, params: Value| match request(app, method, params) {
-        Err(CraftError::Unsupported { message }) => Ok(message),
-        other => Err(format!("`{command}` through `{method}` must be `Unsupported`, got {other:?}")),
-    };
-    let message = refusal(app, "exec", json!({"command": command, "params": params.clone()}))?;
-    if message != words {
-        return Err(format!("the refusal names the command and why: {message}"));
-    }
-    let stepped = json!({"steps": [{"command": "comp.new", "params": {"name": "A"}}, {"command": command, "params": params.clone()}]});
-    let message = refusal(app, "run", stepped)?;
-    if !(message.starts_with(&format!("{command}: `{command}` is not available")) && message.ends_with("(step 1)")) {
-        return Err(format!("the failed step is named and numbered: {message}"));
-    }
-    // A step of an engine batch: the engine runs its steps itself, so the id reaches nothing.
-    for step in [json!({"command": command}), json!({"id": command})] {
-        let batched = json!({"command": "engine.batch", "params": {"steps": [json!({"command": "comp.new", "params": {"name": "B"}}), step]}});
-        let message = refusal(app, "exec", batched.clone())?;
-        if !message.starts_with(&format!("`{command}` is not available")) {
-            return Err(format!("the refusal names the withheld step: {message}"));
-        }
-        // The batch as a step of `run`: the step is named by its own command, as every row is.
-        let message = refusal(app, "run", json!({"steps": [batched]}))?;
-        if !(message.starts_with(&format!("engine.batch: `{command}` is not available")) && message.ends_with("(step 0)")) {
-            return Err(format!("the failed step is named by its command and numbered: {message}"));
-        }
-    }
-    Ok(())
 }
 
 #[test]
@@ -508,10 +476,11 @@ fn the_catalogue_reports_the_phones_capabilities() {
 fn the_method_table_answers_unwired_methods_as_unsupported() {
     let scratch = Scratch::new().expect("a scratch folder");
     let mut app = scratch.app().expect("the app starts from prepared folders");
-    // The six names §14's table carries that `request` does not answer, and one name the table
-    // carries not at all: every name answers `Unsupported` in the one refusal, whose exact words
-    // are pinned so they claim only what is true however the method was asked — that `request`
-    // lacks it, and which methods `request` answers.
+    // The five names §14's table carries that `request` does not answer, and two names the table
+    // carries not at all, `script` (PD13: an app composes the engine's methods instead) and one no
+    // method is: every name answers `Unsupported` in the one refusal, whose exact words are pinned
+    // so they claim only what is true however the method was asked — that `request` lacks it, and
+    // which methods `request` answers.
     for method in ["frame", "export", "template.render", "template.open", "script", "mcp", "no.such.method"] {
         let error = (request(&mut app, method, json!({}))).expect_err("the call was meant to fail");
         match error {
@@ -533,7 +502,7 @@ fn a_call_with_progress_answers_export_and_refuses_every_other_name() {
     let mut app = scratch.app().expect("the app starts from prepared folders");
     // Every name but `export`, the `request` methods included, is refused in the one refusal that
     // names what the call answers.
-    for method in ["info", "exec", "template.render", "frame", "no.such.method"] {
+    for method in ["info", "exec", "template.render", "frame", "script", "no.such.method"] {
         let error = app.request_with_progress(method, json!({}), &mut |_, _, _| true, &mut |_| Ok(())).expect_err("the call was meant to fail");
         match error {
             CraftError::Unsupported { message } => assert_eq!(
