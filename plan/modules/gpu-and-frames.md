@@ -13,9 +13,9 @@
 - **No device:** `Session.accel_note` records why, `info.gpu` reports it, and every render runs on the CPU (L7).
 
 **Preview into the app's view (zero copy, PD8).**
-1. The app attaches its `CAMetalLayer` (iOS) or `Surface` (Android) once (§20 platform module); the core keeps a `wgpu::Surface` configured `Bgra8Unorm` (iOS) or `Rgba8Unorm` (Android), non-sRGB, `PresentMode::Fifo`, `CompositeAlphaMode::PostMultiplied` where offered, else `Opaque`.
+1. The app attaches its `CAMetalLayer` (iOS) or `Surface` (Android) once (§20 platform module); the core keeps a `wgpu::Surface` configured `Bgra8Unorm` (iOS) or `Rgba8Unorm` (Android), non-sRGB, `PresentMode::Fifo` with one frame in flight (the desktop window's `LOW_LATENCY`, `effectcraft: apps/effectcraft/src/main.rs:475-482`), `CompositeAlphaMode::PostMultiplied` where offered, else `Opaque`, else `Inherit`: Android's surfaces offer `Inherit` alone, because its window manager composites the window (Android's Vulkan loader, `frameworks/native/vulkan/libvulkan/swapchain.cpp`), so the pass writes alpha 1 there, as for `Opaque`.
 2. `present({comp, time})` asks the app crate for a display frame: `Gpu::render_display` leaves the composited frame on the GPU as premultiplied `Rgba8Unorm` with mips (`effectcraft: crates/gpu/src/lib.rs:143-147`, `effectcraft: crates/gpu/src/lib.rs:224-236`).
-3. The core's blit pass (`blit.wgsl`, one full-screen triangle, linear filtering on the mip chain) scales it into the surface texture with aspect-fit letterboxing, and presents.
+3. The core's blit pass (the WGSL in `blit.rs`, one full-screen triangle drawn into the aspect-fit viewport, linear filtering on the mip chain) scales it into the surface texture between opaque black bars, un-premultiplying it first when the surface is `PostMultiplied`, and presents (AD14).
 4. When `render_display` returns `None` (the GPU declined the frame), the app crate renders on the CPU (`Session::render_rgba8_alpha`, `crates/engine/src/session/render.rs:132-143`) and the core uploads it into a reusable texture before the same blit.
 
 **Platform images and PNG (`frame`).**
@@ -26,7 +26,7 @@
 **States.**
 - *GPU attached*: Metal or Vulkan, `info.gpu = "<adapter> (<backend>)"`.
 - *CPU only*: `CpuOnly` chosen, no adapter, device lost, or (iOS) the app is in the background without the continued-processing GPU entitlement (Metal rejects background command buffers, `evidence/05-mobile-platforms.md` Finding 19). The core drops the GPU on the first device-lost error. On iOS the Swift layer calls `suspendGpu()` on `UIApplication.didEnterBackgroundNotification` unless the app has told it a GPU background task is running, and `resumeGpu()` on return to the foreground (§22).
-- *Surface lost*: the layer or surface was resized or destroyed; the next `present` reconfigures or returns `Gpu { "no surface" }` after `detach_preview`.
+- *Surface lost*: the layer or surface was resized (outdated): the `present` that finds it configures the surface again and answers `Gpu`, and the next draws. Destroyed (lost): every `present` answers `Gpu` until the app attaches a new surface, and the session is untouched. Any error the device reports while a frame is acquired, drawn or shown answers `Gpu` too, never wgpu's default panic, and a frame that failed to draw is not shown. After `detach_preview` it answers `Gpu { "no surface" }`.
 
 **Edge cases.** A comp larger than the device's texture limit: the compositor renders on the CPU for that comp (its existing decline path). A preview during an export: waits (L3); the app shows its last frame.
 

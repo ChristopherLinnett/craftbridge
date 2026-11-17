@@ -17,7 +17,7 @@
 | `src/folders.rs` | NEW | `Folders` → `Confinement` read roots (container, bundle) and write root (container) (L5) |
 | `src/error.rs` | NEW | `CraftError` and the mapping in §14 |
 | `src/platform/memory.rs` | NEW | `available_memory()`: what the platform says the app may still allocate, `os_proc_available_memory()` on iOS and `MemAvailable` from `/proc/meminfo` on Android, for AD7 (§15). The core never depends on EffectCraft (PD9), and EffectCraft's `sysinfo` has no branch for either platform, so the core reads it itself; the layer table marks `craftbridge-core` a platform crate for this module (D-20) |
-| `src/gpu.rs`, `src/surface.rs`, `src/blit.wgsl`, `src/frames.rs` | NEW | §17 |
+| `src/gpu.rs`, `src/surface.rs`, `src/blit.rs`, `src/frames.rs` | NEW | §17; the blit pass's WGSL is a string in `blit.rs`, because the gate refuses an `include_str!` of any file that is not one of the crate's own `.rs` files (AGENTS.md §3), and a test validates it with naga, the WGSL front end wgpu compiles it with, so a broken shader fails the gate rather than a device |
 
 **Behaviour.**
 1. `start` (called by the app crate's constructor, `start_effects_engine`, through `Engine::start_in(folders, app)`) creates the folders if missing, deals with the files its pending-export journal still lists (D-17, *Returning app* below), builds the GPU device unless `GpuChoice::CpuOnly` (§17), registers the hardware decoders (§18) and spawns the actor with the app.
