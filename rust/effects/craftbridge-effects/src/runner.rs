@@ -8,9 +8,9 @@
 //! the same `Session` calls, and it also waits on the render's thread, which no command does: only
 //! once that thread has ended has a stopped exporter removed the files it opened.
 //!
-//! The runner is also the only caller that starts a render: it lists every file the render may write
-//! before it starts, which the door refuses every other call to do, so a render the system kills
-//! leaves files the next start can delete.
+//! The runner is also the only caller that starts a render (a fill has its own runner, `fill.rs`): it
+//! lists every file the render may write before it starts, which the door refuses every other call to
+//! do, so a render the system kills leaves files the next start can delete.
 
 use craftbridge_core::{CraftError, PROGRESS_INTERVAL, Result};
 use effectcraft_automation::Backend;
@@ -19,7 +19,7 @@ use effectcraft_engine::project::render_queue::RenderStatus;
 use serde_json::Value;
 use std::path::PathBuf;
 
-use crate::methods::{RENDER, execute, execute_listed_render, lacks_capability, object};
+use crate::methods::{RENDER, execute, execute_listed, lacks_capability, object};
 use crate::outputs;
 use crate::requests::RenderRequest;
 
@@ -29,12 +29,12 @@ pub(crate) type Progress<'a> = &'a mut dyn FnMut(u64, u64, Option<f64>) -> bool;
 /// The core's lister of the files an export may write: each call adds to the export's list.
 pub(crate) type ListOutputs<'a> = &'a mut dyn FnMut(&[PathBuf]) -> Result<()>;
 
-/// How the render ended as the watch saw it.
+/// How a render or a fill ended as the watch saw it.
 #[derive(Debug, PartialEq, Eq)]
-enum Ended {
+pub(crate) enum Ended {
     /// The job ran to its end, finished or failed.
     Ran,
-    /// The listener answered `false` and the render was stopped.
+    /// The listener answered `false` and the job was stopped.
     Stopped,
 }
 
@@ -64,7 +64,7 @@ pub(crate) fn export(backend: &mut Backend, params: &Value, on_progress: Progres
     // The file names are known only now: the render writes `card_00000.png` on for a PNG sequence asked
     // for at `card.png`. A refusal to list stops the export before any file is written.
     outputs::list_queued(session(backend)?, list_outputs)?;
-    if let Err(refused) = execute_listed_render(backend, object([("wait", Value::Bool(false))])) {
+    if let Err(refused) = execute_listed(backend, RENDER, object([("wait", Value::Bool(false))])) {
         // The engine refuses a render whose every item is refused with a sentence about an empty
         // queue; the reason each item got is the one that says why.
         return Err(match report(session(backend)?, &attempted) {
@@ -83,7 +83,7 @@ pub(crate) fn export(backend: &mut Backend, params: &Value, on_progress: Progres
 
 /// The in-process session behind the backend, which the plugin always builds headless.
 pub(crate) fn session(backend: &mut Backend) -> Result<&mut Session> {
-    backend.session().ok_or_else(|| CraftError::internal("the render runner needs the in-process session, and this backend has none"))
+    backend.session().ok_or_else(|| CraftError::internal("the runners need the in-process session, and this backend has none"))
 }
 
 /// Poll the running render at each beat and hand its progress to the listener, until the job ends or

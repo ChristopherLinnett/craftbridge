@@ -79,8 +79,8 @@ struct Call<'a> {
 /// render runner's own included: refuse here, before the engine sees the call, what [`refuse_process`]
 /// withholds, then run the command, map its failure and pass a font listing through the platform's
 /// face list. That filter sits on the value returned here, so `exec`, every `run` step and the file
-/// methods answer through it, and nothing built over them can answer untrimmed. A render is started
-/// only by the render runner, through [`execute_listed_render`], once it has listed. A render's failed
+/// methods answer through it, and nothing built over them can answer untrimmed. A render or a fill is
+/// started only by its runner, through [`execute_listed`], once it has listed. A render's failed
 /// items are not read here: a render started without waiting answers while its other items still
 /// render, so the runner reads every item once the render has ended.
 pub(crate) fn execute(backend: &mut Backend, command: &str, params: Value, step: Option<u32>) -> Result<Value> {
@@ -89,10 +89,11 @@ pub(crate) fn execute(backend: &mut Backend, command: &str, params: Value, step:
     exec_on_engine(backend, command, &params, step).map(|value| crate::fonts::filtered(command, &params, value))
 }
 
-/// The render runner's one way to start a render: the engine's command past the door's refusal of a
-/// render, because the runner has handed the journal every file the render may write first.
-pub(crate) fn execute_listed_render(backend: &mut Backend, params: Value) -> Result<Value> {
-    exec_on_engine(backend, RENDER, &params, None)
+/// The runners' one way to start a command the door withholds ([`RENDER`] for the render runner,
+/// [`FILL`] for the fill runner): the engine's command past the door's refusal, because the runner
+/// has handed the journal every file the command may write first.
+pub(crate) fn execute_listed(backend: &mut Backend, command: &str, params: Value) -> Result<Value> {
+    exec_on_engine(backend, command, &params, None)
 }
 
 /// Run one command on the engine and map its failure.
@@ -111,7 +112,7 @@ const NO_PROCESS: [&str; 2] = ["roto.model.download", "face.model.download"];
 
 /// The door itself, which every path that hands a command to the engine passes before the engine
 /// sees it — `exec`, each step of `run`, each line of a `replay` and each tool call of `mcp`: a call
-/// that reaches a model download or a render nothing has listed, by whichever way, is refused as
+/// that reaches a model download, or a render or a fill nothing has listed, by whichever way, is refused as
 /// `Unsupported`, and a step of `run` puts the step's command and index around the words, as it does
 /// every other row's.
 pub(crate) fn refuse_process(command: &str, params: &Value, step: Option<u32>) -> Result<()> {
@@ -124,7 +125,7 @@ pub(crate) fn refuse_process(command: &str, params: &Value, step: Option<u32>) -
 /// The words of the refusal of the first command one call reaches that the door withholds, if any:
 /// the one reader every path asks, so each answers a withheld command in the same words.
 pub(crate) fn withheld(command: &str, params: &Value) -> Option<String> {
-    wants_a_process(command, params).map(starts_a_process).or_else(|| unlisted_render(command, params).map(starts_an_unlisted_render))
+    wants_a_process(command, params).map(starts_a_process).or_else(|| unlisted_write(command, params).map(starts_an_unlisted_write))
 }
 
 /// What the confinement refuses of a command that is to run later, asked without running it, for
@@ -164,9 +165,27 @@ pub(crate) const RENDER: &str = "renderQueue.render";
 /// written until after the door has read the call.
 const UNLISTED_RENDERS: [&str; 5] = [RENDER, "file.watchFolder", "file.watchFolder.poll", "render.saveCurrentPreview", "file.exportTimeline"];
 
-/// The refusal of a command that starts a render nothing has listed, worded as [`starts_a_process`] is,
-/// and naming the method that lists.
-fn starts_an_unlisted_render(withheld: &str) -> String {
+/// The command that generates a Content-Aware Fill: it writes a sequence of frames into a folder on a
+/// background task (`crates/engine/src/cmd/content_fill.rs`:495-598 at the pin), outside the exporter,
+/// so the pending-export journal learns the frames only from the fill runner, which lists them before
+/// the task starts.
+pub(crate) const FILL: &str = "contentFill.generate";
+
+/// Every command that has a fill's frames written: [`FILL`] itself and Content-Aware Fill Layer, which
+/// generates when it is given any parameter and otherwise only opens the panel
+/// (`crates/engine/src/cmd/content_fill.rs`:659-665). A headless session has no panel to open, so the
+/// door refuses it whatever it is given, and only the fill runner generates, after it has listed.
+const UNLISTED_FILLS: [&str; 2] = [FILL, "layer.newContentAwareFill"];
+
+/// The refusal of a command that writes files nothing has listed, worded as [`starts_a_process`] is,
+/// and naming the method that lists: a render is listed by `export`, a fill by `contentFill.generate`
+/// called with progress.
+fn starts_an_unlisted_write(withheld: &str) -> String {
+    if UNLISTED_FILLS.contains(&withheld) {
+        return format!(
+            "`{withheld}` is not available in this build: it generates the frames of a Content-Aware Fill, whose files the pending-export journal cannot list, and `{FILL}` called with progress lists them"
+        );
+    }
     format!("`{withheld}` is not available in this build: it starts a render whose files the pending-export journal cannot list, and `export` lists them")
 }
 
@@ -200,10 +219,13 @@ fn wants_a_process<'a>(command: &'a str, params: &'a Value) -> Option<&'a str> {
     reached(command, params).map(|(reached, _)| reached).find(|reached| NO_PROCESS.contains(reached))
 }
 
-/// The render nothing has listed, if any, that one call reaches: the first command it reaches that is
-/// one of [`UNLISTED_RENDERS`] and is not read, by its own parameters, to write none.
-fn unlisted_render<'a>(command: &'a str, params: &'a Value) -> Option<&'a str> {
-    reached(command, params).find(|(reached, given)| UNLISTED_RENDERS.contains(reached) && !writes_no_render(reached, given)).map(|(reached, _)| reached)
+/// The render or fill nothing has listed, if any, that one call reaches: the first command it reaches
+/// that is one of [`UNLISTED_RENDERS`] or [`UNLISTED_FILLS`] and is not read, by its own parameters, to
+/// write none.
+fn unlisted_write<'a>(command: &'a str, params: &'a Value) -> Option<&'a str> {
+    reached(command, params)
+        .find(|(reached, given)| (UNLISTED_RENDERS.contains(reached) || UNLISTED_FILLS.contains(reached)) && !writes_no_render(reached, given))
+        .map(|(reached, _)| reached)
 }
 
 /// The one withheld render a call can be read to start nothing: Export Timeline's `prerender`
@@ -538,25 +560,63 @@ mod tests {
     #[test]
     fn every_command_that_starts_a_render_is_withheld_on_every_way_a_call_reaches_it() {
         for render in UNLISTED_RENDERS {
-            assert_eq!(unlisted_render(render, &json!({})), Some(render), "{render} as its own command");
+            assert_eq!(unlisted_write(render, &json!({})), Some(render), "{render} as its own command");
             assert_eq!(
-                unlisted_render("engine.batch", &json!({"steps": [{"command": "comp.new"}, {"command": render}]})),
+                unlisted_write("engine.batch", &json!({"steps": [{"command": "comp.new"}, {"command": render}]})),
                 Some(render),
                 "{render} as a step of a batch"
             );
-            assert_eq!(unlisted_render("engine.batch", &json!({"steps": [{"id": render}]})), Some(render), "{render} by `id` in a batch");
+            assert_eq!(unlisted_write("engine.batch", &json!({"steps": [{"id": render}]})), Some(render), "{render} by `id` in a batch");
             assert_eq!(
-                unlisted_render("engine.batch", &json!({"steps": [{"command": "engine.batch", "params": {"steps": [{"command": render}]}}]})),
+                unlisted_write("engine.batch", &json!({"steps": [{"command": "engine.batch", "params": {"steps": [{"command": render}]}}]})),
                 None,
                 "a batch inside a batch runs no steps"
             );
         }
         assert_eq!(UNLISTED_RENDERS, ["renderQueue.render", "file.watchFolder", "file.watchFolder.poll", "render.saveCurrentPreview", "file.exportTimeline"]);
+        assert_eq!(UNLISTED_FILLS, ["contentFill.generate", "layer.newContentAwareFill"]);
         // Pre-render and Create Proxy only queue an item, which `export` lists when it renders it.
         for other in ["renderQueue.add", "renderQueue.setRender", "renderQueue.stop", "renderQueue.list", "render.preRender", "file.createProxy", "file.save"] {
-            assert_eq!(unlisted_render(other, &json!({})), None, "{other} starts no render");
+            assert_eq!(unlisted_write(other, &json!({})), None, "{other} starts no render");
         }
-        assert_eq!(unlisted_render("comp.new", &json!({"name": "renderQueue.render"})), None, "a command only names a render when it runs one");
+        assert_eq!(unlisted_write("comp.new", &json!({"name": "renderQueue.render"})), None, "a command only names a render when it runs one");
+    }
+
+    /// Both commands that can have a fill's frames written are withheld on every way a call reaches
+    /// them, whatever parameters they are given: Content-Aware Fill Layer, which only opens a panel
+    /// when it is given none, is refused too, since a headless session has no panel, and each is
+    /// worded as a fill and names the call that lists, never `export`.
+    #[test]
+    fn every_command_that_generates_a_fill_is_withheld_whatever_it_is_given() {
+        for fill in UNLISTED_FILLS {
+            for given in [json!({}), json!({"layer": 1}), json!({"prerender": "none"}), Value::Null] {
+                assert_eq!(unlisted_write(fill, &given), Some(fill), "{fill} given {given}");
+                assert_eq!(unlisted_write("engine.batch", &json!({"steps": [{"command": "comp.new"}, {"command": fill, "params": given}]})), Some(fill));
+            }
+            assert_eq!(unlisted_write("engine.batch", &json!({"steps": [{"id": fill}]})), Some(fill), "{fill} by `id` in a batch");
+            assert_eq!(
+                unlisted_write("engine.batch", &json!({"steps": [{"command": "engine.batch", "params": {"steps": [{"command": fill}]}}]})),
+                None,
+                "a batch inside a batch runs no steps"
+            );
+            let quiet = json!({"command": "file.exportTimeline", "params": {"prerender": "none"}});
+            assert_eq!(unlisted_write("engine.batch", &json!({"steps": [quiet, {"command": fill}]})), Some(fill), "{fill} after a quiet step");
+            assert_eq!(
+                withheld(fill, &json!({})),
+                Some(format!(
+                    "`{fill}` is not available in this build: it generates the frames of a Content-Aware Fill, whose files the pending-export journal cannot list, and `contentFill.generate` called with progress lists them"
+                ))
+            );
+        }
+        // The fill's settings change a panel's state and write nothing.
+        for other in ["contentFill.set", "layer.addMask", "jobs.list", "jobs.cancel"] {
+            assert_eq!(unlisted_write(other, &json!({})), None, "{other} generates no fill");
+        }
+        assert_eq!(unlisted_write("comp.new", &json!({"name": "contentFill.generate"})), None, "a command only names a fill when it runs one");
+        for render in UNLISTED_RENDERS {
+            let words = withheld(render, &json!({})).expect("a render is withheld");
+            assert!(words.ends_with("and `export` lists them"), "{words}");
+        }
     }
 
     /// Only Export Timeline's own no-render spellings are read past the refusal, exactly as the pin
@@ -590,13 +650,13 @@ mod tests {
     fn a_step_read_past_the_refusal_hides_no_later_step() {
         let quiet = json!({"command": "file.exportTimeline", "params": {"prerender": "none"}});
         for render in UNLISTED_RENDERS {
-            assert_eq!(unlisted_render("engine.batch", &json!({"steps": [quiet, {"command": render}]})), Some(render), "{render} after a quiet step");
-            assert_eq!(unlisted_render("engine.batch", &json!({"steps": [quiet, {"id": render}]})), Some(render), "{render} by `id` after a quiet step");
+            assert_eq!(unlisted_write("engine.batch", &json!({"steps": [quiet, {"command": render}]})), Some(render), "{render} after a quiet step");
+            assert_eq!(unlisted_write("engine.batch", &json!({"steps": [quiet, {"id": render}]})), Some(render), "{render} by `id` after a quiet step");
         }
-        assert_eq!(unlisted_render("engine.batch", &json!({"steps": [quiet, quiet]})), None, "quiet steps alone pass");
-        assert_eq!(unlisted_render("file.exportTimeline", &json!({"prerender": "off"})), None, "a quiet call passes");
+        assert_eq!(unlisted_write("engine.batch", &json!({"steps": [quiet, quiet]})), None, "quiet steps alone pass");
+        assert_eq!(unlisted_write("file.exportTimeline", &json!({"prerender": "off"})), None, "a quiet call passes");
         assert_eq!(
-            unlisted_render("engine.batch", &json!({"prerender": "none", "steps": [{"command": "file.exportTimeline"}]})),
+            unlisted_write("engine.batch", &json!({"prerender": "none", "steps": [{"command": "file.exportTimeline"}]})),
             Some("file.exportTimeline"),
             "a step is read by its own parameters"
         );

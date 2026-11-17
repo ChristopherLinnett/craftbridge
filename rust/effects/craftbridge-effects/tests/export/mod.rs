@@ -16,6 +16,7 @@ use super::common::Scratch;
 use super::{cli, cli_run, scrub, scrubbed, steps_document};
 use craftbridge_core::{CancelToken, CraftError, Engine, GpuChoice};
 use craftbridge_effects::RenderRequest;
+use effectcraft_automation::confine::{Access, Confinement};
 use effectcraft_engine::project::render_queue::OutputFormat;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -311,13 +312,112 @@ fn the_projects_own_queue_exports_as_the_command_lines_queue() {
     assert_eq!(same_files(&plugin_out, &cli_out).expect("the queue's files are the command line's"), 2);
 }
 
+/// A small composition with a hole cut in its one solid, and the Content-Aware Fill of it that writes
+/// into `dir`: the steps both sides run, the fill last.
+fn fill_steps(dir: &Path) -> Vec<(String, Value)> {
+    vec![
+        ("comp.new".to_string(), json!({"name": "F", "width": 48, "height": 32, "duration": 0.4, "frameRate": 10})),
+        ("layer.newSolid".to_string(), json!({"comp": 1, "name": "Bg"})),
+        ("layer.addMask".to_string(), json!({"rect": [20.0, 10.0, 8.0, 8.0], "mode": "subtract"})),
+        ("contentFill.generate".to_string(), json!({"layer": 1, "outputDir": dir.display().to_string(), "method": "edgeBlend"})),
+    ]
+}
+
+#[test]
+fn a_fill_answers_and_writes_what_the_command_lines_fill_does() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let (cli_out, plugin_out) = (scratch.root().join("cli-fill"), scratch.path().join("plugin-fill"));
+    // The command line waits for the fill, which its `run` otherwise leaves to the background.
+    let mut steps = fill_steps(&cli_out);
+    if let Some((_, params)) = steps.last_mut() {
+        params["wait"] = json!(true);
+    }
+    let mut command_line = cli_run(scratch.root(), &steps).expect("the command line ran").doc().expect("the command line printed its document");
+    let mut command_line = command_line.as_array_mut().and_then(|steps| steps.pop()).expect("the fill's result is the last step's");
+
+    let engine = Engine::start(scratch.app().expect("the app starts"), GpuChoice::CpuOnly).expect("the engine starts");
+    let mut plugin_steps = fill_steps(&plugin_out);
+    let (_, fill) = plugin_steps.pop().expect("the fill is the last step");
+    engine.request("run", json!({"steps": steps_document(&plugin_steps)})).expect("the plugin's project is built");
+    let mut plugin = engine.request_with_progress("contentFill.generate", fill, |_, _, _| {}, &CancelToken::new()).expect("the plugin's fill runs");
+    engine.close().expect("the engine closes");
+    scrub(&mut plugin, &[&plugin_out]);
+    scrub(&mut command_line["result"], &[&cli_out]);
+    assert_eq!(plugin, command_line["result"], "the fill's answers differ");
+    assert_eq!(plugin["frames"], json!(4));
+    assert_eq!(same_files(&plugin_out, &cli_out).expect("the fills' files are the command line's"), 4);
+}
+
+/// A fill writes only inside the container, whether or not the engine keeps a journal: a folder
+/// outside it, one in the bundle the app may only read, one named relative to the process, the one
+/// the command picks for a project with no file (in the system's temporary folder), and a frame that
+/// is a link out of the container are each refused in the confinement's own words, before anything
+/// is listed, started or written.
+#[test]
+fn a_fill_is_refused_any_folder_or_frame_outside_the_container_before_anything_is_written() {
+    let scratch = Scratch::with_bundle().expect("a scratch folder with a bundle");
+    let (bundle, outside) = (scratch.bundle().expect("the bundle").to_path_buf(), scratch.outside().to_path_buf());
+    let victim = outside.join("victim.png");
+    std::fs::write(&victim, b"not the app's").expect("a file outside the container");
+    let linked = scratch.path().join("linked");
+    std::fs::create_dir(&linked).expect("a folder of an earlier fill");
+    std::os::unix::fs::symlink(&victim, linked.join("fill_00000.png")).expect("its first frame made a link out of the container");
+    let shown = |path: &Path| path.display().to_string();
+    let unsaved = std::env::temp_dir().join("effectcraft-fill").join("Bg_Fill_1");
+    let cases = [
+        (Some(shown(&outside.join("fill"))), shown(&outside.join("fill"))),
+        (Some(shown(&bundle.join("fill"))), shown(&bundle.join("fill"))),
+        (Some("fill".to_string()), "fill".to_string()),
+        (None, shown(&unsaved)),
+        (Some(shown(&linked)), shown(&linked.join("fill_00000.png"))),
+    ];
+    let write_roots = [scratch.path().to_path_buf()];
+    let confinement = Confinement::new(&[], &write_roots).expect("the confinement builds");
+    for journal in [true, false] {
+        for (folder, refused_at) in &cases {
+            let app = scratch.app().expect("the app starts");
+            let engine = if journal { Engine::start_in(&scratch.folders, app, GpuChoice::CpuOnly) } else { Engine::start(app, GpuChoice::CpuOnly) }
+                .expect("the engine starts");
+            let mut steps = fill_steps(scratch.path());
+            steps.pop();
+            engine.request("run", json!({"steps": steps_document(&steps)})).expect("the project is built");
+            let mut fill = json!({"layer": 1});
+            if let Some(folder) = folder {
+                fill["outputDir"] = json!(folder);
+            }
+            let refused = engine.request_with_progress("contentFill.generate", fill, |_, _, _| {}, &CancelToken::new());
+            let jobs = engine.request("exec", json!({"command": "jobs.list"})).expect("the jobs list");
+            engine.close().expect("the engine closes");
+            let words = confinement.check(refused_at, Access::Write).expect_err("the confinement refuses it").to_string();
+            assert_eq!(refused, Err(CraftError::io(words)), "journal {journal}, folder {folder:?}");
+            assert_eq!((&jobs["running"], &jobs["finished"]), (&json!([]), &json!([])), "a fill started: {jobs}");
+            assert!(!outside.join("fill").exists() && !bundle.join("fill").exists(), "a folder was made outside the container");
+            assert_eq!(std::fs::read(&victim).expect("the file outside reads"), b"not the app's", "a frame was written through the link");
+            assert_eq!(std::fs::read_dir(&linked).expect("the folder reads").count(), 1, "a frame was written beside the link");
+        }
+    }
+    assert!(!Path::new("fill").exists(), "a frame was written into the process's own folder");
+}
+
 /// Every file in the container, by its path inside it, bar the app's own working folders, which the
 /// engine keeps its settings and caches in: what an export could have left behind.
 pub(super) fn outputs_in(scratch: &Scratch) -> Result<Vec<PathBuf>, String> {
+    contents_in(scratch).map(|(files, _)| files)
+}
+
+/// Every file and every folder in the container, each by its path inside it, bar the app's own
+/// working folders and what they hold: the files, then the folders.
+pub(super) fn contents_in(scratch: &Scratch) -> Result<(Vec<PathBuf>, Vec<PathBuf>), String> {
     let working = [&scratch.folders.config, &scratch.folders.cache, &scratch.folders.models];
-    let mut found = entries_under(scratch.path(), &working)?;
-    found.retain(|path| !scratch.path().join(path).is_dir());
-    Ok(found)
+    let (mut files, mut folders) = (Vec::new(), Vec::new());
+    for path in entries_under(scratch.path(), &working)? {
+        if scratch.path().join(&path).is_dir() {
+            folders.push(path);
+        } else {
+            files.push(path);
+        }
+    }
+    Ok((files, folders))
 }
 
 /// Every file and folder under `root` but those in `skip` and below them, by its path inside `root`,

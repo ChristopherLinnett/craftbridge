@@ -1,5 +1,5 @@
-//! A render the system kills mid-way leaves no partial file once the app starts again, and a render
-//! that finishes keeps its files (plan §16, §19, D-17).
+//! A render or a Content-Aware Fill the system kills mid-way leaves no partial file, and no folder it
+//! made, once the app starts again, and one that finishes keeps its files (plan §16, §19, D-17).
 //!
 //! The export runs in a second process, which is the test binary itself started on one test of its
 //! own, and the parent kills it by its exact process id once the first output file exists. That is
@@ -10,7 +10,7 @@
 use super::super::common::Scratch;
 use super::super::scratch::folders_in;
 use super::super::template;
-use super::outputs_in;
+use super::{contents_in, outputs_in};
 use craftbridge_core::{CancelToken, Engine, GpuChoice};
 use craftbridge_effects::EffectCraftApp;
 use serde_json::{Value, json};
@@ -22,22 +22,29 @@ use std::time::{Duration, Instant};
 /// The method of the exports that need no template.
 const EXPORT: &str = "export";
 
-/// The variable that makes this binary run one export, as the child, instead of the tests: the case
-/// it names is the JSON of [`Case`].
+/// The variable that makes this binary run one export or fill, as the child, instead of the tests: the
+/// case it names is the JSON of [`Case`].
 const CHILD: &str = "CRAFTBRIDGE_EXPORT_TO_KILL";
 
 /// How long the parent waits for the child's first output file before it gives up.
 const PATIENCE: Duration = Duration::from_secs(120);
 
 /// The names of [`cases`], in the order they run.
-const CASES: [&str; 5] = ["single", "sequence", "segmented", "queue", "template"];
+const CASES: [&str; 6] = ["single", "sequence", "segmented", "queue", "template", "fill"];
 
-/// One export: the method that answers it, whether the demo project is opened first, the commands that
-/// set the project up, the request, and the file names that show the export has begun writing and the
-/// number of files it writes when it is left to finish.
+const FILL: &str = "contentFill.generate";
+
+/// The frames of the fill case: a comp of this many tenths of a second at ten frames a second.
+const FILL_FRAMES: u64 = 60;
+
+/// One export, template render or fill: the method that answers it, whether the demo project is opened
+/// first, the commands that set the project up, the request, and the file names that show it has begun
+/// writing and the number of files it writes when it is left to finish.
 struct Case {
     name: &'static str,
+    /// The call with progress the case makes: `export`, `template.render` or `contentFill.generate`.
     method: &'static str,
+    /// Whether the project is the demo project; a fill builds its own small one with `setup`.
     demo: bool,
     setup: Vec<(&'static str, Value)>,
     request: Value,
@@ -45,10 +52,11 @@ struct Case {
     finished: usize,
 }
 
-/// The five kinds of render the journal covers, over the demo project cut to a short, small render
+/// The six kinds of render the journal covers, over the demo project cut to a short, small render
 /// that still takes the child far longer than the parent needs to see its first file: a single file,
 /// an image sequence, a segmented sequence, the whole queue and a template's instance, which sets
-/// its own project up. `dir` is the container.
+/// its own project up; and a Content-Aware Fill of a small composition, whose frames the engine
+/// writes one after another as it synthesises them. `dir` is the container.
 fn cases(dir: &Path) -> Vec<Case> {
     let at = |name: &str| dir.join(name).display().to_string();
     let quarter = json!({"end": 4, "resolution": "quarter"});
@@ -108,6 +116,21 @@ fn cases(dir: &Path) -> Vec<Case> {
             request: json!({"template": at(template::FILE), "values": {"Name": "Sam", "Photo": at(template::REPLACEMENT)}, "output": {"output": at("card.png"), "format": "png"}}),
             begun: "card_".into(),
             finished: template::FRAMES,
+        },
+        Case {
+            name: "fill",
+            method: FILL,
+            demo: false,
+            setup: vec![
+                ("comp.new", json!({"name": "A", "width": 96, "height": 64, "duration": FILL_FRAMES / 10, "frameRate": 10})),
+                ("layer.newSolid", json!({"comp": 1, "name": "Bg"})),
+                ("layer.addMask", json!({"rect": [30.0, 20.0, 20.0, 18.0], "mode": "subtract"})),
+            ],
+            request: json!({"layer": 1, "outputDir": at("made/fill")}),
+            // The first file of any name: a fill writes nothing but the frames it listed, so a file of
+            // another name, which would show before the frame it is written for, is where the kill lands.
+            begun: String::new(),
+            finished: FILL_FRAMES as usize,
         },
     ]
 }
@@ -195,6 +218,7 @@ fn a_killed_render_leaves_no_partial_file_after_a_restart() {
         let kept = scratch.path().join("kept.txt");
         std::fs::write(&kept, b"not an output").expect("a file the export has no part in");
         let before = outputs_in(&scratch).expect("the container reads");
+        let (_, folders_before) = contents_in(&scratch).expect("the container reads");
 
         // Declared after `scratch`, so a failing test kills the child before the scratch folder goes.
         let mut child = spawn_child(&case_json(scratch.path(), &case)).expect("the child starts");
@@ -218,6 +242,8 @@ fn a_killed_render_leaves_no_partial_file_after_a_restart() {
         let recovery = engine.recovery().clone();
         engine.close().expect("the engine closes");
         assert_eq!(outputs_in(&scratch).expect("the container reads"), before, "{}: a restart leaves no partial file: {recovery:?}", case.name);
+        let (_, folders_after) = contents_in(&scratch).expect("the container reads");
+        assert_eq!(folders_after, folders_before, "{}: a restart leaves no folder the export made: {recovery:?}", case.name);
         assert!(kept.is_file(), "{}: a file no export wrote is left alone", case.name);
         assert!(recovery.removed.len() >= partial.len(), "{}: the restart reports each file it deleted: {recovery:?}", case.name);
         assert!(recovery.refused.is_empty() && recovery.failed.is_empty(), "{}: nothing was refused or stuck: {recovery:?}", case.name);

@@ -53,8 +53,9 @@ pub trait CraftApp: Send {
     ///
     /// The list is the engine's pending-export journal: when the app is killed mid-export, the next
     /// start deletes each listed file the export wrote, leaving any it never reached as they were,
-    /// and the engine clears the list when this call returns, whatever its outcome. An engine
-    /// started without folders keeps no journal, and its `list_outputs` lists nothing.
+    /// then removes each folder of those files' paths that was not there when they were listed, once
+    /// it holds nothing; the engine clears the list when this call returns, whatever its outcome. An
+    /// engine started without folders keeps no journal, and its `list_outputs` lists nothing.
     ///
     /// Once `on_progress` has answered `false`, the call answers [`crate::CraftError::Cancelled`]
     /// whatever the implementation returns, an error included: the caller asked to stop and the
