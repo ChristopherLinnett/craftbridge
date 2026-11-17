@@ -1,7 +1,9 @@
-//! A biplanar 4:2:0 picture as a decoder's surface holds it, read into the planar frames FilmCraft's
-//! software decoders produce: tight `Yuv8` planes for 8-bit pictures and `Yuv16` planes with the samples
-//! in the low bits for 10-bit ones. The surface is a luma plane and a plane of interleaved Cb, Cr pairs, a
-//! row each `stride` bytes apart, and 10-bit samples sit in the high bits of 16-bit words.
+//! A 4:2:0 picture as a decoder's surface holds it, read into the planar frames FilmCraft's software
+//! decoders produce: tight `Yuv8` planes for 8-bit pictures and `Yuv16` planes with the samples in the low
+//! bits for 10-bit ones. A biplanar surface is a luma plane and a plane of interleaved Cb, Cr pairs, a row
+//! each `stride` bytes apart, and 10-bit samples sit in the high bits of 16-bit words; Android's
+//! `YUV_420_888` image is a luma plane and a Cb and a Cr plane, whose samples sit a pixel stride apart (one
+//! for planar, two for the semi-planar layout most devices use).
 //!
 //! Safe code, so every target tests it; the decoder that reads a surface into these slices is the
 //! platform module's.
@@ -54,6 +56,7 @@ pub(crate) enum Depth {
     Ten,
 }
 
+#[cfg(any(target_os = "ios", test))]
 impl Depth {
     pub(crate) fn bits(self) -> u32 {
         match self {
@@ -63,13 +66,41 @@ impl Depth {
     }
 }
 
+/// One chroma plane of a `YUV_420_888` image: a sample every `pixel` bytes, a row each `stride` bytes apart.
+#[cfg(any(target_os = "android", test))]
+#[derive(Clone, Copy)]
+pub(crate) struct Strided<'a> {
+    pub(crate) data: &'a [u8],
+    pub(crate) stride: usize,
+    /// Bytes from one sample to the next in a row.
+    pub(crate) pixel: usize,
+}
+
+#[cfg(any(target_os = "android", test))]
+impl Strided<'_> {
+    /// Appends `count` rows of `len` samples to `out`, from the sample at (`x`, `y`) in this plane's own
+    /// samples; `None` unless every one of them lies in the plane and in its own
+    /// row, so a hostile size never reads, or allocates for, more than the plane holds.
+    fn copy(&self, y: usize, x: usize, len: usize, count: usize, out: &mut Vec<u8>) -> Option<()> {
+        let last_sample = x.checked_add(len.checked_sub(1)?)?.checked_mul(self.pixel)?;
+        let last = y.checked_add(count.checked_sub(1)?)?.checked_mul(self.stride)?.checked_add(last_sample)?;
+        if self.pixel == 0 || last_sample >= self.stride || last >= self.data.len() {
+            return None;
+        }
+        let first = x.checked_mul(self.pixel)?;
+        for row in 0..count {
+            let start = y.checked_add(row)?.checked_mul(self.stride)?.checked_add(first)?;
+            out.extend(self.data.get(start..)?.iter().step_by(self.pixel).take(len));
+        }
+        Some(())
+    }
+}
+
 const SHORT: &str = "the decoded picture's planes are smaller than the picture";
 
-/// The picture at `crop` in `luma` and `chroma`, as the planar pixels FilmCraft's software decoder
-/// produces for it: planes of exactly the picture's size (the chroma planes rounded up for an odd one), and
-/// the 10-bit samples shifted down from the high bits. An error when the planes hold less than the
-/// picture, or `crop` starts at an odd sample, which 4:2:0 chroma cannot start at.
-pub(crate) fn to_pixels(luma: Plane<'_>, chroma: Plane<'_>, crop: Crop, depth: Depth) -> Result<PixelData, &'static str> {
+/// The picture's size in chroma samples, rounded up for an odd one; an error for an empty picture, or one
+/// at `crop`'s odd offset, where 4:2:0 chroma cannot start.
+fn chroma_size(crop: Crop) -> Result<(usize, usize), &'static str> {
     let Crop { x, y, width, height } = crop;
     if width == 0 || height == 0 {
         return Err("the decoded picture is empty");
@@ -77,7 +108,46 @@ pub(crate) fn to_pixels(luma: Plane<'_>, chroma: Plane<'_>, crop: Crop, depth: D
     if x % 2 != 0 || y % 2 != 0 {
         return Err("the decoded picture starts at an odd sample");
     }
-    let (chroma_width, chroma_height) = (width.div_ceil(2), height.div_ceil(2));
+    Ok((width.div_ceil(2), height.div_ceil(2)))
+}
+
+/// 8-bit planar pixels around the three planes.
+fn yuv8(luma: Vec<u8>, cb: Vec<u8>, cr: Vec<u8>) -> PixelData {
+    PixelData::Yuv8 { planes: [Arc::new(luma), Arc::new(cb), Arc::new(cr)], chroma: Chroma::C420, alpha: None }
+}
+
+/// The luma plane's rows at `crop` as one tight plane, every row checked to lie in the plane before
+/// anything is allocated for it.
+fn luma_8(luma: Plane<'_>, crop: Crop) -> Result<Vec<u8>, &'static str> {
+    let rows = luma.rows(crop.y, crop.x, crop.width, crop.height).ok_or(SHORT)?;
+    let mut plane = pool::take_u8(crop.width.saturating_mul(crop.height));
+    rows.for_each(|row| plane.extend_from_slice(row));
+    Ok(plane)
+}
+
+/// The picture at `crop` in `luma` and the two chroma planes of a `YUV_420_888` image, as the planar pixels
+/// FilmCraft's software decoder produces for an 8-bit picture. The luma samples sit one byte apart. An error
+/// when the planes hold less than the picture, or `crop` starts at an odd sample.
+#[cfg(any(target_os = "android", test))]
+pub(crate) fn planar_to_pixels(luma: Plane<'_>, cb: Strided<'_>, cr: Strided<'_>, crop: Crop) -> Result<PixelData, &'static str> {
+    let (chroma_width, chroma_height) = chroma_size(crop)?;
+    let luma_plane = luma_8(luma, crop)?;
+    let samples = chroma_width.saturating_mul(chroma_height);
+    let (mut cb_plane, mut cr_plane) = (pool::take_u8(samples), pool::take_u8(samples));
+    let (x, y) = (crop.x / 2, crop.y / 2);
+    cb.copy(y, x, chroma_width, chroma_height, &mut cb_plane).ok_or(SHORT)?;
+    cr.copy(y, x, chroma_width, chroma_height, &mut cr_plane).ok_or(SHORT)?;
+    Ok(yuv8(luma_plane, cb_plane, cr_plane))
+}
+
+/// The picture at `crop` in `luma` and `chroma`, as the planar pixels FilmCraft's software decoder
+/// produces for it: planes of exactly the picture's size (the chroma planes rounded up for an odd one), and
+/// the 10-bit samples shifted down from the high bits. An error when the planes hold less than the
+/// picture, or `crop` starts at an odd sample, which 4:2:0 chroma cannot start at.
+#[cfg(any(target_os = "ios", test))]
+pub(crate) fn to_pixels(luma: Plane<'_>, chroma: Plane<'_>, crop: Crop, depth: Depth) -> Result<PixelData, &'static str> {
+    let Crop { x, y, width, height } = crop;
+    let (chroma_width, chroma_height) = chroma_size(crop)?;
     let bytes = match depth {
         Depth::Eight => 1,
         Depth::Ten => 2,
@@ -85,21 +155,20 @@ pub(crate) fn to_pixels(luma: Plane<'_>, chroma: Plane<'_>, crop: Crop, depth: D
     // The bytes of `samples` samples of `parts` values each: a chroma sample is a Cb, Cr pair.
     let scale = |samples: usize, parts: usize| samples.checked_mul(parts).and_then(|values| values.checked_mul(bytes)).ok_or(SHORT);
     // Every row is checked to lie in its plane before anything is allocated for it.
-    let luma_rows = luma.rows(y, scale(x, 1)?, scale(width, 1)?, height).ok_or(SHORT)?;
     let chroma_rows = chroma.rows(y / 2, scale(x / 2, 2)?, scale(chroma_width, 2)?, chroma_height).ok_or(SHORT)?;
     let samples = chroma_width.saturating_mul(chroma_height);
     Ok(match depth {
         Depth::Eight => {
-            let mut luma_plane = pool::take_u8(width.saturating_mul(height));
-            luma_rows.for_each(|row| luma_plane.extend_from_slice(row));
+            let luma_plane = luma_8(luma, crop)?;
             let (mut cb, mut cr) = (pool::take_u8(samples), pool::take_u8(samples));
             for &[b, r] in chroma_rows.flat_map(|row| row.as_chunks::<2>().0) {
                 cb.push(b);
                 cr.push(r);
             }
-            PixelData::Yuv8 { planes: [Arc::new(luma_plane), Arc::new(cb), Arc::new(cr)], chroma: Chroma::C420, alpha: None }
+            yuv8(luma_plane, cb, cr)
         }
         Depth::Ten => {
+            let luma_rows = luma.rows(y, scale(x, 1)?, scale(width, 1)?, height).ok_or(SHORT)?;
             let shift = 16 - depth.bits();
             let mut luma_plane = pool::take_u16(width.saturating_mul(height));
             luma_plane.extend(luma_rows.flat_map(|row| row.as_chunks::<2>().0).map(|&word| u16::from_ne_bytes(word) >> shift));
@@ -220,5 +289,66 @@ mod tests {
         let short = plane(&chroma.data[..8], 8);
         assert!(to_pixels(luma, short, whole, Depth::Eight).is_err(), "a chroma plane shorter than the picture");
         assert!(plane(luma.data, 0).rows(0, 0, 0, 1).is_none(), "a surface that reports no stride");
+    }
+
+    /// The chroma of `surface(stride, rows)` as a `YUV_420_888` image holds it: a Cb plane and a Cr plane,
+    /// each sample `pixel` bytes after the last. With `pixel` 2 the two planes share the surface's interleaved
+    /// bytes, the Cr plane starting one byte after the Cb plane, as a semi-planar image's do; with `pixel` 1 they
+    /// are separate planes of half the stride.
+    fn chroma_planes(chroma: &[u8], stride: usize, pixel: usize) -> (Vec<u8>, Vec<u8>, usize) {
+        if pixel == 2 {
+            (chroma.to_vec(), chroma.get(1..).unwrap().to_vec(), stride)
+        } else {
+            let pick = |from: usize| chroma.iter().skip(from).step_by(2).copied().collect::<Vec<u8>>();
+            (pick(0), pick(1), stride / 2)
+        }
+    }
+
+    #[test]
+    fn a_yuv_420_888_image_in_either_layout_gives_the_pixels_a_biplanar_surface_of_it_does() {
+        let (luma, chroma) = surface(10, 6);
+        for crop in [Crop { x: 2, y: 2, width: 4, height: 4 }, Crop { x: 0, y: 0, width: 5, height: 3 }, Crop { x: 0, y: 0, width: 8, height: 6 }] {
+            let wanted = to_pixels(plane(&luma, 10), plane(&chroma, 10), crop, Depth::Eight).unwrap();
+            for pixel in [1, 2] {
+                let (cb, cr, stride) = chroma_planes(&chroma, 10, pixel);
+                let (cb, cr) = (Strided { data: &cb, stride, pixel }, Strided { data: &cr, stride, pixel });
+                let planar = planar_to_pixels(plane(&luma, 10), cb, cr, crop).unwrap();
+                assert_eq!(yuv8(&planar), yuv8(&wanted), "{crop:?} with a pixel stride of {pixel}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_yuv_420_888_image_smaller_than_the_picture_is_an_error_never_a_panic() {
+        let (luma, chroma) = surface(8, 8);
+        let (cb, cr, stride) = chroma_planes(&chroma, 8, 2);
+        let planes = |cb: &Strided<'_>, cr: &Strided<'_>, crop: Crop| planar_to_pixels(plane(&luma, 8), *cb, *cr, crop);
+        let (cb, cr) = (Strided { data: &cb, stride, pixel: 2 }, Strided { data: &cr, stride, pixel: 2 });
+        let whole = Crop { x: 0, y: 0, width: 8, height: 8 };
+        assert!(planes(&cb, &cr, whole).is_ok());
+        for crop in [
+            Crop { width: 9, ..whole },
+            Crop { height: 9, ..whole },
+            Crop { x: 2, ..whole },
+            Crop { y: 2, ..whole },
+            Crop { x: 1, width: 4, ..whole },
+            Crop { y: 1, height: 4, ..whole },
+            Crop { width: 0, ..whole },
+            Crop { height: 0, ..whole },
+            Crop { x: usize::MAX - 1, ..whole },
+            Crop { width: usize::MAX, ..whole },
+            Crop { height: usize::MAX, ..whole },
+        ] {
+            assert!(planes(&cb, &cr, crop).is_err(), "{crop:?}");
+        }
+        // A chroma plane that stops a sample short, a row that does not hold the samples, a plane that has no
+        // pixel stride and one that has no rows.
+        let short = Strided { data: cb.data.get(..cb.data.len() - 2).unwrap(), ..cb };
+        assert!(planes(&short, &cr, whole).is_err(), "a Cb plane a sample short");
+        assert!(planes(&cb, &Strided { stride: 6, ..cr }, whole).is_err(), "a row shorter than its samples");
+        assert!(planes(&Strided { pixel: 0, ..cb }, &cr, whole).is_err(), "a pixel stride of nothing");
+        assert!(planes(&cb, &Strided { stride: 0, ..cr }, whole).is_err(), "a row stride of nothing");
+        assert!(planar_to_pixels(plane(&luma, 8), cb, cr, Crop { x: 0, y: 0, width: 8, height: 8 }).is_ok());
+        assert!(planar_to_pixels(plane(&luma, 0), cb, cr, whole).is_err(), "a luma plane with no stride");
     }
 }

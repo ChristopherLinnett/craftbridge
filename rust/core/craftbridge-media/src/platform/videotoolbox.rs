@@ -4,7 +4,7 @@
 //! The session requires a hardware decoder, so a device or stream without one fails to start and the
 //! factory declines it (the iOS Simulator has none). Samples go in one at a time and each is decoded before
 //! the call returns, which keeps the pictures VideoToolbox emits, in decoding order, inside the call that fed
-//! the sample: [`Sequence`] then puts them in presentation order, as FilmCraft's software decoders emit them,
+//! the sample: [`crate::order::Sequence`] then puts them in presentation order, as FilmCraft's software decoders emit them,
 //! and each picture is read out of its surface into the planar layout those decoders produce
 //! ([`biplanar`]). Every status VideoToolbox, CoreMedia and CoreVideo return is checked and becomes the
 //! decoder's error, which [`crate::Fallback`] answers by switching to the software decoder.
@@ -24,7 +24,7 @@ use std::ptr::NonNull;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use filmcraft_codecs::hw::{NalCodec, NalStreamInfo, StreamInfo};
-use filmcraft_codecs::{CodecError, DecodedFrame, Result, VideoDecoder};
+use filmcraft_codecs::{CodecError, DecodedFrame, Result};
 use filmcraft_frame::VideoFrame;
 use filmcraft_isobmff::{CodecConfig, SampleEntry};
 use objc2_core_foundation::{CFBoolean, CFData, CFDictionary, CFNumber, CFRetained, CFString, CFType};
@@ -45,10 +45,13 @@ use objc2_video_toolbox::{
 
 use crate::biplanar::{self, Plane};
 use crate::layout::{Codec, Layout};
-use crate::order::{RawDecoder, Sequence};
+use crate::order::{HardwareDecoder, RawDecoder};
 
 /// A failed call, with what failed.
 type Failure = String;
+
+/// The backend's name, which [`crate::register`] reports and every decoder's name starts with.
+pub(crate) const BACKEND: &str = "VideoToolbox";
 
 /// `Ok` when a CoreMedia, CoreVideo or VideoToolbox `status` says success.
 fn check(status: i32, call: &str) -> std::result::Result<(), Failure> {
@@ -122,11 +125,7 @@ fn from_av1c(entry: &SampleEntry, layout: &Layout) -> std::result::Result<(*cons
     let CodecConfig::Av1(config) = &entry.codec else {
         return Err("the sample entry has no av1C".into());
     };
-    let (width, height) = layout.size();
-    let (width, height) = (i32::try_from(width), i32::try_from(height));
-    let (Ok(width), Ok(height)) = (width, height) else {
-        return Err("the picture is too large".into());
-    };
+    let (width, height) = layout.size_i32().ok_or("the picture is too large")?;
     let record = CFData::from_bytes(&config.to_bytes());
     let atom = CFString::from_static_str("av1C");
     let atoms = CFDictionary::<CFString, CFData>::from_slices(&[&atom], &[&record]);
@@ -348,8 +347,8 @@ impl Drop for Session {
     }
 }
 
-/// What a VideoToolbox decoder feeds [`Sequence`]: the session, made again after a seek.
-struct RawSession {
+/// What a VideoToolbox decoder feeds [`crate::order::Sequence`]: the session, made again after a seek.
+pub(crate) struct RawSession {
     layout: Layout,
     format: CFRetained<CMFormatDescription>,
     /// `None` until the first sample of a run: each run, after a seek, gets a session of its own, so no
@@ -382,50 +381,19 @@ impl RawDecoder<DecodedFrame> for RawSession {
     }
 }
 
-/// The VideoToolbox decoder of one `avcC`, `hvcC` or `av1C` stream. It is only ever used inside
-/// [`crate::Fallback`], which answers which samples are random-access or disposable from the stream, as the
-/// software decoder does, so this decoder answers neither.
-pub(crate) struct VtDecoder {
-    sequence: Sequence<RawSession, DecodedFrame>,
-    name: &'static str,
-}
+/// The VideoToolbox decoder of one `avcC`, `hvcC` or `av1C` stream.
+pub(crate) type VtDecoder = HardwareDecoder<RawSession>;
 
-impl VtDecoder {
-    /// A decoder for the stream `entry` describes, whose parsed record is `stream`. It starts a session now,
-    /// so a stream or device without a hardware decoder for it is refused here.
-    pub(crate) fn new(entry: &SampleEntry, stream: &StreamInfo) -> Result<Self> {
-        let layout = Layout::for_stream(stream).map_err(CodecError::Unsupported)?;
-        if !hardware_available(layout.codec) {
-            return Err(CodecError::Unsupported("this device has no hardware decoder for the stream's codec".into()));
-        }
-        let format = format_description(entry, stream, &layout).map_err(CodecError::Unsupported)?;
-        let session = Session::new(&format, &layout).map_err(CodecError::Unsupported)?;
-        let name = match layout.codec {
-            Codec::H264 => "VideoToolbox H.264",
-            Codec::Hevc => "VideoToolbox HEVC",
-            Codec::Av1 => "VideoToolbox AV1",
-        };
-        let depth = layout.reorder;
-        let raw = RawSession { layout, format, session: Some(session) };
-        Ok(Self { sequence: Sequence::new(raw, stream.clone(), depth), name })
+/// A decoder for the stream `entry` describes, whose parsed record is `stream`. It starts a session now, so a
+/// stream or device without a hardware decoder for it is refused here.
+pub(crate) fn decoder(entry: &SampleEntry, stream: &StreamInfo) -> Result<VtDecoder> {
+    let layout = Layout::for_stream(stream).map_err(CodecError::Unsupported)?;
+    if !hardware_available(layout.codec) {
+        return Err(CodecError::Unsupported("this device has no hardware decoder for the stream's codec".into()));
     }
-}
-
-impl VideoDecoder for VtDecoder {
-    fn decode(&mut self, sample: &[u8], pts: i64) -> Result<Vec<DecodedFrame>> {
-        self.sequence.decode(sample, pts).map_err(CodecError::Decode)
-    }
-
-    fn flush(&mut self) -> Vec<DecodedFrame> {
-        // Each sample's picture came out inside its own call, so only the reorder buffer holds any.
-        self.sequence.flush()
-    }
-
-    fn reset(&mut self) {
-        self.sequence.reset();
-    }
-
-    fn name(&self) -> &str {
-        self.name
-    }
+    let format = format_description(entry, stream, &layout).map_err(CodecError::Unsupported)?;
+    let session = Session::new(&format, &layout).map_err(CodecError::Unsupported)?;
+    let (depth, codec) = (layout.reorder, layout.codec);
+    let raw = RawSession { layout, format, session: Some(session) };
+    Ok(HardwareDecoder::new(raw, stream.clone(), depth, BACKEND, codec))
 }

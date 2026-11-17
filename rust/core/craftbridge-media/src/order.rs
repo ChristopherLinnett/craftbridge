@@ -9,6 +9,9 @@
 //! Safe code, so every target tests it.
 
 use filmcraft_codecs::hw::{NalCodec, StreamInfo};
+use filmcraft_codecs::{CodecError, DecodedFrame, VideoDecoder};
+
+use crate::layout::Codec;
 
 /// Holds pictures until no picture decoded later can come before them in presentation order.
 pub(crate) struct Reorder<T> {
@@ -97,6 +100,13 @@ pub(crate) trait RawDecoder<T> {
 
     /// The next sample starts a new decoding run, which refers to no picture an earlier one decoded.
     fn restart(&mut self);
+
+    /// The end of the stream: the pictures the decoder still holds, each with its presentation time, in the
+    /// order it outputs them. A decoder that outputs every picture inside the call that fed its sample holds
+    /// none.
+    fn drain(&mut self) -> Vec<(i64, T)> {
+        Vec::new()
+    }
 }
 
 /// A platform's raw decoder with the rules every hardware decoder shares: the RASL pictures of a run
@@ -127,9 +137,13 @@ impl<R: RawDecoder<T>, T> Sequence<R, T> {
         })
     }
 
-    /// The pictures still held, earliest first.
+    /// The pictures still held, earliest first: the raw decoder's last ones go through the reorder buffer
+    /// with the rest, so a picture a decoder held back comes out in presentation order among them.
     pub(crate) fn flush(&mut self) -> Vec<T> {
-        self.order.drain()
+        let (raw, order) = (&mut self.raw, &mut self.order);
+        let mut pictures: Vec<T> = raw.drain().into_iter().flat_map(|(pts, picture)| order.push(pts, picture)).collect();
+        pictures.extend(order.drain());
+        pictures
     }
 
     /// A seek: nothing decoded so far is referred to again.
@@ -146,6 +160,42 @@ impl<R: RawDecoder<T>, T> Sequence<R, T> {
             StreamInfo::Nal(info) if info.codec == NalCodec::Hevc => info.nal_types(sample),
             _ => Vec::new(),
         }
+    }
+}
+
+/// A hardware decoder of one stream: a platform's raw decoder behind [`Sequence`], answering FilmCraft's
+/// [`VideoDecoder`]. It is only ever used inside [`crate::Fallback`], which answers which samples are
+/// random-access or disposable from the stream, as the software decoder does, so this decoder answers
+/// neither.
+pub(crate) struct HardwareDecoder<R> {
+    sequence: Sequence<R, DecodedFrame>,
+    /// The backend's name, then the codec's, as FilmCraft's diagnostics show it.
+    name: String,
+}
+
+impl<R: RawDecoder<DecodedFrame>> HardwareDecoder<R> {
+    /// `depth` is the stream's reorder depth as the raw decoder leaves it; `backend` is the platform's
+    /// decoder and `codec` the stream's, which together name the decoder.
+    pub(crate) fn new(raw: R, stream: StreamInfo, depth: usize, backend: &str, codec: Codec) -> Self {
+        Self { sequence: Sequence::new(raw, stream, depth), name: format!("{backend} {}", codec.name()) }
+    }
+}
+
+impl<R: RawDecoder<DecodedFrame> + Send> VideoDecoder for HardwareDecoder<R> {
+    fn decode(&mut self, sample: &[u8], pts: i64) -> filmcraft_codecs::Result<Vec<DecodedFrame>> {
+        self.sequence.decode(sample, pts).map_err(CodecError::Decode)
+    }
+
+    fn flush(&mut self) -> Vec<DecodedFrame> {
+        self.sequence.flush()
+    }
+
+    fn reset(&mut self) {
+        self.sequence.reset();
+    }
+
+    fn name(&self) -> &str {
+        &self.name
     }
 }
 
@@ -257,12 +307,15 @@ mod tests {
     }
 
     /// A raw decoder that records what it is fed and fails on the samples it is told to; each sample's
-    /// picture is its own last byte, at its presentation time.
+    /// picture is its own last byte, at its presentation time. One that `holds` keeps every picture until it
+    /// is drained, as a decoder that outputs on its own schedule does.
     #[derive(Default)]
     struct Fake {
         fed: Vec<u8>,
         restarts: usize,
         failing: bool,
+        holds: bool,
+        held: Vec<(i64, u8)>,
     }
 
     impl RawDecoder<u8> for Fake {
@@ -272,11 +325,19 @@ mod tests {
             }
             let marker = sample.last().copied().unwrap_or_default();
             self.fed.push(marker);
+            if self.holds {
+                self.held.push((pts, marker));
+                return Ok(Vec::new());
+            }
             Ok(vec![(pts, marker)])
         }
 
         fn restart(&mut self) {
             self.restarts += 1;
+        }
+
+        fn drain(&mut self) -> Vec<(i64, u8)> {
+            std::mem::take(&mut self.held)
         }
     }
 
@@ -338,5 +399,84 @@ mod tests {
         // neither, so none is left out.
         sequence.decode(&[0, 0, 0, 3, 21, 1, 1], 0).unwrap();
         assert_eq!(sequence.decode(&[0, 0, 0, 3, 8, 1, 2], 1), Ok(vec![2]));
+    }
+
+    #[test]
+    fn a_sequence_flush_puts_the_pictures_the_raw_decoder_held_in_presentation_order_with_the_ones_it_holds() {
+        // A decoder that outputs only when drained, for a stream with one reordered picture.
+        let mut sequence = hevc(1);
+        sequence.raw.holds = true;
+        assert_eq!(sequence.decode(&hevc_sample(19, 10), 0), Ok(Vec::new()));
+        assert_eq!(sequence.decode(&hevc_sample(1, 30), 3), Ok(Vec::new()));
+        assert_eq!(sequence.decode(&hevc_sample(1, 20), 1), Ok(Vec::new()));
+        assert_eq!(sequence.flush(), vec![10, 20, 30], "each picture once, earliest first, those due before the buffer's own");
+        assert_eq!(sequence.flush(), Vec::<u8>::new(), "nothing is held after it");
+    }
+
+    #[test]
+    fn a_raw_decoder_that_holds_nothing_drains_nothing() {
+        struct Plain;
+        impl RawDecoder<u8> for Plain {
+            fn feed(&mut self, _sample: &[u8], pts: i64) -> Result<Vec<(i64, u8)>, String> {
+                Ok(vec![(pts, 1)])
+            }
+
+            fn restart(&mut self) {}
+        }
+        assert_eq!(Plain.drain(), Vec::new());
+    }
+
+    /// A raw decoder of pictures that carry only their presentation time, which fails while `failing`.
+    #[derive(Default)]
+    struct Pictures {
+        failing: bool,
+        restarts: usize,
+        held: Vec<i64>,
+    }
+
+    impl RawDecoder<DecodedFrame> for Pictures {
+        fn feed(&mut self, _sample: &[u8], pts: i64) -> Result<Vec<(i64, DecodedFrame)>, String> {
+            if self.failing {
+                return Err("the session failed".into());
+            }
+            self.held.push(pts);
+            Ok(Vec::new())
+        }
+
+        fn restart(&mut self) {
+            self.restarts += 1;
+        }
+
+        fn drain(&mut self) -> Vec<(i64, DecodedFrame)> {
+            std::mem::take(&mut self.held).into_iter().map(|pts| (pts, picture(pts))).collect()
+        }
+    }
+
+    fn picture(pts: i64) -> DecodedFrame {
+        let frame = filmcraft_frame::VideoFrame {
+            width: 1,
+            height: 1,
+            data: filmcraft_frame::PixelData::Rgba8(Default::default()),
+            color: filmcraft_color::ColorInfo::REC709,
+            par: (1, 1),
+            pts: Default::default(),
+        };
+        DecodedFrame { pts, frame, draft: false }
+    }
+
+    #[test]
+    fn a_hardware_decoder_answers_filmcrafts_decoder_trait_from_its_sequence() {
+        let mut info = NalStreamInfo::from_entry(&avc_entry()).unwrap().unwrap();
+        info.codec = NalCodec::H264;
+        let mut decoder = HardwareDecoder::new(Pictures::default(), StreamInfo::Nal(info), 2, "Backend", Codec::Hevc);
+        assert_eq!(decoder.name(), "Backend HEVC", "the backend's name, then the codec's");
+        assert!(decoder.decode(&[0, 0, 0, 1, 1], 7).unwrap().is_empty());
+        assert!(decoder.decode(&[0, 0, 0, 1, 1], 5).unwrap().is_empty());
+        assert_eq!(decoder.flush().iter().map(|picture| picture.pts).collect::<Vec<_>>(), [5, 7], "what the raw decoder held, through the reorder buffer");
+        decoder.sequence.raw.failing = true;
+        assert!(matches!(decoder.decode(&[0, 0, 0, 1, 1], 9), Err(CodecError::Decode(message)) if message == "the session failed"));
+        decoder.reset();
+        assert_eq!(decoder.sequence.raw.restarts, 1, "a seek restarts the raw decoder");
+        assert!(!decoder.thread_limited() && decoder.is_random_access(&[]).is_none(), "the questions it leaves to the fallback");
     }
 }

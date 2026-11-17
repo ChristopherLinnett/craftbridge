@@ -75,6 +75,11 @@ objc2-core-media = { version = "0.3.2", default-features = false }
 objc2-core-video = { version = "0.3.2", default-features = false }
 objc2-video-toolbox = { version = "0.3.2", default-features = false }
 
+# Android's official NDK bindings (rust-mobile/ndk), for the Android hardware decoder in craftbridge-media
+# (plan §18): MediaCodec, AImageReader and their formats. The crate turns on only the media feature and the
+# API level the SDK's minSdk names.
+ndk = { version = "0.9", default-features = false }
+
 # One definition for every crate: each manifest says `[lints] workspace = true`, and
 # `cargo xtask rules` fails if one does not or if this table is weakened.
 [workspace.lints.rust]

@@ -1,13 +1,16 @@
 //! What a hardware decoder needs to know about a stream to set itself up, and what every picture it
-//! returns carries: the surface format to ask for, the part of the surface that is the picture, and the
-//! colour and pixel aspect FilmCraft's software decoder reports for the same stream. Streams the hardware
+//! returns carries: the surface format to ask for (VideoToolbox's; MediaCodec's is always `YUV_420_888`),
+//! the part of the surface that is the picture, and the colour and pixel aspect FilmCraft's software
+//! decoder reports for the same stream. Streams the hardware
 //! decoders here do not take (interlaced, 4:2:2 or 4:4:4, other bit depths) are refused up front, so they
 //! go to the software decoder before a session is made.
 //!
 //! Safe code, so every target tests it.
 
 use filmcraft_codecs::hw::{FrameCodec, FrameStreamInfo, NalCodec, NalStreamInfo, StreamInfo};
-use filmcraft_color::{ColorInfo, Range};
+use filmcraft_color::ColorInfo;
+#[cfg(any(target_os = "ios", test))]
+use filmcraft_color::Range;
 use filmcraft_frame::{PixelData, VideoFrame};
 
 use crate::biplanar::{Crop, Depth};
@@ -30,7 +33,17 @@ pub(crate) enum Codec {
 }
 
 impl Codec {
+    /// The codec as every hardware decoder's name gives it, after its backend's.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::H264 => "H.264",
+            Self::Hevc => "HEVC",
+            Self::Av1 => "AV1",
+        }
+    }
+
     /// The four-character code CoreMedia names the codec by.
+    #[cfg(any(target_os = "ios", test))]
     pub(crate) fn fourcc(self) -> u32 {
         u32::from_be_bytes(match self {
             Self::H264 => *b"avc1",
@@ -40,6 +53,7 @@ impl Codec {
     }
 }
 
+#[cfg(any(target_os = "ios", test))]
 /// A surface format: biplanar 4:2:0, 8-bit or 10-bit, video or full range. The 10-bit formats keep each
 /// sample in the high bits of a 16-bit word.
 fn pixel_format(depth: Depth, full_range: bool) -> u32 {
@@ -58,12 +72,15 @@ pub(crate) struct Layout {
     pub(crate) depth: Depth,
     /// The surface format the decoder is asked to produce: the stream's own range, so no sample is rescaled
     /// on the way out.
+    #[cfg(any(target_os = "ios", test))]
     pub(crate) pixel_format: u32,
     /// The decoded (coded) size in luma samples.
+    #[cfg(any(target_os = "ios", test))]
     coded: (usize, usize),
     /// The output rectangle in luma samples.
     crop: Crop,
     /// Pictures that may precede a picture in decoding order and follow it in output order.
+    #[cfg(any(target_os = "ios", test))]
     pub(crate) reorder: usize,
     color: ColorInfo,
     par: (u32, u32),
@@ -109,9 +126,12 @@ impl Layout {
         Ok(Self {
             codec,
             depth,
+            #[cfg(any(target_os = "ios", test))]
             pixel_format: pixel_format(depth, info.color.range == Range::Full),
+            #[cfg(any(target_os = "ios", test))]
             coded: (coded_width, coded_height),
             crop: Crop { x, y, width, height },
+            #[cfg(any(target_os = "ios", test))]
             reorder: info.reorder,
             color: info.color,
             par: info.par,
@@ -135,10 +155,13 @@ impl Layout {
         Ok(Self {
             codec: Codec::Av1,
             depth,
+            #[cfg(any(target_os = "ios", test))]
             pixel_format: pixel_format(depth, color.range == Range::Full),
+            #[cfg(any(target_os = "ios", test))]
             coded: (width, height),
             crop: Crop { x: 0, y: 0, width, height },
             // A temporal unit's one shown picture comes out in presentation order.
+            #[cfg(any(target_os = "ios", test))]
             reorder: 0,
             color,
             par: (1, 1),
@@ -147,6 +170,7 @@ impl Layout {
 
     /// Where the picture is in a surface of `width` x `height` luma samples: a surface of the picture's own
     /// size holds just it, one of the coded size holds it at its crop. Any other size is not this stream's.
+    #[cfg(any(target_os = "ios", test))]
     pub(crate) fn crop_in(&self, width: usize, height: usize) -> Option<Crop> {
         if (width, height) == (self.crop.width, self.crop.height) {
             Some(Crop { x: 0, y: 0, ..self.crop })
@@ -158,8 +182,15 @@ impl Layout {
     }
 
     /// The picture's size in luma samples.
+    #[cfg(any(target_os = "android", test))]
     pub(crate) fn size(&self) -> (usize, usize) {
         (self.crop.width, self.crop.height)
+    }
+
+    /// The picture's size as the signed integers the platforms' frameworks take; `None` when a side does not
+    /// fit one, which a picture bounded by [`MAX_SIDE`] never is.
+    pub(crate) fn size_i32(&self) -> Option<(i32, i32)> {
+        Some((i32::try_from(self.crop.width).ok()?, i32::try_from(self.crop.height).ok()?))
     }
 
     /// The frame around `pixels` of the picture at `crop`, as the software decoder makes it: colour and pixel
@@ -208,6 +239,11 @@ mod tests {
     #[test]
     fn each_codec_is_named_by_the_four_characters_coremedia_knows_it_by() {
         assert_eq!([Codec::H264, Codec::Hevc, Codec::Av1].map(Codec::fourcc), [0x61766331, 0x68766331, 0x61763031]);
+    }
+
+    #[test]
+    fn each_codec_has_the_name_every_hardware_decoders_name_gives_it() {
+        assert_eq!([Codec::H264, Codec::Hevc, Codec::Av1].map(Codec::name), ["H.264", "HEVC", "AV1"]);
     }
 
     #[test]
@@ -286,6 +322,17 @@ mod tests {
         let taken = layout(offset).unwrap();
         assert_eq!(taken.crop_in(32, 32), Some(Crop { x: 0, y: 0, width: 32, height: 32 }));
         assert_eq!(taken.crop_in(64, 64), Some(Crop { x: 8, y: 4, width: 32, height: 32 }));
+    }
+
+    #[test]
+    fn a_pictures_size_is_given_as_the_signed_integers_the_frameworks_take_when_it_fits_them() {
+        let mut taken = layout(nal()).unwrap();
+        assert_eq!(taken.size_i32(), Some((nal().crop.2 as i32, nal().crop.3 as i32)));
+        taken.crop.width = i32::MAX as usize + 1;
+        assert_eq!(taken.size_i32(), None);
+        taken.crop.width = 1;
+        taken.crop.height = usize::MAX;
+        assert_eq!(taken.size_i32(), None);
     }
 
     #[test]
