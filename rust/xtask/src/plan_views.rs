@@ -336,7 +336,7 @@ mod tests {
     /// of them would show itself: the same plan, bytes apart.
     #[test]
     fn the_rebuild_reads_nothing_of_the_machine() {
-        crate::scratch::rerun(
+        craftbridge_process::rerun(
             "plan_views::tests::the_plan_rebuilt_on_another_machine",
             &[
                 ("TZ", OsStr::new("Pacific/Kiritimati")),
@@ -345,7 +345,8 @@ mod tests {
                 ("NODE_OPTIONS", OsStr::new(ANOTHER_MACHINE)),
             ],
             "rebuilt with another clock, zone, language and listing order, the plan did not match",
-        );
+        )
+        .unwrap();
     }
 
     /// The same check as `a_rebuild_from_the_master_matches_the_plan`, run only by the child above: a test
@@ -459,11 +460,12 @@ mod tests {
         let cache = dependencies().join(".cache");
         let (running, held) = claim_scratch(&cache).unwrap();
         let note = Scratch::new("plan-views-left-at");
-        crate::scratch::rerun(
+        craftbridge_process::rerun(
             "plan_views::tests::a_check_stops_before_removing_its_scratch",
             &[(LEFT_AT, note.0.join("path").as_os_str())],
             "the stopping check did not run",
-        );
+        )
+        .unwrap();
         let stopped = PathBuf::from(fs::read_to_string(note.0.join("path")).unwrap());
         let unheld = crate::scratch::create_in(&cache, SCRATCH_TAG).unwrap();
         let (next, own) = claim_scratch(&cache).unwrap();

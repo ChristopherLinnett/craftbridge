@@ -622,11 +622,12 @@ mod tests {
             format!("deps/libnever_crash_lints-0123456789abcdef.rmeta: src/lib.rs {} {}\n", in_the_hook_s_folder.display(), outside_any_build_folder.display()),
         );
         scratch.write("deps/libnever_crash_lints-0123456789abcdef.rmeta", "");
-        crate::scratch::rerun(
+        craftbridge_process::rerun(
             "compiled::tests::child_judges_the_lint_library_s_run_in_the_build_folder_cargo_names",
             &[("XTASK_COMPILED_SCRATCH", scratch.0.as_os_str()), ("CARGO_TARGET_DIR", scratch.0.join("pushed/target-7").as_os_str())],
             "the run in the build folder cargo names did not accept the library there and refuse the one outside",
-        );
+        )
+        .unwrap();
     }
 
     /// The lint library is a workspace of its own the gate compiles too, so a unit of it is judged like a

@@ -6,6 +6,7 @@ Every artifact (the Rust crates, the Swift package and both Maven artifacts) sha
 
 ### Added
 
+- `rerun` in `craftbridge-process`: it runs one ignored test of the current test binary again in a child started with a changed environment — the helper weighs the child's stdout and stderr itself, and refuses a run whose name matches no test — so a test can meet a variable its own process must not carry while other tests run beside it. xtask's rerunning tests take it from there, and `craftbridge-core`'s tests use it to prove `WGPU_BACKEND=gl` cannot switch the backend the core asks, which only a child started with the variable set can show.
 - `craftbridge-core`'s preview surface: it configures the app's surface from the core's device (the platform's non-sRGB format, `Fifo` with one frame in flight, and `PostMultiplied` alpha where the surface offers it, else an opaque picture, as on Android), draws a display frame into it aspect-fit between black bars, configures it again on a resize, and answers a `Gpu` error, never a panic, when the surface is outdated or lost or the device refuses a frame.
 - The gate reads Rust with `syn`: `unsafe` and lint attributes are found as the syntax tree holds them (a macro's body too), an unparsable file is reported by name, and `allow(warnings)`, an allowed default clippy group and `rustfmt::skip` on a crate or module fail `rules: lints`; the hand-written source stripper is gone.
 - The repository: its rules in `AGENTS.md`, the licences, and the plan of record in `plan/`.

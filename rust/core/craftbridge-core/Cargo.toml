@@ -29,5 +29,11 @@ oneshot.workspace = true
 objc2-core-foundation = { workspace = true, features = ["std", "CFArray", "CFString", "CFURL"] }
 objc2-core-text = { workspace = true, features = ["std", "CTFontCollection", "CTFontDescriptor", "CTFontManager"] }
 
+# The core's tests rerun an ignored child test in a fresh process whose environment differs, which is
+# the only way to prove the environment switches nothing the core chooses. The support crate is host
+# code, and a core crate may take it from its tests only (AGENTS.md §2).
+[dev-dependencies]
+craftbridge-process.workspace = true
+
 [lints]
 workspace = true

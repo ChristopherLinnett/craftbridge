@@ -353,6 +353,36 @@ mod tests {
         assert_eq!(Platform::current(), Platform::of(std::env::consts::OS));
     }
 
+    /// The environment must not switch that pick (§17, D-7): the instance is built without reading it.
+    /// Only a fresh process proves this — setting `WGPU_BACKEND` here would switch the adapter every
+    /// other test asks for, and wgpu reads the variable as an instance is built, so it must already be
+    /// in the environment when the production request runs. Were the instance ever built from the
+    /// environment, the child would get GL — or, with GL not compiled in, no device at all, which is
+    /// the same failure to pick — and this test would fail with the child's own words.
+    #[test]
+    fn a_child_started_with_wgpu_backend_gl_still_gets_the_core_s_backend() {
+        craftbridge_process::rerun(
+            "gpu::tests::child_asked_with_wgpu_backend_gl",
+            &[("WGPU_BACKEND", std::ffi::OsStr::new("gl"))],
+            "WGPU_BACKEND=gl switched the backend the core asks for",
+        )
+        .unwrap();
+    }
+
+    /// The production request as the parent above runs it in a child whose environment says
+    /// `WGPU_BACKEND=gl`. The host answers a device on its own backend whatever the variable says: a
+    /// GL device is the environment having switched the core's pick, and no device at all means the
+    /// variable emptied the backends the core asked for.
+    #[test]
+    #[ignore = "run by a_child_started_with_wgpu_backend_gl_still_gets_the_core_s_backend, which starts it with WGPU_BACKEND=gl"]
+    fn child_asked_with_wgpu_backend_gl() {
+        let gpu = GpuDevice::request(GpuChoice::Preferred);
+        let Some((adapter, _device, _queue)) = gpu.parts() else {
+            panic!("the host answers a device whatever WGPU_BACKEND says, and this child answered none: {}", gpu.summary());
+        };
+        assert_ne!(adapter.get_info().backend, wgpu::Backend::Gl, "the core's instance read WGPU_BACKEND after all: {}", gpu.summary());
+    }
+
     /// With a device, `info.gpu` reads `"<adapter> (<backend>)"` (§17's GPU-attached state), the
     /// backend spelt as the compositor names its device: `Metal`, `Vulkan`.
     #[test]

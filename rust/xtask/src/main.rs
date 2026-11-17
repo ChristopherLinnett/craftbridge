@@ -477,11 +477,12 @@ mod repository {
     #[test]
     fn a_command_run_in_a_copy_is_refused_before_it_runs() {
         let copy = tree("root-command");
-        crate::scratch::rerun(
+        craftbridge_process::rerun(
             "repository::child_runs_a_command_here_and_in_the_copy",
             &[(NAMED_TREE, copy.0.as_os_str())],
             "the command ran in the copy, or not in its own tree",
-        );
+        )
+        .unwrap();
     }
 
     /// The child half of the test above: alone in a process of its own, it may move its working folder.

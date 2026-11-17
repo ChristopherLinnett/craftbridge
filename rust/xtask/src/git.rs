@@ -159,11 +159,12 @@ mod tests {
         output(&own.0, &["init", "-q"]).unwrap();
         output(&other.0, &["init", "-q"]).unwrap();
         own.write("planted.txt", "x\n");
-        crate::scratch::rerun(
+        craftbridge_process::rerun(
             "git::tests::child_stages_a_file_in_its_own_folder",
             &[("GIT_DIR", other.0.join(".git").as_os_str()), ("XTASK_GIT_OWN", own.0.as_os_str())],
             "the command started from a hook did not act on its own folder",
-        );
+        )
+        .unwrap();
         assert_eq!(listed(&own.0, &["ls-files", "-z"]).unwrap(), ["planted.txt"], "the file is staged where the command was told to act");
         assert!(listed(&other.0, &["ls-files", "-z"]).unwrap().is_empty(), "the hook's repository is untouched");
         assert_eq!(String::from_utf8(output(&other.0, &["config", "core.bare"]).unwrap()).unwrap().trim(), "false");

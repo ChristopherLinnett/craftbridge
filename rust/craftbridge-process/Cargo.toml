@@ -1,6 +1,6 @@
 [package]
 name = "craftbridge-process"
-description = "Host-only process support for CraftBridge's gate: starting a process in a group of its own and stopping the whole group."
+description = "Host-only process support for CraftBridge's gate: starting a process in a group of its own and stopping the whole group, and running one test of a test binary again in a child started with a changed environment."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

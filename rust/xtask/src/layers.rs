@@ -26,7 +26,8 @@ pub(crate) enum Kind {
     App(&'static str),
     /// A host tool: may depend on anything, and nothing may depend on it.
     Tool,
-    /// A host-only support crate, which the tools share (starting a process and stopping its group). A
+    /// A host-only support crate, which the tools share (starting a process and stopping its group, and
+    /// running a test of the current test binary again in a child started with a changed environment). A
     /// tool may depend on it; the core's and the apps' crates only from their tests, since nothing they
     /// ship may carry host code; and it depends on no CraftBridge crate and no Craft app's crate.
     Support,
