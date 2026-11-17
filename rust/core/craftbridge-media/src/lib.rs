@@ -20,7 +20,7 @@ use filmcraft_codecs::hw::{StreamInfo, hardware_decoding, note_hw_declined, set_
 use filmcraft_codecs::{Result, VideoDecoder, register_video_decoder};
 use filmcraft_isobmff::SampleEntry;
 
-pub use fallback::Fallback;
+pub use fallback::{Draining, Fallback};
 #[cfg(target_os = "android")]
 pub use mediacodec_input::CodecInfo;
 
@@ -645,6 +645,27 @@ pub(crate) mod fixtures {
     /// bytes.
     pub(crate) fn text(pictures: &[DecodedFrame]) -> Vec<String> {
         pictures.iter().map(|picture| format!("{} {} {:?}", picture.pts, picture.draft, picture.frame)).collect()
+    }
+
+    /// Asserts that `samples` of `entry`'s stream, decoded through [`crate::Fallback`] over `hardware`, which
+    /// fails only while the end of the stream is drained, give every picture the software decoder gives, byte
+    /// for byte, and that the stream went on in the software decoder, the switch counted once. The caller holds
+    /// [`counters`], since the switch counter is process-wide.
+    pub(crate) fn through_a_failed_drain(entry: &SampleEntry, samples: &[(i64, Vec<u8>)], hardware: impl crate::Draining) {
+        let stream = crate::fallback::stream_info(entry).unwrap().unwrap();
+        let mut decoder = crate::Fallback::new(hardware, entry, stream);
+        let hardware_name = decoder.name().to_string();
+        let fallbacks = filmcraft_codecs::hw::hw_stats().fallbacks;
+        let mut seen = Vec::new();
+        for (pts, sample) in samples {
+            seen.extend(decoder.decode(sample, *pts).unwrap());
+        }
+        assert_eq!(decoder.name(), hardware_name, "nothing failed before the end");
+        seen.extend(decoder.flush());
+        let mut software = filmcraft_codecs::software_video_decoder(entry).unwrap();
+        assert_eq!(text(&seen), decoded(software.as_mut(), samples));
+        let switched = (decoder.name(), filmcraft_codecs::hw::hw_stats().fallbacks);
+        assert_eq!(switched, (software.name(), fallbacks + 1), "the stream went on in software, once");
     }
 
     /// A stream no hardware decoder takes.

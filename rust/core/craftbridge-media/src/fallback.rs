@@ -1,4 +1,5 @@
-//! A hardware decoder that hands over to the software decoder when it fails mid-stream.
+//! A hardware decoder that hands over to the software decoder when it fails mid-stream or while the end of
+//! the stream is drained.
 //!
 //! The software decoders are the reference (plan D-14): a stream a hardware decoder cannot finish is
 //! finished in software, from a sample decoding can restart at, so the pictures the caller sees never
@@ -127,10 +128,21 @@ enum Engine<D> {
 /// Makes the software decoder the hardware one hands over to.
 type SoftwareMaker = Box<dyn Fn() -> Result<Box<dyn VideoDecoder>> + Send>;
 
+/// A hardware decoder that can say its end of the stream failed. FilmCraft's [`VideoDecoder::flush`]
+/// answers pictures and no error, so a decoder that fails while it drains would end the stream early with
+/// nothing to show for it; [`Fallback`] asks this instead.
+pub trait Draining: VideoDecoder {
+    /// The pictures the decoder still holds at the end of the stream, or why it could not say. There is no
+    /// default: one answering [`VideoDecoder::flush`]'s pictures would hide the very failure this asks about,
+    /// so every decoder wrapped in [`Fallback`] answers for its own end, a decoder whose end cannot fail
+    /// included.
+    fn drain(&mut self) -> Result<Vec<DecodedFrame>>;
+}
+
 /// Wraps the hardware decoder `D`. When `D` fails, or a sample carries parameters other than the ones
-/// `D` was set up with, it switches to the software decoder and replays the samples since the last
-/// restart sample, so the caller sees one continuous stream: the pictures it already has are left out,
-/// and the ones `D` still held come out in presentation order.
+/// `D` was set up with, or `D` fails while the stream's end is flushed, it switches to the software decoder
+/// and replays the samples since the last restart sample, so the caller sees one continuous stream: the
+/// pictures it already has are left out, and the ones `D` still held come out in presentation order.
 ///
 /// `D` reports [`CodecError::Cancelled`] only for a sample it has not taken: FilmCraft's decode loop
 /// feeds a sample again after any error.
@@ -148,7 +160,7 @@ pub struct Fallback<D> {
     draft: bool,
 }
 
-impl<D: VideoDecoder> Fallback<D> {
+impl<D: Draining> Fallback<D> {
     /// Wraps `hardware`, a decoder for the stream `entry` describes; `stream` is what FilmCraft's
     /// hardware-decoder support reads from `entry`, and the decoder switched to is FilmCraft's software
     /// decoder for `entry`.
@@ -193,29 +205,34 @@ impl<D: VideoDecoder> Fallback<D> {
         pictures
     }
 
-    /// Switches to the software decoder after `failure` on `sample`, replays the kept samples and that
-    /// one, and returns the pictures the caller does not have yet.
-    fn switch(&mut self, failure: CodecError, sample: &[u8], pts: i64) -> Result<Vec<DecodedFrame>> {
-        // Without a software decoder the hardware one stays, and the sample is not kept: the caller
-        // feeds it again.
-        let Ok(mut software) = (self.software)() else { return Err(failure) };
+    /// The software decoder to hand over to, in the caller's draft mode, with the switch counted.
+    fn software_decoder(&self) -> Result<Box<dyn VideoDecoder>> {
+        let mut software = (self.software)()?;
         software.set_draft(self.draft);
         note_hw_fallback();
-        self.replay.keep(&self.stream, sample, pts);
+        Ok(software)
+    }
+
+    /// Makes `software` the engine: the caller's pictures and those the failed hardware decoder still held
+    /// are noted, and the replay is returned. Past a bound there is no replay: the software decoder starts at
+    /// the next restart sample, or at the caller's next seek, and the pictures the hardware decoder still
+    /// held are returned instead.
+    fn hand_over(&mut self, software: Box<dyn VideoDecoder>) -> std::result::Result<Vec<Kept>, Vec<DecodedFrame>> {
         let still_held = self.active_mut().flush();
-        let Some(replay) = self.replay.take() else {
-            // Too far from a restart sample to replay: the software decoder starts at the next one, or
-            // at the caller's next seek.
-            self.engine = Engine::Software(software);
-            return Err(failure);
-        };
+        let replay = self.replay.take();
         self.engine = Engine::Software(software);
+        let Some(replay) = replay else { return Err(still_held) };
         self.delivered = replay.iter().filter(|kept| kept.delivered).map(|kept| kept.pts).collect();
         self.held = still_held.into_iter().map(|picture| (picture.pts, picture)).collect();
+        Ok(replay)
+    }
+
+    /// Feeds the software decoder the replay, and returns its pictures and the error of the last sample if
+    /// the software decoder rejected it. A replay's pictures are merged only once the whole replay has run,
+    /// as FilmCraft's hybrid does: until then they are the replay's own output, so any error can drop them
+    /// without touching what the caller has or what the failed hardware decoder held.
+    fn replayed(&mut self, replay: &[Kept]) -> Result<(Vec<DecodedFrame>, Option<CodecError>)> {
         let last = replay.len().saturating_sub(1);
-        // A replay's pictures are merged only once the whole replay has run, as FilmCraft's hybrid does: until
-        // then they are the replay's own output, so any error can drop them without touching what the caller
-        // has or what the failed hardware decoder held.
         let mut frames = Vec::new();
         let mut rejected = None;
         let mut produced = 0usize;
@@ -237,6 +254,18 @@ impl<D: VideoDecoder> Fallback<D> {
                 Err(_) => {}
             }
         }
+        Ok((frames, rejected))
+    }
+
+    /// Switches to the software decoder after `failure` on `sample`, replays the kept samples and that
+    /// one, and returns the pictures the caller does not have yet.
+    fn switch(&mut self, failure: CodecError, sample: &[u8], pts: i64) -> Result<Vec<DecodedFrame>> {
+        // Without a software decoder the hardware one stays, and the sample is not kept: the caller
+        // feeds it again.
+        let Ok(software) = self.software_decoder() else { return Err(failure) };
+        self.replay.keep(&self.stream, sample, pts);
+        let Ok(replay) = self.hand_over(software) else { return Err(failure) };
+        let (frames, rejected) = self.replayed(&replay)?;
         match rejected {
             None => Ok(self.merge(frames)),
             Some(error) => {
@@ -250,6 +279,29 @@ impl<D: VideoDecoder> Fallback<D> {
                 }
                 Err(error)
             }
+        }
+    }
+
+    /// The hardware decoder failed while draining the end of the stream: the software decoder replays the
+    /// kept samples, ends the stream itself, and the pictures the caller does not have yet come out, every
+    /// one from the restart sample the replay starts at; one the failed decoder held from before that sample
+    /// is lost with it, since no kept sample makes it again. When it cannot (no software decoder, a replay
+    /// past a bound, a replay that fails), the pictures the hardware decoder still held are all there is.
+    /// FilmCraft's trait has no error for the end of a stream, so the caller's decode loop finds a lost
+    /// picture missing, and makes it again only at its next seek.
+    fn switch_at_the_end(&mut self) -> Vec<DecodedFrame> {
+        let Ok(software) = self.software_decoder() else { return self.active_mut().flush() };
+        let replay = match self.hand_over(software) {
+            Ok(replay) => replay,
+            Err(still_held) => return still_held,
+        };
+        match self.replayed(&replay) {
+            Ok((frames, _)) => {
+                let mut out = self.merge(frames);
+                out.extend(self.flush());
+                out
+            }
+            Err(_) => std::mem::take(&mut self.held).into_values().collect(),
         }
     }
 
@@ -284,7 +336,7 @@ pub(crate) fn stream_info(entry: &SampleEntry) -> Option<Result<StreamInfo>> {
     }
 }
 
-impl<D: VideoDecoder> VideoDecoder for Fallback<D> {
+impl<D: Draining> VideoDecoder for Fallback<D> {
     fn decode(&mut self, sample: &[u8], pts: i64) -> Result<Vec<DecodedFrame>> {
         let outcome = match &mut self.engine {
             Engine::Software(software) => {
@@ -311,10 +363,13 @@ impl<D: VideoDecoder> VideoDecoder for Fallback<D> {
     }
 
     fn flush(&mut self) -> Vec<DecodedFrame> {
-        let pictures = self.active_mut().flush();
-        if matches!(self.engine, Engine::Hardware(_)) {
-            return self.delivered(pictures);
+        if let Engine::Hardware(hardware) = &mut self.engine {
+            return match hardware.drain() {
+                Ok(pictures) => self.delivered(pictures),
+                Err(_) => self.switch_at_the_end(),
+            };
         }
+        let pictures = self.active_mut().flush();
         let mut out = self.merge(pictures);
         out.extend(std::mem::take(&mut self.held).into_values());
         out
@@ -360,11 +415,13 @@ mod tests {
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
 
-    use filmcraft_codecs::hw::NalCodec;
+    use filmcraft_codecs::hw::{NalCodec, hw_stats};
     use filmcraft_isobmff::{CodecConfig, FourCc};
 
     use super::*;
-    use crate::fixtures::{avc_entry, pps, prores_entry, sps};
+    use crate::fixtures::{avc_entry, counters, pps, prores_entry, reordered_entry, reordered_samples, sps, through_a_failed_drain, tiny_entry, tiny_samples};
+    use crate::layout::Codec;
+    use crate::order::{HardwareDecoder, RawDecoder};
     use filmcraft_codecs::hw::FrameCodec;
 
     // The last byte of a test sample tells the fakes what to do with it.
@@ -457,6 +514,9 @@ mod tests {
         cancels: bool,
         /// Loses the pictures it held when it fails, as a hardware decoder whose session is lost does.
         forgets: bool,
+        /// Fails when asked to drain, and keeps the pictures it holds, as a hardware decoder whose
+        /// reorder buffer outlives its codec does.
+        drain_fails: bool,
         /// What it says of itself.
         intra_only: bool,
         thread_limited: bool,
@@ -503,6 +563,15 @@ mod tests {
         }
     }
 
+    impl Draining for Fake {
+        fn drain(&mut self) -> Result<Vec<DecodedFrame>> {
+            if self.drain_fails {
+                return Err(CodecError::Decode("injected drain failure".into()));
+            }
+            Ok(self.flush())
+        }
+    }
+
     fn fake(name: &'static str, fails_on: &'static [u8], latency: usize) -> Fake {
         Fake {
             name,
@@ -510,6 +579,7 @@ mod tests {
             latency,
             cancels: name == "hardware",
             forgets: false,
+            drain_fails: false,
             intra_only: false,
             thread_limited: false,
             pending: VecDeque::new(),
@@ -528,17 +598,19 @@ mod tests {
         bounds: Bounds,
         /// The hardware fake loses the pictures it held when it fails.
         forgets: bool,
+        /// The hardware fake fails when drained.
+        drain_fails: bool,
     }
 
     impl Default for Setup {
         fn default() -> Self {
-            Self { hardware: 0, software: 0, stream: avc(), available_from: 1, bounds: BOUNDS, forgets: false }
+            Self { hardware: 0, software: 0, stream: avc(), available_from: 1, bounds: BOUNDS, forgets: false, drain_fails: false }
         }
     }
 
     impl Setup {
         fn rig(self) -> Rig {
-            let hardware = Fake { forgets: self.forgets, ..fake("hardware", &[FAIL, BOTH], self.hardware) };
+            let hardware = Fake { forgets: self.forgets, drain_fails: self.drain_fails, ..fake("hardware", &[FAIL, BOTH], self.hardware) };
             let software = fake("software", &[REJECT, BOTH], self.software);
             let (hardware_fed, software_fed) = (Arc::clone(&hardware.fed), Arc::clone(&software.fed));
             let (hardware_draft, software_draft) = (Arc::clone(&hardware.drafted), Arc::clone(&software.drafted));
@@ -556,6 +628,7 @@ mod tests {
                 Ok(Box::new(software) as Box<dyn VideoDecoder>)
             };
             Rig {
+                _counters: counters(),
                 decoder: Fallback::with_software(hardware, self.stream, make, self.bounds),
                 hardware: hardware_fed,
                 software: software_fed,
@@ -570,6 +643,9 @@ mod tests {
     type Outcome = std::result::Result<Vec<i64>, &'static str>;
 
     struct Rig {
+        /// Held for the rig's life: FilmCraft's switch counter is process-wide, so a test reads it only while no
+        /// other rig switches.
+        _counters: std::sync::MutexGuard<'static, ()>,
         decoder: Fallback<Fake>,
         hardware: Fed,
         software: Fed,
@@ -606,6 +682,12 @@ mod tests {
         }
         fn made(&self) -> u32 {
             *self.made.lock().unwrap()
+        }
+        /// Every picture the calls return for `samples` and the flush after them.
+        fn through_the_end(&mut self, samples: &[(i64, Vec<u8>)]) -> Vec<i64> {
+            let mut seen = pictures(&self.feed(samples));
+            seen.extend(self.flush());
+            seen
         }
         /// Feeds two GOPs whose fifth sample fails the hardware decoder, and returns the calls with
         /// every picture the caller ended up with. A hardware decoder two samples late still holds 2 and 3
@@ -804,6 +886,7 @@ mod tests {
         // The software decoder returns 2 and 3 after the error; the caller had them from hardware. Picture 4
         // goes with the error.
         assert_eq!(seen, vec![0, 1, 2, 3, 5, 6]);
+        drop(rig);
         // The hardware decoder still held 2 and 3 when it failed: they come after the error, whether the
         // cap trips before the software decoder returned a picture or after it returned one during the
         // replay. FilmCraft's hybrid merges after the whole replay, so an error drops only the replay's
@@ -920,6 +1003,7 @@ mod tests {
         let hardware = Fake { thread_limited: true, ..fake("hardware", &[FAIL], 0) };
         let software = Mutex::new(Some(Fake { intra_only: true, ..fake("software", &[], 0) }));
         let make = move || Ok(Box::new(software.lock().unwrap().take().expect("made once")) as Box<dyn VideoDecoder>);
+        let _counters = counters();
         let mut decoder = Fallback::with_software(hardware, avc(), make, BOUNDS);
         assert_eq!((decoder.name(), decoder.intra_only(), decoder.thread_limited()), ("hardware", false, true));
         assert!(decoder.decode(&at(0, IDR, FAIL).1, 0).is_ok(), "the failed sample is replayed in software");
@@ -937,6 +1021,90 @@ mod tests {
         assert_eq!(rig.made(), 0, "nothing here needed the software decoder");
     }
 
+    /// Two GOPs of three samples each, their restart samples at 0 and 3, so a replay at the end starts at 3.
+    fn the_stream() -> Vec<(i64, Vec<u8>)> {
+        (0..6).map(|pts| at(pts, if pts % 3 == 0 { IDR } else { P }, PLAIN)).collect()
+    }
+
+    /// Every picture a software decoder alone gives `the_stream`, flush included.
+    fn software_alone() -> Vec<i64> {
+        let mut software = fake("software", &[], 0);
+        let mut seen: Vec<i64> = the_stream().iter().flat_map(|(pts, sample)| software.decode(sample, *pts).unwrap()).map(|p| p.pts).collect();
+        seen.extend(software.flush().iter().map(|p| p.pts));
+        seen
+    }
+
+    #[test]
+    fn a_hardware_decoder_that_fails_while_draining_gives_the_streams_whole_tail_from_the_software_decoder() {
+        for latency in [0, 2] {
+            let mut rig = Setup { hardware: latency, drain_fails: true, ..Setup::default() }.rig();
+            let fallbacks = hw_stats().fallbacks;
+            let mut seen = pictures(&rig.feed(&the_stream()));
+            assert_eq!((rig.made(), rig.decoder.name()), (0, "hardware"), "nothing failed before the end");
+            seen.extend(rig.flush());
+            // Each picture once, as the software decoder alone gives them, whatever the hardware decoder had
+            // already handed over before it failed.
+            assert_eq!(seen, software_alone(), "latency {latency}");
+            assert_eq!(hw_stats().fallbacks, fallbacks + 1, "the switch is counted, latency {latency}");
+            assert_eq!((rig.made(), rig.decoder.name()), (1, "software"));
+            assert_eq!(rig.fed_to_software(), vec![3, 4, 5], "the replay starts at the last restart sample");
+            assert_eq!(rig.fed_to_hardware(), vec![0, 1, 2, 3, 4, 5], "the failed decoder is never fed again");
+            assert_eq!(rig.flush(), Vec::<i64>::new(), "the end of the stream is one end");
+        }
+    }
+
+    /// A raw decoder that decodes with FilmCraft's software decoder, so its pictures are the real ones, and
+    /// fails every drain, losing whatever its decoder still held.
+    struct DrainFails(Box<dyn VideoDecoder>);
+
+    impl RawDecoder<DecodedFrame> for DrainFails {
+        fn feed(&mut self, sample: &[u8], pts: i64) -> std::result::Result<Vec<(i64, DecodedFrame)>, String> {
+            let pictures = self.0.decode(sample, pts).map_err(|error| error.to_string())?;
+            Ok(pictures.into_iter().map(|picture| (picture.pts, picture)).collect())
+        }
+
+        fn restart(&mut self) {
+            self.0.reset();
+        }
+
+        fn drain(&mut self) -> std::result::Result<Vec<(i64, DecodedFrame)>, String> {
+            Err("the drain failed".into())
+        }
+    }
+
+    #[test]
+    fn a_raw_decoder_that_fails_while_draining_gives_the_streams_whole_tail_through_fallback_equal_to_the_software_decoders() {
+        let _counters = counters();
+        // The second stream has B pictures, so its software decoder holds the last pictures until the end.
+        for (entry, samples) in [(tiny_entry(), tiny_samples()), (reordered_entry(), reordered_samples())] {
+            let stream = stream_info(&entry).unwrap().unwrap();
+            let raw = DrainFails(software_video_decoder(&entry).unwrap());
+            through_a_failed_drain(&entry, &samples, HardwareDecoder::new(raw, stream, 0, "Raw", Codec::H264));
+        }
+    }
+
+    #[test]
+    fn a_hardware_decoder_that_drains_cleanly_is_never_switched_from() {
+        let mut rig = Setup { hardware: 2, ..Setup::default() }.rig();
+        let fallbacks = hw_stats().fallbacks;
+        assert_eq!(rig.through_the_end(&the_stream()), software_alone());
+        assert_eq!((hw_stats().fallbacks, rig.made(), rig.decoder.name()), (fallbacks, 0, "hardware"));
+    }
+
+    #[test]
+    fn when_the_end_cannot_be_replayed_the_pictures_the_failed_decoder_held_are_all_there_is() {
+        // No software decoder: the hardware decoder stays, with what it held. A replay past a bound, and one
+        // that produces too many pictures, hand what was held over.
+        for (setup, engine) in [
+            (Setup { available_from: 2, ..Setup::default() }, "hardware"),
+            (Setup { bounds: Bounds { samples: 2, ..BOUNDS }, ..Setup::default() }, "software"),
+            (Setup { bounds: Bounds { pictures: 1, ..BOUNDS }, ..Setup::default() }, "software"),
+        ] {
+            let mut rig = Setup { hardware: 2, drain_fails: true, ..setup }.rig();
+            assert_eq!((rig.through_the_end(&the_stream()), rig.decoder.name()), (vec![0, 1, 2, 3, 4, 5], engine));
+        }
+    }
+
     #[test]
     fn a_reset_forgets_the_replay_and_the_pictures_the_caller_had() {
         // Before the switch: the replay starts afresh at the first sample after the reset.
@@ -945,6 +1113,7 @@ mod tests {
         rig.decoder.reset();
         assert_eq!(rig.feed(&[at(2, P, FAIL)]), vec![Ok(vec![2])]);
         assert_eq!(rig.fed_to_software(), vec![2]);
+        drop(rig);
         // After it: a seek back wants every picture again, the ones the hardware decoder returned included.
         let mut rig = Setup { software: 2, ..Setup::default() }.rig();
         rig.feed(&[at(0, IDR, PLAIN), at(1, P, PLAIN), at(2, P, FAIL)]);

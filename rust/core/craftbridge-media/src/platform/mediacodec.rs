@@ -14,9 +14,9 @@
 //! the factory declines it. MediaCodec decodes on its own schedule, so a picture comes out of a later call
 //! than the one that fed its sample, and [`crate::order::Sequence`] runs around the codec as it does around
 //! VideoToolbox: the RASL pictures of a run starting at a CRA are never fed to it, and the pictures it still
-//! holds at the end come out of [`RawDecoder::drain`]. Every status MediaCodec and the image reader return
-//! is checked and becomes the decoder's error, which [`crate::Fallback`] answers by switching to the
-//! software decoder.
+//! holds at the end come out of [`RawDecoder::drain`], which fails when the codec does or never ends the
+//! stream. Every status MediaCodec and the image reader return is checked and becomes the decoder's error,
+//! which [`crate::Fallback`] answers by switching to the software decoder, at the end of the stream as well.
 //!
 //! The official NDK bindings (`ndk`) make every call; the only `unsafe` here is the claim that the codec and
 //! the reader may move between threads, and the bytes of a locked P010 buffer's planes. Which streams the
@@ -410,25 +410,27 @@ impl RawDecoder<DecodedFrame> for RawCodec {
         self.end_run();
     }
 
-    fn drain(&mut self) -> Vec<(i64, DecodedFrame)> {
+    fn drain(&mut self) -> std::result::Result<Vec<(i64, DecodedFrame)>, Failure> {
         let layout = self.layout.clone();
-        let mut pictures = Vec::new();
-        if let Some(pipeline) = &self.pipeline {
-            // The end of the stream is queued as an input of its own; the codec outputs what it holds, then
-            // the end. A failure on the way keeps the pictures read so far: the caller has no more to ask for.
-            let queued = pipeline.queue(&[], 0, true, &layout).map(|held| pictures.extend(held));
-            let deadline = Instant::now() + STALL;
-            while queued.is_ok() && Instant::now() < deadline {
-                let Ok((more, end)) = pipeline.pictures(POLL, &layout) else { break };
-                pictures.extend(more);
-                if end {
-                    break;
-                }
+        // The end of the stream is queued as an input of its own; the codec outputs what it holds, then
+        // the end. A stream that does not end in time, or any failed call, loses the tail the caller has no
+        // other way to know of, so each is an error. A codec that has seen the end takes no more samples
+        // until it is flushed, which is how a run ends and keeps the one codec; a codec that failed while
+        // draining is never used again: the next run gets a codec of its own, whatever this drain answers.
+        let drained = match &self.pipeline {
+            Some(pipeline) => mediacodec_input::until_the_end(STALL, || pipeline.queue(&[], 0, true, &layout), || pipeline.pictures(POLL, &layout)),
+            None => Ok(Vec::new()),
+        };
+        match drained {
+            Ok(pictures) => {
+                self.end_run();
+                Ok(decoded(pictures))
+            }
+            Err(why) => {
+                self.pipeline = None;
+                Err(why)
             }
         }
-        // A codec that has seen the end takes no more samples until it is flushed.
-        self.end_run();
-        decoded(pictures)
     }
 }
 
@@ -482,7 +484,7 @@ pub(crate) mod tests {
     use crate::fallback::{Fallback, stream_info};
     use crate::fixtures::{
         av1_entry, av1_samples, counters, decoded, hevc_entry, hevc_samples, hevc10_entry, hevc10_samples, pictures, reordered_entry, reordered_samples, text,
-        tiny_entry, tiny_samples,
+        through_a_failed_drain, tiny_entry, tiny_samples,
     };
     use crate::mediacodec_input::{AV1_MIME, H264_MIME, HEVC_MIME};
 
@@ -710,7 +712,7 @@ pub(crate) mod tests {
     /// reordering.
     fn raw_pictures(raw: &mut RawCodec, samples: &[(i64, Vec<u8>)]) -> Vec<String> {
         let mut out: Vec<DecodedFrame> = samples.iter().flat_map(|(pts, sample)| raw.feed(sample, *pts).unwrap()).map(|(_, picture)| picture).collect();
-        out.extend(raw.drain().into_iter().map(|(_, picture)| picture));
+        out.extend(raw.drain().unwrap().into_iter().map(|(_, picture)| picture));
         text(&out)
     }
 
@@ -870,6 +872,61 @@ pub(crate) mod tests {
         let DequeuedInputBufferResult::Buffer(mut input) = pipeline.codec.dequeue_input_buffer(STALL).unwrap() else { panic!("no input buffer") };
         pipeline.codec.stop().unwrap();
         assert_eq!(fill(&mut input, &[0, 0, 0, 1]), Err("the decoder gave no input buffer memory".to_string()));
+    }
+
+    /// Stops `raw`'s codec, if it has one, as a codec that fails on its own thread is stopped: every call a drain
+    /// then makes fails, every time rather than in a race.
+    fn stop_codec(raw: &RawCodec) {
+        if let Some(pipeline) = &raw.pipeline {
+            pipeline.codec.stop().unwrap();
+        }
+    }
+
+    #[test]
+    fn a_codec_that_fails_while_draining_is_the_decoders_error_and_is_never_used_again() {
+        let (entry, samples) = (tiny_entry(), tiny_samples());
+        let mut raw = raw_codec(&entry, &stream(&entry), any_codec).unwrap();
+        for (pts, sample) in &samples {
+            raw.feed(sample, *pts).unwrap();
+        }
+        stop_codec(&raw);
+        assert!(raw.drain().is_err(), "the pictures the codec held are lost with it, which only an error tells");
+        assert!(raw.pipeline.is_none(), "the codec whose drain failed is gone");
+        // The next run gets a codec of its own, which decodes the stream whole.
+        let codec = raw.layout.codec;
+        let mut decoder = HardwareDecoder::new(raw, stream(&entry), 0, BACKEND, codec);
+        assert_eq!(decoded(&mut decoder, &samples), decoded(software(&entry).as_mut(), &samples));
+    }
+
+    /// A MediaCodec raw decoder whose codec is stopped just before the end of the stream is drained, so that it
+    /// fails there and nowhere else.
+    struct StoppedAtTheEnd(RawCodec);
+
+    impl RawDecoder<DecodedFrame> for StoppedAtTheEnd {
+        fn feed(&mut self, sample: &[u8], pts: i64) -> std::result::Result<Vec<(i64, DecodedFrame)>, Failure> {
+            self.0.feed(sample, pts)
+        }
+
+        fn restart(&mut self) {
+            self.0.restart();
+        }
+
+        fn drain(&mut self) -> std::result::Result<Vec<(i64, DecodedFrame)>, Failure> {
+            stop_codec(&self.0);
+            self.0.drain()
+        }
+    }
+
+    #[test]
+    fn a_codec_that_fails_while_draining_gives_the_streams_whole_tail_through_fallback_from_the_software_decoder() {
+        let _counters = counters();
+        // A codec can hold every picture of streams this short until the end (the API 29 emulator's does), so
+        // the tail a failed drain loses can be the whole stream.
+        for (entry, samples) in [(tiny_entry(), tiny_samples()), (reordered_entry(), reordered_samples())] {
+            let raw = raw_codec(&entry, &stream(&entry), any_codec).unwrap();
+            let codec = raw.layout.codec;
+            through_a_failed_drain(&entry, &samples, HardwareDecoder::new(StoppedAtTheEnd(raw), stream(&entry), 0, BACKEND, codec));
+        }
     }
 
     #[test]
@@ -1076,6 +1133,8 @@ pub(crate) mod tests {
         // loses its pictures without an error, which a run cannot tell from no pictures, so a run that ends
         // so compares nothing, and at least one run must compare. A decoder that refuses the stream at its start
         // is declined by the factory, as before Android 14.
+        // A failed run below is replayed through `Fallback`, whose switch a process-wide counter counts.
+        let _counters = counters();
         let samples = hevc10_samples();
         let wanted = decoded(software(&hevc10_entry()).as_mut(), &samples);
         let mut compared = 0;

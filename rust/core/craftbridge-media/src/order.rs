@@ -11,6 +11,7 @@
 use filmcraft_codecs::hw::{NalCodec, StreamInfo};
 use filmcraft_codecs::{CodecError, DecodedFrame, VideoDecoder};
 
+use crate::fallback::Draining;
 use crate::layout::Codec;
 
 /// Holds pictures until no picture decoded later can come before them in presentation order.
@@ -91,6 +92,9 @@ impl Leading {
     }
 }
 
+/// What a decoder whose drain failed answers until a seek.
+const DRAIN_FAILED: &str = "the decoder failed while draining the end of the stream";
+
 /// What a platform's decoder does for [`Sequence`]: decodes one sample at a time.
 pub(crate) trait RawDecoder<T> {
     /// Decodes `sample`, whose presentation time is `pts`, into the pictures it produced, each with its
@@ -103,9 +107,10 @@ pub(crate) trait RawDecoder<T> {
 
     /// The end of the stream: the pictures the decoder still holds, each with its presentation time, in the
     /// order it outputs them. A decoder that outputs every picture inside the call that fed its sample holds
-    /// none.
-    fn drain(&mut self) -> Vec<(i64, T)> {
-        Vec::new()
+    /// none. An error means the decoder could not say what it still held, so the stream's tail is unknown;
+    /// the decoder is never fed or drained again before [`RawDecoder::restart`].
+    fn drain(&mut self) -> Result<Vec<(i64, T)>, String> {
+        Ok(Vec::new())
     }
 }
 
@@ -117,18 +122,24 @@ pub(crate) struct Sequence<R, T> {
     stream: StreamInfo,
     order: Reorder<T>,
     leading: Leading,
+    /// The raw decoder failed while draining: it holds an unknown tail and must not be fed or drained
+    /// again until a seek restarts it.
+    drain_failed: bool,
 }
 
 impl<R: RawDecoder<T>, T> Sequence<R, T> {
     /// `depth` is the stream's reorder depth.
     pub(crate) fn new(raw: R, stream: StreamInfo, depth: usize) -> Self {
-        Self { raw, stream, order: Reorder::new(depth), leading: Leading::new() }
+        Self { raw, stream, order: Reorder::new(depth), leading: Leading::new(), drain_failed: false }
     }
 
     /// The pictures now due in presentation order after `sample`. A sample the raw decoder fails on adds
     /// nothing to the reorder buffer, which keeps what the fallback flushes, and leaves the run where it
     /// was, so fed again it is treated as it was.
     pub(crate) fn decode(&mut self, sample: &[u8], pts: i64) -> Result<Vec<T>, String> {
+        if self.drain_failed {
+            return Err(DRAIN_FAILED.into());
+        }
         let types = self.nal_types(sample);
         let (raw, order) = (&mut self.raw, &mut self.order);
         self.leading.pass(&types, || {
@@ -138,12 +149,24 @@ impl<R: RawDecoder<T>, T> Sequence<R, T> {
     }
 
     /// The pictures still held, earliest first: the raw decoder's last ones go through the reorder buffer
-    /// with the rest, so a picture a decoder held back comes out in presentation order among them.
-    pub(crate) fn flush(&mut self) -> Vec<T> {
-        let (raw, order) = (&mut self.raw, &mut self.order);
-        let mut pictures: Vec<T> = raw.drain().into_iter().flat_map(|(pts, picture)| order.push(pts, picture)).collect();
+    /// with the rest, so a picture a decoder held back comes out in presentation order among them. When the
+    /// raw decoder fails to drain, the error is the stream's: the reorder buffer keeps what it holds
+    /// ([`Sequence::held`]), and the raw decoder is not asked again.
+    pub(crate) fn flush(&mut self) -> Result<Vec<T>, String> {
+        if self.drain_failed {
+            return Err(DRAIN_FAILED.into());
+        }
+        let drained = self.raw.drain().inspect_err(|_| self.drain_failed = true)?;
+        let order = &mut self.order;
+        let mut pictures: Vec<T> = drained.into_iter().flat_map(|(pts, picture)| order.push(pts, picture)).collect();
         pictures.extend(order.drain());
-        pictures
+        Ok(pictures)
+    }
+
+    /// The pictures the reorder buffer holds, earliest first, without asking the raw decoder for more: what
+    /// is left of a stream whose raw decoder failed.
+    pub(crate) fn held(&mut self) -> Vec<T> {
+        self.order.drain()
     }
 
     /// A seek: nothing decoded so far is referred to again.
@@ -151,6 +174,7 @@ impl<R: RawDecoder<T>, T> Sequence<R, T> {
         self.raw.restart();
         self.order.clear();
         self.leading.reset();
+        self.drain_failed = false;
     }
 
     /// The NAL unit types of an HEVC sample, which decide the RASL pictures a run leaves out; none for
@@ -186,8 +210,11 @@ impl<R: RawDecoder<DecodedFrame> + Send> VideoDecoder for HardwareDecoder<R> {
         self.sequence.decode(sample, pts).map_err(CodecError::Decode)
     }
 
+    /// What FilmCraft's trait lets this answer: the pictures held, which for a decoder whose drain failed are
+    /// those the reorder buffer holds. A caller that must not lose the stream's tail uses
+    /// [`Draining::drain`].
     fn flush(&mut self) -> Vec<DecodedFrame> {
-        self.sequence.flush()
+        self.sequence.flush().unwrap_or_else(|_| self.sequence.held())
     }
 
     fn reset(&mut self) {
@@ -196,6 +223,12 @@ impl<R: RawDecoder<DecodedFrame> + Send> VideoDecoder for HardwareDecoder<R> {
 
     fn name(&self) -> &str {
         &self.name
+    }
+}
+
+impl<R: RawDecoder<DecodedFrame> + Send> Draining for HardwareDecoder<R> {
+    fn drain(&mut self) -> filmcraft_codecs::Result<Vec<DecodedFrame>> {
+        self.sequence.flush().map_err(CodecError::Decode)
     }
 }
 
@@ -314,6 +347,9 @@ mod tests {
         fed: Vec<u8>,
         restarts: usize,
         failing: bool,
+        /// Fails when drained.
+        drain_fails: bool,
+        drains: usize,
         holds: bool,
         held: Vec<(i64, u8)>,
     }
@@ -336,8 +372,12 @@ mod tests {
             self.restarts += 1;
         }
 
-        fn drain(&mut self) -> Vec<(i64, u8)> {
-            std::mem::take(&mut self.held)
+        fn drain(&mut self) -> Result<Vec<(i64, u8)>, String> {
+            self.drains += 1;
+            if self.drain_fails {
+                return Err("the drain failed".into());
+            }
+            Ok(std::mem::take(&mut self.held))
         }
     }
 
@@ -384,10 +424,10 @@ mod tests {
         sequence.raw.failing = true;
         assert!(sequence.decode(&hevc_sample(1, 20), 1).is_err());
         sequence.raw.failing = false;
-        assert_eq!(sequence.flush(), vec![30], "the failed sample left nothing in the buffer");
+        assert_eq!(sequence.flush(), Ok(vec![30]), "the failed sample left nothing in the buffer");
         sequence.decode(&hevc_sample(1, 40), 4).unwrap();
         sequence.reset();
-        assert_eq!(sequence.flush(), Vec::<u8>::new(), "a seek forgets what was held");
+        assert_eq!(sequence.flush(), Ok(Vec::<u8>::new()), "a seek forgets what was held");
     }
 
     #[test]
@@ -409,8 +449,30 @@ mod tests {
         assert_eq!(sequence.decode(&hevc_sample(19, 10), 0), Ok(Vec::new()));
         assert_eq!(sequence.decode(&hevc_sample(1, 30), 3), Ok(Vec::new()));
         assert_eq!(sequence.decode(&hevc_sample(1, 20), 1), Ok(Vec::new()));
-        assert_eq!(sequence.flush(), vec![10, 20, 30], "each picture once, earliest first, those due before the buffer's own");
-        assert_eq!(sequence.flush(), Vec::<u8>::new(), "nothing is held after it");
+        assert_eq!(sequence.flush(), Ok(vec![10, 20, 30]), "each picture once, earliest first, those due before the buffer's own");
+        assert_eq!(sequence.flush(), Ok(Vec::<u8>::new()), "nothing is held after it");
+    }
+
+    #[test]
+    fn a_sequence_whose_raw_decoder_fails_to_drain_passes_the_error_up_and_never_uses_the_raw_decoder_again() {
+        let mut sequence = hevc(1);
+        sequence.decode(&hevc_sample(19, 10), 0).unwrap();
+        sequence.decode(&hevc_sample(1, 20), 1).unwrap();
+        sequence.raw.drain_fails = true;
+        assert_eq!(sequence.flush(), Err("the drain failed".into()));
+        assert_eq!(sequence.raw.drains, 1);
+        // Neither fed nor drained again, whatever it would answer now.
+        sequence.raw.drain_fails = false;
+        assert_eq!(sequence.decode(&hevc_sample(1, 30), 2), Err(DRAIN_FAILED.into()));
+        assert_eq!(sequence.flush(), Err(DRAIN_FAILED.into()));
+        assert_eq!((sequence.raw.drains, sequence.raw.fed.len()), (1, 2));
+        // What the reorder buffer holds is still the stream's.
+        assert_eq!(sequence.held(), vec![20]);
+        // A seek restarts the raw decoder, and the sequence is whole again.
+        sequence.reset();
+        assert_eq!(sequence.raw.restarts, 1);
+        assert_eq!(sequence.decode(&hevc_sample(19, 40), 0), Ok(Vec::new()));
+        assert_eq!(sequence.flush(), Ok(vec![40]));
     }
 
     #[test]
@@ -423,13 +485,14 @@ mod tests {
 
             fn restart(&mut self) {}
         }
-        assert_eq!(Plain.drain(), Vec::new());
+        assert_eq!(Plain.drain(), Ok(Vec::new()));
     }
 
     /// A raw decoder of pictures that carry only their presentation time, which fails while `failing`.
     #[derive(Default)]
     struct Pictures {
         failing: bool,
+        drain_fails: bool,
         restarts: usize,
         held: Vec<i64>,
     }
@@ -447,8 +510,11 @@ mod tests {
             self.restarts += 1;
         }
 
-        fn drain(&mut self) -> Vec<(i64, DecodedFrame)> {
-            std::mem::take(&mut self.held).into_iter().map(|pts| (pts, picture(pts))).collect()
+        fn drain(&mut self) -> Result<Vec<(i64, DecodedFrame)>, String> {
+            if self.drain_fails {
+                return Err("the drain failed".into());
+            }
+            Ok(std::mem::take(&mut self.held).into_iter().map(|pts| (pts, picture(pts))).collect())
         }
     }
 
@@ -473,10 +539,18 @@ mod tests {
         assert!(decoder.decode(&[0, 0, 0, 1, 1], 7).unwrap().is_empty());
         assert!(decoder.decode(&[0, 0, 0, 1, 1], 5).unwrap().is_empty());
         assert_eq!(decoder.flush().iter().map(|picture| picture.pts).collect::<Vec<_>>(), [5, 7], "what the raw decoder held, through the reorder buffer");
+        assert!(decoder.drain().unwrap().is_empty(), "nothing is held after the flush");
         decoder.sequence.raw.failing = true;
         assert!(matches!(decoder.decode(&[0, 0, 0, 1, 1], 9), Err(CodecError::Decode(message)) if message == "the session failed"));
         decoder.reset();
         assert_eq!(decoder.sequence.raw.restarts, 1, "a seek restarts the raw decoder");
+        // The end of the stream is `Draining`'s error where `flush` has none, with the reorder buffer's pictures
+        // still the decoder's to give.
+        decoder.sequence.raw.failing = false;
+        decoder.decode(&[0, 0, 0, 1, 1], 4).unwrap();
+        decoder.sequence.raw.drain_fails = true;
+        assert!(matches!(decoder.drain(), Err(CodecError::Decode(message)) if message == "the drain failed"));
+        assert!(decoder.flush().is_empty(), "the raw decoder's own tail is lost with it");
         assert!(!decoder.thread_limited() && decoder.is_random_access(&[]).is_none(), "the questions it leaves to the fallback");
     }
 }
