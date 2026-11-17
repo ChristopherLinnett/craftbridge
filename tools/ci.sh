@@ -237,7 +237,9 @@ stage_android() {
   # --continue runs every task whose inputs are still good after one fails, and the second build below
   # runs whatever the first found, so a formatting error does not hide a Lint or compile error until the
   # next run.
-  # The tests' Kotlin compiles too, under the same warnings-as-errors rules as the code it tests.
+  # The tests' Kotlin compiles too, under the same warnings-as-errors rules as the code it tests, and the
+  # unit tests run, on the TestNG craftbridge.android.library gives every module; a library variant of
+  # AGP 9 builds unit tests for the debug build type alone.
   # A task a module's build file disables, or guards with `onlyIf`, checks nothing and still lets the
   # build succeed; `cargo xtask skipped-tasks` reads Gradle's log and fails on any such task of the SDK's
   # projects (rust/xtask/src/gradle_log.rs). --console=plain makes Gradle print every task's outcome even
@@ -258,7 +260,7 @@ stage_android() {
   # craftbridge.android.library registers over every variant and every test component of a module, and
   # the build's rule jar carries its own tests, run here beside the rules they check.
   gradle_build detektMain detektTest :build-logic:detekt-rules:test || status=1
-  gradle_build lint lintRelease assembleRelease compileDebugUnitTestSources compileDebugAndroidTestSources || status=1
+  gradle_build lint lintRelease assembleRelease compileDebugUnitTestSources testDebugUnitTest compileDebugAndroidTestSources || status=1
   xtask skipped-tasks "$log" || status=1
   rm -f "$log"
   return "$status"

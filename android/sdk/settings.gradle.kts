@@ -74,6 +74,8 @@ val gateWorkers =
         "assembleRelease" to listOf("compileReleaseKotlin", "bundleReleaseAar"),
         // The tests' Kotlin compiles under the same rules, so a warning in a test fails too.
         "compileDebugUnitTestSources" to listOf("compileDebugUnitTestKotlin"),
+        // The unit tests run what that compilation built.
+        "testDebugUnitTest" to listOf("compileDebugUnitTestKotlin"),
         "compileDebugAndroidTestSources" to listOf("compileDebugAndroidTestKotlin"),
         // Each detekt run reads the packages written for its module from its namespace: without that
         // task in the graph no component was checked.

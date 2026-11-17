@@ -35,6 +35,7 @@ pub(crate) fn generators() -> Vec<Generator> {
     vec![
         Generator { name: "effects-api-surface", output_dir: crate::effects_api::OUTPUT_DIR, generate: crate::effects_api::generate },
         Generator { name: "effects-swift-facade", output_dir: crate::effects_api::SWIFT_OUTPUT_DIR, generate: crate::effects_api::generate_swift },
+        Generator { name: "effects-kotlin-facade", output_dir: crate::effects_api::KOTLIN_OUTPUT_DIR, generate: crate::effects_api::generate_kotlin },
         Generator { name: "effects-version", output_dir: crate::effects_api::VERSION_OUTPUT_DIR, generate: crate::effects_api::generate_version },
     ]
 }
@@ -53,18 +54,21 @@ pub(crate) fn run(root: &Path, check: bool) -> ExitCode {
 }
 
 /// What makes a registry unsafe to run. A generator's output directory is replaced by every run, so it
-/// must be a `generated`/`Generated` directory inside one of the trees `rules: generated` reads — never
-/// the root, a source folder, `plan/` or a path that climbs out — and two generators may neither share a
-/// name, which every message goes by, nor share or nest an output, or each run would delete the other's
-/// files.
+/// must be a `generated`/`Generated` directory, or a folder inside one (one package's folder of a source
+/// folder several generators write), inside one of the trees `rules: generated` reads — never the root,
+/// a hand-written source folder, `plan/` or a path that climbs out. Below a generated directory nothing
+/// is hand-written, since `rules: generated` refuses a file there that no generator's output holds, so a
+/// run replaces generated files alone. Two generators may neither share a name, which every message
+/// goes by, nor share or nest an output, or each run would delete the other's files.
 fn registry_problems(registry: &[Generator]) -> Vec<String> {
     let mut problems = Vec::new();
     for (index, generator) in registry.iter().enumerate() {
         let output = Path::new(generator.output_dir);
         let stays_inside = output.components().all(|part| matches!(part, std::path::Component::Normal(_)));
-        let generated = output.file_name().is_some_and(|name| name == "generated" || name == "Generated");
+        let generated = output.components().any(|part| part.as_os_str().to_str().is_some_and(crate::generated::is_generated_dir));
         if !stays_inside || !generated {
-            problems.push(format!("{}: output `{}` must be a generated or Generated directory inside the repository", generator.name, generator.output_dir));
+            problems
+                .push(format!("{}: output `{}` must lie in a generated or Generated directory inside the repository", generator.name, generator.output_dir));
         }
         if !crate::files::CODE_TREES.iter().any(|tree| output.starts_with(tree)) {
             problems.push(format!(
@@ -423,6 +427,21 @@ mod tests {
     }
 
     #[test]
+    fn generators_may_each_own_a_package_folder_of_one_generated_source_folder() {
+        let generator = |name: &'static str, output_dir: &'static str| Generator { name, output_dir, generate: fake_generator };
+        let effects = "android/sdk/effects/src/generated/kotlin/io/github/christopherlinnett/craftbridge/effects";
+        let ffi = "android/sdk/effects/src/generated/kotlin/io/github/christopherlinnett/craftbridge/ffi/effects";
+        assert!(registry_problems(&[generator("facade", effects), generator("bindings", ffi)]).is_empty());
+        let inside = registry_problems(&[
+            generator("facade", effects),
+            generator("bindings", "android/sdk/effects/src/generated/kotlin/io/github/christopherlinnett/craftbridge/effects/ffi"),
+        ]);
+        assert!(inside.iter().any(|problem| problem.starts_with("bindings:") && problem.contains("lies in facade's")), "{inside:?}");
+        let outside = registry_problems(&[generator("facade", "android/sdk/effects/src/main/kotlin/effects")]);
+        assert!(!outside.is_empty(), "a folder with no generated directory above it is refused: {outside:?}");
+    }
+
+    #[test]
     fn a_registry_with_two_names_alike_or_an_output_outside_the_trees_is_refused() {
         let generator = |name: &'static str, output_dir: &'static str| Generator { name, output_dir, generate: fake_generator };
         let twice = registry_problems(&[generator("a", "rust/x/generated"), generator("a", "rust/y/generated")]);
@@ -489,11 +508,12 @@ mod tests {
     }
 
     #[test]
-    fn the_registry_is_safe_to_run_and_holds_the_effects_surface_its_swift_facade_and_version_constants() {
+    fn the_registry_is_safe_to_run_and_holds_the_effects_surface_its_facades_and_version_constants() {
         let registry = generators();
         assert!(registry_problems(&registry).is_empty(), "{:?}", registry_problems(&registry));
         assert!(registry.iter().any(|generator| generator.name == "effects-api-surface" && generator.output_dir.ends_with("/generated")));
         assert!(registry.iter().any(|generator| generator.name == "effects-swift-facade" && generator.output_dir.ends_with("/CraftBridgeEffects/Generated")));
+        assert!(registry.iter().any(|generator| generator.name == "effects-kotlin-facade" && generator.output_dir.ends_with("/craftbridge/effects")));
         assert!(registry.iter().any(|generator| generator.name == "effects-version" && generator.output_dir == crate::effects_api::VERSION_OUTPUT_DIR));
     }
 }

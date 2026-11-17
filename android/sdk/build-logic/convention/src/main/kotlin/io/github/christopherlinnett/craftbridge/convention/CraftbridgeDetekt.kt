@@ -8,6 +8,7 @@ import org.gradle.api.Project
 import org.gradle.api.Task
 import org.gradle.api.attributes.Usage
 import org.gradle.api.file.ConfigurableFileCollection
+import org.gradle.api.file.FileCollection
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Classpath
@@ -133,14 +134,23 @@ abstract class CraftbridgeDetekt : DefaultTask() {
     }
 }
 
-/** The generated bindings' source folder, which every module compiles beside its written code. */
+/** The source folder of every module's generated Kotlin, which it compiles beside its written code. */
 internal const val GENERATED_KOTLIN = "src/generated/kotlin"
 
 /**
+ * Where the generated bindings sit inside [GENERATED_KOTLIN]: the folders of §9's `ffi` packages. The
+ * bindings are the tool's own code, held to §3 alone; every other generated file, the command facade
+ * above all, is written code written for you. Spotless and detekt both split the folder at this line,
+ * so the facade is formatted and checked as written code and the bindings are neither.
+ */
+internal const val GENERATED_BINDINGS = "io/github/christopherlinnett/craftbridge/ffi"
+
+/**
  * detekt for every component AGP builds for the module, as AGP's variant API lists them: `detektMain`
- * checks each variant's written code with the written and shipped profiles and its generated bindings
- * with the base profile alone, and `detektTest` each variant's test components with the written one.
- * A build type or product flavor added later brings its own tasks with it; nothing here names one.
+ * checks each variant's written code and the generated facade beside it with the written and shipped
+ * profiles, its generated bindings with the base profile alone, and `detektTest` each variant's test
+ * components with the written one. A build type or product flavor added later brings its own tasks with
+ * it; nothing here names one.
  */
 internal fun Project.configureDetekt() {
     val android = extensions.getByType<LibraryExtension>()
@@ -175,15 +185,27 @@ internal fun Project.configureDetekt() {
             writtenConfig.set(layout.buildDirectory.file("craftbridge-detekt/written-packages.yml"))
             bindingsConfig.set(layout.buildDirectory.file("craftbridge-detekt/bindings-packages.yml"))
         }
-    val mainChecks = aggregate("detektMain", "every variant's shipped code and generated bindings")
+    val mainChecks = aggregate("detektMain", "every variant's shipped code, generated facade and generated bindings")
     val testChecks = aggregate("detektTest", "every variant's test components")
     val generated = projectDir.resolve(GENERATED_KOTLIN)
+    // AGP lists the generated folder as one root, so each run takes its half of it as a file tree of
+    // its own, which Gradle walks when the run executes: the facade with the written code, the
+    // bindings ([GENERATED_BINDINGS]) alone. Neither half can move into the other's profile without
+    // moving its package, which each run's package rule checks.
+    val facade =
+        fileTree(generated) {
+            include("**/*.kt")
+            exclude("$GENERATED_BINDINGS/**")
+        }
+    val bindings = fileTree(generated) { include("$GENERATED_BINDINGS/**/*.kt") }
+    val nothing = files()
 
     fun register(
         name: String,
         component: Component,
         what: String,
         directories: (File) -> Boolean,
+        generatedFiles: FileCollection,
         profileFiles: List<File>,
         packagesFile: (CraftbridgeDetektConfig) -> RegularFileProperty,
     ): TaskProvider<CraftbridgeDetekt> =
@@ -199,6 +221,7 @@ internal fun Project.configureDetekt() {
             // AGP lists a source set's folders whether or not the module has them, and the analyser
             // reads only folders that exist; a declared-but-unused folder is no finding.
             checkedSources.from(kotlin.all.map { all -> all.map { it.asFile }.filter { it.isDirectory && directories(it) } })
+            checkedSources.from(generatedFiles)
             configFiles.from(profileFiles, packages.flatMap(packagesFile))
             reportFile.set(layout.buildDirectory.file("craftbridge-detekt/$name.md"))
         }
@@ -206,14 +229,15 @@ internal fun Project.configureDetekt() {
     forEachComponent(
         main = { variant ->
             val name = "detekt" + variant.name.replaceFirstChar(Char::uppercaseChar)
-            // Written code is what the never-crash checks were written for; the generated bindings change
-            // through their generator instead (§6), as the Spotless exclusion has it.
+            // Written code, and the generated facade with it, is what the never-crash checks were
+            // written for; only the bindings are held to §3 alone, as Spotless leaves them unformatted.
             val code =
                 register(
                     name,
                     variant,
-                    "written code",
+                    "written code and the generated facade",
                     { it != generated },
+                    facade,
                     listOf(base, written, shipped),
                     CraftbridgeDetektConfig::writtenConfig,
                 )
@@ -222,7 +246,10 @@ internal fun Project.configureDetekt() {
                     "${name}Bindings",
                     variant,
                     "generated bindings",
-                    { it == generated },
+                    // Nothing from AGP's own folders: the bindings' half of the generated folder is its
+                    // file tree, and every written folder stays out of their base profile.
+                    { false },
+                    bindings,
                     listOf(base),
                     CraftbridgeDetektConfig::bindingsConfig,
                 )
@@ -235,6 +262,7 @@ internal fun Project.configureDetekt() {
                     nested,
                     "sources",
                     { true },
+                    nothing,
                     listOf(base, written),
                     CraftbridgeDetektConfig::writtenConfig,
                 )

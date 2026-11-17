@@ -5,6 +5,7 @@ import org.gradle.api.GradleException
 import org.gradle.api.JavaVersion
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.tasks.testing.Test
 import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.getByType
 import org.gradle.kotlin.dsl.withType
@@ -33,9 +34,10 @@ private val agpCompilerArgs = setOf("-Xuse-inline-scopes-numbers")
 
 /**
  * The Android library setup every CraftBridge module shares: SDK levels, Java and Kotlin rules,
- * Lint strictness, the consumer R8 rules and where generated bindings are compiled from. A
- * module's build file applies this plugin and names only its namespace and dependencies; the rules the
- * gate relies on are read back once that file has run, so it cannot set them back either.
+ * Lint strictness, the consumer R8 rules, where generated Kotlin is compiled from and what the unit
+ * tests run on. A module's build file applies this plugin and names only its namespace and
+ * dependencies; the rules the gate relies on are read back once that file has run, so it cannot set
+ * them back either.
  */
 class AndroidLibraryConventionPlugin : Plugin<Project> {
     override fun apply(target: Project): Unit =
@@ -67,13 +69,20 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                     abortOnError = true
                     disable += dayDependentLintChecks
                 }
-                // Generated bindings are compiled from their own folder, so no tool ever formats,
-                // lints or hand-edits them alongside the written code.
+                // Generated Kotlin — the command facade and the bindings — is compiled from a folder of
+                // its own, which only `cargo xtask generate` writes (AGENTS §6), beside the written code.
                 sourceSets
                     .getByName("main")
                     .kotlin.directories
                     .add(GENERATED_KOTLIN)
             }
+
+            // Every module's unit tests run on TestNG, through kotlin-test's binding to it: kotlin-test
+            // binds to JUnit 4 by default, whose EPL-1.0 is on no branch of the allowlist (AGENTS §8), and
+            // Gradle's default runner discovers no test the TestNG binding marks, so the framework and
+            // its binding are chosen here together, once for every module.
+            dependencies.addProvider("testImplementation", catalogLibrary("kotlin-test-testng"))
+            tasks.withType<Test>().configureEach { useTestNG() }
 
             // AGP 9 compiles Kotlin itself and registers this extension for it.
             extensions.configure<KotlinAndroidProjectExtension> {

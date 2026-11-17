@@ -13,8 +13,7 @@
 //! `EffectsEngine.command` they call through. It meets every Swift rule written code does, which the gate's
 //! Swift stages read it for: no force unwrap, `try!` or `fatalError`, so a call that fails throws.
 
-use crate::facade::{Dialect, EXTRA, EXTRA_DOC, EnumType, FROM_WORD_DOC, Method, Namespace, Param, RETURNS_DOC, THROWS_DOC, WORD_DOC, first_clash};
-use crate::types::KeyType;
+use crate::facade::{Dialect, ENGINE, EXTRA, EXTRA_DOC, EnumType, FROM_WORD_DOC, Method, Namespace, Param, RETURNS_DOC, THROWS_DOC, WORD_DOC, first_clash};
 
 /// The words Swift refuses as a name, without backticks, in at least one place the facade writes one: a
 /// method, a property, an enum key's value (a static member), or a parameter's label or value, each settled
@@ -84,10 +83,6 @@ const KEYWORDS: &[&str] = &[
 /// `.none` over an enum value of that name, which would silently leave the key out. An enum value of
 /// either name is renamed; a method, property or parameter of the name is no enum value and keeps it.
 const OPTIONAL_CASES: &[&str] = &["none", "some"];
-
-/// The stored property each namespace's type holds its engine by. A namespace below another is a property
-/// of its parent's type, so one named this would be a second declaration of the name there.
-const ENGINE: &str = "engine";
 
 /// Every type the emitted code names without qualifying it. An enum key's value type is nested in its
 /// namespace's type, so one of the same name would stand in for it there, and still compile where both
@@ -177,7 +172,7 @@ fn file(dialect: &dyn Dialect, namespace: &Namespace) -> String {
         None => ("EffectsEngine".to_string(), "self"),
     };
     let mut text = String::new();
-    text.push_str(&header());
+    text.push_str(&crate::facade::header(COMMAND));
     text.push_str("\nimport CraftBridge\n\n");
     // The type is declared next to the property that hands it out, in the namespace that holds it; the
     // methods follow in an extension, the shape the plan gives.
@@ -198,11 +193,6 @@ fn file(dialect: &dyn Dialect, namespace: &Namespace) -> String {
 
 /// The subcommand that writes the Swift facade: the one name `run` answers to and its files' notice gives.
 pub(crate) const COMMAND: &str = "swift";
-
-/// The file's first lines: the generated notice, then where to make a change instead.
-fn header() -> String {
-    format!("{}// Change the generator, which reads EffectCraft's command registry at the pinned revision.\n", crate::generated_notice(COMMAND))
-}
 
 /// An enum key is emitted as a `RawRepresentable` struct with a static member per value, not as a Swift
 /// `enum`: no `switch` over a struct can be exhaustive, so the compiler makes every caller write a
@@ -275,45 +265,26 @@ fn binding(dialect: &dyn Dialect, param: &Param) -> (String, String) {
     if label.starts_with('`') { (label, format!("{}Value", param.name)) } else { (label.clone(), label) }
 }
 
-/// The Swift type a key is passed as.
+/// The Swift type a key is passed as: the shared table, with Swift's word for a boolean.
 fn type_name(param: &Param) -> String {
-    match &param.key_type {
-        KeyType::Bool => "Bool".to_string(),
-        KeyType::Number => "Double".to_string(),
-        KeyType::Str => "String".to_string(),
-        KeyType::Enum(_) => param.enum_name.clone().unwrap_or_else(|| "String".to_string()),
-        KeyType::Vec2 => "Vec2".to_string(),
-        KeyType::Vec3 => "Vec3".to_string(),
-        KeyType::Color => "CraftColor".to_string(),
-        KeyType::Ref => "ItemReference".to_string(),
-        KeyType::Json => "JSONValue".to_string(),
-    }
+    crate::facade::type_name(param, "Bool")
 }
 
-/// `text` between the quotes of a Swift string literal.
+/// `text` between the quotes of a Swift string literal. Swift spells a control character `\u{...}`;
+/// the escaping table is shared with the Kotlin emitter, which spells the same control `\uXXXX`.
 fn string_literal(text: &str) -> String {
-    text.chars()
-        .map(|letter| match letter {
-            '\\' => "\\\\".to_string(),
-            '"' => "\\\"".to_string(),
-            letter if letter.is_control() => format!("\\u{{{:x}}}", u32::from(letter)),
-            letter => letter.to_string(),
-        })
-        .collect()
+    crate::facade::string_literal(text, "", |letter| format!("\\u{{{:x}}}", u32::from(letter)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::facade::plan;
+    use crate::facade::{plan_emitted, refusal, text_in};
     use crate::model::{Command, Key};
-
-    fn emitted(commands: &[Command]) -> Vec<(String, String)> {
-        files(&plan(commands).unwrap())
-    }
+    use crate::types::KeyType;
 
     fn text_of(commands: &[Command], name: &str) -> String {
-        emitted(commands).into_iter().find(|(file, _)| file == name).map(|(_, text)| text).unwrap_or_default()
+        text_in(plan_emitted(files, commands).into_iter(), name, |file, want| file == want)
     }
 
     #[test]
@@ -348,7 +319,7 @@ mod tests {
         ] {
             assert!(text.contains(wanted), "missing {wanted:?} in\n{text}");
         }
-        assert!(text.starts_with("// @generated "), "{text}");
+        assert!(text.starts_with(&crate::facade::header(COMMAND)), "{text}");
     }
 
     #[test]
@@ -410,7 +381,7 @@ mod tests {
     #[test]
     fn two_values_the_swift_renames_into_one_name_are_refused() {
         let mode = KeyType::Enum(vec!["None".to_string(), "noneValue".to_string()]);
-        let error = refusal(&[Command::of("layer.mask.spin", "Spin", vec![Key::of("mode", false, mode)])]);
+        let error = refusal(check, &[Command::of("layer.mask.spin", "Spin", vec![Key::of("mode", false, mode)])]);
         assert!(
             error.contains("command `layer.mask.spin` key `mode`")
                 && error.contains("the value `None`")
@@ -423,72 +394,46 @@ mod tests {
     #[test]
     fn two_keys_the_swift_binds_into_one_name_are_refused() {
         let keys = vec![Key::of("in", true, KeyType::Json), Key::of("inValue", false, KeyType::Bool)];
-        let error = refusal(&[Command::of("edit.paste", "Paste", keys)]);
+        let error = refusal(check, &[Command::of("edit.paste", "Paste", keys)]);
         assert!(
             error.contains("command `edit.paste`") && error.contains("key `in`") && error.contains("key `inValue`") && error.contains("Swift name `inValue`"),
             "{error}"
         );
         let apart = vec![Key::of("in", true, KeyType::Json), Key::of("at", false, KeyType::Bool)];
-        assert!(refusal(&[Command::of("edit.paste", "Paste", apart)]).is_empty(), "keys the renames leave apart pass");
+        assert!(refusal(check, &[Command::of("edit.paste", "Paste", apart)]).is_empty(), "keys the renames leave apart pass");
     }
 
     #[test]
     fn an_enum_key_whose_type_would_take_a_name_the_facade_uses_is_refused() {
+        crate::facade::assert_facade_names_are_refused(check, NAMED_TYPES, type_name);
+        // The name this language's JSON machinery declares for convertible strings is weighed too.
         let kind = KeyType::Enum(vec!["layer".to_string(), "comp".to_string()]);
-        let error = refusal(&[Command::of("effect.item", "Item", vec![Key::of("reference", false, kind.clone())])]);
-        assert!(error.contains("command `effect.item` key `reference`") && error.contains("`ItemReference`"), "{error}");
-        // The names the layout writes by hand are weighed too, through ids that would take them: the two
-        // words of a value type's name build `EffectsEngine` exactly.
-        let error = refusal(&[Command::of("view.effects", "E", vec![Key::of("engine", false, kind.clone())])]);
-        assert!(error.contains("`EffectsEngine`"), "{error}");
-        // The acronyms are within reach too, through a method that starts with a lower-case letter.
-        let error = refusal(&[Command::of("a.jSON", "J", vec![Key::of("value", false, kind.clone())])]);
-        assert!(error.contains("`JSONValue`"), "{error}");
-        let error = refusal(&[Command::of("a.jSONString", "J", vec![Key::of("representable", false, kind.clone())])]);
+        let error = refusal(check, &[Command::of("a.jSONString", "J", vec![Key::of("representable", false, kind)])]);
         assert!(error.contains("`JSONStringRepresentable`"), "{error}");
-        // So is any name of two words whose initials are capitals, not just an acronym: a method `craft`
-        // with a key `color` would name one `CraftColor`.
-        let error = refusal(&[Command::of("a.craft", "C", vec![Key::of("color", false, kind.clone())])]);
-        assert!(error.contains("`CraftColor`"), "{error}");
-        for key_type in [KeyType::Bool, KeyType::Number, KeyType::Str, KeyType::Vec2, KeyType::Vec3, KeyType::Color, KeyType::Ref, KeyType::Json] {
-            let param = plan(&[Command::of("a.b", "B", vec![Key::of("k", false, key_type)])])
-                .unwrap()
-                .pop()
-                .and_then(|namespace| namespace.methods.into_iter().next())
-                .and_then(|method| method.params.into_iter().next())
-                .unwrap();
-            assert!(NAMED_TYPES.contains(&type_name(&param).as_str()), "{} is named by the facade but not weighed", type_name(&param));
-        }
     }
 
     #[test]
     fn a_namespace_below_another_named_like_the_stored_engine_is_refused() {
-        let error = refusal(&[Command::of("view.engine.front", "Front", vec![])]);
+        let error = refusal(check, &[Command::of("view.engine.front", "Front", vec![])]);
         assert!(error.contains("namespace `view.engine`") && error.contains("`engine`"), "{error}");
         // The fold builds the same name from another spelling, so it is refused too: `Engine` and `ENGINE`
         // are the same property of the same parent.
-        let caps = refusal(&[Command::of("view.ENGINE.front", "Front", vec![])]);
+        let caps = refusal(check, &[Command::of("view.ENGINE.front", "Front", vec![])]);
         assert!(caps.contains("namespace `view.ENGINE`") && caps.contains("`engine`"), "{caps}");
-        let word = refusal(&[Command::of("view.Engine.front", "Front", vec![])]);
+        let word = refusal(check, &[Command::of("view.Engine.front", "Front", vec![])]);
         assert!(word.contains("namespace `view.Engine`") && word.contains("`engine`"), "{word}");
         // What the engine and the compiler leave apart stays: Swift names a property and a method of one
         // type apart by their full names, so a top-level namespace or a command of the name is no clash.
-        let kept = refusal(&[
-            Command::of("engine.info", "Info", vec![]),
-            Command::of("view.engines.front", "Front", vec![]),
-            Command::of("view.engine", "Engine", vec![]),
-        ]);
+        let kept = refusal(
+            check,
+            &[Command::of("engine.info", "Info", vec![]), Command::of("view.engines.front", "Front", vec![]), Command::of("view.engine", "Engine", vec![])],
+        );
         assert!(kept.is_empty(), "{kept}");
-    }
-
-    /// The error [`check`] gives for `commands`, or the empty string when it finds nothing.
-    fn refusal(commands: &[Command]) -> String {
-        check(&plan(commands).unwrap()).err().unwrap_or_default()
     }
 
     #[test]
     fn a_namespace_with_no_command_of_its_own_still_has_its_type() {
-        let files = emitted(&[Command::of("outer.inner.run", "Run", vec![])]);
+        let files = plan_emitted(files, &[Command::of("outer.inner.run", "Run", vec![])]);
         assert_eq!(files.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["OuterCommands.swift", "OuterInnerCommands.swift"]);
         let outer = files.first().map(|(_, text)| text.as_str()).unwrap_or_default();
         assert!(outer.contains("public struct OuterCommands") && !outer.contains("public func"), "{outer}");
@@ -502,16 +447,20 @@ mod tests {
     }
 
     #[test]
-    fn every_namespace_and_command_at_the_pin_is_emitted_once() {
-        let commands = crate::surface::commands();
-        let namespaces = plan(&commands).unwrap();
-        let emitted = files(&namespaces);
-        assert_eq!(emitted.len(), namespaces.len());
-        let methods: usize = emitted.iter().map(|(_, text)| text.matches("    public func ").count()).sum();
-        assert_eq!(methods, commands.len());
-        for command in &commands {
-            let needle = format!("            \"{}\",\n", command.id);
-            assert_eq!(emitted.iter().map(|(_, text)| text.matches(&needle).count()).sum::<usize>(), 1, "{}", command.id);
+    fn a_line_break_in_registry_text_stays_inside_its_doc_comment() {
+        // A doc comment is one `///` line: a line break would end it and leave the rest of the sentence
+        // as code, so every sentence that names the registry's text is one line in the emitted file.
+        let emitted = plan_emitted(files, &crate::facade::broken_lines());
+        let text = emitted.iter().map(|(_, text)| text.as_str()).collect::<String>();
+        assert!(!text.contains('\r'), "{text}");
+        assert!(text.contains("/// The value `of f`.") && text.contains("/// The `view left` commands."), "{text}");
+        for line in text.lines().filter(|line| line.contains("of f") || line.contains("k y") || line.contains("view left")) {
+            assert!(line.trim_start().starts_with("///"), "{line:?} is code:\n{text}");
         }
+    }
+
+    #[test]
+    fn every_namespace_and_command_at_the_pin_is_emitted_once() {
+        crate::facade::assert_pin_emitted_once(files, "    public func ");
     }
 }

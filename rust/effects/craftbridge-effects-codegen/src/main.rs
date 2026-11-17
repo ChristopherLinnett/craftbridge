@@ -4,12 +4,14 @@
 //! ```text
 //! craftbridge-effects-codegen surface --pin <commit> <out-dir>
 //! craftbridge-effects-codegen swift <out-dir>
+//! craftbridge-effects-codegen kotlin <out-dir>
 //! craftbridge-effects-codegen version --pin <commit> <out-dir>
 //! craftbridge-effects-codegen diff <old> <new>
 //! ```
 //!
 //! `surface` writes `api-surface.json` into `<out-dir>`, `swift` one Swift file for each command namespace,
-//! `version` the plugin's Rust file of the engine's version and pin.
+//! `kotlin` one Kotlin file for each, in the package the `:effects` module declares, and `version` the
+//! plugin's Rust file of the engine's version and pin.
 //! `diff` reads two surface files and lists, on standard output, the commands, keys and tools that were
 //! added, removed or changed (see [`diff`] for the lines and for what breaks an app). Its exit code is 0
 //! when no change breaks an app, 2 when one does and 1 when a file cannot be read or parsed, or the report
@@ -18,6 +20,7 @@
 
 mod diff;
 mod facade;
+mod kotlin;
 mod model;
 mod surface;
 mod swift;
@@ -44,7 +47,8 @@ fn run(args: &[OsString]) -> ExitCode {
         [command, flag, pin, out_dir] if command == "surface" && flag == "--pin" => {
             report(pin_text(pin).and_then(|pin| write_surface(pin, Path::new(out_dir))))
         }
-        [command, out_dir] if command == swift::COMMAND => report(write_swift(Path::new(out_dir))),
+        [command, out_dir] if command == swift::COMMAND => report(write_facade(&SWIFT, Path::new(out_dir))),
+        [command, out_dir] if command == kotlin::COMMAND => report(write_facade(&KOTLIN, Path::new(out_dir))),
         [command, flag, pin, out_dir] if command == version::COMMAND && flag == "--pin" => {
             report(pin_text(pin).and_then(|pin| write_version(pin, Path::new(out_dir))))
         }
@@ -52,7 +56,7 @@ fn run(args: &[OsString]) -> ExitCode {
         _ => {
             say(
                 std::io::stderr(),
-                "usage: craftbridge-effects-codegen surface --pin <commit> <out-dir>\n       craftbridge-effects-codegen swift <out-dir>\n       craftbridge-effects-codegen version --pin <commit> <out-dir>\n       craftbridge-effects-codegen diff <old> <new>",
+                "usage: craftbridge-effects-codegen surface --pin <commit> <out-dir>\n       craftbridge-effects-codegen swift <out-dir>\n       craftbridge-effects-codegen kotlin <out-dir>\n       craftbridge-effects-codegen version --pin <commit> <out-dir>\n       craftbridge-effects-codegen diff <old> <new>",
             );
             ExitCode::FAILURE
         }
@@ -133,12 +137,22 @@ fn write_surface(pin: &str, out_dir: &Path) -> Result<String, String> {
     Ok(format!("{} holds {} commands and {} tools; keys typed {counts}", file.display(), surface.commands.len(), surface.tools.len()))
 }
 
-/// Write the Swift facade of every command into `out_dir`, saying what it holds.
-fn write_swift(out_dir: &Path) -> Result<String, String> {
+/// One facade's emitter: the checks of the names it declares for itself, then its files, each a path
+/// below the output folder and the file's text.
+struct Emitter {
+    check: fn(&[facade::Namespace]) -> Result<(), String>,
+    files: fn(&[facade::Namespace]) -> Vec<(String, String)>,
+}
+
+const SWIFT: Emitter = Emitter { check: swift::check, files: swift::files };
+const KOTLIN: Emitter = Emitter { check: kotlin::check, files: kotlin::files };
+
+/// Write one facade of every command into `out_dir`, saying what it holds.
+fn write_facade(emitter: &Emitter, out_dir: &Path) -> Result<String, String> {
     let commands = surface::commands();
     let namespaces = facade::plan(&commands)?;
-    swift::check(&namespaces)?;
-    let files = swift::files(&namespaces);
+    (emitter.check)(&namespaces)?;
+    let files = (emitter.files)(&namespaces);
     for (name, text) in &files {
         write_into(out_dir, name, text)?;
     }
@@ -172,16 +186,20 @@ mod tests {
     }
 
     #[test]
-    fn the_swift_is_written_one_file_for_each_namespace() {
-        let out = temp("swift");
-        let _ = std::fs::remove_dir_all(&out);
-        let done = write_swift(&out).unwrap();
-        let names: Vec<String> = std::fs::read_dir(&out).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
-        assert!(names.contains(&"LayerCommands.swift".to_string()) && names.contains(&"LayerMaskCommands.swift".to_string()), "{names:?}");
-        assert!(done.contains(&format!("{} files", names.len())), "{done}");
-        let text = std::fs::read_to_string(out.join("RenderQueueCommands.swift")).unwrap();
-        assert!(text.contains("public func setRender("), "{text}");
-        let _ = std::fs::remove_dir_all(&out);
+    fn each_facade_is_written_one_file_for_each_namespace() {
+        for (emitter, extension, call) in [(&SWIFT, "swift", "public func setRender("), (&KOTLIN, "kt", "public suspend fun setRender(")] {
+            let out = temp(extension);
+            let _ = std::fs::remove_dir_all(&out);
+            let done = write_facade(emitter, &out).unwrap();
+            let names: Vec<String> = std::fs::read_dir(&out).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
+            for file in ["LayerCommands", "LayerMaskCommands"] {
+                assert!(names.contains(&format!("{file}.{extension}")), "{names:?}");
+            }
+            assert!(done.contains(&format!("{} files", names.len())), "{done}");
+            let text = std::fs::read_to_string(out.join(format!("RenderQueueCommands.{extension}"))).unwrap();
+            assert!(text.contains(call), "{text}");
+            let _ = std::fs::remove_dir_all(&out);
+        }
     }
 
     #[test]
@@ -219,6 +237,9 @@ mod tests {
         assert!(run(&line(&[b"swift", folder])) == ExitCode::SUCCESS);
         assert!(out.join("LayerCommands.swift").is_file());
         let _ = std::fs::remove_dir_all(&out);
+        assert!(run(&line(&[b"kotlin", folder])) == ExitCode::SUCCESS);
+        assert!(out.join("LayerCommands.kt").is_file());
+        let _ = std::fs::remove_dir_all(&out);
         assert!(run(&line(&[b"version", b"--pin", pin, folder])) == ExitCode::SUCCESS);
         assert!(out.join(version::FILE).is_file());
         let _ = std::fs::remove_dir_all(&out);
@@ -228,6 +249,8 @@ mod tests {
             &[b"surface", b"--pins", pin, folder],
             &[b"swift"],
             &[b"swift", folder, b"more"],
+            &[b"kotlin"],
+            &[b"kotlin", folder, b"more"],
             &[b"version", b"--pin", pin],
             &[b"version", b"--pins", pin, folder],
             &[b"version", b"--pin", pin, b"--engine-version", b"1.2.3", folder],
@@ -289,7 +312,7 @@ mod tests {
     #[test]
     fn a_diff_that_loses_a_command_key_or_tool_or_makes_one_stricter_exits_2() {
         type Edit = fn(&mut model::Surface);
-        let breaking: [(&str, Edit); 11] = [
+        let breaking: [(&str, Edit); 10] = [
             ("removed-command", |s| drop(s.commands.pop())),
             ("removed-key", |s| drop(first_command(s).keys.remove(0))),
             ("removed-tool", |s| drop(s.tools.pop())),
@@ -299,7 +322,6 @@ mod tests {
             ("removed-enum-word", |s| first_command(s).keys.get_mut(2).unwrap().values = Some(vec!["x".to_string()])),
             ("removed-whole-word-list", |s| first_command(s).keys.get_mut(2).unwrap().values = None),
             ("keys-reordered", |s| first_command(s).keys.swap(0, 1)),
-            ("new-optional-key-first", |s| first_command(s).keys.insert(0, model::Key::raw("fresh", false, "bool", None))),
             ("tool-became-bridge-only", |s| s.tools.first_mut().unwrap().bridge_only = true),
         ];
         for (name, edit) in breaking {
@@ -310,10 +332,11 @@ mod tests {
     #[test]
     fn a_diff_that_only_adds_or_loosens_exits_0() {
         type Edit = fn(&mut model::Surface);
-        let compatible: [(&str, Edit); 8] = [
+        let compatible: [(&str, Edit); 9] = [
             ("nothing", |_| {}),
             ("new-command", |s| s.commands.push(model::Command { journal: false, ..model::Command::of("c.new", "", vec![]) })),
             ("new-optional-key-last", |s| first_command(s).keys.push(model::Key::raw("fresh", false, "bool", None))),
+            ("new-optional-key-first", |s| first_command(s).keys.insert(0, model::Key::raw("fresh", false, "bool", None))),
             ("bridge-only-tool-removed", |s| s.tools.retain(|tool| !tool.bridge_only)),
             ("new-enum-word", |s| first_command(s).keys.get_mut(2).unwrap().values = Some(vec!["x".to_string(), "y".to_string(), "z".to_string()])),
             ("key-became-optional", |s| first_command(s).keys.get_mut(1).unwrap().required = false),
