@@ -1003,15 +1003,15 @@ impl Engine {
 </tr>
 <tr>
 <td><code>template.render</code></td>
-<td><code>{template, values, output?: RenderRequest, frame?: FrameRequest}</code></td>
-<td>as <code>export</code> or <code>frame</code></td>
+<td><code>{template, values?, output: RenderRequest}</code> through <code>request_with_progress</code>; <code>{template, values?, frame?: FrameRequest}</code> through the binary <code>frame</code></td>
+<td>as <code>export</code> with <code>warnings</code> beside <code>rendered</code>, or as <code>frame</code></td>
 <td><code>render --template</code>, <code>render-frame --template</code></td>
-<td>CraftBridge&#39;s template runner over the <code>essential</code> and <code>templates</code> commands (AD5)</td>
+<td>CraftBridge&#39;s template runner over the <code>essential</code>, <code>project</code>, <code>comp</code>, <code>layer</code>, <code>edit</code> and <code>file</code> commands (AD5), exporting through the render runner (AD3)</td>
 </tr>
 <tr>
 <td><code>template.open</code></td>
-<td><code>{template, values}</code></td>
-<td><code>{comp}</code></td>
+<td><code>{template, values?}</code></td>
+<td><code>{comp, warnings}</code></td>
 <td>— (the first half of <code>--template</code>)</td>
 <td>the template runner&#39;s first half (AD5)</td>
 </tr>
@@ -1095,7 +1095,7 @@ impl Engine {
 <td><code>effect.apply: no effect &quot;Gausian Blur&quot; (step 3)</code></td>
 </tr>
 <tr>
-<td>no comp, layer or property</td>
+<td>no comp, layer, property or template control</td>
 <td><code>NotFound</code></td>
 <td><code>no layer &quot;#9&quot; in &quot;Birthday Card&quot;</code></td>
 </tr>
@@ -1399,7 +1399,7 @@ impl Engine {
 <td>AD5</td>
 <td>Templates: open an <code>.ectemplate</code>, apply values, render a frame or an export, and surface missing-font warnings</td>
 <td>the CLI&#39;s <code>--template</code> (<code>effectcraft: apps/<wbr>effectcraft-cli/<wbr>src/<wbr>template.rs</code>)</td>
-<td>the <code>essential</code> and <code>templates</code> commands, and the command line&#39;s <code>--template</code> handling whole (<code>effectcraft: apps/<wbr>effectcraft-cli/<wbr>src/<wbr>template.rs</code>)</td>
+<td>the <code>essential</code>, <code>project</code>, <code>comp</code>, <code>layer</code>, <code>edit</code> and <code>file</code> commands, and the command line&#39;s <code>--template</code> handling whole (<code>effectcraft: apps/<wbr>effectcraft-cli/<wbr>src/<wbr>template.rs</code>), and the confinement&#39;s check of a path, which tells a template whose folder, as named, the session may write from one whose folder it may only read</td>
 <td>FX-1f</td>
 </tr>
 <tr>
@@ -1432,7 +1432,7 @@ impl Engine {
 </tr>
 <tr>
 <td>AD10</td>
-<td>The answer table: <code>info</code>, <code>commands</code>, <code>exec</code> and <code>run</code> in the CLI&#39;s shapes, and every EffectCraft failure mapped onto one <code>CraftError</code> row (§14): what the confinement withholds and a capability the build lacks are <code>Unsupported</code>, a file access outside the confinement is <code>Io</code>, an unknown command or parameter and a parameter the confinement cannot check are <code>InvalidParams</code>, a missing comp, item, layer or property is <code>NotFound</code> in each of the engine&#39;s phrasings, a file the engine reports it cannot read or write is <code>Io</code>, everything else <code>CommandFailed</code>, and every failed step of <code>run</code> names its step</td>
+<td>The answer table: <code>info</code>, <code>commands</code>, <code>exec</code> and <code>run</code> in the CLI&#39;s shapes, and every EffectCraft failure mapped onto one <code>CraftError</code> row (§14): what the confinement withholds and a capability the build lacks are <code>Unsupported</code>, a file access outside the confinement is <code>Io</code>, an unknown command or parameter and a parameter the confinement cannot check are <code>InvalidParams</code>, a missing comp, item, layer, property or control is <code>NotFound</code> in each of the engine&#39;s phrasings, a file the engine reports it cannot read or write is <code>Io</code>, everything else <code>CommandFailed</code>, and every failed step of <code>run</code> names its step</td>
 <td>the CLI&#39;s <code>info</code>, <code>exec</code> and <code>run</code> printing (<code>effectcraft: apps/<wbr>effectcraft-cli/<wbr>src/<wbr>main.rs:630-745</code>): a library has no process to print, so the plugin answers those documents and errors through <code>CraftError</code></td>
 <td><code>Error</code> (<code>effectcraft: crates/<wbr>automation/<wbr>src/<wbr>lib.rs:33</code>), <code>EngineError</code> (<code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>error.rs:2</code>), <code>ProjectError</code> (<code>effectcraft: crates/<wbr>project/<wbr>src/<wbr>settings.rs:83</code>), <code>check_params</code> (<code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>cmd/<wbr>schema.rs:107</code>), <code>tools::run</code> (<code>effectcraft: crates/<wbr>automation/<wbr>src/<wbr>tools.rs:111</code>), the confinement&#39;s refusals (<code>effectcraft: crates/<wbr>automation/<wbr>src/<wbr>confine.rs:190-423</code>), the engine&#39;s <code>not available in this build</code>, <code>{format} export is not available</code>, missing-layer and <code>cannot read</code>/<code>cannot write</code> sentences, <code>APP_VERSION</code> (<code>effectcraft: crates/<wbr>project/<wbr>src/<wbr>settings.rs:13</code>), the command line&#39;s <code>info</code>, <code>exec</code>, <code>run</code> and <code>commands</code> with <code>exec --list</code> (<code>effectcraft: apps/<wbr>effectcraft-cli/<wbr>src/<wbr>main.rs:630-671</code>, <code>:672-673</code>, <code>:676-690</code>, <code>:691-745</code>, <code>:1036-1055</code>)</td>
 <td>FX-1a, FX-1b</td>
@@ -1801,7 +1801,17 @@ impl Engine {
 <tr>
 <td><code>src/<wbr>runner.rs</code></td>
 <td>NEW</td>
-<td>AD3: the render runner, which lists the render&#39;s files before it starts (§19); AD5: the template runner</td>
+<td>AD3: the render runner, which lists the render&#39;s files before it starts (§19)</td>
+</tr>
+<tr>
+<td><code>src/<wbr>templates.rs</code></td>
+<td>NEW</td>
+<td>AD5: the template runner: <code>template.open</code>, <code>template.render</code> and the template half of <code>frame</code>, which set an instance up as the command line&#39;s <code>--template</code> does and export it through the render runner</td>
+</tr>
+<tr>
+<td><code>src/<wbr>staging.rs</code></td>
+<td>NEW</td>
+<td>AD5: the staging of a source the session may read from a folder it may not write: a copy in the cache, which the import reads so what it writes beside the source lands inside the container (§19)</td>
 </tr>
 <tr>
 <td><code>src/<wbr>outputs.rs</code></td>
@@ -1834,7 +1844,8 @@ impl Engine {
 <p><strong>States</strong> (per call): success · <code>InvalidParams</code> (unknown key, bad JSON) · <code>NotFound</code> (comp, layer, property, template control) · <code>CommandFailed</code> (the engine&#39;s message; <code>run</code> adds the step, as it does to every other row&#39;s message) · waiting in order during an export (L3) · <code>Cancelled</code> · <code>Unsupported</code> (helper effects; plug-ins switched off; a command that runs a script, which the confinement withholds; the model downloads, AD11; an export format the build lacks; a name <code>request</code> or <code>request_with_progress</code> does not answer) · <code>Io</code> (outside the confinement, or a file the disk will not read or write).</p>
 <p><strong>Edge cases.</strong></p>
 <ul>
-<li>A template whose font is missing on the phone: EffectCraft substitutes a fallback and reports it in the template result&#39;s warnings, as on the desktop; the Swift and Kotlin layers surface <code>warnings</code>.</li>
+<li>A template whose font is missing on the phone: EffectCraft substitutes a fallback face and says nothing, on the phone as on the desktop, where the command line&#39;s <code>--template</code> prints nothing about it; the template runner answers the template&#39;s text layers whose font is missing as <code>warnings</code>, as <code>file.findMissing</code> reports them, and the Swift and Kotlin layers surface <code>warnings</code>.</li>
+<li>A template whose folder lies outside the container&#39;s write root, as <code>bundleURL(&quot;Birthday Card.ectemplate&quot;)</code>&#39;s does (§5): the import writes a template&#39;s media beside the template as it is named (<code>&lt;stem&gt; Media/<wbr></code>), so a template in the bundle would have them written into the bundle, which on iOS fails without a word and leaves the instance&#39;s media missing, and on Android, where the unpacked assets can be written, escapes the confinement. <code>template.open</code>, <code>template.render</code> and the template half of <code>frame</code> therefore read such a template from a copy in <code>&lt;cache&gt;/<wbr>staged/<wbr>&lt;id&gt;/<wbr></code>, <code>&lt;id&gt;</code> a hash of its resolved path so two sources never share a folder, made by CraftBridge&#39;s one staging (<code>src/<wbr>staging.rs</code>), which asks the confinement&#39;s own write check of the folder holding the name the call gives, not of where a link there leads, and which knows nothing of templates, so any import that writes beside its source can read it the same way; a template whose folder may be written is imported where it is, and one the confinement does not let the session read is refused as before.</li>
 <li><code>run</code> with many steps: they run in order on the actor, and the call returns after the last step or at the first failure with its step index, as the CLI&#39;s <code>run</code> does (<code>apps/<wbr>effectcraft-cli/<wbr>src/<wbr>main.rs:732-740</code>). The CLI&#39;s 100,000-step limit guards text read from files and standard input (<code>:371-374</code>); a step array an app builds in memory needs no such guard.</li>
 </ul>
 <p><strong>Tests.</strong> The desktop conformance suite runs every method on macOS and compares results with the CLI&#39;s on the same inputs (§28, QA-1).</p>

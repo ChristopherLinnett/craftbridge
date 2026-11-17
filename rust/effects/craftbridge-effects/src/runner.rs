@@ -77,7 +77,7 @@ pub(crate) fn export(backend: &mut Backend, params: &Value, on_progress: Progres
 }
 
 /// The in-process session behind the backend, which the plugin always builds headless.
-fn session(backend: &mut Backend) -> Result<&mut Session> {
+pub(crate) fn session(backend: &mut Backend) -> Result<&mut Session> {
     backend.session().ok_or_else(|| CraftError::internal("the render runner needs the in-process session, and this backend has none"))
 }
 

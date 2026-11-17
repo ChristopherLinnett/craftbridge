@@ -343,16 +343,28 @@ fn is_refused_by_the_disk(why: &str) -> bool {
 }
 
 /// Whether a command's refusal is one of the engine's "the thing you named is not there" sentences
-/// for a comp, layer or property (the §14 `NotFound` row) rather than a command failing for some
-/// other reason ("unknown effect" is a failed call, not a missing comp, layer or property). The
+/// for a comp, layer, property or control (the §14 `NotFound` row, a template's values naming a
+/// control it lacks among them) rather than a command failing for some other reason ("unknown
+/// effect" is a failed call, not a missing comp, layer or property). The
 /// engine says these both as a command's own refusal and as a plain one: every command that takes a
 /// list of layers refuses a missing one as "no layer …" outside its own refusal. A sentence counts
 /// only when the missing thing is all it says or the reference it names follows — an id, a quoted
 /// name, `#n`, `@uid` — because the same words open sentences about something else: "no layers",
 /// "no layer uses motion blur", "no compatible unlocked property".
 fn is_missing_named(message: &str) -> bool {
-    const MISSING: [&str; 9] =
-        ["no such property", "no such layer", "no such item", "no property group", "no property", "no layer", "no item", "no composition", "no comp"];
+    const MISSING: [&str; 11] = [
+        "no such property",
+        "no such layer",
+        "no such item",
+        "no property group",
+        "no property",
+        "no layer",
+        "no item",
+        "no composition",
+        "no comp",
+        "no control named",
+        "no control",
+    ];
     let names_a_reference = |rest: &str| rest.starts_with(|c: char| c.is_ascii_digit() || matches!(c, '"' | '`' | '#' | '@' | '-'));
     MISSING.iter().any(|missing| {
         message.strip_prefix(missing).is_some_and(|rest| rest.is_empty() || rest == " is open" || rest.strip_prefix(' ').is_some_and(names_a_reference))
@@ -455,6 +467,8 @@ mod tests {
             "no composition is open",
             "no property `transform/opacity`",
             "no property group @12",
+            "no control named `Nope` (controls: Name, Photo)",
+            "no control 74 on this instance",
         ] {
             assert!(is_missing_named(missing), "`{missing}` names a missing thing");
         }

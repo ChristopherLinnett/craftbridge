@@ -476,18 +476,18 @@ fn the_catalogue_reports_the_phones_capabilities() {
 fn the_method_table_answers_unwired_methods_as_unsupported() {
     let scratch = Scratch::new().expect("a scratch folder");
     let mut app = scratch.app().expect("the app starts from prepared folders");
-    // The five names §14's table carries that `request` does not answer, and two names the table
+    // The four names §14's table carries that `request` does not answer, and two names the table
     // carries not at all, `script` (PD13: an app composes the engine's methods instead) and one no
     // method is: every name answers `Unsupported` in the one refusal, whose exact words are pinned
     // so they claim only what is true however the method was asked — that `request` lacks it, and
     // which methods `request` answers.
-    for method in ["frame", "export", "template.render", "template.open", "script", "mcp", "no.such.method"] {
+    for method in ["frame", "export", "template.render", "script", "mcp", "no.such.method"] {
         let error = (request(&mut app, method, json!({}))).expect_err("the call was meant to fail");
         match error {
             CraftError::Unsupported { message } => assert_eq!(
                 message,
                 format!(
-                    "`{method}` is not answered by `request` in this build, which answers `info`, `commands`, `exec`, `run`, `props`, `get`, `set`, `open`, `save`, `saveAs`, `new`, `replay` and `timings`"
+                    "`{method}` is not answered by `request` in this build, which answers `info`, `commands`, `exec`, `run`, `props`, `get`, `set`, `open`, `save`, `saveAs`, `new`, `replay`, `timings` and `template.open`"
                 ),
                 "the refusal names the method and what `request` answers"
             ),
@@ -497,17 +497,17 @@ fn the_method_table_answers_unwired_methods_as_unsupported() {
 }
 
 #[test]
-fn a_call_with_progress_answers_export_and_refuses_every_other_name() {
+fn a_call_with_progress_answers_its_methods_and_refuses_every_other_name() {
     let scratch = Scratch::new().expect("a scratch folder");
     let mut app = scratch.app().expect("the app starts from prepared folders");
-    // Every name but `export`, the `request` methods included, is refused in the one refusal that
+    // Every name but `export` and `template.render`, the `request` methods included, is refused in the one refusal that
     // names what the call answers.
-    for method in ["info", "exec", "template.render", "frame", "script", "no.such.method"] {
+    for method in ["info", "exec", "template.open", "frame", "script", "no.such.method"] {
         let error = app.request_with_progress(method, json!({}), &mut |_, _, _| true, &mut |_| Ok(())).expect_err("the call was meant to fail");
         match error {
             CraftError::Unsupported { message } => assert_eq!(
                 message,
-                format!("`{method}` is not answered by `request_with_progress` in this build, which answers `export`"),
+                format!("`{method}` is not answered by `request_with_progress` in this build, which answers `export` and `template.render`"),
                 "the refusal names the method and what the call answers"
             ),
             other => panic!("a name the call does not answer must be `Unsupported`, got {other:?}"),
@@ -681,7 +681,7 @@ fn a_frame_is_never_answered_by_request() {
     match request(&mut app, "frame", json!({})).expect_err("`request` does not answer `frame`") {
         CraftError::Unsupported { message } => assert!(
             message
-                .ends_with("which answers `info`, `commands`, `exec`, `run`, `props`, `get`, `set`, `open`, `save`, `saveAs`, `new`, `replay` and `timings`"),
+                .ends_with("which answers `info`, `commands`, `exec`, `run`, `props`, `get`, `set`, `open`, `save`, `saveAs`, `new`, `replay`, `timings` and `template.open`"),
             "{message}"
         ),
         other => panic!("`frame` through `request` must be `Unsupported`, got {other:?}"),

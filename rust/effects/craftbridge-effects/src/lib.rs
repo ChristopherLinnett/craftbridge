@@ -13,7 +13,8 @@
 //! Every call reaches the session through the MCP server built at construction, so the `mcp` call's
 //! line transport and the method table act on one session. The methods the plugin answers are the
 //! plan's §14 rows its method lists name — one for `request`, `replay` and `timings` among them, and
-//! one for `request_with_progress`, which answers `export` through the render runner (AD3) — each
+//! one for `request_with_progress`, which answers `export` through the render runner (AD3) and
+//! `template.render` through the template runner (AD5) — each
 //! with the result shape and failure words of the EffectCraft command line at the pin (AD10); `mcp`
 //! is a call of its own, not a row of either list, and `script` is not a method of the phone build
 //! (PD13): a script's commands reach the session past the confinement, so an app runs the engine's
@@ -21,7 +22,8 @@
 //! `Unsupported`, naming what was asked and the methods that call answers. The binary `frame` is
 //! answered only through [`CraftApp::frame`](craftbridge_core::CraftApp::frame), since pixels cannot
 //! come back through `request`'s JSON; its request is resolved as the command line's `render-frame`
-//! resolves its flags (AD4).
+//! resolves its flags (AD4), or, when its parameters name a `template`, of that template's instance
+//! (AD5).
 //!
 //! At engine start the plugin registers the phone's font folders with EffectCraft and takes the
 //! font listing every app-facing call answers from the platform's own answer (AD2).
@@ -45,6 +47,8 @@ mod replay;
 mod requests;
 mod runner;
 mod session;
+mod staging;
+mod templates;
 #[cfg(test)]
 mod test_plugin;
 mod timings;

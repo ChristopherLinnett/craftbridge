@@ -10,6 +10,7 @@
 mod common;
 mod export;
 mod scratch;
+mod template;
 
 use common::{EVERY_FORMAT, Scratch};
 use craftbridge_core::{CancelToken, CraftApp, CraftError, Engine, FrameBytes, GpuChoice, PixelFormat};
