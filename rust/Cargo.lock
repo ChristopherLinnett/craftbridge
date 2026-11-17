@@ -4236,6 +4236,7 @@ name = "uniffi-bindgen"
 version = "0.1.0"
 dependencies = [
  "craftbridge-effects-ffi",
+ "serde_json",
  "tempfile",
  "uniffi",
 ]

@@ -22,6 +22,20 @@ pub(crate) fn failed(command: &str, failure: impl std::fmt::Display) -> std::pro
     std::process::ExitCode::from(1)
 }
 
+/// The exit of a command that prints a list a script reads as data: one line each, or why it could not
+/// be read, as [`failed`] says it.
+pub(crate) fn print_lines(lines: Result<Vec<String>, String>, command: &str) -> std::process::ExitCode {
+    match lines {
+        Ok(lines) => {
+            for line in lines {
+                println!("{line}");
+            }
+            std::process::ExitCode::SUCCESS
+        }
+        Err(failure) => failed(command, failure),
+    }
+}
+
 /// Path as the repository expects to see it in a message: relative to the root, `/` separated, so a
 /// report from another machine's checkout points at the same file. A tool may hand back the root's
 /// resolved path (Cargo does, for a checkout reached through a symbolic link such as macOS's `/var`), so
