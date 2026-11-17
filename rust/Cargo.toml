@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core/*", "effects/*", "xtask"]
+members = ["core/*", "effects/*", "craftbridge-process", "xtask"]
 # Host tools build only when named, so a plain `cargo build` builds the libraries.
 default-members = ["core/*", "effects/craftbridge-effects", "effects/craftbridge-effects-ffi"]
 
@@ -17,6 +17,7 @@ craftbridge-media = { path = "core/craftbridge-media" }
 craftbridge-core = { path = "core/craftbridge-core" }
 craftbridge-core-ffi = { path = "core/craftbridge-core-ffi" }
 craftbridge-effects = { path = "effects/craftbridge-effects" }
+craftbridge-process = { path = "craftbridge-process" }
 
 # The workspace's external libraries: what the host tools use, and the few a shipped crate uses.
 # serde's `derive` gives a file format one definition, its Rust types: the API surface file, which the

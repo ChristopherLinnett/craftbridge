@@ -1,6 +1,7 @@
 //! The oracle: the EffectCraft command line, built from the pinned official revision by
 //! `tools/oracle.sh`. Behind a trait so the comparison is tested without it.
 
+use craftbridge_process::Group;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -20,8 +21,9 @@ pub(crate) trait Oracle {
     fn run(&self, folder: &Path, args: &[String]) -> Result<Outcome, String>;
 }
 
-/// The command-line binary. A step that outlives `timeout` is killed, so a hung export fails the gate
-/// instead of holding it.
+/// The command-line binary. A step that outlives `timeout` is killed with everything it started, so a
+/// hung export fails the gate instead of holding it, and leaves no helper running on the machine; and so
+/// is a step the runner leaves running when it is interrupted or killed itself.
 pub(crate) struct Cli {
     pub(crate) binary: PathBuf,
     pub(crate) timeout: Duration,
@@ -37,33 +39,41 @@ impl Oracle for Cli {
         let stdout_path = folder.join(".oracle-stdout");
         let stderr_path = folder.join(".oracle-stderr");
         let create = |path: &Path| File::create(path).map_err(|error| format!("cannot create {}: {error}", path.display()));
-        let mut child = Command::new(&self.binary)
-            .args(args)
-            .current_dir(folder)
-            // The oracle inherits nothing from the runner's environment and is given one variable, its
-            // configuration folder, the scenario's own. EffectCraft, the Craft libraries and the crates
-            // under them read settings from variables spelt with no common prefix (font folders, the
-            // compositor, the GPU adapter, thread counts, the locale, the time zone, the user's own font
-            // folder through HOME, the loader's DYLD_ ones), and more with every pin, so no list of what to
-            // drop stays complete: a variable the oracle is not given is one it reads at its default, which
-            // is EffectCraft as it is, whatever shell starts the gate. It needs none to run; what stays the
-            // machine's is the system itself, its own fonts among it.
-            .env_clear()
-            .env("EFFECTCRAFT_CONFIG_DIR", folder.join(".config"))
-            .stdin(Stdio::null())
-            .stdout(create(&stdout_path)?)
-            .stderr(create(&stderr_path)?)
-            .spawn()
-            .map_err(|error| format!("cannot start {}: {error}", self.binary.display()))?;
+        // The step runs in a process group of its own, which is what a timeout stops: whatever the step
+        // starts joins its group, and a kill of the step alone leaves those running. A terminal's Ctrl-C
+        // goes to the runner's group and so no longer reaches the step's, which the group's guard ends
+        // when the runner ends first, however it ends.
+        let mut step = Group::spawn(
+            Command::new(&self.binary)
+                .args(args)
+                .current_dir(folder)
+                // The oracle inherits nothing from the runner's environment and is given one variable, its
+                // configuration folder, the scenario's own. EffectCraft, the Craft libraries and the crates
+                // under them read settings from variables spelt with no common prefix (font folders, the
+                // compositor, the GPU adapter, thread counts, the locale, the time zone, the user's own font
+                // folder through HOME, the loader's DYLD_ ones), and more with every pin, so no list of what to
+                // drop stays complete: a variable the oracle is not given is one it reads at its default, which
+                // is EffectCraft as it is, whatever shell starts the gate. It needs none to run; what stays the
+                // machine's is the system itself, its own fonts among it.
+                .env_clear()
+                .env("EFFECTCRAFT_CONFIG_DIR", folder.join(".config"))
+                .stdin(Stdio::null())
+                .stdout(create(&stdout_path)?)
+                .stderr(create(&stderr_path)?),
+        )
+        .map_err(|error| format!("cannot start {}: {error}", self.binary.display()))?;
         let started = Instant::now();
         let status = loop {
-            match child.try_wait().map_err(|error| format!("cannot wait for {}: {error}", self.binary.display()))? {
+            match step.try_wait().map_err(|error| format!("cannot wait for {}: {error}", self.binary.display()))? {
                 Some(status) => break status,
                 None if started.elapsed() >= self.timeout => {
-                    // The process may have ended in the meantime; either way it is reaped.
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(format!("did not finish within {} s and was stopped", self.timeout.as_secs()));
+                    // The step may have ended in the meantime; either way its whole group is gone and the
+                    // step reaped before this answers.
+                    let seconds = self.timeout.as_secs();
+                    return match step.stop() {
+                        Ok(()) => Err(format!("did not finish within {seconds} s and was stopped")),
+                        Err(error) => Err(format!("did not finish within {seconds} s and could not be stopped: {error}")),
+                    };
                 }
                 None => std::thread::sleep(POLL),
             }
@@ -79,10 +89,13 @@ impl Oracle for Cli {
 #[cfg(unix)]
 mod tests {
     use super::*;
+    use craftbridge_process::{group_has_live_process, signal_group};
     use std::os::unix::fs::PermissionsExt;
 
-    /// How long the step the timeout test stops would run if nothing stopped it.
-    const OUTLASTING_STEP: Duration = Duration::from_secs(30);
+    /// How long the step the timeout test stops would run if nothing stopped it: longer than any bound a
+    /// stop gives its group, so an orphan a stop missed is caught while it still runs — one that ended
+    /// within the stop's own bound would excuse a stop that killed only the processes it started.
+    const OUTLASTING_STEP: Duration = Duration::from_secs(120);
 
     /// A runner of the script `body`, under the bound the runner gives every real step. Every step but the
     /// timeout test's ends on its own, so that bound only stops one that is truly stuck: a loaded machine,
@@ -133,8 +146,6 @@ mod tests {
     fn a_step_that_outlives_the_timeout_is_stopped_and_named() {
         let scratch = tempfile::tempdir().expect("scratch");
         let dir = scratch.path().to_path_buf();
-        // `exec` makes the sleep the process the runner kills: a shell killed while it waits on a sleep
-        // would leave the sleep running on after the test.
         let mut cli = script(&dir, &format!("exec sleep {}", OUTLASTING_STEP.as_secs()));
         cli.timeout = Duration::from_millis(200);
         let started = Instant::now();
@@ -145,6 +156,58 @@ mod tests {
         // so a return before then is the runner's stop: a slow start, the first-run scan included, delays
         // only the step, and the kill reaches a step held by the scan at once.
         assert!(elapsed >= cli.timeout && elapsed < OUTLASTING_STEP, "stopped after {elapsed:?}");
+    }
+
+    /// Runs the step `body` until the runner cuts it short, by its timeout or because the step's group can
+    /// no longer be guarded. The step first writes the id of the process group it runs in to `group`, and
+    /// this answers that group, the runner's error, and whether the group still held a live process when
+    /// the runner answered; whatever was left is killed, so a failed test leaves nothing behind. The script
+    /// first runs once to its end under the runner's own bound, so the system's first-run scan of a freshly
+    /// written file, which can outlast any timeout a test sets, is over before the timed run. A step the
+    /// machine still starts later than the timeout never writes the id, so it is given a longer timeout
+    /// each time the id is missing.
+    fn group_of_a_cut_short_step(body: &str) -> (u32, String, bool) {
+        let scratch = tempfile::tempdir().expect("scratch");
+        let dir = scratch.path().to_path_buf();
+        let mut cli = script(&dir, &format!("[ \"$1\" = once ] && exit 0\nps -o pgid= -p $$ > group\n{body}"));
+        assert!(cli.run(&dir, &["once".to_string()]).is_ok_and(|outcome| outcome.success), "the script never ran to its end");
+        for seconds in [1, 4, 16] {
+            cli.timeout = Duration::from_secs(seconds);
+            let error = cli.run(&dir, &[]).err().unwrap_or_default();
+            if let Some(group) = std::fs::read_to_string(dir.join("group")).ok().and_then(|text| text.trim().parse::<u32>().ok()) {
+                let left = group_has_live_process(group).unwrap();
+                if left {
+                    signal_group(group, "KILL").unwrap();
+                }
+                return (group, error, left);
+            }
+        }
+        panic!("the step never started within 16 s");
+    }
+
+    /// A step that waits on a child of its own (the shell running `sleep` without `exec`), one whose child
+    /// starts a child, and one whose children ignore every signal a terminal sends leave nothing of their
+    /// group running once the runner has answered: a kill of the step alone leaves the sleeps behind.
+    #[test]
+    fn a_timed_out_step_leaves_no_process_of_its_group_running() {
+        let sleep = OUTLASTING_STEP.as_secs();
+        let bodies =
+            [format!("sleep {sleep}; true"), format!("sh -c 'sleep {sleep}; true' & wait"), format!("sh -c 'trap \"\" INT TERM HUP; sleep {sleep}' & wait")];
+        for body in bodies {
+            let (group, error, left) = group_of_a_cut_short_step(&body);
+            assert!(error.contains("was stopped"), "{body}: {error}");
+            assert!(!left, "{body}: a process of group {group} was still running when the runner answered");
+        }
+    }
+
+    /// A step whose group loses its guard while it runs (here the step kills it, by its id, which is the
+    /// group's) is failed at once, naming the guard, and its group is stopped before the runner answers:
+    /// unguarded, the group would outlive a runner that ended next.
+    #[test]
+    fn a_step_whose_guard_is_killed_is_failed_and_its_group_stopped() {
+        let (group, error, left) = group_of_a_cut_short_step(&format!("kill -s KILL $(ps -o pgid= -p $$); sleep {}; true", OUTLASTING_STEP.as_secs()));
+        assert!(error.contains("guard has gone"), "{error}");
+        assert!(!left, "a process of group {group} was still running when the runner answered");
     }
 
     #[test]

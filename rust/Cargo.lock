@@ -530,6 +530,7 @@ dependencies = [
 name = "craftbridge-effects-conformance"
 version = "0.1.0"
 dependencies = [
+ "craftbridge-process",
  "effectcraft-media",
  "effectcraft-time",
  "image",
@@ -561,6 +562,10 @@ dependencies = [
  "objc2-core-video",
  "objc2-video-toolbox",
 ]
+
+[[package]]
+name = "craftbridge-process"
+version = "0.1.0"
 
 [[package]]
 name = "crc32fast"
@@ -4454,6 +4459,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "craftbridge-process",
  "proc-macro2",
  "quote",
  "roxmltree",
