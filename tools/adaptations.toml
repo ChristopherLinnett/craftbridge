@@ -153,13 +153,22 @@ id = "AD7"
 crate = "craftbridge-effects"
 file = "src/session.rs and src/exporter.rs"
 implements = "FX-1a (the seam), FX-1g, MED-3"
-summary = "CraftBridge's exporter, set as Session.exporter: hands each job to EffectCraft's FileExporter inside a thread pool sized from half the memory the phone reports available at 16 bytes a pixel, between one and the core count; from wave 6 it also encodes H.264 and HEVC in hardware through craftbridge-media (plan §18). FX-1a lands the seam only — Session.exporter is set from one function that hands out EffectCraft's own FileExporter today and the pool when FX-1g writes src/exporter.rs."
+summary = "CraftBridge's exporter (src/exporter.rs), set as Session.exporter from the one function in src/session.rs: hands each job to EffectCraft's FileExporter inside a rayon thread pool with as many threads as half the memory craftbridge-core's available_memory() reports holds the job's largest frame at 16 bytes a pixel (the frame the compositor renders or the one the job's output module writes, whichever is larger; EffectCraft makes each output module and each segment a job of its own), between one and the size of the pool a thread outside any pool runs on (the machine's cores, or what RAYON_NUM_THREADS sets). A job that gets that many, as every job does with no memory figure (every desktop, the iOS Simulator and a phone whose figure cannot be read), runs on its caller's own threads, as FileExporter alone runs it, so the exports of a desktop run as before. A smaller pool is kept for the next job of its size rather than started for each, because EffectCraft keeps state on every thread it renders on (an expression runtime each builds once and never frees). On that pool the caller's progress hook, which is not Send, is run by the thread that called the export, which waits for its answer. From wave 6 it also encodes H.264 and HEVC in hardware through craftbridge-media (plan §18)."
 replaces = "FileExporter alone, whose free-memory figure is empty on iOS and Android because sysinfo::memory() has no branch for either (crates/host/src/lib.rs:91-94, crates/engine/src/system/sysinfo.rs:142-168), which leaves frames in flight bounded only by the thread count (crates/export/src/pipeline.rs:140-149, :171-176)."
 depends = [
   { item = "Exporter", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["93-113"] }] },
   { item = "ExportJob", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["22-46"] }] },
+  { item = "ExportResult", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["76-91"] }] },
   { item = "FileExporter", at = [{ file = "crates/host/src/lib.rs", lines = ["25-89"] }] },
-  { item = "the export frame loop's thread count", at = [{ file = "crates/export/src/pipeline.rs", lines = ["140-149"] }] },
+  { item = "the export frame loop's thread count: auto_cpu_frames, Inflight::window and the CPU frames in flight Cx::auto_cpu_frames settles", at = [{ file = "crates/export/src/pipeline.rs", lines = ["140-149", "171-176", "694-711"] }] },
+  { item = "the frames per batch of the export", at = [{ file = "crates/export/src/lib.rs", lines = ["290-292"] }] },
+  { item = "Project::comp", at = [{ file = "crates/project/src/item.rs", lines = ["231-233"] }] },
+  { item = "RenderQueueItem's comp, settings and output", at = [{ file = "crates/project/src/render_queue.rs", lines = ["1477-1502"] }] },
+  { item = "Session::outputs_of", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["552-572"] }] },
+  { item = "Session::segments", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["501-537"] }] },
+  { item = "RenderSettings::output_size", at = [{ file = "crates/project/src/render_queue.rs", lines = ["455-462"] }] },
+  { item = "OutputModule::output_size", at = [{ file = "crates/project/src/render_queue.rs", lines = ["1311-1317"] }] },
+  { item = "the expression runtime each thread builds once and never frees", at = [{ file = "crates/expr/src/runtime.rs", lines = ["46-56", "533-562"] }] },
 ]
 
 [[adaptation]]

@@ -17,10 +17,9 @@ pub mod surface;
 #[cfg(test)]
 mod testing;
 
-/// The platform's own calls, the one place hand-written `unsafe` may sit in this crate (AGENTS.md §4).
-/// iOS is the first platform with anything to ask its system about: the faces CoreText offers an app
-/// (plan §19, AD2). Every other platform asks nothing yet, so the module compiles only on iOS.
-#[cfg(target_os = "ios")]
+/// The platform's own calls, the one place hand-written `unsafe` may sit in this crate (AGENTS.md §4):
+/// how much memory the app may still allocate on every target, and on iOS the faces CoreText offers an
+/// app (plan §19, AD2, AD7).
 #[allow(unsafe_code)]
 pub mod platform;
 
@@ -32,6 +31,7 @@ pub use export::PROGRESS_INTERVAL;
 pub use frames::{FrameBytes, PixelFormat};
 pub use gpu::{GpuChoice, GpuDevice};
 pub use journal::{JOURNAL_FILE, Recovery};
+pub use platform::memory::available_memory;
 pub use surface::{Presented, PreviewSurface};
 
 /// The result of a runtime call: what the call answers, or the [`CraftError`] it failed with. The

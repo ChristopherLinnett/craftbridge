@@ -74,9 +74,10 @@ impl Run {
 /// the plugin's thread-pool size. The exporter's WebM muxer writes one cluster per render batch,
 /// and a batch is one frame per thread of the pool the export runs on, so a file's bytes follow
 /// that pool's size: a byte comparison of the two sides holds only when both pools are one size.
-/// The plugin's exports run on this process's global pool, so rayon itself is asked its size, which
-/// holds whatever set it — either of rayon's variables, or the machine's cores — and the command
-/// line is given that size in the one variable it reads first.
+/// A desktop reports no memory figure, so the plugin's exports run on this process's global pool, as
+/// the command line's run on its own, and rayon itself is asked that pool's size, which holds whatever
+/// set it — either of rayon's variables, or the machine's cores — and the command line is given that
+/// size in the one variable it reads first.
 fn oracle_in(dir: &Path) -> std::result::Result<Command, String> {
     let mut command = Command::new(oracle()?);
     command

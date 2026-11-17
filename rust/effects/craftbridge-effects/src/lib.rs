@@ -26,6 +26,7 @@
 //! EffectCraft's full registry.
 
 mod app;
+mod exporter;
 mod files;
 mod fonts;
 /// What the generator writes, one file to a module under `src/generated/`.
