@@ -98,8 +98,10 @@ fn with_hardware(mut request: Value) -> Value {
     request
 }
 
+/// The engine an app crate's constructor makes: started in the app's folders, so it keeps the journal
+/// that a cancelled export's files are deleted by.
 fn start_engine(scratch: &Scratch) -> Result<Engine, String> {
-    let engine = Engine::start(scratch.app().map_err(|e| e.to_string())?, GpuChoice::CpuOnly).map_err(|e| e.to_string())?;
+    let engine = Engine::start_in(&scratch.folders, scratch.app().map_err(|e| e.to_string())?, GpuChoice::CpuOnly).map_err(|e| e.to_string())?;
     engine.request("exec", json!({"command": "file.openDemoProject"})).map_err(|e| format!("the demo project opens: {e}"))?;
     Ok(engine)
 }
@@ -118,14 +120,14 @@ fn names_in(dir: &Path) -> Vec<String> {
     entries.filter(|entry| entry.path().is_file()).map(|entry| entry.file_name().to_string_lossy().into_owned()).collect()
 }
 
-/// Run `export`; with `stop_at_half`, cancel it once half its frames are done, noting the files in
-/// that folder at that moment, which the export had written and the stop must remove.
-fn export(engine: &Engine, request: Value, cancel: &CancelToken, stop_at_half: Option<&Path>) -> Exported {
+/// Run `export`; with `stop_at`, cancel it once that percent of its frames are done, noting the files
+/// in the folder at that moment, which the export had written and the stop must remove.
+fn export(engine: &Engine, request: Value, cancel: &CancelToken, stop_at: Option<(&Path, u64)>) -> Exported {
     let reports = Arc::new(Mutex::new(Vec::new()));
     let at_cancel = Arc::new(Mutex::new(Vec::new()));
     let (heard, seen) = (reports.clone(), at_cancel.clone());
     let token = cancel.clone();
-    let watched = stop_at_half.map(Path::to_path_buf);
+    let watched = stop_at.map(|(dir, percent)| (dir.to_path_buf(), percent));
     let answer = engine.request_with_progress(
         "export",
         request,
@@ -133,9 +135,9 @@ fn export(engine: &Engine, request: Value, cancel: &CancelToken, stop_at_half: O
             if let Ok(mut heard) = heard.lock() {
                 heard.push((done, total));
             }
-            if let Some(dir) = &watched
+            if let Some((dir, percent)) = &watched
                 && total > 0
-                && done * 2 >= total
+                && done * 100 >= total * percent
                 && !token.is_cancelled()
             {
                 if let Ok(mut seen) = seen.lock() {
@@ -455,18 +457,63 @@ fn a_cancelled_export_answers_cancelled_and_leaves_no_output() {
     assert!(finished.answer.is_ok(), "{:?}", finished.answer);
     assert!(scratch.path().join("control.mp4").is_file());
 
-    let before = outputs_in(&scratch).expect("the container reads");
+    // The cancelled exports write into a folder the export makes: the exporter removes the file it
+    // opened when it sees the stop, but only the engine removes the folder, so the folder is what
+    // shows that the engine deleted what the call listed.
+    let made = scratch.path().join("made");
+    let before = contents_in(&scratch).expect("the container reads");
     for (file, format) in [("cancelled.mp4", "h264"), ("cancelled_seq.png", "png")] {
-        let cancelled = export(&engine, slow(file, format), &CancelToken::new(), Some(scratch.path()));
+        let cancelled = export(&engine, slow(&format!("made/{file}"), format), &CancelToken::new(), Some((&made, 50)));
         assert_eq!(cancelled.answer, Err(CraftError::Cancelled), "{file}");
         let stem = file.split('.').next().unwrap_or(file);
         assert!(cancelled.at_cancel.iter().any(|name| name.starts_with(stem)), "{file} had been written when the cancel came: {:?}", cancelled.at_cancel);
         assert!(cancelled.reports.iter().any(|(done, total)| *done > 0 && *total > 0), "{file} reported progress before the cancel: {:?}", cancelled.reports);
-        assert_eq!(outputs_in(&scratch).expect("the container reads"), before, "a cancelled export leaves no file anywhere in the container ({file})");
+        assert_eq!(contents_in(&scratch).expect("the container reads"), before, "a cancelled export leaves no file and no folder it made ({file})");
     }
     // The session is free again: nothing is left rendering behind the cancel.
     let again = export(&engine, slow("after.mp4", "h264"), &CancelToken::new(), None);
     assert!(again.answer.is_ok(), "{:?}", again.answer);
+    engine.close().expect("the engine closes");
+}
+
+/// A fill stopped at its first report answers `Cancelled`, and the engine takes away every frame and
+/// the folders the call made, from what the runner listed: the runner itself takes nothing away for a
+/// stop. A fill left alone keeps its frames.
+#[test]
+fn a_cancelled_fill_leaves_no_frame_and_no_folder_it_made() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    // Started in the app's folders, as an app crate's constructor does, so the engine keeps the journal.
+    let engine = Engine::start_in(&scratch.folders, scratch.app().expect("the app starts"), GpuChoice::CpuOnly).expect("the engine starts");
+    // A fill long enough that the first report comes while its task still runs.
+    let setup = [
+        ("comp.new", json!({"name": "A", "width": 96, "height": 64, "duration": 6, "frameRate": 10})),
+        ("layer.newSolid", json!({"comp": 1, "name": "Bg"})),
+        ("layer.addMask", json!({"rect": [30.0, 20.0, 20.0, 18.0], "mode": "subtract"})),
+    ];
+    for (command, params) in setup {
+        engine.request("exec", json!({"command": command, "params": params})).expect("the project builds");
+    }
+    let before = contents_in(&scratch).expect("the container reads");
+    let fill = |dir: &str, cancel: &CancelToken, stop: bool| {
+        let token = cancel.clone();
+        let request = json!({"layer": 1, "outputDir": scratch.path().join(dir).display().to_string()});
+        engine.request_with_progress(
+            "contentFill.generate",
+            request,
+            move |_, _, _| {
+                if stop {
+                    token.cancel()
+                }
+            },
+            cancel,
+        )
+    };
+    let cancelled = fill("deep/er/fill", &CancelToken::new(), true);
+    assert_eq!(cancelled, Err(CraftError::Cancelled));
+    assert_eq!(contents_in(&scratch).expect("the container reads"), before, "a cancelled fill leaves no frame and no folder");
+    let finished = fill("deep/er/fill", &CancelToken::new(), false);
+    assert!(finished.is_ok(), "{finished:?}");
+    assert_eq!(outputs_in(&scratch).expect("the container reads").len(), 60, "a finished fill keeps its frames");
     engine.close().expect("the engine closes");
 }
 

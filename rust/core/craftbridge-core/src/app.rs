@@ -54,13 +54,17 @@ pub trait CraftApp: Send {
     /// The list is the engine's pending-export journal: when the app is killed mid-export, the next
     /// start deletes each listed file the export wrote, leaving any it never reached as they were,
     /// then removes each folder of those files' paths that was not there when they were listed, once
-    /// it holds nothing; the engine clears the list when this call returns, whatever its outcome. An
-    /// engine started without folders keeps no journal, and its `list_outputs` lists nothing.
+    /// it holds nothing; the engine clears the list when this call returns, whatever its outcome, and
+    /// first deletes what it lists in the same way when it answers [`crate::CraftError::Cancelled`], so
+    /// an implementation need not remove its own files for a stop. An engine started without folders
+    /// keeps no journal, and its `list_outputs` lists nothing.
     ///
     /// Once `on_progress` has answered `false`, the call answers [`crate::CraftError::Cancelled`]
     /// whatever the implementation returns, an error included: the caller asked to stop and the
-    /// work stopped. A request that ends before any `false` keeps its own answer. A panic is
-    /// answered as one in [`CraftApp::request`] is.
+    /// work stopped. Only a listed file the engine cannot delete then is answered instead, as
+    /// [`crate::CraftError::Io`] naming it, since a caller told that no file was made must find
+    /// none. A request that ends before any `false` keeps its own answer. A panic is answered as one
+    /// in [`CraftApp::request`] is.
     fn request_with_progress(
         &mut self,
         method: &str,

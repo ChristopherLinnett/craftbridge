@@ -121,10 +121,9 @@ impl Plan {
         Before { files: self.files().filter(|path| path.exists()).collect(), missing }
     }
 
-    /// Take away what a fill that did not finish left: a stop that lands after the last frame was
-    /// written finds the task done, and the engine keeps the files of a finished task, and the engine
-    /// leaves every folder its scratch file made above the fill's own. What the call found already
-    /// there stays.
+    /// Take away what a fill that failed left: the engine leaves every folder its scratch file made
+    /// above the fill's own. What the call found already there stays. A fill that was stopped is not
+    /// withdrawn here: the core deletes what a call listed once it answers `Cancelled`.
     fn withdraw(&self, before: &Before) {
         for path in self.files().filter(|path| !before.files.contains(path)) {
             let _ = std::fs::remove_file(path);
@@ -326,10 +325,10 @@ pub(crate) fn generate(backend: &mut Backend, params: &Value, on_progress: Progr
         Ended::Stopped => Err(CraftError::Cancelled),
         Ended::Ran => outcome(session(backend)?, &task, params),
     };
-    // A fill that ends without its frames, stopped or failed, leaves the container as a restart after
-    // a kill does: the engine takes away the frames and the one folder it made only when its task sees
-    // the stop or the failure, and never the folders above that its scratch file made.
-    if answer.is_err() {
+    // A fill that fails leaves the container as a restart after a kill does: the engine takes away the
+    // frames and the one folder it made only when its task sees the failure, and never the folders
+    // above that its scratch file made. A stop is the core's: it deletes what was listed.
+    if matches!(&answer, Err(error) if *error != CraftError::Cancelled) {
         plan.withdraw(&before);
     }
     answer
@@ -718,9 +717,10 @@ mod tests {
     }
 
     /// The first `false` stops the fill: the listener is never asked again, the call answers `Cancelled`,
-    /// the task is gone, no frame and no layer is left, and the folder the fill made goes with them.
+    /// the task is gone, and no layer is left. The folders the call made are the core's to take away
+    /// once it has answered, so they are not looked at here (`tests/export`).
     #[test]
-    fn the_first_false_stops_the_fill_and_leaves_no_frame_no_layer_and_no_folder() {
+    fn the_first_false_stops_the_fill_and_leaves_no_layer() {
         let mut rig = rig(4);
         let gate = rig.gate();
         let out = rig.out("deep/er/fill");
@@ -738,7 +738,8 @@ mod tests {
         let session = rig.backend.session().expect("a session");
         assert!(session.jobs().is_empty(), "the task has wound down on return");
         assert_eq!(session.project.comp(ItemId(1)).map(|comp| comp.layers.len()), Some(1), "no layer was added");
-        assert!(!rig.dir.path().join("deep").exists(), "no frame and no folder the fill made is left");
+        // Only the core deletes what a stopped call listed: the runner keeps no second way to.
+        assert!(rig.dir.path().join("deep/er").is_dir(), "the runner took away a folder the core is to");
     }
 
     /// The frames are written in place by the runner's own writer, never through the session's
@@ -841,11 +842,10 @@ mod tests {
         assert!(!rig.dir.path().join("Fill").exists(), "the failed fill left its default folder");
     }
 
-    /// A stop that lands after the task wrote its last frame finds the engine keeping the finished
-    /// files, so the runner takes away what the call made, and only that: a frame that was there stays,
-    /// and so does a folder that was.
+    /// A fill that failed is taken away as the call made it, and only that: a frame that was there
+    /// stays, and so does a folder that was.
     #[test]
-    fn a_stop_takes_away_the_frames_the_call_made_and_no_other() {
+    fn a_failure_takes_away_the_frames_the_call_made_and_no_other() {
         let dir = tempfile::tempdir().expect("a scratch folder");
         let made = |name: &str| dir.path().join(name);
         let plan = |folder: PathBuf| Plan { dir: folder, frames: 3, given: Vec::new() };
