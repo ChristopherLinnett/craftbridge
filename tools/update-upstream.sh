@@ -15,8 +15,9 @@
 #
 # Steps 3 to 7 follow in the same run (rust/xtask/src/update.rs), each named by what a person does with
 # its result: 3, the adaptations of tools/adaptations.toml whose upstream items the revision change
-# touched, listed with their diffs to be rechecked, and the listed lines that only moved, with the lines
-# they moved to; 4, the API surface and the facades regenerated and diffed against the surface the tree
+# touched, listed with their diffs to be rechecked, the listed lines that only moved, with the lines
+# they moved to, and the list's retired entries apart from the live ones, each with the upstream commit
+# that replaced it; 4, the API surface and the facades regenerated and diffed against the surface the tree
 # held; 5, the gate, tools/ci.sh, whose conformance stage compares the new revision's command line with
 # the corpus; 6, the record appended to docs/upstream-updates.md, whose recheck lines the person
 # completes; 7, every version of android/sdk/gradle/libs.versions.toml and of the Gradle wrapper that has

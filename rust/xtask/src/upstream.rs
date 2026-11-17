@@ -814,9 +814,15 @@ fn cache_dir() -> Result<PathBuf, String> {
 }
 
 /// Is `rev` a commit id, in full or abbreviated, as git writes one? A branch, a tag or an expression such
-/// as `main~3` resolves too, but to whatever it names on the day: the pin must not move.
+/// as `main~3` resolves too, but to whatever it names on the day, so nothing that must keep naming one
+/// commit is written that way.
+pub(crate) fn is_commit_id(rev: &str) -> bool {
+    !rev.is_empty() && rev.len() <= 40 && rev.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// The pin's commit id, refused unless [`is_commit_id`]: the pin must not move.
 fn commit_id(rev: &str) -> Result<(), String> {
-    if !rev.is_empty() && rev.len() <= 40 && rev.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) {
+    if is_commit_id(rev) {
         return Ok(());
     }
     Err(format!(
