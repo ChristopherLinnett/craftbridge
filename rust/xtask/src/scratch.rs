@@ -103,7 +103,7 @@ pub(crate) fn rust_tree_copy(tag: &str) -> Scratch {
 
 /// Copy one directory tree, skipping build output; a scratch needs the manifests and sources only.
 #[cfg(test)]
-fn copy_tree(from: &std::path::Path, to: &std::path::Path) {
+pub(crate) fn copy_tree(from: &std::path::Path, to: &std::path::Path) {
     std::fs::create_dir_all(to).unwrap();
     for entry in std::fs::read_dir(from).unwrap().flatten() {
         if entry.file_name() == "target" {

@@ -32,12 +32,12 @@ const CODEGEN: &str = "craftbridge-effects-codegen";
 
 /// Write the surface into `out_dir`.
 pub(crate) fn generate(out_dir: &Path) -> Result<(), String> {
-    run_codegen(&["surface", "--pin", &pinned_commit(&crate::repo_root())?], out_dir)
+    run_codegen(&["surface", "--pin", &pinned_commit(&crate::repository_root()?)?], out_dir)
 }
 
 /// Write the version constants into `out_dir`.
 pub(crate) fn generate_version(out_dir: &Path) -> Result<(), String> {
-    run_codegen(&["version", "--pin", &pinned_commit(&crate::repo_root())?], out_dir)
+    run_codegen(&["version", "--pin", &pinned_commit(&crate::repository_root()?)?], out_dir)
 }
 
 /// The commit Cargo builds for the pin `rust/Cargo.toml` writes, in full.
@@ -59,7 +59,7 @@ pub(crate) fn generate_kotlin(out_dir: &Path) -> Result<(), String> {
 
 /// Build the codegen and run it with `args` and the output folder.
 fn run_codegen(args: &[&str], out_dir: &Path) -> Result<(), String> {
-    let binary = build_codegen(&crate::repo_root().join("rust"))?;
+    let binary = build_codegen(&crate::repository_root()?.join("rust"))?;
     let output = Command::new(&binary).args(args).arg(out_dir).output().map_err(|error| format!("cannot run {}: {error}", binary.display()))?;
     if output.status.success() { Ok(()) } else { Err(format!("{CODEGEN} exited with {}: {}", output.status, String::from_utf8_lossy(&output.stderr).trim())) }
 }
