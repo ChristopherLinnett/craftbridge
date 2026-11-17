@@ -12,8 +12,8 @@ publish.workspace = true
 crate-type = ["staticlib", "cdylib", "lib"]
 
 [dependencies]
-# The engine's start the constructor makes, `Engine::start_in`, and the guard it builds the app
-# behind, both the core's.
+# The engine's start the constructor makes, `Engine::start_in_with`, which builds the app once it
+# has checked the processor, and the guard that start runs behind, both the core's.
 craftbridge-core.workspace = true
 # The app the constructor builds: the EffectCraft plugin.
 craftbridge-effects.workspace = true

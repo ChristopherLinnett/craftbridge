@@ -122,6 +122,26 @@ fn a_first_launch_starts_in_folders_that_are_not_there_yet() {
     assert!(container.join("config").is_dir(), "the config folder the start promises was not made");
 }
 
+/// The constructor hands the build to the core's start rather than building the app itself, so
+/// EffectCraft's code runs only once the core has checked the processor. That check comes before
+/// the core makes the folders (the core's own tests pin that order), so an app built from folders
+/// the start has made was built after it; a constructor that built the app first, and handed the core
+/// an app already built, would run EffectCraft's code on a processor below the floor, and on a first
+/// launch would build it from folders not made yet.
+#[test]
+fn the_app_is_built_inside_the_core_s_start_after_its_processor_check() {
+    let scratch = tempfile::tempdir().expect("a scratch parent");
+    let container = scratch.path().join("first launch");
+    let made = std::cell::Cell::new(None);
+    let engine = start(folders(&container), GpuChoice::CpuOnly, |folders| {
+        made.set(Some(folders.config.is_dir()));
+        craftbridge_effects::EffectCraftApp::new(folders)
+    })
+    .expect("the engine starts");
+    pollster::block_on(engine.shut_down()).expect("stopping the engine answers");
+    assert_eq!(made.get(), Some(true), "the app was built before the core's start made its folders, so before it checked the processor");
+}
+
 /// Building the app runs the Craft app's own code on the caller's thread, before the engine thread
 /// that guards every call exists: a panic there is the start's `Internal`, the error the call
 /// declares, so it reaches the app as a `CraftError` and not as the binding's own panic error.

@@ -25,7 +25,7 @@ pub struct Engine {
 
 impl Engine {
     /// Wrap a started core engine, which an app crate's constructor makes with
-    /// `craftbridge_core::Engine::start_in`.
+    /// `craftbridge_core::Engine::start_in_with`.
     #[must_use]
     pub fn from_core(core: craftbridge_core::Engine) -> Arc<Self> {
         Arc::new(Self { core: Arc::new(core), limits: Limits::BOUNDARY })

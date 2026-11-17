@@ -5,7 +5,7 @@
 
 ## 22. Swift packages design
 
-One Swift package in `ios/sdk/`, `Package.swift` at its top (PD19), iOS 17 (PD11), products `CraftBridge` and `CraftBridgeEffects` (PD16). Apps reach it by local path during development and through `craftbridge-swift` from the first release (D-24).
+One Swift package in `ios/sdk/`, `Package.swift` at its top (PD19), iOS 17 (PD11), products `CraftBridge` and `CraftBridgeEffects` (PD16). The engine start needs no processor check on iOS: every chip iOS 17 runs on (A12 and newer) has FP16. Apps reach it by local path during development and through `craftbridge-swift` from the first release (D-24).
 
 | Target | Change | What |
 |---|---|---|

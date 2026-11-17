@@ -21,11 +21,12 @@ uniffi::use_remote_type!(craftbridge_core_ffi::CraftError);
 uniffi::use_remote_type!(craftbridge_core_ffi::GpuChoice);
 
 /// Start an EffectCraft engine in the app's `folders`, answering its handle or the [`CraftError`]
-/// that refused it: folders that would not prepare, an app that would not build from them, a panic
-/// while it was built (`Internal`), or the thread the engine runs on refusing to start.
+/// that refused it: a processor the library cannot run on (`Unsupported`, answered before any of
+/// EffectCraft's code runs), folders that would not prepare, an app that would not build from them, a
+/// panic while it was built (`Internal`), or the thread the engine runs on refusing to start.
 ///
 /// The app it starts is EffectCraft's, built for the folders the app names (plan §19), and it starts
-/// with the core's `Engine::start_in`, so every export the engine runs from then on is journaled:
+/// with the core's `Engine::start_in_with`, so every export the engine runs from then on is journaled:
 /// the start deals first with the files the pending-export journal still lists, deleting the ones an
 /// export the system killed wrote and leaving the ones it never reached, and clears the journal
 /// (plan §16, D-17); [`Engine::recovery`] reports what it did.
@@ -39,20 +40,21 @@ pub fn start_effects_engine(folders: Folders, gpu: GpuChoice) -> Result<Arc<Engi
     start(folders, gpu, craftbridge_effects::EffectCraftApp::new)
 }
 
-/// Start the engine of the app `build` makes from `folders`, with the core's `Engine::start_in` and the app's `gpu` choice.
+/// Start the engine of the app `build` makes from `folders`, with the core's `Engine::start_in_with` and the app's `gpu` choice.
 ///
-/// The app is built on the caller's thread, before an engine thread exists to guard it, and building
-/// it runs the Craft app's own code, so the build runs behind the guard the engine runs every call
-/// behind: a panic in it is the start's `Internal`, as it is any call's. Unguarded, UniFFI would catch
-/// it and throw an error of its own instead (Swift's `rustPanic`, Kotlin's `InternalException`),
-/// which an app catching the `CraftError` the call declares would not catch.
+/// The core builds the app, on the caller's thread, once it has checked that the processor can run it
+/// and has made the folders. No engine thread exists yet to guard that build, and it runs the Craft
+/// app's own code, so the whole start runs behind the guard the engine runs every call behind: a panic
+/// in it is the start's `Internal`, as it is any call's. Unguarded, UniFFI would catch it and throw an
+/// error of its own instead (Swift's `rustPanic`, Kotlin's `InternalException`), which an app catching
+/// the `CraftError` the call declares would not catch.
 fn start<A: CraftApp + 'static>(
     folders: Folders,
     gpu: GpuChoice,
     build: impl FnOnce(&craftbridge_core::folders::Folders) -> craftbridge_core::Result<A>,
 ) -> Result<Arc<Engine>, CraftError> {
     let folders = craftbridge_core::folders::Folders::from(folders);
-    let core = guarded(|| craftbridge_core::Engine::start_in(&folders, build(&folders)?, gpu)).flatten()?;
+    let core = guarded(|| craftbridge_core::Engine::start_in_with(&folders, build, gpu)).flatten()?;
     Ok(Engine::from_core(core))
 }
 

@@ -831,8 +831,8 @@ impl CraftApp for Spy {
 fn engine_on(choice: GpuChoice) -> Result<(Scratch, Engine, Arc<Seen>), String> {
     let scratch = Scratch::new().map_err(|e| e.to_string())?;
     let seen = Arc::new(Seen::default());
-    let app = Spy { inner: scratch.app().map_err(|e| e.to_string())?, seen: seen.clone() };
-    let engine = Engine::start_in(&scratch.folders, app, choice).map_err(|e| e.to_string())?;
+    let spy = |folders: &_| Ok(Spy { inner: EffectCraftApp::new(folders)?, seen: seen.clone() });
+    let engine = Engine::start_in_with(&scratch.folders, spy, choice).map_err(|e| e.to_string())?;
     let steps = json!([
         {"command": "comp.new", "params": {"name": "C", "width": 8, "height": 6}},
         {"command": "layer.newSolid", "params": {"comp": 1, "name": "s"}},

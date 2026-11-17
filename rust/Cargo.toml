@@ -44,6 +44,9 @@ quote = "1"
 # The core's write probe of a folder and the scratch folders of its tests;
 # craftbridge-effects-conformance runs each scenario in one.
 tempfile = "3"
+# The kernel's capability bits on Android arm64, which the core reads before any app code runs
+# (`getauxval`), through the C library's own declarations.
+libc = "0.2"
 # `image` writes the PNG a straight-RGBA frame is held in and reads the PNGs a scenario compares in
 # craftbridge-effects-conformance, writes the PNGs the tests of that crate and craftbridge-effects compare,
 # and reads the Targa frames craftbridge-effects' hardware export takes from EffectCraft's export (plan §18).

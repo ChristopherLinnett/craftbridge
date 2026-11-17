@@ -5,13 +5,15 @@
 
 ## 23. Kotlin libraries design
 
-Two Android library modules in the Gradle build at `android/sdk/` (PD16, PD19), `minSdk 29` (PD11), `compileSdk 37` (the emulator image's API level, `evidence/03-device-feasibility.md` Method).
+Two Android library modules in the Gradle build at `android/sdk/` (PD16, PD19), `minSdk 29` (PD11) on arm64-v8a with FP16, `compileSdk 37` (the emulator image's API level, `evidence/03-device-feasibility.md` Method).
 
 | Module | Change | What |
 |---|---|---|
 | `:core` (`io.github.christopherlinnett.craftbridge:core`) | NEW | generated core bindings, the Kotlin core API, `NativeSurfaces` (JNI, §20); depends on JNA (`net.java.dev.jna:jna`, `@aar`) |
 | `:effects` (`io.github.christopherlinnett.craftbridge:effects`) | NEW | generated EffectCraft bindings and facade, the hand-written fixed-shape calls, and `jniLibs/{arm64-v8a,x86_64}/libcraftbridge_effects_ffi.so` |
 | `:effects` `androidTest` | NEW | instrumented conformance tests on the emulator (QA-2) |
+
+**Device floor.** The arm64 library is built for half-precision arithmetic in every crate (`-C target-feature=+fp16`, `tools/env.sh`), so it needs a processor that has it: ARMv8.2-A, Cortex-A55 and A75 and newer. `EffectsEngine.start` on an arm64 phone without it throws the `Unsupported` exception the core answers, whose message names the missing feature (`HWCAP_FPHP` or `HWCAP_ASIMDHP`), before any engine code runs; an app catches it and tells its user that the app's video engine needs a newer processor than the phone has. The x86_64 emulator takes no half-precision path and starts.
 
 **Kotlin API.** Mirrors §22: `EffectsEngine.start(context, folders, gpu)`, `suspend` functions, progress as a lambda, cancellation through the coroutine's `Job`. `Folders.appDefault(context)` uses `filesDir`, `cacheDir` and `noBackupFilesDir`, and names its `staged` folder beside `config` and `models` — never under the `cacheDir`, which the system may empty while the app is not running and a saved project must still find the copies it names; an app's assets are copied to `filesDir` before use, because the engine reads files, not asset streams. `attachPreview(surface: Surface)`; frames → `Bitmap` (`ARGB_8888`, premultiplied) and `HardwareBuffer` (§17).
 

@@ -149,8 +149,7 @@ fn case_json(dir: &Path, case: &Case) -> Value {
 /// Start the app in `container` as an app crate's constructor does, with the journal on.
 fn start(container: &Path) -> Result<Engine, String> {
     let folders = folders_in(container, None, Vec::new());
-    let app = EffectCraftApp::new(&folders).map_err(|error| error.to_string())?;
-    Engine::start_in(&folders, app, GpuChoice::CpuOnly).map_err(|error| error.to_string())
+    Engine::start_in_with(&folders, EffectCraftApp::new, GpuChoice::CpuOnly).map_err(|error| error.to_string())
 }
 
 /// Set the demo project up as the case says and run its export to the end, answering what it answered.

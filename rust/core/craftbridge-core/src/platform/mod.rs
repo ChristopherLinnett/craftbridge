@@ -8,11 +8,13 @@
 //! system frameworks never leaves this folder.
 //!
 //! `memory` builds on every target, since each one answers (or answers that it has no figure);
-//! `coretext` is iOS's alone, because no other platform lists its fonts through the system.
+//! `cpu` builds on every target too, and answers that there is no floor to meet everywhere but Android
+//! arm64; `coretext` is iOS's alone, because no other platform lists its fonts through the system.
 
 #[cfg(target_os = "ios")]
 pub use coretext::{CoreTextFace, available_family_names, coretext_faces};
 
 #[cfg(target_os = "ios")]
 mod coretext;
+pub(crate) mod cpu;
 pub(crate) mod memory;
