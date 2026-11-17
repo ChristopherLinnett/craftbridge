@@ -1,7 +1,9 @@
 //! [`EffectCraftApp`]: the construction of plan §19 and the dispatch of the §14 method table.
 
+use std::sync::Arc;
+
 use craftbridge_core::folders::Folders;
-use craftbridge_core::{CraftApp, CraftError, FrameBytes, PixelFormat, Result};
+use craftbridge_core::{CraftApp, CraftError, FrameBytes, GpuDevice, GpuFailure, PixelFormat, Platform, Result};
 // The core and the engine both call their type `Confinement`: the core's carries the roots the app's
 // folders make, the engine's checks every access against those same roots. They meet in this file
 // alone, so the engine's is renamed here to keep the two apart.
@@ -11,18 +13,25 @@ use serde_json::Value;
 use std::path::PathBuf;
 
 use crate::runner::{self, Progress};
-use crate::{files, info, mcp, methods, properties, replay, requests, session, timings};
+use crate::{files, info, mcp, methods, plugins, properties, replay, requests, session, timings};
 
 /// A hosted EffectCraft session: the MCP server built at construction, which owns the headless
 /// [`Backend`] and the confined session behind it (plan §19).
 ///
-/// The core moves the app onto the engine thread and reaches it only through [`CraftApp::request`],
-/// so nothing here needs a lock: one call at a time is what the engine thread already gives it.
+/// The core moves the app onto the engine thread and reaches it only through its [`CraftApp`]
+/// calls, so nothing here needs a lock: one call at a time is what the engine thread already gives
+/// it.
 pub struct EffectCraftApp {
     /// Every method reaches the session through this server's backend, so the app keeps the server
     /// itself rather than the backend inside it: the `mcp` call answers its lines from here, and an
     /// app that wired the line transport around a copy of the backend would fork the session.
     server: McpServer,
+    /// The notice of the device last handed to [`CraftApp::attach_gpu`], kept so [`Self::drop_gpu`]
+    /// can name in `info.gpu` the failure that ended it (§17). It is checked on the way into every
+    /// request, which is where the app can see a failure reported since the last one.
+    gpu_failure: Option<GpuFailure>,
+    /// The app's place in the iOS plug-in gate's folder list, held while the app lives (§19).
+    _admission: plugins::Admission,
 }
 
 impl EffectCraftApp {
@@ -33,11 +42,32 @@ impl EffectCraftApp {
     /// The folders are prepared first because the engine's confinement resolves its roots on disk,
     /// and a root that is not there yet would be refused before the folder that would be it exists.
     pub fn new(folders: &Folders) -> Result<Self> {
+        Self::for_platform(Platform::current(), folders)
+    }
+
+    /// The app as `platform` builds it: [`Self::new`] for this build's own platform, and for the
+    /// tests the same construction with another platform's plug-in policy (§19), so the policy of
+    /// each platform is pinned on the host through the app's own door and confinement.
+    pub(crate) fn for_platform(platform: Platform, folders: &Folders) -> Result<Self> {
         let roots = folders.prepare()?;
-        let mut backend = Backend::headless(session::build(folders));
+        // The iOS plug-in gate reads the app's plug-in folder from where the loader function can
+        // reach it, since a loader is a plain function pointer (§19); the folder is resolved on
+        // disk, so it is handed over once the folders are prepared.
+        let admission = plugins::admit(platform, folders);
+        let mut backend = Backend::headless(session::build(platform, folders));
         let confinement = EngineConfinement::new(roots.read_roots(), &[roots.write_root().to_path_buf()]).map_err(|error| CraftError::io(error.to_string()))?;
         backend.confine(confinement);
-        Ok(Self { server: McpServer::new(backend) })
+        Ok(Self { server: McpServer::new(backend), gpu_failure: None, _admission: admission })
+    }
+
+    /// The first device failure retires the GPU before the next request is answered: the notice has
+    /// failed and the session still holds the device, so the GPU goes the way [`Self::drop_gpu`]
+    /// sends it, and `info.gpu` says which loss it was (§17). An app with no device answers
+    /// nothing here: no notice, nothing to settle.
+    fn settle_gpu_failure(&mut self) {
+        if self.gpu_failure.as_ref().is_some_and(GpuFailure::failed) {
+            self.drop_gpu();
+        }
     }
 }
 
@@ -79,7 +109,12 @@ impl CraftApp for EffectCraftApp {
     /// the case the refusal is for. It speaks of `request` alone because the core reaches the app
     /// through calls of its own for the binary `frame`, the line `mcp` and a call with progress
     /// (plan §16), so a name refused here can be one the app answers through another call.
+    ///
+    /// A device lost since the last call settles first: the engine thread touches the session only
+    /// here, so this is where the first device-lost report finds it (§17), before any new command
+    /// runs on a dead device.
     fn request(&mut self, method: &str, params: Value) -> Result<Value> {
+        self.settle_gpu_failure();
         match METHODS.iter().find(|(name, _)| *name == method) {
             Some((_, answer)) => answer(self.server.backend(), &params),
             None => Err(CraftError::unsupported(not_answered(method, "request", METHODS.iter().map(|(name, _)| *name)))),
@@ -100,6 +135,7 @@ impl CraftApp for EffectCraftApp {
         on_progress: &mut dyn FnMut(u64, u64, Option<f64>) -> bool,
         _list_outputs: &mut dyn FnMut(&[PathBuf]) -> Result<()>,
     ) -> Result<Value> {
+        self.settle_gpu_failure();
         match PROGRESS_METHODS.iter().find(|(name, _)| *name == method) {
             Some((_, answer)) => answer(self.server.backend(), &params, on_progress),
             None => Err(CraftError::unsupported(not_answered(method, "request_with_progress", PROGRESS_METHODS.iter().map(|(name, _)| *name)))),
@@ -109,6 +145,7 @@ impl CraftApp for EffectCraftApp {
     /// Render one frame (plan §14's binary `frame`): the request is resolved as `render-frame`
     /// resolves its flags. It has no row in [`METHODS`], so `request` keeps refusing the name.
     fn frame(&mut self, params: Value, format: PixelFormat) -> Result<FrameBytes> {
+        self.settle_gpu_failure();
         requests::frame(self.server.backend(), &params, format)
     }
 
@@ -116,7 +153,72 @@ impl CraftApp for EffectCraftApp {
     /// session every method reaches. It is not a row of [`METHODS`]: a line is not a method call, so
     /// `request` keeps refusing the name `mcp`.
     fn mcp(&mut self, line: &str) -> Option<String> {
+        self.settle_gpu_failure();
         mcp::answer(&mut self.server, line)
+    }
+
+    /// Take the device the core built (§17). A device is handed to EffectCraft's own
+    /// `Gpu::new(adapter, device, queue)` — the hand-over EffectCraft's desktop app makes of its
+    /// window's device — and the session renders on the result: `Session.accel` carries it, the CPU
+    /// note goes away, and `info.gpu` names the adapter (§19 step 5). A `CpuOnly` answer is not a
+    /// failure: its reason becomes the session's note, and every render runs on the CPU (L7).
+    ///
+    /// Both of wgpu's failure callbacks are then installed on the device — the device-lost callback
+    /// wgpu calls when the driver retires it, and the uncaptured-error callback wgpu calls for an
+    /// error no call claimed — and both call one failure path, as the compositor's own installer
+    /// does (`crates/gpu/src/readback.rs`:348-362), in the words it and EffectCraft's desktop app
+    /// give each. That path reports to the core's notice for this device and to the compositor's
+    /// shared-device notifier, which a borrowed device's owner must forward to so pending readbacks
+    /// settle the moment the device is gone (`crates/gpu/src/context.rs`:826-830, :1070-1078). The
+    /// first report is the one the notice keeps, and the GPU is dropped before the next request
+    /// (§17).
+    fn attach_gpu(&mut self, gpu: &GpuDevice) -> Result<()> {
+        let Some((adapter, device, queue)) = gpu.parts() else {
+            let Some(session) = self.server.backend().session() else {
+                return Err(CraftError::gpu("this app's session sits behind a bridge, which holds no GPU to note"));
+            };
+            session.accel = None;
+            session.accel_note = Some(gpu.summary());
+            self.gpu_failure = None;
+            return Ok(());
+        };
+        let accel = effectcraft_gpu::Gpu::new(adapter, device.clone(), queue.clone()).map_err(CraftError::gpu)?;
+        let note = gpu.device_failure_notifier();
+        let fail = {
+            let (note, retire) = (note.clone(), accel.context().device_failure_notifier());
+            Arc::new(move |why: String| {
+                retire(why.clone());
+                note.report(why);
+            })
+        };
+        let lost = Arc::clone(&fail);
+        device.set_device_lost_callback(move |reason, message| lost(format!("GPU device lost ({reason:?}): {message}")));
+        device.on_uncaptured_error(Arc::new(move |error: wgpu::Error| fail(format!("uncaptured GPU error: {error}"))));
+        let Some(session) = self.server.backend().session() else {
+            return Err(CraftError::gpu("this app's session sits behind a bridge, which holds no GPU to attach"));
+        };
+        session.accel = Some(Arc::new(accel));
+        session.accel_note = None;
+        self.gpu_failure = Some(note);
+        Ok(())
+    }
+
+    /// Put the session back on the CPU: the device goes out of the session, and the note takes the
+    /// first failure's words when a failure is why (§17), as EffectCraft's desktop app notes a
+    /// retired device (`crates/ui-egui/src/app/gpu.rs`:69-70), so `info.gpu` names it afterwards.
+    /// Nothing was attached: nothing to drop — the app keeps answering what it answered before.
+    fn drop_gpu(&mut self) {
+        let Some(session) = self.server.backend().session() else {
+            return;
+        };
+        if session.accel.is_none() {
+            return;
+        }
+        session.accel = None;
+        session.accel_note = Some(match self.gpu_failure.as_ref().and_then(GpuFailure::reason) {
+            Some(why) => format!("GPU preview retired: {why}"),
+            None => "the GPU was detached; renders run on the CPU".to_string(),
+        });
     }
 }
 
@@ -130,4 +232,48 @@ fn not_answered<'a>(method: &str, entry: &str, answered: impl Iterator<Item = &'
         None => "nothing".to_string(),
     };
     format!("`{method}` is not answered by `{entry}` in this build, which answers {answered}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::tests::Scratch;
+    use craftbridge_core::GpuChoice;
+
+    /// The failure path tells the compositor as well as the core, whichever of wgpu's two callbacks
+    /// reports: after the failure, and before any request has dropped the GPU, the compositor's own
+    /// context on that device is already retired (`Accelerator::available`, which is its health
+    /// check), so its pending readbacks settle at once rather than waiting out their deadlines
+    /// (§17).
+    #[test]
+    fn a_failure_retires_the_compositor_before_the_gpu_is_dropped() {
+        let causes: [(&str, fn(&wgpu::Device)); 2] = [
+            ("an uncaptured error", |device| {
+                let oversized = wgpu::BufferDescriptor {
+                    label: Some("craftbridge compositor-retire probe"),
+                    size: device.limits().max_buffer_size + 4096,
+                    usage: wgpu::BufferUsages::UNIFORM,
+                    mapped_at_creation: false,
+                };
+                let _ = device.create_buffer(&oversized);
+            }),
+            ("a lost device", |device| {
+                device.destroy();
+                let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            }),
+        ];
+        for (name, cause) in causes {
+            let scratch = Scratch::new(false, None);
+            let mut app = scratch.app(Platform::Host);
+            let gpu = GpuDevice::request(GpuChoice::Preferred);
+            let GpuDevice::Device { device, .. } = &gpu else {
+                panic!("a desktop with no adapter: {}", gpu.summary());
+            };
+            app.attach_gpu(&gpu).expect("the desktop device attaches");
+            let available = |app: &mut EffectCraftApp| app.server.backend().session().and_then(|session| session.accel.as_ref().map(|accel| accel.available()));
+            assert_eq!(available(&mut app), Some(true), "the compositor starts healthy");
+            cause(device);
+            assert_eq!(available(&mut app), Some(false), "{name}: the failure path retired the compositor's context");
+        }
+    }
 }

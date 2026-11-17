@@ -11,7 +11,11 @@
 //! A device answers `(adapter, device, queue)` for the app crate to hand to
 //! `effectcraft_gpu::Gpu::new`; no device answers why, in words `info.gpu` can report, and every
 //! render then runs on the CPU (L7). A failed adapter or device request is that answer, never a
-//! panic.
+//! panic. A device also carries its failure notice ([`GpuFailure`], §17): the app crate's handlers
+//! for wgpu's device-lost and uncaptured-error callbacks report into it, and the GPU is dropped on
+//! its first report.
+
+use std::sync::{Arc, OnceLock};
 
 use crate::Result;
 use crate::error::CraftError;
@@ -26,11 +30,12 @@ pub enum GpuChoice {
     CpuOnly,
 }
 
-/// The platform the core picks GPU backends for. A build takes the one its target names, and the
-/// tests name each target, so every platform's pick is proven on the machine the tests run on while
-/// the gate's phone builds prove the code compiles for the phones.
+/// The platform the core picks GPU backends for, and the platform an app plugin picks its
+/// per-platform rules by (§19): the same three names answer both. A build takes the one its target
+/// names, and the tests name each target, so every platform's pick is proven on the machine the
+/// tests run on while the gate's phone builds prove the code compiles for the phones.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Platform {
+pub enum Platform {
     Ios,
     Android,
     /// Any other target, a desktop: its own backends, Metal on macOS.
@@ -39,14 +44,16 @@ pub(crate) enum Platform {
 
 impl Platform {
     /// The platform this build was compiled for.
-    pub(crate) fn current() -> Platform {
+    #[must_use]
+    pub fn current() -> Platform {
         Platform::of(std::env::consts::OS)
     }
 
     /// The platform of a target operating system, named as `std::env::consts::OS` names it (the
     /// target's `target_os`; the iOS Simulator's is `ios`). A plain function of the name, rather than
     /// a `cfg!` a host build always folds to `Host`, so the tests pin each phone's pick on the host.
-    pub(crate) fn of(os: &str) -> Platform {
+    #[must_use]
+    pub fn of(os: &str) -> Platform {
         match os {
             "ios" => Platform::Ios,
             "android" => Platform::Android,
@@ -66,6 +73,35 @@ impl Platform {
     }
 }
 
+/// A device's failure notice (plan §17): where wgpu's device-lost and uncaptured-error callbacks
+/// carry their reason, and what is read to drop the GPU on the first report. The first report's
+/// words are the ones kept — a failing device can report again, with every later uncaptured error
+/// and with the loss that follows one, and only the first failure names why the render went back
+/// to the CPU. Calling it is safe from any thread, since the callbacks that call it are wgpu's own,
+/// and harmless once the device is gone.
+#[derive(Clone, Debug, Default)]
+pub struct GpuFailure(Arc<OnceLock<String>>);
+
+impl GpuFailure {
+    /// Report a device failure in words, as `info.gpu` will report it. Whether this report was the
+    /// first: once a failure is in, the GPU is dropped and a later report changes nothing.
+    pub fn report(&self, reason: String) -> bool {
+        self.0.set(reason).is_ok()
+    }
+
+    /// Whether a failure was reported.
+    #[must_use]
+    pub fn failed(&self) -> bool {
+        self.0.get().is_some()
+    }
+
+    /// The first failure's words, if one was reported.
+    #[must_use]
+    pub fn reason(&self) -> Option<String> {
+        self.0.get().cloned()
+    }
+}
+
 /// The engine's GPU: the device to render on, or the reason the render runs on the CPU instead
 /// (§17's *GPU attached* and *CPU only* states).
 #[derive(Debug)]
@@ -79,6 +115,8 @@ pub enum GpuDevice {
         device: wgpu::Device,
         /// The queue that carries the device's work.
         queue: wgpu::Queue,
+        /// The device's failure notice: the one handle every holder of this device shares (§17).
+        failure: GpuFailure,
     },
     /// No device — `CpuOnly` was chosen, no adapter answered, or the request failed. `reason` is
     /// in words `info.gpu` can report, and every render runs on the CPU (L7).
@@ -121,8 +159,20 @@ impl GpuDevice {
     #[must_use]
     pub fn parts(&self) -> Option<(&wgpu::Adapter, &wgpu::Device, &wgpu::Queue)> {
         match self {
-            GpuDevice::Device { adapter, device, queue } => Some((adapter, device, queue)),
+            GpuDevice::Device { adapter, device, queue, .. } => Some((adapter, device, queue)),
             GpuDevice::CpuOnly { .. } => None,
+        }
+    }
+
+    /// The device's failure notice (§17): the one handle every holder of this device shares, so
+    /// the app crate's handlers for wgpu's device-lost and uncaptured-error callbacks report into it
+    /// and every holder of the device sees the same first report. `CpuOnly` has no device to fail:
+    /// the notice it hands out never fails, and there is no GPU to drop.
+    #[must_use]
+    pub fn device_failure_notifier(&self) -> GpuFailure {
+        match self {
+            GpuDevice::Device { failure, .. } => failure.clone(),
+            GpuDevice::CpuOnly { .. } => GpuFailure::default(),
         }
     }
 }
@@ -206,7 +256,7 @@ fn on_backends(backends: wgpu::Backends) -> GpuDevice {
 /// and the CPU renders, never a panic (§17's *CPU only* state).
 fn open(adapter: wgpu::Adapter, required: wgpu::Limits) -> GpuDevice {
     match pollster::block_on(adapter.request_device(&device_descriptor(required))) {
-        Ok((device, queue)) => GpuDevice::Device { adapter, device, queue },
+        Ok((device, queue)) => GpuDevice::Device { adapter, device, queue, failure: GpuFailure::default() },
         Err(error) => GpuDevice::CpuOnly { reason: format!("no device on {}: {error}", adapter.get_info().name) },
     }
 }
@@ -404,5 +454,37 @@ mod tests {
         fn assert_send<T: Send>() {}
         assert_send::<GpuDevice>();
         assert_send::<GpuChoice>();
+    }
+
+    /// The failure notice keeps the first report's words and nothing after it: a failing device
+    /// can report again, and only the first failure names why the render went back to the CPU.
+    /// Every holder of the device shares the one notice — a second ask for it sees the same
+    /// failure — so this is what is read to drop the GPU (§17). The notice must
+    /// also cross threads: wgpu calls the callbacks that report into it on its own.
+    #[test]
+    fn device_failure_latches_on_the_first_report() {
+        let gpu = GpuDevice::request(GpuChoice::Preferred);
+        let GpuDevice::Device { .. } = &gpu else {
+            panic!("a desktop with no adapter: {}", gpu.summary());
+        };
+        let note = gpu.device_failure_notifier();
+        assert!(!note.failed());
+        assert!(note.report("device lost: the first".to_string()), "the first report takes");
+        assert!(!note.report("device lost: a later one".to_string()), "a later report changes nothing");
+        assert!(note.failed());
+        assert_eq!(note.reason().as_deref(), Some("device lost: the first"));
+        assert!(gpu.device_failure_notifier().failed(), "every holder shares the one notice");
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<GpuFailure>();
+    }
+
+    /// With no device there is nothing to fail: the notice a `CpuOnly` answer hands out never
+    /// fails, and `info.gpu` keeps reporting the reason it already carries (§17).
+    #[test]
+    fn cpu_only_has_no_failure_to_report() {
+        let gpu = GpuDevice::CpuOnly { reason: "the app asked for CPU-only rendering".to_string() };
+        let note = gpu.device_failure_notifier();
+        assert!(!note.failed());
+        assert!(note.reason().is_none());
     }
 }

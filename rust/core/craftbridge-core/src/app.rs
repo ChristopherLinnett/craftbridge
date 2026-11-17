@@ -93,4 +93,50 @@ pub trait CraftApp: Send {
     fn mcp(&mut self, _line: &str) -> Option<String> {
         None
     }
+
+    /// Hand the app the engine's GPU, as [`crate::gpu::GpuDevice::request`] answered it (plan §16,
+    /// §17): a device to render on, or `CpuOnly` with the reason every render runs on the CPU (L7),
+    /// which the app reports in `info.gpu`. An answer of [`CraftError::Gpu`] says the device could
+    /// not be taken, and the app keeps rendering on the CPU.
+    ///
+    /// An app that renders on no GPU keeps this default, which answers
+    /// [`CraftError::Unsupported`]: the refusal is the same for every such app, so it is written
+    /// once, here.
+    fn attach_gpu(&mut self, gpu: &crate::gpu::GpuDevice) -> Result<()> {
+        let _ = gpu;
+        Err(CraftError::unsupported("this app attaches no GPU device"))
+    }
+
+    /// Take the GPU away: every render runs on the CPU again and `info.gpu` says why (plan §17).
+    /// It is how the GPU goes once the device's failure notice has its first report, and when a
+    /// device that was handed over is taken back. Dropping a GPU the app does not hold is not a
+    /// failure, so an app with nothing to drop keeps this default, which does nothing.
+    fn drop_gpu(&mut self) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gpu::{GpuChoice, GpuDevice};
+
+    struct NoGpu;
+
+    impl CraftApp for NoGpu {
+        fn request(&mut self, _method: &str, _params: Value) -> Result<Value> {
+            Ok(Value::Null)
+        }
+    }
+
+    /// The trait's default, pinned to its words: an app that attaches no device says so, and a
+    /// drop it holds nothing for stays the silence the default is.
+    #[test]
+    fn an_app_that_attaches_no_device_refuses_with_the_default() {
+        let mut app = NoGpu;
+        let error = app.attach_gpu(&GpuDevice::request(GpuChoice::CpuOnly)).expect_err("an app with no GPU says so");
+        match error {
+            CraftError::Unsupported { message } => assert_eq!(message, "this app attaches no GPU device", "the refusal's words are pinned"),
+            other => panic!("the default refusal must be `Unsupported`, got {other:?}"),
+        }
+        app.drop_gpu();
+    }
 }

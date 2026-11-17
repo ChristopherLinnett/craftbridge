@@ -657,6 +657,7 @@ dependencies = [
 name = "craftbridge-effects"
 version = "0.1.0"
 dependencies = [
+ "boa_engine",
  "craftbridge-core",
  "effectcraft-automation",
  "effectcraft-engine",
@@ -674,6 +675,8 @@ dependencies = [
  "rustix",
  "serde_json",
  "tempfile",
+ "toml",
+ "wgpu",
 ]
 
 [[package]]

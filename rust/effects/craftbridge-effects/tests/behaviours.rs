@@ -1,12 +1,15 @@
 //! The behaviours the plugin promises, each pinned by a named test: the confinement that refuses
 //! accesses outside the container, the commands that need a helper answering `Unsupported`, the
-//! plug-ins switched off, the method table's rows, and `run` stopping at the right step.
+//! plug-ins switched off, the method table's rows, `run` stopping at the right step, and the
+//! GPU's states of plan §17 as `info.gpu` reports them — the core's device handed to EffectCraft's
+//! own `Gpu::new`, and both of wgpu's failure callbacks reaching the core's notice for that device,
+//! so the GPU is dropped on its first failure.
 
 mod common;
 mod scratch;
 
 use common::{EVERY_FORMAT, Scratch};
-use craftbridge_core::{CraftApp, CraftError, Engine, PixelFormat};
+use craftbridge_core::{CraftApp, CraftError, Engine, GpuChoice, GpuDevice, PixelFormat};
 use craftbridge_effects::EffectCraftApp;
 use serde_json::{Value, json};
 
@@ -27,7 +30,11 @@ fn info_names_the_engine_its_version_and_the_builds_state() {
     assert!(info["effects"].as_u64().is_some_and(|n| n > 0));
     assert!(info["project"].is_object());
     assert!(info["activeComp"].is_null(), "a fresh session has no comp open");
-    assert!(info["gpu"].is_null(), "no GPU has been attached, so the engine says so");
+    assert_eq!(
+        info["gpu"].as_str(),
+        Some("headless: renders on the CPU"),
+        "with no device attached, `info.gpu` carries the session's note, as plan §17's *CPU only* state has it"
+    );
     assert_eq!(info["hardwareDecoding"].as_bool(), Some(false));
     assert_eq!(
         info["project"]["renderer"]["why"].as_str(),
@@ -597,4 +604,89 @@ fn a_frame_is_never_answered_by_request() {
         ),
         other => panic!("`frame` through `request` must be `Unsupported`, got {other:?}"),
     }
+}
+
+/// What `info.gpu` answers right now, in one string for the assertions.
+fn gpu_of(app: &mut EffectCraftApp) -> Result<String, String> {
+    let info = app.request("info", json!({})).map_err(|e| format!("`info` fails: {e}"))?;
+    info.pointer("/gpu").and_then(Value::as_str).map(str::to_string).ok_or("the `info` answer carries no `gpu` string".to_string())
+}
+
+/// The desktop device, attached, and `info` already naming it as `"<adapter> (<backend>)"`, with the
+/// device itself for the test to act on.
+fn attach_the_device(app: &mut EffectCraftApp) -> Result<(GpuDevice, wgpu::Device), String> {
+    let gpu = GpuDevice::request(GpuChoice::Preferred);
+    let GpuDevice::Device { device, .. } = &gpu else {
+        return Err(format!("a desktop must answer a device for this test to mean anything: {}", gpu.summary()));
+    };
+    let device = device.clone();
+    app.attach_gpu(&gpu).map_err(|e| format!("the desktop device must attach: {e}"))?;
+    let name = gpu_of(app)?;
+    if name != gpu.summary() {
+        return Err(format!("the attached device must be named as `\"<adapter> (<backend>)\"` (plan §17); `info` says {name}"));
+    }
+    Ok((gpu, device))
+}
+
+/// The §17 states in order: the construction note, then the reason a `CpuOnly` choice gives, then
+/// the adapter's name once a device is attached, then the note a deliberate detach leaves.
+#[test]
+fn the_states_of_the_gpu_read_through_info() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    assert_eq!(gpu_of(&mut app).expect("`info` answers"), "headless: renders on the CPU", "the session's own note before any device");
+
+    let cpu = GpuDevice::request(GpuChoice::CpuOnly);
+    app.attach_gpu(&cpu).expect("attaching a CPU-only answer is not a failure");
+    assert_eq!(gpu_of(&mut app).expect("`info` answers"), cpu.summary(), "the reason of the `CpuOnly` choice is what `info.gpu` reports (plan §17)");
+
+    attach_the_device(&mut app).expect("the desktop device attaches and is named");
+    app.drop_gpu();
+    assert_eq!(gpu_of(&mut app).expect("`info` answers"), "the GPU was detached; renders run on the CPU", "the detach says so through `info.gpu`");
+}
+
+/// The device-lost callback the app installed reaches the core's notice for the device, in the
+/// words EffectCraft gives a lost device: after the device is destroyed and polled, the notice has
+/// the loss, the very next request drops the GPU, and `info.gpu` carries the loss as EffectCraft's
+/// desktop app notes a retired device — and a fresh device afterwards attaches again, so the drop
+/// is a state, not a death (§17: "The core drops the GPU on the first device-lost error").
+#[test]
+fn a_device_lost_drops_the_gpu_on_the_next_request() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    let (gpu, device) = attach_the_device(&mut app).expect("the desktop device attaches and is named");
+
+    device.destroy();
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    let lost = "GPU device lost (Destroyed): ";
+    assert_eq!(gpu.device_failure_notifier().reason().as_deref(), Some(lost), "the device-lost callback reached the core's notice");
+    let retired = format!("GPU preview retired: {lost}");
+    assert_eq!(gpu_of(&mut app).expect("`info` answers after the loss"), retired, "the next request dropped the GPU and names the loss");
+    assert_eq!(gpu_of(&mut app).expect("`info` answers again"), retired, "the failure stays settled; no request re-attaches a lost device");
+
+    let fresh = GpuDevice::request(GpuChoice::Preferred);
+    app.attach_gpu(&fresh).expect("a fresh device attaches after the loss");
+    assert_eq!(gpu_of(&mut app).expect("`info` answers on the new device"), fresh.summary(), "the engine is on the new device");
+}
+
+/// The uncaptured-error callback reaches the same notice: a buffer the device cannot give fails
+/// validation, wgpu hands the error to the device's uncaptured handler (no call claimed it), and
+/// the notice has it in the words EffectCraft gives an uncaptured error, and the next request finds
+/// the GPU dropped with those words in `info.gpu`.
+#[test]
+fn an_uncaptured_error_drops_the_gpu_too() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    let (gpu, device) = attach_the_device(&mut app).expect("the desktop device attaches and is named");
+
+    let oversized = wgpu::BufferDescriptor {
+        label: Some("craftbridge uncaptured-error probe"),
+        size: device.limits().max_buffer_size + 4096,
+        usage: wgpu::BufferUsages::UNIFORM,
+        mapped_at_creation: false,
+    };
+    let _ = device.create_buffer(&oversized);
+    let reason = gpu.device_failure_notifier().reason().expect("the uncaptured-error callback reached the core's notice");
+    assert!(reason.starts_with("uncaptured GPU error: "), "the notice keeps the error in EffectCraft's words: {reason}");
+    assert_eq!(gpu_of(&mut app).expect("`info` answers after the error"), format!("GPU preview retired: {reason}"), "the next request dropped the GPU");
 }

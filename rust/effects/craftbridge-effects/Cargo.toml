@@ -29,10 +29,25 @@ serde_json.workspace = true
 rustix.workspace = true
 # The export's thread pool (AD7).
 rayon.workspace = true
+# The plugin hands the core's wgpu device to the compositor and installs its failure callbacks,
+# which speak wgpu's own types (plan §17); the version is the workspace's, shared with the core.
+wgpu.workspace = true
+
+# D-8: boa's default packed-value layout panics on Android, where heap pointers carry a tag in
+# their top byte (plan/evidence/03-device-feasibility.md Finding 9); the `jsvalue-enum` feature
+# gives boa a layout that tolerates it. Only Android needs it, so this crate asks for it through a
+# target-specific dependency and Cargo unifies the feature over every boa in the Android build —
+# EffectCraft's own script and expression crates included — and over no other target. The
+# workspace's entry keeps boa's default features off, as EffectCraft's does, so Android's scripts
+# get the layout and nothing the desktop's do not have.
+[target.'cfg(target_os = "android")'.dependencies]
+boa_engine = { workspace = true, features = ["jsvalue-enum"] }
 
 [dev-dependencies]
 image.workspace = true
 tempfile.workspace = true
+# The D-8 test reads the toolchain pin's targets with the TOML parser the workspace's tools use.
+toml.workspace = true
 
 [lints]
 workspace = true

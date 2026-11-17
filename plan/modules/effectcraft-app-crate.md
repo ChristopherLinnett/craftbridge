@@ -9,7 +9,7 @@
 
 | File | Change | What |
 |---|---|---|
-| `Cargo.toml` | NEW | `effectcraft-engine`, `-host`, `-automation`, `-gpu`, `-render`, `-text`, `-media`, `-expr`, `-script` and `-plugin` from the workspace pins; `[target.'cfg(target_os = "android")'.dependencies] boa_engine = { version = "0.22", features = ["jsvalue-enum"] }` (D-8) |
+| `Cargo.toml` | NEW | `effectcraft-engine`, `-host`, `-automation`, `-gpu`, `-render`, `-text`, `-media`, `-expr`, `-script` and `-plugin` from the workspace pins; `[target.'cfg(target_os = "android")'.dependencies] boa_engine = { workspace = true, features = ["jsvalue-enum"] }`, the workspace's entry being EffectCraft's own `{ version = "0.22", default-features = false }`, so Android's boa adds the layout and nothing else (D-8) |
 | `src/app.rs` | NEW | `EffectCraftApp`: construction and its confinement (AD9), GPU attach, the method table of §14 |
 | `src/methods.rs` | NEW | `commands`, `exec` and `run`, each calling the upstream function named in §14's table, the one door every command passes, the one mapping of EffectCraft's failures onto §14's rows (AD10), and the model downloads withheld at the door (AD11) |
 | `src/plugins.rs` | NEW | PD13: plug-in policy |
@@ -26,7 +26,7 @@
 
 **Construction.**
 1. CraftBridge builds the session (AD1): `Session { models_dir, plugins_dir, footage: MediaPool::new(), importer, exporter, expr, expr_check, plugin_loader, plugin_previewer, ..Default::default() }` with the app's folders, CraftBridge's exporter (AD7) and no helper hooks, then `effectcraft_script::install`, then the phone's fonts (AD2).
-2. **Plug-ins (PD13):** with `Folders.plugins = None`, `session.plugin_loader` and `session.plugin_previewer` are `None` (fields at `effectcraft: crates/engine/src/lib.rs:207-215`), so no WebAssembly plug-in loads. On Android the loader is `effectcraft_plugin::loader` (`crates/plugin/src/lib.rs:61`). On iOS it is `plugins::bundle_loader`, a function with the same `PluginLoader` signature (`crates/engine/src/lib.rs:294`; the bundle path sits in a process-wide `OnceLock` set at start, because the signature is a plain function pointer) that refuses any `source` outside the bundle's plug-ins folder with `Unsupported` and otherwise calls `effectcraft_plugin::loader`, so a script or command cannot load a plug-in from the container (T24).
+2. **Plug-ins (PD13):** with `Folders.plugins = None`, `session.plugin_loader` and `session.plugin_previewer` are `None` (fields at `effectcraft: crates/engine/src/lib.rs:207-215`), so no WebAssembly plug-in loads. On Android the loader is `effectcraft_plugin::loader` (`crates/plugin/src/lib.rs:61`). On iOS it is `plugins::bundle_loader`, a function with the same `PluginLoader` signature (`crates/engine/src/lib.rs:294`; the plug-in folder each iOS engine names inside its bundle is added, resolved, to a process-wide list at start and taken out again when the app is dropped, because the signature is a plain function pointer, and a folder outside the bundle is never added) that refuses any `source` that does not resolve inside such a folder with `Unsupported` and otherwise calls `effectcraft_plugin::loader`, so a script or command cannot load a plug-in from the container (T24).
 3. `Backend::headless(session)` then `Backend::confine(Confinement::new(read: [container, bundle], write: [container]))` (L5, AD9).
 4. `McpServer::new(backend)`.
 5. `attach_gpu` builds `Gpu::new(adapter, device, queue)` from the core's device and sets `session.accel` (§17).

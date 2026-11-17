@@ -429,3 +429,61 @@ depends = [
   { item = "Gpu::render_display and DisplayFrame: a premultiplied Rgba8Unorm texture with a full mip chain", at = [{ file = "crates/gpu/src/lib.rs", lines = ["138-147", "224-236"] }] },
   { item = "the desktop window's frame latency, LOW_LATENCY's one frame in flight and the reasons given for it, which the preview surface follows", at = [{ file = "apps/effectcraft/src/main.rs", lines = ["475-482"] }] },
 ]
+
+[[adaptation]]
+id = "AD15"
+crate = "craftbridge-core"
+file = "src/gpu.rs"
+implements = "FX-2"
+summary = "The device carries its failure notice: the first device-lost or uncaptured-error report latches the failure with its words and every later report changes nothing, the notice is one handle shared by everyone holding the device, and it crosses threads because the callbacks that report into it are wgpu's own; it is what is read to drop the GPU on the first failure (plan §17), and the app crate's one failure path for both callbacks reports into it."
+replaces = "nothing in the command line: EffectCraft's desktop app latches its own failure bridge inside the egui front end, which a phone's SDK has no front end to copy; the core's notice is the same latched-first-failure the compositor's bridge is, placed where the SDK's owner of the shared device can hold it."
+depends = [
+  { item = "the shared-device contract that the owner of a borrowed device must forward failures into the compositor's notifier, and what forwarding retires and settles", at = [{ file = "crates/gpu/src/context.rs", lines = ["826-830", "1070-1078"] }] },
+  { item = "the latched duplicate-reporting shape of the compositor's own failure bridge, which the core's notice follows", at = [{ file = "crates/ui-egui/src/gpu_failure.rs", lines = ["25-26", "54-56"] }] },
+  { item = "the words GpuContext::new gives the device, adapter and backend, which the drop reason sits beside in info.gpu", at = [{ file = "crates/gpu/src/context.rs", lines = ["866"] }] },
+]
+
+[[adaptation]]
+id = "AD16"
+crate = "craftbridge-effects"
+file = "src/app.rs"
+implements = "FX-2"
+summary = "The GPU hand-over: attach_gpu gives the core's device to the compositor's own Gpu::new(adapter, device, queue) and puts the result on the session as its accelerator, clearing the CPU note; a CpuOnly answer is no failure but the note; both wgpu failure callbacks are installed on the device and call one failure path, in the words EffectCraft gives each (GPU device lost (reason): message, uncaptured GPU error: error), which reports to the core's notice and to the compositor's shared-device notifier; the first failure settles on the way into the next request, which drops the GPU and leaves the loss in info.gpu as EffectCraft's desktop app notes a retired device (GPU preview retired: reason) (plan §16, §17)."
+replaces = "the desktop app's gpu_failure bridge wiring its own device's callbacks and forwarding to the notifier (crates/ui-egui/src/app/gpu.rs:46, crates/ui-egui/src/gpu_failure.rs:54) and the command line's --gpu start, which builds the compositor's device behind the same Gpu::new seam and notes the CPU when there is none (apps/effectcraft-cli/src/main.rs:488-493): the SDK has no window and no start flags, so the core's device arrives by attach_gpu and the failure arrives by the two callbacks."
+depends = [
+  { item = "Gpu::new, which takes a device the caller made and says in words when the adapter cannot run the compositor", at = [{ file = "crates/gpu/src/lib.rs", lines = ["162-166"] }] },
+  { item = "Gpu::context, the way to the context of the device just handed over", at = [{ file = "crates/gpu/src/lib.rs", lines = ["216"] }] },
+  { item = "GpuContext::device_failure_notifier, the shared-device forward the owner must do", at = [{ file = "crates/gpu/src/context.rs", lines = ["1070-1078"] }] },
+  { item = "the compositor's own handler installer, one failure path both callbacks call, and the words it gives a lost device and an uncaptured error, which the desktop app gives too", at = [{ file = "crates/gpu/src/readback.rs", lines = ["348-362"] }, { file = "apps/effectcraft/src/main.rs", lines = ["317-328"] }] },
+  { item = "the note the desktop app leaves on the session when it retires a failed device, which the drop's note follows", at = [{ file = "crates/ui-egui/src/app/gpu.rs", lines = ["69-70"] }] },
+  { item = "the session fields the hand-over fills: the accelerator and the note of why the render is on the CPU", at = [{ file = "crates/engine/src/lib.rs", lines = ["129", "132"] }] },
+  { item = "the name an attached device answers with, which info.gpu reports", at = [{ file = "crates/render/src/accel.rs", lines = ["64"] }] },
+  { item = "Backend::session, the way to the session the app built", at = [{ file = "crates/automation/src/backend.rs", lines = ["61"] }] },
+]
+
+[[adaptation]]
+id = "AD17"
+crate = "craftbridge-effects"
+file = "src/plugins.rs"
+implements = "FX-2"
+summary = "The plug-in loader is picked per platform (PD13): with no plug-in folder no hooks on any platform; Android and the desktop answer with EffectCraft's own loader, the confinement guarding which files reach it; iOS answers with a loader gated to the plug-in folder the app names inside its bundle — each iOS engine adds its folder, resolved, to a process-wide list at construction and takes it out again when its app is dropped, because a loader is a plain function pointer, and a folder outside the bundle is never added — which calls EffectCraft's own loader for a module that resolves inside such a folder and refuses every other source in the engine's not-available-in-this-build sentence, so it lands on the Unsupported row as a capability the build was put together without (T24)."
+replaces = "the command line's own loader with no folder rule: its headless session takes EffectCraft's loader for every file it may read (crates/host/src/lib.rs:106), and its confine leaves effect.plugins.load open; the per-platform loader choice is the phone's, and its refusal borrows the sentence the engine itself answers when no loader is installed."
+depends = [
+  { item = "the loader and previewer the policy delegates to, and the runtime gate behind them", at = [{ file = "crates/plugin/src/lib.rs", lines = ["41", "61", "77"] }] },
+  { item = "the session fields the switch fills and the function types that bind them", at = [{ file = "crates/engine/src/lib.rs", lines = ["207-215", "294", "311"] }] },
+  { item = "effect.plugins.load, the loader's caller from a command or a script: its no-loader refusal, the file it reads through the session's services, which the confinement checks, before it hands the loader that path as the source, and the `path: reason` shape a refused file comes back in", at = [{ file = "crates/engine/src/cmd/effect.rs", lines = ["39", "56-66"] }] },
+  { item = "the confinement's check of effect.plugins.load's path and folder and of the session's file reads, which refuse a relative path and a `..` component and resolve links before they read, so the source the loader is handed is a file the confinement let through, and one outside its roots is refused in its words", at = [{ file = "crates/automation/src/confine.rs", lines = ["101", "190-206", "568-571"] }] },
+  { item = "the Plug-in Library's other callers of the loader and the previewer, which the confinement withholds", at = [{ file = "crates/engine/src/system/library.rs", lines = ["459", "760-761", "871", "926-927"] }, { file = "crates/automation/src/confine.rs", lines = ["69-75"] }] },
+]
+
+[[adaptation]]
+id = "AD18"
+crate = "craftbridge-effects"
+file = "Cargo.toml"
+implements = "FX-2"
+summary = "The Android build asks boa for its jsvalue-enum layout through a target-specific dependency of this crate, so every boa in the Android graph — the ones EffectCraft's script and expression crates bring — builds with the layout that tolerates Android's top-byte-tagged heap pointers (D-8), and no other platform's graph carries the feature."
+replaces = "nothing in the command line: the panic is Android's, the switch is a Cargo feature, and EffectCraft asks nothing of boa's layout at its own interface."
+depends = [
+  { item = "the boa dependencies this unifies over: effectcraft-script's and effectcraft-expr's own", at = [{ file = "crates/script/Cargo.toml", lines = ["20"] }, { file = "crates/expr/Cargo.toml", lines = ["20"] }] },
+  { item = "the workspace's boa version with its default features off, which the workspace's own entry copies so Android's boa adds only the layout", at = [{ file = "Cargo.toml", lines = ["68"] }] },
+]

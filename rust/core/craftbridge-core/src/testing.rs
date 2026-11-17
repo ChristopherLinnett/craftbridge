@@ -120,7 +120,7 @@ pub(crate) struct Rig {
 /// so a host without one fails the tests that draw instead of passing what they never proved.
 pub(crate) fn rig() -> Rig {
     match GpuDevice::request(GpuChoice::Preferred) {
-        GpuDevice::Device { adapter, device, queue } => Rig { adapter, device, queue },
+        GpuDevice::Device { adapter, device, queue, .. } => Rig { adapter, device, queue },
         GpuDevice::CpuOnly { reason } => panic!("the host must answer a GPU for this test to mean anything: {reason}"),
     }
 }

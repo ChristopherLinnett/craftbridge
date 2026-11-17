@@ -62,6 +62,10 @@ uniffi = "0.32"
 # FFI's async calls wait for the engine's own answer without blocking a thread. It is the channel the
 # JavaScript engine in EffectCraft's graph already uses.
 oneshot = { version = "0.2", features = ["std", "async"] }
+# The JavaScript engine EffectCraft's scripts and expressions run on, as the pinned EffectCraft workspace
+# asks for it — the same version, its default features off — so the one boa in the lock is that one, built
+# with only the features EffectCraft and this workspace turn on (D-8).
+boa_engine = { version = "0.22", default-features = false }
 
 effectcraft-engine = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
 effectcraft-host = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
