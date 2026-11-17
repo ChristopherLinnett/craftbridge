@@ -1,22 +1,26 @@
 //! The Android hardware video decoder: MediaCodec decoding `avcC` (H.264) and, where the device decodes it,
 //! `hvcC` (HEVC) and `av1C` (AV1) streams into an `AImageReader`.
 //!
-//! Decoding to an image reader, rather than to the buffers MediaCodec hands out, is what keeps vendor-tiled
-//! and other private output formats away from CraftBridge. An 8-bit picture is read from a `YUV_420_888`
-//! image, the one format Android guarantees. The NDK has no 10-bit YUV image format, so a 10-bit picture is
-//! decoded into a reader of `AHARDWAREBUFFER_FORMAT_YCbCr_P010` images, which Android makes from 14 (API 34)
-//! and no earlier, and read from the image's hardware buffer, locked for the CPU, only when that buffer is
-//! P010 laid out as P010 is: before Android 14 no decoder starts for a 10-bit stream, and a device whose
-//! buffer is another (vendor-tiled) format fails the picture's read; either way the software decoder takes
-//! the stream. The decoder it uses must be a hardware one by the platform's own answer (a software codec is
-//! no faster than FilmCraft's), chosen from the device's codec list rather than taken from the platform's
-//! default for the type, which can be a software codec; a device or stream without one fails to start and
-//! the factory declines it. MediaCodec decodes on its own schedule, so a picture comes out of a later call
-//! than the one that fed its sample, and [`crate::order::Sequence`] runs around the codec as it does around
-//! VideoToolbox: the RASL pictures of a run starting at a CRA are never fed to it, and the pictures it still
-//! holds at the end come out of [`RawDecoder::drain`], which fails when the codec does or never ends the
-//! stream. Every status MediaCodec and the image reader return is checked and becomes the decoder's error,
-//! which [`crate::Fallback`] answers by switching to the software decoder, at the end of the stream as well.
+//! Decoding to an image reader, rather than to the buffers MediaCodec hands out, is what keeps vendor-tiled and
+//! other private output formats away from CraftBridge. The decoder is asked for the reader's layout
+//! (`color-format`): a decoder writing to a surface and asked for none picks its own, and Qualcomm's pick a
+//! compressed one. An 8-bit picture is read from a `YUV_420_888` reader's image, the one format Android
+//! guarantees, through the three planes the platform describes it as, whatever format code it carries (Qualcomm's
+//! decoders give their own linear NV12 code); an image it describes no planes of, such as a compressed one, is
+//! an error and none of it is read. The NDK has no 10-bit YUV image format, so a 10-bit picture is decoded into a
+//! reader of `AHARDWAREBUFFER_FORMAT_YCbCr_P010` images, which Android makes from 14 (API 34) and no earlier, and
+//! read from the image's hardware buffer, locked for the CPU, only when that buffer is P010 laid out as P010 is:
+//! before Android 14 no decoder starts for a 10-bit stream, and a device whose buffer is another (vendor-tiled)
+//! format fails the picture's read; either way the software decoder takes the stream. The decoder it uses must be
+//! a hardware one by the platform's own answer (a software codec is no faster than FilmCraft's), chosen from the
+//! device's codec list rather than taken from the platform's default for the type, which can be a software codec;
+//! a device or stream without one fails to start and the factory declines it. MediaCodec decodes on its own
+//! schedule, so a picture comes out of a later call than the one that fed its sample, and
+//! [`crate::order::Sequence`] runs around the codec as it does around VideoToolbox: the RASL pictures of a run
+//! starting at a CRA are never fed to it, and the pictures it still holds at the end come out of
+//! [`RawDecoder::drain`], which fails when the codec does or never ends the stream. Every status MediaCodec and
+//! the image reader return is checked and becomes the decoder's error, which [`crate::Fallback`] answers by
+//! switching to the software decoder, at the end of the stream as well.
 //!
 //! The official NDK bindings (`ndk`) make every call; the only `unsafe` here is the claim that the codec and
 //! the reader may move between threads, and the bytes of a locked P010 buffer's planes. Which streams the
@@ -180,7 +184,8 @@ fn image_reader(width: i32, height: i32, depth: Depth) -> std::result::Result<Im
 
 impl Pipeline {
     /// `codec`, a decoder of `mime`, started for a picture of `layout`'s size from the codec-specific data
-    /// `config` and decoding into a reader.
+    /// `config` and decoding into a reader, in the layout that reader's planes describe
+    /// ([`mediacodec_input::color_format`]).
     fn start(codec: MediaCodec, mime: &str, layout: &Layout, config: &[(&str, Vec<u8>)]) -> std::result::Result<Self, Failure> {
         let (width, height) = layout.size_i32().ok_or("the picture is too large")?;
         let reader = image_reader(width, height, layout.depth)?;
@@ -189,6 +194,7 @@ impl Pipeline {
         format.set_str("mime", mime);
         format.set_i32("width", width);
         format.set_i32("height", height);
+        format.set_i32("color-format", mediacodec_input::color_format(mediacodec_input::reader_format(layout.depth)));
         for (key, data) in config {
             format.set_buffer(key, data);
         }
@@ -291,19 +297,20 @@ fn read_picture(image: &Image, layout: &Layout) -> std::result::Result<VideoFram
     Ok(layout.frame(pixels))
 }
 
-/// The 8-bit picture at `crop` in a `YUV_420_888` image.
+/// The 8-bit picture at `crop` in an image of the `YUV_420_888` reader, read from the three planes the platform
+/// describes it as, and only once it does ([`mediacodec_input::described_planes`]).
 fn yuv_420_888_pixels(image: &Image, crop: Crop) -> std::result::Result<PixelData, Failure> {
     let format = step(image.format(), "reading the picture's format")?;
-    if format != ImageFormat::YUV_420_888 || step(image.number_of_planes(), "counting the picture's planes")? != 3 {
-        return Err(format!("the decoded picture is in format {format:?}, not YUV_420_888"));
-    }
-    let plane = |index: i32| -> std::result::Result<Strided<'_>, Failure> {
-        let data = step(image.plane_data(index), "reading a plane")?;
-        let stride = step(image.plane_row_stride(index), "reading a plane's row stride")?;
-        let pixel = step(image.plane_pixel_stride(index), "reading a plane's pixel stride")?;
-        mediacodec_input::plane(index, data, stride, pixel)
+    let planes = step(image.number_of_planes(), "counting the picture's planes")?;
+    let strides = |index: i32| -> std::result::Result<(i32, i32), Failure> {
+        Ok((step(image.plane_row_stride(index), "reading a plane's row stride")?, step(image.plane_pixel_stride(index), "reading a plane's pixel stride")?))
     };
-    Ok(biplanar::planar_to_pixels(mediacodec_input::luma(plane(0)?)?, plane(1)?, plane(2)?, crop)?)
+    let described = if planes == 3 { [strides(0)?, strides(1)?, strides(2)?] } else { [(0, 0); 3] };
+    let [luma, cb, cr] = mediacodec_input::described_planes(i32::from(format), planes, described)?;
+    let plane = |index: i32, (stride, pixel): (i32, i32)| -> std::result::Result<Strided<'_>, Failure> {
+        mediacodec_input::plane(index, step(image.plane_data(index), "reading a plane")?, stride, pixel)
+    };
+    Ok(biplanar::planar_to_pixels(mediacodec_input::luma(plane(0, luma)?)?, plane(1, cb)?, plane(2, cr)?, crop)?)
 }
 
 /// The 10-bit picture at `crop` in a decoded image's hardware `buffer`: an error unless the buffer is P010.
@@ -494,11 +501,61 @@ pub(crate) mod tests {
     /// `getSupportedTypes()` joined by commas.
     const LIST_FILE: &str = "CRAFTBRIDGE_CODEC_LIST";
 
+    /// The call `name` of the device's own `library`, looked up as the process runs: the way to a platform call
+    /// the NDK's headers and stubs leave out. An error naming both where the device's library has no such call.
+    ///
+    /// # Safety
+    ///
+    /// `name` must be a call of `library` that takes no arguments and returns nothing.
+    unsafe fn platform_call(library: &std::ffi::CStr, name: &std::ffi::CStr) -> std::result::Result<extern "C" fn(), String> {
+        unsafe extern "C" {
+            fn dlopen(file: *const std::ffi::c_char, mode: std::ffi::c_int) -> *mut std::ffi::c_void;
+            fn dlsym(library: *mut std::ffi::c_void, name: *const std::ffi::c_char) -> *mut std::ffi::c_void;
+        }
+        /// Bionic's `RTLD_NOW`.
+        const NOW: std::ffi::c_int = 2;
+        // SAFETY: both names are NUL-terminated strings that outlive the calls, and a library dlopen gives is
+        // never closed, so the address dlsym finds stays valid for the process's life.
+        let address = unsafe {
+            let opened = dlopen(library.as_ptr(), NOW);
+            if opened.is_null() { std::ptr::null_mut() } else { dlsym(opened, name.as_ptr()) }
+        };
+        if address.is_null() {
+            return Err(format!("the device's {} has no {}", library.to_string_lossy(), name.to_string_lossy()));
+        }
+        // SAFETY: the address is the call's, which the caller promises takes no arguments and returns nothing.
+        Ok(unsafe { std::mem::transmute::<*mut std::ffi::c_void, extern "C" fn()>(address) })
+    }
+
+    /// Starts this process's binder thread pool, which an app's process has from its start and a test binary
+    /// run from a shell has not. A hardware decoder runs in a vendor process that calls back into this one over
+    /// binder: with no thread here to take those calls, the acceptance phone's decoders gave no picture and their
+    /// release never returned. `ABinderProcess_startThreadPool` is `libbinder_ndk`'s call for it, which AOSP
+    /// declares in a platform header (`binder_process.h`) the NDK leaves out.
+    fn binder_threads() -> std::result::Result<(), String> {
+        // SAFETY: `binder_process.h` declares `void ABinderProcess_startThreadPool(void)`.
+        let start = unsafe { platform_call(c"libbinder_ndk.so", c"ABinderProcess_startThreadPool") }?;
+        start();
+        Ok(())
+    }
+
+    #[test]
+    fn a_platform_call_the_devices_library_does_not_have_is_an_error_naming_both() {
+        // SAFETY: the call is never made: the device's library has none of that name.
+        let missing = unsafe { platform_call(c"libbinder_ndk.so", c"ABinderProcess_noSuchCall") };
+        assert_eq!(missing.err(), Some("the device's libbinder_ndk.so has no ABinderProcess_noSuchCall".to_string()));
+        // SAFETY: as above; no library of this name is on the device.
+        let no_library = unsafe { platform_call(c"libcraftbridge_none.so", c"ABinderProcess_startThreadPool") };
+        assert_eq!(no_library.err(), Some("the device's libcraftbridge_none.so has no ABinderProcess_startThreadPool".to_string()));
+    }
+
     /// The device's codec list, as the app hands it over. A run without it would compare nothing, so the tests
-    /// that need it fail instead.
+    /// that need it fail instead. Every test that makes a codec reads it, so reading it first starts the binder
+    /// thread pool an app's process has ([`binder_threads`]).
     pub(crate) fn device_codecs() -> &'static [CodecInfo] {
         static LIST: OnceLock<std::result::Result<Vec<CodecInfo>, String>> = OnceLock::new();
         let list = LIST.get_or_init(|| {
+            binder_threads()?;
             let path = std::env::var_os(LIST_FILE).ok_or(format!("{LIST_FILE} names no file of the device's codec list"))?;
             let text = std::fs::read_to_string(&path).map_err(|error| format!("{LIST_FILE}: {error}"))?;
             text.lines()
@@ -530,15 +587,43 @@ pub(crate) mod tests {
         listed_hardware_codec(mime, device_codecs())
     }
 
+    /// The name of the first hardware decoder for `mime` the device's codec list names, the one [`listed`] makes
+    /// where the platform creates it; `None` on a device whose list names none for the type, which declines every
+    /// stream of it. Read from the list, not from a codec made: a listed decoder the platform could not create
+    /// compared nothing either.
+    fn hardware_name(mime: &str) -> Option<String> {
+        mediacodec_input::hardware_decoders(device_codecs(), mime).first().map(|name| name.to_string())
+    }
+
+    /// Whether a test that compared `compared` pictures of a `mime` stream with the software decoder's may pass:
+    /// where the device's codec list names a hardware decoder for the type, only having compared some, since a
+    /// test that passed having compared none would hide that the hardware decoded nothing; on a device with none,
+    /// whose streams the factory hands to the software decoder, whatever it compared.
+    fn hardware_compared(mime: &str, compared: usize) -> std::result::Result<(), String> {
+        match hardware_name(mime) {
+            Some(name) if compared == 0 => Err(format!("{mime}: the device's hardware decoder {name} gave no picture compared with the software decoder's")),
+            _ => Ok(()),
+        }
+    }
+
+    /// The decoder `start` made over the device's hardware decoder for `mime`; `None` for a start that was
+    /// refused, which compares no picture: on a device whose codec list names a hardware decoder for the type,
+    /// that is an error saying what the platform answered.
+    fn hardware_start<T>(mime: &str, start: std::result::Result<T, impl std::fmt::Debug>) -> std::result::Result<Option<T>, String> {
+        match start {
+            Ok(decoder) => Ok(Some(decoder)),
+            Err(why) => hardware_compared(mime, 0).map(|()| None).map_err(|rule| format!("{rule}: its start was refused ({why:?})")),
+        }
+    }
+
     /// The device's hardware decoder for `entry`'s stream, which the factory declines the stream without: none
-    /// where the device has no hardware decoder for its codec, and then there is nothing to compare. The
-    /// platform's H.264 software decoder is no stand-in: on the API 29 emulator, read through the image reader,
-    /// a picture of it now and then carries an earlier picture's pixels, in about one run of these tests in ten
-    /// and in most runs with the tests in parallel.
+    /// where the device has no hardware decoder for its codec, and then there is nothing to compare, and a
+    /// failed test where it has one that refuses the stream ([`hardware_start`]). The platform's H.264 software
+    /// decoder is no stand-in: on the API 29 emulator, read through the image reader, a picture of it now and
+    /// then carries an earlier picture's pixels, in about one run of these tests in ten and in most runs with
+    /// the tests in parallel.
     fn device_decoders(entry: &SampleEntry, mime: &str) -> Vec<McDecoder> {
-        let decoder = decoder_with(entry, &stream(entry), listed);
-        assert_eq!(decoder.is_ok(), listed(mime).is_ok(), "a decoder starts exactly where the device has a hardware one for {mime}");
-        decoder.into_iter().collect()
+        hardware_start(mime, decoder_with(entry, &stream(entry), listed)).unwrap().into_iter().collect()
     }
 
     fn software(entry: &SampleEntry) -> Box<dyn VideoDecoder> {
@@ -692,7 +777,7 @@ pub(crate) mod tests {
         let entry = reordered_entry();
         let samples = reordered_samples();
         let wanted = decoded(software(&entry).as_mut(), &samples);
-        let Ok(mut decoder) = decoder_with(&entry, &stream(&entry), counted) else { return assert!(listed(H264_MIME).is_err()) };
+        let Some(mut decoder) = hardware_start(H264_MIME, decoder_with(&entry, &stream(&entry), counted)).unwrap() else { return };
         assert_eq!(decoded(&mut decoder, &samples), wanted);
         for (pts, sample) in samples.iter().take(3) {
             decoder.decode(sample, *pts).unwrap();
@@ -713,11 +798,9 @@ pub(crate) mod tests {
     }
 
     /// The device's hardware decoder for the tiny stream, outside [`crate::order::Sequence`]; none where the
-    /// device has no hardware H.264 decoder.
+    /// device has no hardware H.264 decoder ([`hardware_start`]).
     fn tiny_raw() -> Option<RawCodec> {
-        let raw = raw_codec(&tiny_entry(), &stream(&tiny_entry()), listed);
-        assert_eq!(raw.is_ok(), listed(H264_MIME).is_ok(), "a codec starts exactly where the device has a hardware one for {H264_MIME}");
-        raw.ok()
+        hardware_start(H264_MIME, raw_codec(&tiny_entry(), &stream(&tiny_entry()), listed)).unwrap()
     }
 
     #[test]
@@ -1151,12 +1234,59 @@ pub(crate) mod tests {
         assert_eq!(error, "the decoded picture is in hardware buffer format R8G8B8A8_UNORM, not P010");
     }
 
-    /// A decoder of the 10-bit HEVC stream, made over the device's own HEVC decoder (a hardware one or not),
-    /// with the error that started none.
+    /// A decoder of the 10-bit HEVC stream, made over the device's hardware HEVC decoder where its codec list
+    /// names one, and otherwise over its own HEVC decoder, a software one included; or the error that started
+    /// none.
     fn ten_bit_decoder() -> (SampleEntry, std::result::Result<McDecoder, CodecError>) {
         let entry = hevc10_entry();
-        let decoder = decoder_with(&entry, &stream(&entry), any_codec);
+        let make: MakeCodec = if hardware_name(HEVC_MIME).is_some() { listed } else { any_codec };
+        let decoder = decoder_with(&entry, &stream(&entry), make);
         (entry, decoder)
+    }
+
+    /// How many of the device decoder's own pictures of the 10-bit stream one run through `start` compared with
+    /// the software decoder's (`wanted`), each equal to it. A start that was refused compares none, and is the
+    /// error [`hardware_start`] makes of it where the device has a hardware HEVC decoder. A run whose decoder
+    /// failed on a sample compares none either: the registry's decoder answers the failure by replaying the stream
+    /// in software, whose pictures must be the software decoder's, byte for byte, and none of them is the device
+    /// decoder's.
+    fn ten_bit_run(start: std::result::Result<McDecoder, CodecError>, samples: &[(i64, Vec<u8>)], wanted: &[String]) -> std::result::Result<usize, String> {
+        let Some(mut decoder) = hardware_start(HEVC_MIME, start)? else { return Ok(0) };
+        let outcome: std::result::Result<Vec<_>, _> = samples.iter().map(|(pts, sample)| decoder.decode(sample, *pts)).collect();
+        let Ok(decoded_samples) = outcome else {
+            drop(decoder);
+            let (entry, again) = ten_bit_decoder();
+            if let Some(again) = hardware_start(HEVC_MIME, again)? {
+                let mut declined = Fallback::new(again, &entry, stream(&entry));
+                assert_eq!(decoded(&mut declined, samples), wanted, "a decline is byte-identical");
+            }
+            return Ok(0);
+        };
+        let mut pictures: Vec<_> = decoded_samples.into_iter().flatten().collect();
+        pictures.extend(decoder.flush());
+        if !pictures.is_empty() {
+            assert_eq!(text(&pictures), wanted, "the device gave YCbCr_P010");
+        }
+        Ok(pictures.len())
+    }
+
+    #[test]
+    fn a_start_that_was_refused_compares_no_picture_and_fails_where_the_device_has_a_hardware_decoder_for_the_type() {
+        let refused = || decoder_with(&hevc10_entry(), &stream(&hevc10_entry()), |_| Err("the codec refused the stream".into()));
+        // Where the rule applies is read from the device's codec list itself, not through the rule's own helpers.
+        let rule = |mime: &str| {
+            let first = mediacodec_input::hardware_decoders(device_codecs(), mime).first().copied();
+            first.map(|name| format!("{mime}: the device's hardware decoder {name} gave no picture compared with the software decoder's"))
+        };
+        let why = "Unsupported(\"the codec refused the stream\")";
+        let refusal = |mime: &str| rule(mime).map(|rule| format!("{rule}: its start was refused ({why})"));
+        for mime in BACKEND_MIMES {
+            assert_eq!(hardware_compared(mime, 0), rule(mime).map_or(Ok(()), Err), "{mime}");
+            assert_eq!(hardware_compared(mime, 1), Ok(()), "{mime}");
+            let start = hardware_start(mime, refused()).map(|decoder| decoder.is_some());
+            assert_eq!(start, refusal(mime).map_or(Ok(false), Err), "{mime}");
+        }
+        assert_eq!(ten_bit_run(refused(), &hevc10_samples(), &[]), refusal(HEVC_MIME).map_or(Ok(0), Err), "a refused 10-bit start compares nothing");
     }
 
     #[test]
@@ -1168,47 +1298,20 @@ pub(crate) mod tests {
             assert_eq!(why, "creating the P010 image reader failed (ErrorInvalidParameter)");
             return;
         }
-        // From it, the device's own decoder takes the stream with the same codec-specific data, the same Annex B
+        // From it, the device's decoder takes the stream with the same codec-specific data, the same Annex B
         // samples and the P010 reader. Where that decoder gives P010 buffers, its pictures are the software
         // decoder's, frame by frame. Where it gives none (a decoder that does not decode 10-bit video, or that
-        // makes another buffer format), a sample is an error, which the registry's decoder answers by
-        // replaying the stream in software: the pictures are then the software decoder's, byte for byte. A
-        // codec that has failed has no input buffer memory to give, and that must be the same error, so the
-        // run repeats to meet a codec in that state. A codec that fails only after the last sample was fed
-        // loses its pictures without an error, which a run cannot tell from no pictures, so a run that ends
-        // so compares nothing, and at least one run must compare. A decoder that refuses the stream at its start
-        // is declined by the factory, as before Android 14.
-        // A failed run below is replayed through `Fallback`, whose switch a process-wide counter counts.
+        // makes another buffer format), a sample is an error, which the registry's decoder answers by replaying
+        // the stream in software. A codec that has failed has no input buffer memory to give, and that must be
+        // the same error, so the run repeats to meet a codec in that state. A codec that fails only after the
+        // last sample was fed loses its pictures without an error, which a run cannot tell from no pictures, so
+        // a run that ends so compares nothing. Where the device has a hardware HEVC decoder, its pictures must
+        // be compared; a device with none may decline the stream at its start, as before Android 14.
+        // A failed run is replayed through `Fallback`, whose switch a process-wide counter counts.
         let _counters = counters();
         let samples = hevc10_samples();
         let wanted = decoded(software(&hevc10_entry()).as_mut(), &samples);
-        let mut compared = 0;
-        for _ in 0..6 {
-            let (entry, decoder) = ten_bit_decoder();
-            let Ok(mut decoder) = decoder else {
-                compared += 1;
-                continue;
-            };
-            let outcome: std::result::Result<Vec<_>, _> = samples.iter().map(|(pts, sample)| decoder.decode(sample, *pts)).collect();
-            let Ok(decoded_samples) = outcome else {
-                drop(decoder);
-                let (_, again) = ten_bit_decoder();
-                let Ok(again) = again else {
-                    compared += 1;
-                    continue;
-                };
-                let mut declined = Fallback::new(again, &entry, stream(&entry));
-                assert_eq!(decoded(&mut declined, &samples), wanted, "a decline is byte-identical");
-                compared += 1;
-                continue;
-            };
-            let mut pictures: Vec<_> = decoded_samples.into_iter().flatten().collect();
-            pictures.extend(decoder.flush());
-            if !pictures.is_empty() {
-                assert_eq!(text(&pictures), wanted, "the device gave P010");
-                compared += 1;
-            }
-        }
-        assert!(compared > 0, "no run of the 10-bit stream gave pictures or an error");
+        let compared: std::result::Result<usize, String> = (0..6).map(|_| ten_bit_run(ten_bit_decoder().1, &samples, &wanted)).sum();
+        hardware_compared(HEVC_MIME, compared.unwrap()).unwrap();
     }
 }
