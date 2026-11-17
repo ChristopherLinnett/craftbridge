@@ -63,6 +63,53 @@ fn a_start_after_a_killed_export_deletes_its_partial_files_and_reports_it() {
     pollster::block_on(engine.shut_down()).expect("stopping the engine answers");
 }
 
+/// A previous engine of the app was killed mid-write: its temporary files sit in the engine's
+/// folders, where no journal could list them, the config folder's beside the journal itself. The
+/// engine this call starts takes them back before answering, while the journal's step on the same
+/// start path finds nothing of its own to take, and leaves a file of another name and a temporary
+/// outside the engine's folders where they were.
+#[test]
+fn a_start_takes_back_the_temporaries_a_killed_write_left_beside_the_journal_s_files() {
+    let scratch = tempfile::tempdir().expect("a scratch container");
+    let container = scratch.path();
+    let core_folders = craftbridge_core::folders::Folders::from(folders(container));
+    core_folders.prepare().expect("the scratch folders prepare");
+    // The writer of a killed write has ended: a process started and reaped here, so none has its id.
+    let mut ended = std::process::Command::new("true").spawn().expect("a process starts");
+    let previous = ended.id();
+    ended.wait().expect("the process ends and is reaped");
+    let temporary = |folder: &Path, number: u64| folder.join(format!(".effectcraft-{previous}-{number}.tmp"));
+    let working = core_folders.working().map(|(_, folder)| folder);
+    for (number, folder) in (0_u64..).zip(working) {
+        fs::write(temporary(folder, number), b"half a write").expect("a temporary a killed write left in an engine folder");
+    }
+    let outside = temporary(container, u64::MAX);
+    fs::write(&outside, b"a leftover beside the folders").expect("a temporary outside the engine's folders");
+    fs::write(core_folders.cache.join("settings.json"), b"a finished file").expect("a file of another name");
+    fs::write(core_folders.config.join("last-project.ecproj"), b"a finished project").expect("a finished file config keeps");
+    fs::write(core_folders.config.join(craftbridge_core::JOURNAL_FILE), json!({ "outputs": [] }).to_string())
+        .expect("a journal with nothing of its own to take");
+
+    let engine = start_effects_engine(folders(container), GpuChoice::CpuOnly).expect("the engine starts");
+
+    let report = engine.recovery().expect("every path is Unicode");
+    assert!(report.removed.is_empty() && report.journal.is_empty(), "the journal had nothing of its own to take: {report:?}");
+    for folder in working {
+        assert!(
+            !folder.read_dir().expect("the folder reads").filter_map(Result::ok).any(|entry| entry.file_name().to_string_lossy().starts_with(".effectcraft-")),
+            "a temporary of a process that has ended survived the start in {:?}",
+            folder.display()
+        );
+    }
+    assert!(outside.exists(), "the start swept the container root, which no engine folder is");
+    assert!(
+        core_folders.cache.join("settings.json").exists() && core_folders.config.join("last-project.ecproj").exists(),
+        "the start deleted a file of another name"
+    );
+
+    pollster::block_on(engine.shut_down()).expect("stopping the engine answers");
+}
+
 /// A container that is not there yet is made, not refused: an app names its folders on its very
 /// first launch, before anything of the engine's exists.
 #[test]

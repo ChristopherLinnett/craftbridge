@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use crate::hardware::HardwareChoice;
 use crate::requests::RenderRequest;
 use crate::runner::{self, ListOutputs, Progress};
-use crate::{files, fill, info, mcp, methods, plugins, properties, replay, session, templates, timings};
+use crate::{files, fill, info, mcp, methods, orphans, plugins, properties, replay, session, templates, timings};
 
 /// A hosted EffectCraft session: the MCP server built at construction, which owns the headless
 /// [`Backend`] and the confined session behind it (plan §19).
@@ -58,6 +58,12 @@ impl EffectCraftApp {
     /// each platform is pinned on the host through the app's own door and confinement.
     pub(crate) fn for_platform(platform: Platform, folders: &Folders) -> Result<Self> {
         let roots = folders.prepare()?;
+        // A long write the system killed leaves its temporary file beside the file it was writing,
+        // and no journal could list that file: its name is drawn as the write starts, later than
+        // any listing of it could be. The start takes those back here, in the one path an engine
+        // of this app starts by — the core deals with the files the pending-export journal still
+        // lists one step on, in `Engine::start_in` — and takes nothing else (AD21).
+        orphans::sweep(folders);
         // The iOS plug-in gate reads the app's plug-in folder from where the loader function can
         // reach it, since a loader is a plain function pointer (§19); the folder is resolved on
         // disk, so it is handed over once the folders are prepared.

@@ -1515,6 +1515,13 @@ impl Engine {
 <td>the command&#39;s own reading of its call and its frame names (<code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>cmd/<wbr>content_fill.rs:69-82</code>, <code>:134-149</code>, <code>:423</code>, <code>:495-598</code>, <code>crates/<wbr>engine/<wbr>src/<wbr>cmd/<wbr>params.rs:91-147</code>), the session&#39;s background tasks (<code>crates/<wbr>engine/<wbr>src/<wbr>background/<wbr>jobs.rs:118-307</code>), the confinement&#39;s write check and its reading of the command&#39;s paths as reads (<code>crates/<wbr>automation/<wbr>src/<wbr>confine.rs:190-206</code>, <code>:319-324</code>, <code>:360-366</code>, <code>:572-583</code>), the session&#39;s services, their atomic write through a temporary file and the fill&#39;s calls of them (<code>crates/<wbr>engine/<wbr>src/<wbr>services.rs:4-58</code>, <code>:99-101</code>, <code>crates/<wbr>engine/<wbr>src/<wbr>settings/<wbr>config.rs:196-236</code>, <code>crates/<wbr>engine/<wbr>src/<wbr>cmd/<wbr>content_fill.rs:433-434</code>, <code>:576</code>)</td>
 <td>FX-1j</td>
 </tr>
+<tr>
+<td>AD21</td>
+<td>The engine start&#39;s sweep of the temporary files a hard-killed write left (D-17, §19): every file the session&#39;s file services write is published by a rename from a <code>.effectcraft-&lt;pid&gt;-&lt;n&gt;.tmp</code> made beside it, and a kill between the create and the rename leaves one whose name no journal could list, the name being drawn only as the write starts; at app construction the sweep walks the working folders — the one list <code>Folders::working</code> keeps — subfolders included, and removes every regular file of that exact spelling carrying an id no process has now, as <code>kill</code> with no signal answers it (<code>ESRCH</code>), so the temporary of a process still running, this one or another engine&#39;s on the same container, is kept and an id reused since keeps its leftover for a later start, touches nothing else, follows no link, and never fails the start, so a folder added to the list is swept with no second list</td>
+<td>nothing upstream: EffectCraft removes the temporary of a write that fails on its own path and keeps no sweep of a hard kill&#39;s leftover, which its desktop hosts hardly meet</td>
+<td><code>create_temp</code>, <code>atomic_write</code> and <code>atomic_write_with</code> (<code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>settings/<wbr>config.rs:196-236</code>), <code>FsServices::write_file</code> (<code>crates/<wbr>engine/<wbr>src/<wbr>services.rs:99-101</code>)</td>
+<td>FX-1l</td>
+</tr>
 </tbody></table>
 </div><p><strong>States.</strong></p>
 <ul>
@@ -1863,6 +1870,11 @@ impl Engine {
 <td><code>src/<wbr>fill.rs</code></td>
 <td>NEW</td>
 <td>AD20: the fill runner, which lists a Content-Aware Fill&#39;s frames before it starts the fill&#39;s task (§19)</td>
+</tr>
+<tr>
+<td><code>src/<wbr>orphans.rs</code></td>
+<td>NEW</td>
+<td>AD21: the engine start&#39;s sweep of the temporary files a hard-killed write left: EffectCraft&#39;s atomic write, which every file the session&#39;s file services write goes through, publishes it by a rename from a <code>.effectcraft-&lt;pid&gt;-&lt;n&gt;.tmp</code> made beside it, and a kill between the two leaves one whose name no journal could list (D-17), so at construction the app removes every such file, of an id no process has now and a regular file only, in the working folders — the one list <code>Folders::working</code> keeps, subfolders included, so a folder added to that list is swept with no second list — and touches nothing else</td>
 </tr>
 <tr>
 <td><code>src/<wbr>timings.rs</code></td>
