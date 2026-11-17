@@ -66,7 +66,7 @@ fn lint_library_toolchain() -> String {
 
 /// The library's name as dylint names its build, `lib<name>@<toolchain>`: the package name with `_`.
 pub(crate) fn lint_library_name() -> String {
-    LINT_LIBRARY.trim_end_matches('/').rsplit('/').next().unwrap_or_default().replace('-', "_")
+    crate::layers::library_name(LINT_LIBRARY.trim_end_matches('/').rsplit('/').next().unwrap_or_default())
 }
 
 /// Every file and folder of the gate's machinery (AGENTS.md §10) besides the configurations above: the

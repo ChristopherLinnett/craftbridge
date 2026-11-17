@@ -17,6 +17,8 @@ uniffi = { workspace = true, features = ["cli"] }
 craftbridge-effects-ffi.workspace = true
 # A scratch folder for the generated bindings.
 tempfile.workspace = true
+# Cargo's own reading of this manifest, which names the library the tests read.
+serde_json.workspace = true
 
 [lints]
 workspace = true

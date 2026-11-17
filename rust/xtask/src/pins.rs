@@ -176,27 +176,14 @@ fn swift_builds(root: &Path) -> Result<Vec<String>, String> {
     Ok(lines)
 }
 
-/// Print one list, or name on stderr why it could not be read.
-fn print(lines: Result<Vec<String>, String>, command: &str) -> ExitCode {
-    match lines {
-        Ok(lines) => {
-            for line in lines {
-                println!("{line}");
-            }
-            ExitCode::SUCCESS
-        }
-        Err(failure) => crate::report::failed(command, failure),
-    }
-}
-
 /// `cargo xtask pins`: the pins the doctor and the gate read.
 pub(crate) fn run(root: &Path) -> ExitCode {
-    print(pins(root), "pins")
+    crate::report::print_lines(pins(root), "pins")
 }
 
 /// `cargo xtask swift-builds`: the Swift package's shipping builds.
 pub(crate) fn builds(root: &Path) -> ExitCode {
-    print(swift_builds(root), "swift-builds")
+    crate::report::print_lines(swift_builds(root), "swift-builds")
 }
 
 #[cfg(test)]

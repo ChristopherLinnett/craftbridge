@@ -51,6 +51,8 @@ pub(crate) struct CrateDependency {
     pub(crate) source: Option<String>,
     /// A dev-dependency, built only for the crate's own tests, examples and benchmarks.
     pub(crate) dev: bool,
+    /// A build-dependency, built only for the crate's build script, which runs on the build host.
+    pub(crate) build: bool,
 }
 
 /// Every target kind a library can be built as. A crate whose only library type is `staticlib` reports
@@ -87,11 +89,15 @@ fn packages(metadata: &Metadata) -> Result<Vec<Crate>, String> {
             .and_then(Metadata::as_array)
             .map(|deps| {
                 deps.iter()
-                    .map(|dep| CrateDependency {
-                        name: dep.get("name").and_then(Metadata::as_str).unwrap_or_default().to_string(),
-                        path: dep.get("path").and_then(Metadata::as_str).map(str::to_string),
-                        source: dep.get("source").and_then(Metadata::as_str).map(str::to_string),
-                        dev: dep.get("kind").and_then(Metadata::as_str) == Some("dev"),
+                    .map(|dep| {
+                        let kind = dep.get("kind").and_then(Metadata::as_str);
+                        CrateDependency {
+                            name: dep.get("name").and_then(Metadata::as_str).unwrap_or_default().to_string(),
+                            path: dep.get("path").and_then(Metadata::as_str).map(str::to_string),
+                            source: dep.get("source").and_then(Metadata::as_str).map(str::to_string),
+                            dev: kind == Some("dev"),
+                            build: kind == Some("build"),
+                        }
                     })
                     .collect()
             })
@@ -216,8 +222,8 @@ fn target_directory_of(metadata: &Metadata) -> Result<PathBuf, String> {
 mod tests {
     use super::*;
 
-    /// The minimum JSON `cargo metadata` prints for one package, plus a dev-dependency and a non-library
-    /// target the reader must drop.
+    /// The minimum JSON `cargo metadata` prints for one package, plus a dev-dependency, a build-dependency
+    /// and a non-library target the reader must drop.
     const ONE_PACKAGE: &str = r#"{
         "packages": [{
             "name": "craftbridge-core", "version": "0.1.0", "id": "path+file:///x/craftbridge-core#0.1.0",
@@ -236,7 +242,7 @@ mod tests {
     }"#;
 
     #[test]
-    fn dev_dependencies_are_marked_and_non_library_targets_dropped() {
+    fn dev_and_build_dependencies_are_marked_and_non_library_targets_dropped() {
         let parsed = packages(&serde_json::from_str::<Metadata>(ONE_PACKAGE).unwrap()).unwrap();
         assert_eq!(parsed.len(), 1);
         let package = &parsed[0];
@@ -245,8 +251,8 @@ mod tests {
         assert_eq!(package.edition, "2024");
         let editions: Vec<(&str, &str)> = package.target_editions.iter().map(|(name, edition)| (name.as_str(), edition.as_str())).collect();
         assert_eq!(editions, [("craftbridge_core", "2024"), ("core-tool", "2021")], "each target's own edition, as Cargo resolved it");
-        let names: Vec<(&str, bool)> = package.dependencies.iter().map(|dep| (dep.name.as_str(), dep.dev)).collect();
-        assert_eq!(names, [("craftbridge-media", false), ("insta", true), ("uniffi", false)]);
+        let names: Vec<(&str, bool, bool)> = package.dependencies.iter().map(|dep| (dep.name.as_str(), dep.dev, dep.build)).collect();
+        assert_eq!(names, [("craftbridge-media", false, false), ("insta", true, false), ("uniffi", false, true)]);
         assert_eq!(package.dependencies[0].path.as_deref(), Some("/x/craftbridge-media"));
         assert_eq!(package.library_targets.len(), 1);
         assert_eq!(package.library_targets[0].crate_types, ["lib".to_string(), "cdylib".to_string()]);

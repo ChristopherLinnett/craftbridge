@@ -6,8 +6,9 @@
 #   tools/build-xcframework.sh --keep-bindings  build and join, leaving the committed bindings as they are
 #
 # `cargo xtask xcframework` does the building and the joining (rust/xtask/src/xcframework.rs): it builds
-# craftbridge-effects-ffi with --release for every Apple target rust/rust-toolchain.toml lists, for the iOS
-# the package's manifest names, and joins each static library with the headers and module map of the crates'
+# the distribution library the SDK ships, the one the layer table gives (rust/xtask/src/layers.rs), with
+# --release for every Apple target rust/rust-toolchain.toml lists, for the iOS the package's manifest
+# names, and joins each static library with the headers and module map of the crates'
 # low-level Swift modules, which links the system frameworks and libraries rustc says that library needs,
 # into the folder the manifest gives its binary target, only when what the framework would hold changed.
 # The Swift itself is written by `cargo xtask generate`, whose registered generator keeps

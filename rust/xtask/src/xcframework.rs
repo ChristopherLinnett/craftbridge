@@ -1,10 +1,11 @@
 //! The XCFramework the Swift package's binary target links (plan §22): `cargo xtask xcframework`, which
 //! `tools/build-xcframework.sh` runs, and the gate's Swift stages through it. Nobody commits it.
 //!
-//! It holds the distribution library, built with `--release` for each Apple slice `rust/rust-toolchain.toml`
-//! lists, for the iOS version the package's manifest names, each static library with the headers and module
-//! map of the crates' low-level modules (`crate::swift_bindings`), joined by `xcodebuild -create-xcframework`
-//! into the folder the manifest gives its binary target. Each of those facts is read from what owns it — the
+//! It holds the distribution library the SDK ships, built with `--release` for each Apple slice
+//! `rust/rust-toolchain.toml` lists, for the iOS version the package's manifest names, each static library
+//! with the headers and module map of the crates' low-level modules (`crate::swift_bindings`), joined by
+//! `xcodebuild -create-xcframework` into the folder the manifest gives its binary target. Each of those
+//! facts is read from what owns it — the library from the layer table (`crate::layers::sdk_library`), the
 //! slices from the toolchain file (`crate::pins`), the version and the folder from SwiftPM's reading of the
 //! manifest (`crate::direction`), each library's file from Cargo's report of the build, and the system
 //! frameworks and libraries each library needs, which its module map links, from rustc's own answer for that
@@ -35,41 +36,35 @@ struct Slice {
     linked: Vec<Linked>,
 }
 
-/// The library's release build for one slice, for `version`. `cargo rustc` hands what follows `--` to the
-/// library's own compilation alone, the one that writes the static library and so the one rustc can say
-/// what it needs for; `--crate-type staticlib` builds the one kind the framework holds. Cargo keeps a unit's
-/// notes and repeats them when the unit is up to date, so a run that rebuilds nothing has the answer too.
-fn build_library(rust_dir: &Path, target: &str, version: &str) -> Result<Slice, String> {
+/// The release build of the package `library` for one slice, for `version`. `cargo rustc` hands what
+/// follows `--` to the library's own compilation alone, the one that writes the static library and so the
+/// one rustc can say what it needs for; `--crate-type staticlib` builds the one kind the framework holds.
+/// Cargo keeps a unit's notes and repeats them when the unit is up to date, so a run that rebuilds nothing
+/// has the answer too.
+fn build_library(rust_dir: &Path, library: &str, target: &str, version: &str) -> Result<Slice, String> {
     let reported = crate::compiled::compile(
         rust_dir,
         "rustc",
-        &[
-            "--message-format=json",
-            "--release",
-            "--target",
-            target,
-            "--package",
-            crate::bindings::LIBRARY_PACKAGE,
-            "--crate-type",
-            "staticlib",
-            "--",
-            "--print",
-            NATIVE_STATIC_LIBS,
-        ],
+        &["--message-format=json", "--release", "--target", target, "--package", library, "--crate-type", "staticlib", "--", "--print", NATIVE_STATIC_LIBS],
         &[("IPHONEOS_DEPLOYMENT_TARGET", version)],
     )?;
-    Ok(Slice { target: target.to_string(), library: static_library_of(&reported.artifacts, target)?, linked: linked_of(&reported.diagnostics, target)? })
+    Ok(Slice {
+        target: target.to_string(),
+        library: static_library_of(&reported.artifacts, library, target)?,
+        linked: linked_of(&reported.diagnostics, library, target)?,
+    })
 }
 
-/// What rustc's note among `diagnostics` says the static library built for `target` needs linked beside it:
-/// each framework and library once, in the order it first names them, which a module map's links do not
-/// depend on. Anything else in the note is refused, as no module map declaration could link it.
-fn linked_of(diagnostics: &[String], target: &str) -> Result<Vec<Linked>, String> {
+/// What rustc's note among `diagnostics` says the static library of the package `library` built for
+/// `target` needs linked beside it: each framework and library once, in the order it first names them,
+/// which a module map's links do not depend on. Anything else in the note is refused, as no module map
+/// declaration could link it.
+fn linked_of(diagnostics: &[String], library: &str, target: &str) -> Result<Vec<Linked>, String> {
     let prefix = format!("{NATIVE_STATIC_LIBS}: ");
     let answer = diagnostics
         .iter()
         .find_map(|text| text.strip_prefix(&prefix))
-        .ok_or_else(|| format!("cargo built {} for {target} but passed on no `{NATIVE_STATIC_LIBS}` note from rustc", crate::bindings::LIBRARY_PACKAGE))?;
+        .ok_or_else(|| format!("cargo built {library} for {target} but passed on no `{NATIVE_STATIC_LIBS}` note from rustc"))?;
     let refused = |word: &str| format!("rustc's `{NATIVE_STATIC_LIBS}` for {target} names `{word}`, which is no framework or library a module map can link");
     let mut words = answer.split_whitespace();
     let mut linked = Vec::new();
@@ -98,16 +93,19 @@ fn plain(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|character| character.is_ascii_alphanumeric() || "_-.+".contains(character))
 }
 
-/// The static library among the units cargo reported building for `target`: the `.a` of the unit it reports
-/// as a `staticlib`, the kind of the distribution library the XCFramework is joined from.
-fn static_library_of(artifacts: &[Artifact], target: &str) -> Result<PathBuf, String> {
+/// The static library of the package `library` among the units cargo reported building for `target`: the
+/// `.a` of its unit that cargo reports as a `staticlib`, the kind of the distribution library the
+/// XCFramework is joined from. Cargo builds every kind a dependency's library declares, so a combined
+/// distribution crate's build reports each plugin's own static library too.
+fn static_library_of(artifacts: &[Artifact], library: &str, target: &str) -> Result<PathBuf, String> {
+    let name = crate::layers::library_name(library);
     artifacts
         .iter()
-        .filter(|artifact| artifact.target_kinds.iter().any(|kind| kind == "staticlib"))
+        .filter(|artifact| artifact.target_name == name && artifact.target_kinds.iter().any(|kind| kind == "staticlib"))
         .flat_map(|artifact| artifact.filenames.iter())
         .map(PathBuf::from)
         .find(|file| file.extension().is_some_and(|extension| extension == "a"))
-        .ok_or_else(|| format!("cargo built {} for {target} but reported no static library", crate::bindings::LIBRARY_PACKAGE))
+        .ok_or_else(|| format!("cargo built {library} for {target} but reported no static library"))
 }
 
 /// What a framework holds, as its `Info.plist` lists it, read through `plutil`, Apple's own reader of the
@@ -199,7 +197,9 @@ fn build(root: &Path) -> Result<(PathBuf, bool), String> {
     let version = crate::direction::ios_version(&package)?;
     let framework = package_dir.join(crate::direction::binary_target_path(&package)?);
     let rust_dir = root.join("rust");
-    let slices = crate::pins::apple_slices(root)?.iter().map(|slice| build_library(&rust_dir, slice.target, &version)).collect::<Result<Vec<_>, _>>()?;
+    let library = crate::layers::sdk_library()?;
+    let slices =
+        crate::pins::apple_slices(root)?.iter().map(|slice| build_library(&rust_dir, library, slice.target, &version)).collect::<Result<Vec<_>, _>>()?;
     let headers = crate::scratch::create("xcframework-headers")?;
     let libraries: Vec<(PathBuf, PathBuf)> = slices.iter().map(|slice| (slice.library.clone(), headers.join(&slice.target))).collect();
     let folders: Vec<(&Path, &[Linked])> = libraries.iter().zip(&slices).map(|((_, folder), slice)| (folder.as_path(), slice.linked.as_slice())).collect();
@@ -249,11 +249,30 @@ mod tests {
         ]
         .join("\n");
         let artifacts = crate::compiled::read_messages(messages.as_bytes()).unwrap();
-        assert_eq!(static_library_of(&artifacts, "aarch64-apple-ios"), Ok(PathBuf::from("/t/aarch64-apple-ios/release/libcraftbridge_effects_ffi.a")));
+        assert_eq!(
+            static_library_of(&artifacts, "craftbridge-effects-ffi", "aarch64-apple-ios"),
+            Ok(PathBuf::from("/t/aarch64-apple-ios/release/libcraftbridge_effects_ffi.a"))
+        );
         let none = crate::compiled::read_messages(messages.lines().next().unwrap().as_bytes()).unwrap();
         assert_eq!(
-            static_library_of(&none, "aarch64-apple-ios"),
+            static_library_of(&none, "craftbridge-effects-ffi", "aarch64-apple-ios"),
             Err("cargo built craftbridge-effects-ffi for aarch64-apple-ios but reported no static library".to_string())
+        );
+    }
+
+    /// A combined distribution crate's build reports each plugin's static library before its own, since
+    /// Cargo builds every kind a dependency declares: the framework holds the library asked for.
+    #[test]
+    fn the_library_is_the_package_s_own_among_its_plugins_static_libraries() {
+        let messages = [
+            r#"{"reason":"compiler-artifact","target":{"name":"craftbridge_effects_ffi","kind":["staticlib","cdylib","lib"]},"filenames":["/t/aarch64-apple-ios/release/deps/libcraftbridge_effects_ffi.a","/t/aarch64-apple-ios/release/deps/libcraftbridge_effects_ffi.rlib"]}"#,
+            r#"{"reason":"compiler-artifact","target":{"name":"craftbridge_all_ffi","kind":["staticlib"]},"filenames":["/t/aarch64-apple-ios/release/libcraftbridge_all_ffi.a"]}"#,
+        ]
+        .join("\n");
+        let artifacts = crate::compiled::read_messages(messages.as_bytes()).unwrap();
+        assert_eq!(
+            static_library_of(&artifacts, "craftbridge-all-ffi", "aarch64-apple-ios"),
+            Ok(PathBuf::from("/t/aarch64-apple-ios/release/libcraftbridge_all_ffi.a"))
         );
     }
 
@@ -267,7 +286,7 @@ mod tests {
         let framework = |name: &str| Linked::Framework(name.to_string());
         let library = |name: &str| Linked::Library(name.to_string());
         assert_eq!(
-            linked_of(&notes, "aarch64-apple-ios"),
+            linked_of(&notes, "craftbridge-effects-ffi", "aarch64-apple-ios"),
             Ok(vec![
                 framework("VideoToolbox"),
                 framework("CoreVideo"),
@@ -287,7 +306,7 @@ mod tests {
             ])
         );
         assert_eq!(
-            linked_of(&notes[..1], "aarch64-apple-ios"),
+            linked_of(&notes[..1], "craftbridge-effects-ffi", "aarch64-apple-ios"),
             Err("cargo built craftbridge-effects-ffi for aarch64-apple-ios but passed on no `native-static-libs` note from rustc".to_string())
         );
         for (word, refused) in [
@@ -299,7 +318,7 @@ mod tests {
             ("/usr/lib/libz.a", "/usr/lib/libz.a"),
         ] {
             assert_eq!(
-                linked_of(&[format!("native-static-libs: -lc {word}")], "aarch64-apple-ios-sim"),
+                linked_of(&[format!("native-static-libs: -lc {word}")], "craftbridge-effects-ffi", "aarch64-apple-ios-sim"),
                 Err(format!(
                     "rustc's `native-static-libs` for aarch64-apple-ios-sim names `{refused}`, which is no framework or library a module map can link"
                 )),

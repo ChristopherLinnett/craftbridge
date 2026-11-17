@@ -10,13 +10,54 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// The name of the distribution library's library target, as Cargo reads it: the one workspace crate this
+/// crate's manifest takes by its path as a dev-dependency, which xtask's tests hold to the library the
+/// layer table gives the SDK. Cargo builds every kind a dependency's library declares, so the test's folder
+/// also holds the dynamic library of each crate that one links; only the manifest says which to read.
+fn library_name() -> Result<String, String> {
+    let manifest = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+    let ran = Command::new(env!("CARGO"))
+        .args(["metadata", "--format-version", "1", "--no-deps", "--offline", "--manifest-path", manifest])
+        .output()
+        .map_err(|error| format!("cargo metadata does not start: {error}"))?;
+    if !ran.status.success() {
+        return Err(format!("cargo metadata failed: {}", String::from_utf8_lossy(&ran.stderr)));
+    }
+    let metadata: serde_json::Value = serde_json::from_slice(&ran.stdout).map_err(|error| format!("cargo metadata printed no JSON: {error}"))?;
+    let text = |value: &serde_json::Value, key: &str| value.get(key).and_then(serde_json::Value::as_str).map(str::to_string);
+    let list = |value: &serde_json::Value, key: &str| value.get(key).and_then(serde_json::Value::as_array).cloned().unwrap_or_default();
+    let packages = list(&metadata, "packages");
+    let package = |name: &str| packages.iter().find(|package| text(package, "name").as_deref() == Some(name));
+    let bindgen = package(env!("CARGO_PKG_NAME")).ok_or("cargo metadata lists no bindgen")?;
+    let taken: Vec<String> = list(bindgen, "dependencies")
+        .iter()
+        .filter(|dependency| text(dependency, "kind").as_deref() == Some("dev") && text(dependency, "path").is_some())
+        .filter_map(|dependency| text(dependency, "name"))
+        .collect();
+    let [library] = taken.as_slice() else {
+        return Err(format!("{manifest} takes {taken:?} by path as dev-dependencies, where it takes the one library the SDK ships"));
+    };
+    let targets = package(library).map(|package| list(package, "targets")).unwrap_or_default();
+    targets
+        .iter()
+        .find(|target| list(target, "kind").iter().any(|kind| kind.as_str() == Some("cdylib")))
+        .and_then(|target| text(target, "name"))
+        .ok_or_else(|| format!("{library} builds no cdylib"))
+}
+
 /// The distribution library cargo built for this test. A dev-dependency's library is built into the
 /// folder the test's own executable is built in, under the name the platform gives a dynamic library.
 fn distribution_library() -> Result<PathBuf, String> {
     let test = std::env::current_exe().map_err(|error| format!("the test cannot find its own path: {error}"))?;
     let folder = test.parent().ok_or_else(|| format!("{} sits in no folder", test.display()))?;
-    let library = folder.join(format!("{}craftbridge_effects_ffi{}", std::env::consts::DLL_PREFIX, std::env::consts::DLL_SUFFIX));
+    let library = folder.join(format!("{}{}{}", std::env::consts::DLL_PREFIX, library_name()?, std::env::consts::DLL_SUFFIX));
     if library.is_file() { Ok(library) } else { Err(format!("no distribution library at {}", library.display())) }
+}
+
+/// The line of a package's Kotlin that names the native library it loads: the one the bindings were
+/// generated from, which library mode names.
+fn loads() -> Result<String, String> {
+    Ok(format!("return \"{}\"", library_name()?))
 }
 
 /// Run the workspace's bindgen for `language` into `out`, as the generators of `cargo xtask generate`
@@ -53,10 +94,11 @@ fn the_core_s_kotlin_holds_every_export_and_no_name_kotlin_owns() {
     // The package path comes from the core's uniffi.toml, and the file at all from its scaffolding
     // being linked into the distribution library: without it library mode finds no core to write.
     let kotlin = lines(&out.path().join("io/github/christopherlinnett/craftbridge/ffi/core/craftbridge_core_ffi.kt")).unwrap();
+    let loads = loads().unwrap();
     let expected = [
         "package io.github.christopherlinnett.craftbridge.ffi.core",
         // The one native library, named by the library the bindings are generated from.
-        "return \"craftbridge_effects_ffi\"",
+        loads.as_str(),
         "public interface EngineInterface {",
         "suspend fun `request`(`method`: kotlin.String, `params`: kotlin.String): kotlin.String",
         "suspend fun `requestWithProgress`(`method`: kotlin.String, `params`: kotlin.String, `listener`: ProgressListener, `cancel`: CancelToken): kotlin.String",
@@ -111,8 +153,8 @@ fn the_core_s_kotlin_holds_every_export_and_no_name_kotlin_owns() {
 fn the_core_s_swift_holds_every_export_in_files_named_for_its_crate() {
     let out = tempfile::tempdir().expect("a scratch folder");
     generate("swift", out.path()).unwrap();
-    // Named for the crate, so the distribution crate's own Swift, generated into the same folder, never
-    // overwrites them.
+    // Named for the crate, so the plugin's own Swift, generated into the same folder, never overwrites
+    // them.
     for file in ["craftbridge_core_ffiFFI.h", "craftbridge_core_ffiFFI.modulemap"] {
         assert!(out.path().join(file).is_file(), "{file} was not written");
     }
@@ -163,14 +205,15 @@ fn the_core_s_swift_holds_every_export_in_files_named_for_its_crate() {
 fn the_plugin_s_kotlin_holds_its_constructor_over_the_core_s_types() {
     let out = tempfile::tempdir().expect("a scratch folder");
     generate("kotlin", out.path()).expect("the library generates Kotlin");
-    // The package comes from the distribution crate's own `uniffi.toml`; the file at all, from its
+    // The package comes from the plugin's `-ffi` crate's own `uniffi.toml`; the file at all, from its
     // scaffolding being in the library beside the core's.
     let kotlin =
         lines(&out.path().join("io/github/christopherlinnett/craftbridge/ffi/effects/craftbridge_effects_ffi.kt")).expect("the plugin's Kotlin was written");
+    let loads = loads().expect("the library is named");
     let expected = [
         "package io.github.christopherlinnett.craftbridge.ffi.effects",
         // The plugin's package loads the one native library too, the same name the core's loads.
-        "return \"craftbridge_effects_ffi\"",
+        loads.as_str(),
         // The constructor, named as Kotlin holds it, throwing the core's error, answering the core's handle.
         "@Throws(CraftException::class) fun `startEffectsEngine`(`folders`: Folders, `gpu`: GpuChoice): Engine {",
         // The types it crosses in are the core's package's, not a second copy: one package per crate,
@@ -192,8 +235,8 @@ fn the_plugin_s_kotlin_holds_its_constructor_over_the_core_s_types() {
 fn the_plugin_s_swift_holds_its_constructor_in_files_named_for_its_crate() {
     let out = tempfile::tempdir().expect("a scratch folder");
     generate("swift", out.path()).expect("the library generates Swift");
-    // Named for the distribution crate, so these sit beside the core's of the same kinds without
-    // overwriting them, as the core's test checks its own.
+    // Named for the plugin's `-ffi` crate, not for the library that links it, so these sit beside the
+    // core's of the same kinds without overwriting them, as the core's test checks its own.
     for file in ["craftbridge_effects_ffiFFI.h", "craftbridge_effects_ffiFFI.modulemap"] {
         assert!(out.path().join(file).is_file(), "{file} was not written");
     }

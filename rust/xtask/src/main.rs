@@ -5,8 +5,9 @@
 //! lists its stages read, `cargo xtask files <kind>`; the pins the doctor and the gate read,
 //! `cargo xtask pins` and `cargo xtask swift-builds`; the Swift stage's formatter check,
 //! `cargo xtask swift-format`; the XCFramework `tools/build-xcframework.sh` builds,
-//! `cargo xtask xcframework`; and the 16 KB alignment `tools/build-android.sh` hands over,
-//! `cargo xtask elf-alignment <llvm-readelf> <library>…`.
+//! `cargo xtask xcframework`; and for `tools/build-android.sh`, the native library the SDK ships,
+//! `cargo xtask sdk-library`, and the 16 KB alignment it hands over, `cargo xtask elf-alignment
+//! <llvm-readelf> <library>…`.
 //!
 //! The rules in `AGENTS.md` that no compiler, formatter or linter already enforces are checked here,
 //! behind one command, so a change cannot merge with one broken. Each check lives in its own module: a
@@ -240,6 +241,7 @@ fn dispatch(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
         ["elf-alignment", readelf, libraries @ ..] => elf_alignment::run(readelf, libraries),
         ["swift-builds"] => pins::builds(&root),
         ["xcframework"] => xcframework::run(&root),
+        ["sdk-library"] => layers::run_sdk_library(),
         _ => {
             usage();
             ExitCode::from(MISUSE)
@@ -267,7 +269,8 @@ fn usage() {
     eprintln!("       cargo xtask pins");
     eprintln!("       cargo xtask elf-alignment <llvm-readelf> <library>...   (every library aligned to 16 KB pages)");
     eprintln!("       cargo xtask swift-builds");
-    eprintln!("       cargo xtask xcframework   (through tools/build-xcframework.sh: the native library's XCFramework, joined again only when it changed)")
+    eprintln!("       cargo xtask xcframework   (through tools/build-xcframework.sh: the native library's XCFramework, joined again only when it changed)");
+    eprintln!("       cargo xtask sdk-library   (the native library the SDK ships, as the layer table gives it, for tools/build-android.sh)")
 }
 
 /// Run every check, print one line per failure and `ok` per clean check, and fail if any failed.

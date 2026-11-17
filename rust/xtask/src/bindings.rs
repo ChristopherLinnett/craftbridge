@@ -16,10 +16,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-/// The distribution library, the one library library mode reads every crate's exports from, and the one an
-/// app links (`crate::xcframework`).
-pub(crate) const LIBRARY_PACKAGE: &str = "craftbridge-effects-ffi";
-
 /// The workspace's binding generator, built at the version the libraries are (`rust/uniffi-bindgen`).
 const BINDGEN_PACKAGE: &str = "uniffi-bindgen";
 
@@ -29,24 +25,27 @@ struct HostBuild {
     library: PathBuf,
 }
 
-/// Build the bindgen and the distribution library for the host, and find the two files.
+/// Build the bindgen and the distribution library the SDK ships for the host, and find the two files. The
+/// library is the one library mode reads every crate's exports from, and the one an app links
+/// (`crate::xcframework`), which the layer table gives ([`crate::layers::sdk_library`]).
 fn build_for_host(rust_dir: &Path) -> Result<HostBuild, String> {
-    host_build_of(&crate::compiled::build(rust_dir, &[BINDGEN_PACKAGE, LIBRARY_PACKAGE])?)
+    let library = crate::layers::sdk_library()?;
+    host_build_of(&crate::compiled::build(rust_dir, &[BINDGEN_PACKAGE, library])?, library)
 }
 
-/// The two files among the units cargo reported building. The library is the unit of the package that
-/// cargo reports as a `cdylib`, under the name the host gives a dynamic library.
-fn host_build_of(artifacts: &[crate::compiled::Artifact]) -> Result<HostBuild, String> {
+/// The two files among the units cargo reported building. The library is the unit of the package
+/// `library` that cargo reports as a `cdylib`, under the name the host gives a dynamic library.
+fn host_build_of(artifacts: &[crate::compiled::Artifact], library: &str) -> Result<HostBuild, String> {
     let bindgen =
         crate::compiled::executable_of(artifacts, BINDGEN_PACKAGE).ok_or_else(|| format!("cargo built {BINDGEN_PACKAGE} but reported no binary for it"))?;
-    let library_name = format!("{}{}{}", std::env::consts::DLL_PREFIX, LIBRARY_PACKAGE.replace('-', "_"), std::env::consts::DLL_SUFFIX);
+    let library_name = format!("{}{}{}", std::env::consts::DLL_PREFIX, crate::layers::library_name(library), std::env::consts::DLL_SUFFIX);
     let library = artifacts
         .iter()
         .filter(|artifact| artifact.target_kinds.iter().any(|kind| kind == "cdylib"))
         .flat_map(|artifact| artifact.filenames.iter())
         .map(PathBuf::from)
         .find(|file| file.file_name().is_some_and(|name| name.to_string_lossy() == library_name))
-        .ok_or_else(|| format!("cargo built {LIBRARY_PACKAGE} but reported no {library_name}"))?;
+        .ok_or_else(|| format!("cargo built {library} but reported no {library_name}"))?;
     Ok(HostBuild { bindgen, library })
 }
 
@@ -147,16 +146,36 @@ mod tests {
 
     #[test]
     fn the_host_build_is_the_bindgens_binary_and_the_librarys_dynamic_file() {
-        let built = host_build_of(&reported(true, true)).unwrap();
+        let built = host_build_of(&reported(true, true), "craftbridge-effects-ffi").unwrap();
         assert_eq!(built.bindgen, PathBuf::from("/t/debug/uniffi-bindgen"));
         assert!(built.library.starts_with("/t/debug") && built.library.extension().is_some_and(|extension| extension != "a"), "{:?}", built.library);
     }
 
     #[test]
     fn a_build_that_reports_either_file_missing_says_which() {
-        assert_eq!(host_build_of(&reported(false, true)).err(), Some("cargo built uniffi-bindgen but reported no binary for it".to_string()));
+        assert_eq!(
+            host_build_of(&reported(false, true), "craftbridge-effects-ffi").err(),
+            Some("cargo built uniffi-bindgen but reported no binary for it".to_string())
+        );
         let name = format!("{}craftbridge_effects_ffi{}", std::env::consts::DLL_PREFIX, std::env::consts::DLL_SUFFIX);
-        assert_eq!(host_build_of(&reported(true, false)).err(), Some(format!("cargo built craftbridge-effects-ffi but reported no {name}")));
+        assert_eq!(
+            host_build_of(&reported(true, false), "craftbridge-effects-ffi").err(),
+            Some(format!("cargo built craftbridge-effects-ffi but reported no {name}"))
+        );
+        // The library is found by the package asked for, not by whichever cdylib cargo reported.
+        let other = format!("{}craftbridge_all_ffi{}", std::env::consts::DLL_PREFIX, std::env::consts::DLL_SUFFIX);
+        assert_eq!(host_build_of(&reported(true, true), "craftbridge-all-ffi").err(), Some(format!("cargo built craftbridge-all-ffi but reported no {other}")));
+    }
+
+    /// The bindgen's own tests read the library the SDK ships, which Cargo builds for them only as a
+    /// dependency their manifest names, since Cargo reads no table: that name is held to the table's.
+    #[test]
+    fn the_bindgen_s_tests_build_the_library_the_sdk_ships() {
+        let crates = crate::meta::read(&crate::repo_root().join("rust"), crate::meta::Graph::Workspace).unwrap();
+        let bindgen = crates.iter().find(|package| package.name == BINDGEN_PACKAGE).unwrap();
+        let built: Vec<&str> =
+            bindgen.dependencies.iter().filter(|dependency| dependency.dev && dependency.path.is_some()).map(|dependency| dependency.name.as_str()).collect();
+        assert_eq!(built, [crate::layers::sdk_library().unwrap()], "rust/uniffi-bindgen/Cargo.toml's workspace dev-dependencies");
     }
 
     #[test]
