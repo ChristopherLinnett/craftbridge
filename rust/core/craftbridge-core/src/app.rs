@@ -4,6 +4,7 @@ use crate::Result;
 use crate::error::CraftError;
 use crate::frames::{FrameBytes, PixelFormat};
 use serde_json::Value;
+use std::path::PathBuf;
 
 /// A hosted Craft app's session. The app plugin implements this against its own app's engine; the
 /// runtime never knows which app it hosts, only this interface (plan §16).
@@ -20,7 +21,8 @@ pub trait CraftApp: Send {
     fn request(&mut self, method: &str, params: Value) -> Result<Value>;
 
     /// Run one named request that runs long enough to show progress — an export — reporting its
-    /// progress to `on_progress` and stopping when that answers `false` (plan §16, §19).
+    /// progress to `on_progress`, stopping when that answers `false`, and listing every file it is
+    /// about to write with `list_outputs` before it writes any of them (plan §16, §19, D-17).
     ///
     /// An app with no such request keeps this default, which answers every method
     /// [`crate::CraftError::Unsupported`], as [`CraftApp::request`] answers a method its table does
@@ -38,14 +40,33 @@ pub trait CraftApp: Send {
     ///   does — for an export, stopping the render so the exporter removes the files it opened for
     ///   that output (L4) — and returns. A `false` means the caller's `CancelToken` was set or the
     ///   engine is closing (plan §16 behaviour 4), and every later call answers `false` again;
-    /// * otherwise runs the request to its end and answers as [`CraftApp::request`] does.
+    /// * otherwise runs the request to its end and answers as [`CraftApp::request`] does;
+    /// * hands `list_outputs` every file the request may write, as the paths its own writer will
+    ///   open, once it knows them and before it writes the first: for a render, once its items are
+    ///   queued and before the render starts, each output of each item (every file of an image
+    ///   sequence, every segment, the render log), since a file the export writes is not always the
+    ///   name it was given (a PNG sequence asked for at `card.png` writes `card_00000.png` on).
+    ///   `list_outputs` may be called more than once; each call adds to the export's list. It
+    ///   answers an error, which the implementation returns without writing those files, when a
+    ///   path lies outside the container, is a folder or a link, or the list cannot be written.
+    ///
+    /// The list is the engine's pending-export journal: when the app is killed mid-export, the next
+    /// start deletes each listed file the export wrote, leaving any it never reached as they were,
+    /// and the engine clears the list when this call returns, whatever its outcome. An engine
+    /// started without folders keeps no journal, and its `list_outputs` lists nothing.
     ///
     /// Once `on_progress` has answered `false`, the call answers [`crate::CraftError::Cancelled`]
     /// whatever the implementation returns, an error included: the caller asked to stop and the
     /// work stopped. A request that ends before any `false` keeps its own answer. A panic is
     /// answered as one in [`CraftApp::request`] is.
-    fn request_with_progress(&mut self, method: &str, params: Value, on_progress: &mut dyn FnMut(u64, u64, Option<f64>) -> bool) -> Result<Value> {
-        let _ = (params, on_progress);
+    fn request_with_progress(
+        &mut self,
+        method: &str,
+        params: Value,
+        on_progress: &mut dyn FnMut(u64, u64, Option<f64>) -> bool,
+        list_outputs: &mut dyn FnMut(&[PathBuf]) -> Result<()>,
+    ) -> Result<Value> {
+        let _ = (params, on_progress, list_outputs);
         Err(CraftError::unsupported(format!("`{method}` does not run with progress in this app")))
     }
 

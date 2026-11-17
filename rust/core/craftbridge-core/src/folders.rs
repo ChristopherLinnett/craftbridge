@@ -7,12 +7,15 @@
 //! L5: the engine reads only inside the container, the bundle and paths the app passes, and writes
 //! only inside the container. The roots stay plain paths — the app plugin hands them to the engine
 //! behind it (plan §19, EffectCraft's own `Backend::confine`), which is what refuses each file access
-//! outside them; refusing accesses here as well would be a second confinement to keep in step.
+//! outside them; refusing accesses here as well would be a second confinement to keep in step. The
+//! one file access the core makes on its own account is the pending-export journal's (`crate::journal`),
+//! which deletes files by name at start, so the core checks those paths itself ([`written_file`],
+//! [`entry_in`]).
 
 use std::fs;
 use std::io;
 use std::iter;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::error::CraftError;
 
@@ -71,12 +74,12 @@ impl Folders {
         let working = self.working();
         let read_only = self.read_only();
         for (what, path) in iter::once(("container", self.container.as_path())).chain(working).chain(read_only.iter().copied()) {
-            names_a_folder(what, path)?;
+            names_a_path(&format!("{what} folder"), path)?;
         }
-        let container = resolved("container", &self.container)?;
+        let container = resolved("container folder", &self.container)?;
         ensure_dir("container", &container)?;
         for (what, path) in working {
-            let target = resolved(what, path)?;
+            let target = resolved(&format!("{what} folder"), path)?;
             if !target.starts_with(&container) {
                 return Err(CraftError::io(format!(
                     "the {what} folder {} is outside the container {}: the engine writes only inside its container",
@@ -141,20 +144,71 @@ impl Confinement {
     pub fn write_root(&self) -> &Path {
         &self.write_root
     }
+
+    /// The write root as the operating system resolves it (links followed), the one spelling every
+    /// path checked against it is compared in: an app's container is often named through a link
+    /// (`/var` is `/private/var` on Apple's systems).
+    pub(crate) fn resolved_write_root(&self) -> Result<PathBuf, CraftError> {
+        resolved("container folder", &self.write_root)
+    }
 }
 
-/// Refuse a path that names no folder wherever the engine runs: an empty one, one holding a NUL
-/// byte (no operating system's file calls take one, so it is the caller's mistake, not the disk's),
-/// and a relative one.
-fn names_a_folder(what: &'static str, path: &Path) -> Result<(), CraftError> {
+/// Where `path`, a file about to be written, really lands, as a path below `root` (a resolved write
+/// root): resolved as the writer's open will resolve it (links followed, `..` taken; see `resolved`),
+/// so a spelling that climbs out of the root or runs through a link out of it is refused as the file
+/// it reaches. The root itself is no file.
+pub(crate) fn written_file(root: &Path, path: &Path) -> Result<PathBuf, CraftError> {
+    names_a_path("output file", path)?;
+    let target = resolved("output file", path)?;
+    match target.strip_prefix(root) {
+        Ok(below) if !below.as_os_str().is_empty() => Ok(below.to_path_buf()),
+        _ => Err(outside_the_container(path, root)),
+    }
+}
+
+/// Where the entry `relative` names under `root` (a resolved write root), to be deleted: its folder
+/// resolved, so a folder that is a link out of the root is refused as the folder it reaches, and its
+/// own name kept as it is, never followed, so a file someone replaced with a link is looked at as the
+/// link and nothing it points at is reached. `relative` is a plain name below the root, every part
+/// a name: an absolute path, `..`, or nothing at all names no file the root holds and is refused
+/// unread.
+pub(crate) fn entry_in(root: &Path, relative: &Path) -> Result<PathBuf, CraftError> {
+    let plain = !relative.as_os_str().is_empty() && relative.components().all(|part| matches!(part, Component::Normal(_)));
+    let (true, Some(name), Some(parent)) = (plain, relative.file_name(), root.join(relative).parent().map(Path::to_path_buf)) else {
+        return Err(CraftError::io(format!(
+            "the entry {} is not a path inside the container {}: it must be a plain name below it",
+            relative.display(),
+            root.display()
+        )));
+    };
+    let folder = resolved("output file's folder", &parent)?;
+    if !folder.starts_with(root) {
+        return Err(outside_the_container(relative, root));
+    }
+    Ok(folder.join(name))
+}
+
+/// The refusal of a file the engine would write or delete outside its write root.
+fn outside_the_container(path: &Path, root: &Path) -> CraftError {
+    CraftError::io(format!(
+        "the output file {} is outside the container {}: the engine writes and deletes only inside its container",
+        path.display(),
+        root.display()
+    ))
+}
+
+/// Refuse a path that names nothing wherever the engine runs: an empty one, one holding a NUL byte
+/// (no operating system's file calls take one, so it is the caller's mistake, not the disk's), and a
+/// relative one. `subject` is what the path names, as the message says it ("the container folder").
+fn names_a_path(subject: &str, path: &Path) -> Result<(), CraftError> {
     if path.as_os_str().is_empty() {
-        return Err(CraftError::invalid_params(format!("the {what} folder path is empty")));
+        return Err(CraftError::invalid_params(format!("the {subject} path is empty")));
     }
     if path.as_os_str().as_encoded_bytes().contains(&0) {
-        return Err(CraftError::invalid_params(format!("the {what} folder path holds a NUL byte: {}", path.display())));
+        return Err(CraftError::invalid_params(format!("the {subject} path holds a NUL byte: {}", path.display())));
     }
     if !path.is_absolute() {
-        return Err(CraftError::invalid_params(format!("the {what} folder path must be absolute: {}", path.display())));
+        return Err(CraftError::invalid_params(format!("the {subject} path must be absolute: {}", path.display())));
     }
     Ok(())
 }
@@ -162,9 +216,10 @@ fn names_a_folder(what: &'static str, path: &Path) -> Result<(), CraftError> {
 /// Where `path` is, or will be once its missing folders are made: its nearest folder that exists,
 /// resolved as the operating system resolves it (symbolic links followed, `..` taken), with the
 /// missing names after it. A missing name cannot be `..`, since there is no folder yet to step out
-/// of, so such a path is refused rather than guessed at.
-fn resolved(what: &'static str, path: &Path) -> Result<PathBuf, CraftError> {
-    let unresolved = |error: io::Error| CraftError::io(format!("cannot resolve the {what} folder {}: {error}", path.display()));
+/// of, so such a path is refused rather than guessed at. `subject` is what the path names, as the
+/// message says it ("the container folder").
+pub(crate) fn resolved(subject: &str, path: &Path) -> Result<PathBuf, CraftError> {
+    let unresolved = |error: io::Error| CraftError::io(format!("cannot resolve the {subject} {}: {error}", path.display()));
     let mut missing = Vec::new();
     let mut nearest = path;
     loop {
@@ -208,6 +263,7 @@ fn readable_dir(what: &'static str, path: &Path) -> Result<(), CraftError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::scratch_folders;
     use std::collections::BTreeSet;
     use std::ffi::OsString;
     use tempfile::TempDir;
@@ -227,16 +283,7 @@ mod tests {
     fn sandbox() -> Result<Sandbox, std::io::Error> {
         let root = TempDir::new()?;
         let container = root.path().join("container");
-        let folders = Folders {
-            config: container.join("config"),
-            cache: container.join("cache"),
-            models: container.join("models"),
-            container,
-            bundle: None,
-            plugins: None,
-            fonts: Vec::new(),
-        };
-        Ok(Sandbox { root, folders })
+        Ok(Sandbox { root, folders: scratch_folders(container) })
     }
 
     /// The names a folder holds, so a test can say nothing else was left in it.
