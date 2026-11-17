@@ -660,6 +660,7 @@ version = "0.1.0"
 dependencies = [
  "boa_engine",
  "craftbridge-core",
+ "craftbridge-process",
  "effectcraft-automation",
  "effectcraft-engine",
  "effectcraft-expr",
