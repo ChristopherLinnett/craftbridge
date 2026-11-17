@@ -59,6 +59,21 @@ pub(crate) struct Scenario {
     /// Files the steps wrote, the side under test's held against the oracle's.
     #[serde(default, rename = "compare")]
     pub(crate) compares: Vec<Compare>,
+    /// What each side's folders must hold when the steps are done.
+    #[serde(default, rename = "folder")]
+    pub(crate) folders: Vec<Folder>,
+}
+
+/// The names a folder of every side that ran holds when its steps are done, and no others: a cancelled
+/// export leaves no file, and a queue writes the items it ticked and none it did not. `path` is relative
+/// to the side's scratch folder, `.` the scratch folder itself. A name that starts with a dot is the side's
+/// own working file (its configuration, cache and captured output) and is not counted; a folder that is not
+/// there is a failure, never an empty one, so a misspelt path cannot pass.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Folder {
+    pub(crate) path: String,
+    pub(crate) holds: Vec<String>,
 }
 
 /// A file the scenario starts with: `from`, relative to the corpus file's folder, is copied to `to`,
@@ -68,6 +83,10 @@ pub(crate) struct Scenario {
 pub(crate) struct Fixture {
     pub(crate) from: String,
     pub(crate) to: String,
+    /// The file is text that says [`CONTAINER`] where the side's own folder goes, as an argument does: a
+    /// values file names a picture by the path its side reads it at, which no fixture can spell for both.
+    #[serde(default)]
+    pub(crate) names_container: bool,
 }
 
 /// One step: an invocation of the oracle (the arguments after its name) and the calls the plug-in makes to
@@ -119,13 +138,16 @@ pub(crate) enum FrameFormat {
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) enum Call {
     /// `CraftApp::request`: the method and its parameters; each `files` entry puts the text of a file
-    /// in the parameter of that name.
+    /// in the parameter of that name. With `progress` the call is `CraftApp::request_with_progress`, which
+    /// is how `export` and `template.render` run.
     Request {
         method: String,
         #[serde(default = "no_params")]
         params: Value,
         #[serde(default)]
         files: BTreeMap<String, String>,
+        #[serde(default)]
+        progress: Option<Progress>,
     },
     /// `CraftApp::frame`: the frame written to `out`.
     Frame {
@@ -136,6 +158,24 @@ pub(crate) enum Call {
     },
     /// `CraftApp::mcp`: every line of the step's standard input, each reply on a line of output.
     Mcp {},
+}
+
+/// A call that reports progress, and how its listener answers.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Progress {
+    /// The fraction of the frames done at which the listener answers `false` to stop the call; the call
+    /// runs to its end without one.
+    #[serde(default)]
+    pub(crate) cancel_at: Option<f64>,
+}
+
+impl Progress {
+    /// Whether the listener stops the call at `done` of `total` frames. A call that has not said how many
+    /// frames it has is not stopped, since half of nothing is no place to stop at.
+    pub(crate) fn cancels(&self, done: u64, total: u64) -> bool {
+        self.cancel_at.is_some_and(|at| total > 0 && done as f64 >= at * total as f64)
+    }
 }
 
 /// What a step's arguments, calls and input say where the side's own folder goes: the plug-in takes
@@ -223,12 +263,20 @@ impl Same {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) enum Compare {
-    /// The bytes are the same.
+    /// The bytes are the same; of two folders, they hold the same files with the same bytes.
     Identical { actual: String, reference: String },
     /// Decoded frames agree: the same size and, for two movies, the same frame count, and every frame at
-    /// least 40 dB PSNR from its counterpart (D-12). A frame index picks one frame of a movie or a still
-    /// to compare with one frame of the other (a still is frame 0); without either index both are movies.
-    Frames { actual: String, reference: String, actual_frame: Option<u32>, reference_frame: Option<u32> },
+    /// least 40 dB PSNR from its counterpart (D-12), or, with `exact`, every decoded frame the same pixel
+    /// for pixel. A frame index picks one frame of a movie or a still to compare with one frame of the
+    /// other (a still is frame 0); without either index both are movies.
+    Frames {
+        actual: String,
+        reference: String,
+        actual_frame: Option<u32>,
+        reference_frame: Option<u32>,
+        #[serde(default)]
+        exact: bool,
+    },
     /// Two PNGs hold the pixels they say, straight RGBA, each channel within `tolerance` levels of the
     /// other's, in all but `allowed_fraction` of the pixels, and no pixel's channel further than `cap`
     /// levels: the compositor's own rule for a render on the GPU against the CPU's.
@@ -310,6 +358,13 @@ fn scenario_errors(scenario: &Scenario) -> Vec<String> {
         if !scenario.sides.runs_oracle() && !step.args.is_empty() {
             errors.push(format!("{id}: step {index} has `args`, but the scenario runs on the plug-in alone"));
         }
+        for call in &step.calls {
+            if let Call::Request { progress: Some(Progress { cancel_at: Some(at) }), .. } = call
+                && !(*at > 0.0 && *at <= 1.0)
+            {
+                errors.push(format!("{id}: step {index} cancels at {at}, which must be a fraction of the frames above 0 and up to 1"));
+            }
+        }
         let mut inside = step.host.plugins.iter().map(String::as_str).chain(step.calls.iter().flat_map(call_paths));
         if let Some(path) = inside.find(|path| !stays_inside(path)) {
             errors.push(format!("{id}: {path:?} must be a relative path that stays in the scenario's folder"));
@@ -337,6 +392,11 @@ fn scenario_errors(scenario: &Scenario) -> Vec<String> {
     {
         if !stays_inside(path) {
             errors.push(format!("{id}: {path:?} must be a relative path that stays in the scenario's folder"));
+        }
+    }
+    for folder in &scenario.folders {
+        if folder.path != "." && !stays_inside(&folder.path) {
+            errors.push(format!("{id}: {:?} must be `.` or a relative path that stays in the scenario's folder", folder.path));
         }
     }
     errors
@@ -396,7 +456,7 @@ reference_frame = 0
         assert_eq!((scenario.id.as_str(), scenario.steps.len(), scenario.expects.len(), scenario.sames.len(), scenario.compares.len()), ("T5", 1, 1, 1, 1));
         assert_eq!(scenario.sides, Sides::Both);
         assert!(matches!(scenario.steps.first().and_then(|step| step.calls.first()), Some(Call::Request { method, .. }) if method == "info"));
-        assert!(matches!(scenario.compares.first(), Some(Compare::Frames { reference_frame: Some(0), actual_frame: None, .. })));
+        assert!(matches!(scenario.compares.first(), Some(Compare::Frames { reference_frame: Some(0), actual_frame: None, exact: false, .. })));
     }
 
     #[test]
@@ -471,5 +531,48 @@ reference_frame = 0
             assert!(errors(&plugins).contains("stays in the scenario's folder"), "{outside:?}");
         }
         assert!(stays_inside("sub/out.mp4"));
+    }
+
+    #[test]
+    fn a_call_that_reports_progress_may_name_the_fraction_it_is_stopped_at() {
+        let with = |progress: &str| GOOD.replace("method = \"info\"", &format!("method = \"info\"\nprogress = {progress}"));
+        let progress = |text: &str| match Corpus::parse(&with(text)).expect("parses").scenarios.remove(0).steps.remove(0).calls.remove(0) {
+            Call::Request { progress, .. } => progress,
+            other => panic!("a request expected: {other:?}"),
+        };
+        assert!(matches!(progress("{}"), Some(Progress { cancel_at: None })));
+        assert!(matches!(progress("{ cancel_at = 0.5 }"), Some(Progress { cancel_at: Some(at) }) if at == 0.5));
+        assert!(matches!(progress("{ cancel_at = 1 }"), Some(Progress { cancel_at: Some(at) }) if at == 1.0));
+        assert!(
+            Corpus::parse(GOOD).is_ok_and(|corpus| matches!(
+                corpus.scenarios.first().and_then(|s| s.steps.first()?.calls.first()),
+                Some(Call::Request { progress: None, .. })
+            ))
+        );
+        for outside in ["0", "-0.5", "1.5", "nan", "inf"] {
+            assert!(errors(&with(&format!("{{ cancel_at = {outside} }}"))).contains("which must be a fraction of the frames above 0 and up to 1"), "{outside}");
+        }
+        assert!(errors(&with("{ cancel_after = 0.5 }")).contains("does not parse"));
+    }
+
+    #[test]
+    fn the_listener_stops_a_call_at_the_fraction_and_never_one_that_names_none_or_has_no_frames() {
+        let at = |fraction: Option<f64>| Progress { cancel_at: fraction };
+        assert!(!at(None).cancels(100, 100));
+        assert!(!at(Some(0.5)).cancels(49, 100) && at(Some(0.5)).cancels(50, 100) && at(Some(0.5)).cancels(51, 100));
+        assert!(!at(Some(0.5)).cancels(0, 0), "a call that has not said how many frames it has is not stopped");
+        assert!(at(Some(1.0)).cancels(10, 10) && !at(Some(1.0)).cancels(9, 10));
+    }
+
+    #[test]
+    fn a_folder_rule_names_a_path_in_the_scenarios_folder_or_the_folder_itself() {
+        let rule = |path: &str| format!("{GOOD}\n[[scenario.folder]]\npath = \"{path}\"\nholds = [\"a\"]\n");
+        for inside in [".", "out", "out/deeper"] {
+            assert!(Corpus::parse(&rule(inside)).is_ok(), "{inside}");
+        }
+        for outside in ["/etc", "..", "../x", "a/../../x", ""] {
+            assert!(errors(&rule(outside)).contains("must be `.` or a relative path that stays in the scenario's folder"), "{outside:?}");
+        }
+        assert!(errors(&format!("{GOOD}\n[[scenario.folder]]\npath = \".\"\n")).contains("does not parse"), "a rule without its names is no rule");
     }
 }

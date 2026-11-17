@@ -57,8 +57,9 @@ macro_rules! complain {
     }};
 }
 
-/// Longest a single step of either side may take. The slowest one in the corpus is an export of a few
-/// seconds; a step this far past that is hung.
+/// Longest a single step of either side may take. The slowest one in the corpus is an export the plug-in
+/// encodes in the runner's debug build, under a minute on a loaded machine; a step this far past that is
+/// hung.
 const STEP_TIMEOUT: Duration = Duration::from_secs(300);
 
 struct Options {

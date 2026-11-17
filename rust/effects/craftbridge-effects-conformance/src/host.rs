@@ -5,7 +5,7 @@
 //! folder is the one the environment names, as the command line reads it from there. The plan arrives as
 //! one JSON argument and the step's lines on standard input.
 
-use crate::corpus::{Call, FrameFormat, Host};
+use crate::corpus::{Call, FrameFormat, Host, Progress};
 use craftbridge_core::folders::Folders;
 use craftbridge_core::gpu::{GpuChoice, GpuDevice};
 use craftbridge_core::{CraftApp, CraftError, PixelFormat};
@@ -101,7 +101,7 @@ pub(crate) fn run(plan: &str, stdin: &str, container: &Path, config: PathBuf) ->
 /// One call's answer as the text its step prints.
 fn make(app: &mut EffectCraftApp, call: &Call, stdin: &str, container: &Path) -> Result<String, CraftError> {
     match call {
-        Call::Request { method, params, files } => {
+        Call::Request { method, params, files, progress } => {
             let mut params = params.clone();
             for (name, path) in files {
                 let text = std::fs::read_to_string(container.join(path)).map_err(|error| CraftError::io(format!("cannot read {path}: {error}")))?;
@@ -110,7 +110,10 @@ fn make(app: &mut EffectCraftApp, call: &Call, stdin: &str, container: &Path) ->
                     None => return Err(CraftError::invalid_params(format!("`{method}`: parameters that take a file must be an object"))),
                 };
             }
-            Ok(app.request(method, params)?.to_string())
+            match progress {
+                None => Ok(app.request(method, params)?.to_string()),
+                Some(progress) => with_progress(app, method, params, progress).map(|answer| answer.to_string()),
+            }
         }
         Call::Frame { params, format, out } => {
             let wanted = match format {
@@ -127,6 +130,14 @@ fn make(app: &mut EffectCraftApp, call: &Call, stdin: &str, container: &Path) ->
         }
         Call::Mcp {} => Ok(stdin.lines().filter_map(|line| app.mcp(line)).collect::<Vec<_>>().join("\n")),
     }
+}
+
+/// A call that runs long: its answer, with the listener of the call told to stop once `progress` says so.
+/// The files the call may write are listed to nobody: the core's journal that reads them is not part of
+/// the app a step builds.
+fn with_progress(app: &mut EffectCraftApp, method: &str, params: Value, progress: &Progress) -> Result<Value, CraftError> {
+    let mut listen = |done: u64, total: u64, _left: Option<f64>| !progress.cancels(done, total);
+    app.request_with_progress(method, params, &mut listen, &mut |_| Ok(()))
 }
 
 /// A PNG holding straight RGBA pixels exactly as they are, which is how a file can be compared with the
@@ -240,5 +251,28 @@ mod tests {
         let (_scratch, cpu) = printed("", INFO, "");
         let cpu: Value = serde_json::from_str(&cpu.expect("runs")).expect("JSON");
         assert!(cpu["gpu"].as_str().is_some_and(|gpu| gpu.starts_with("headless")), "{cpu}");
+    }
+
+    /// `export` runs through the call with progress, which a plain request refuses, and writes what it was
+    /// asked for.
+    #[test]
+    fn a_call_with_progress_runs_export_and_a_plain_request_of_it_is_refused() {
+        let scratch = tempfile::tempdir().expect("scratch");
+        let out = scratch.path().join("x.png");
+        let call = |progress: &str| {
+            format!(
+                "[[scenario.step.call]]\nkind = \"request\"\nmethod = \"run\"\nparams = {{ steps = [{{ command = \"comp.new\", params = {{ width = 8, height = 6, duration = 0.2, frameRate = 10 }} }}] }}\n[[scenario.step.call]]\nkind = \"request\"\nmethod = \"export\"\nparams = {{ output = \"{}\", format = \"png\" }}\n{progress}",
+                out.display()
+            )
+        };
+        let config = scratch.path().join(".config");
+        let plain = run(&plan("", &call("")), "", scratch.path(), config.clone()).expect("runs");
+        let refused: Value = serde_json::from_str(&plain).expect("JSON");
+        assert_eq!(refused["kind"], "Unsupported", "{plain}");
+        assert!(!out.exists());
+        let answer = run(&plan("", &call("progress = {}\n")), "", scratch.path(), config).expect("runs");
+        let rendered: Value = serde_json::from_str(&answer).expect("JSON");
+        assert_eq!(rendered["rendered"].as_array().map(Vec::len), Some(1), "{answer}");
+        assert!(scratch.path().join("x_00000.png").is_file(), "the export wrote its first frame");
     }
 }

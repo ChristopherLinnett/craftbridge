@@ -1,5 +1,7 @@
 //! Decoded frames and the D-12 comparison: an encoded export conforms when its frame count and size equal
 //! the reference's and every decoded frame is within 40 dB PSNR of the reference's decoded frame (plan §28).
+//! An export whose decoded frames the plan asks to be identical (a GIF's) is held to the same size and count
+//! with every frame the same pixel for pixel.
 
 use effectcraft_media::{MediaPool, probe};
 use effectcraft_time::Tick;
@@ -95,13 +97,35 @@ pub(crate) fn psnr_db(actual: &[u8], reference: &[u8]) -> Option<f64> {
     Some(if mean == 0.0 { f64::INFINITY } else { 10.0 * (255.0_f64 * 255.0 / mean).log10() })
 }
 
-/// How many failing frames are named; the rest are counted.
-const NAMED: usize = 3;
+/// How many failing frames or files a comparison names; the rest are counted.
+pub(crate) const NAMED: usize = 3;
 
-/// The failures of `actual` against `reference` under D-12; none means they conform. With no frame index
-/// the two are movies and every frame pair is compared; an index picks the one frame compared (an index on
-/// one side alone leaves the other at frame 0).
-pub(crate) fn conform(actual: &Clip, reference: &Clip, actual_frame: Option<u32>, reference_frame: Option<u32>) -> Vec<String> {
+/// How a frame pair is held: within D-12's 40 dB, or, for `exact`, the same pixel for pixel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Closeness {
+    D12,
+    Exact,
+}
+
+impl Closeness {
+    /// The failure of one frame `a` of the actual clip against frame `r` of the reference's, if it is not
+    /// close enough; the figure of a D-12 failure is what the count of failing frames names.
+    fn judge(self, a: u32, r: u32, ours: &[u8], theirs: &[u8]) -> Result<Option<String>, String> {
+        match self {
+            Closeness::Exact => Ok((ours != theirs).then(|| format!("frame {a} is not the reference's frame {r}, pixel for pixel"))),
+            Closeness::D12 => match psnr_db(ours, theirs) {
+                None => Err(format!("frame {a} cannot be compared with the reference's frame {r}")),
+                Some(db) if db < MIN_PSNR_DB => Ok(Some(format!("frame {a} is {db:.2} dB from the reference's frame {r}, below the {MIN_PSNR_DB} dB of D-12"))),
+                Some(_) => Ok(None),
+            },
+        }
+    }
+}
+
+/// The failures of `actual` against `reference` under D-12, or under `Exact`; none means they conform. With
+/// no frame index the two are movies and every frame pair is compared; an index picks the one frame compared
+/// (an index on one side alone leaves the other at frame 0).
+pub(crate) fn conform(actual: &Clip, reference: &Clip, actual_frame: Option<u32>, reference_frame: Option<u32>, closeness: Closeness) -> Vec<String> {
     let mut failures = Vec::new();
     if (actual.width, actual.height) != (reference.width, reference.height) {
         failures.push(format!("size {}x{} is not the reference's {}x{}", actual.width, actual.height, reference.width, reference.height));
@@ -119,21 +143,23 @@ pub(crate) fn conform(actual: &Clip, reference: &Clip, actual_frame: Option<u32>
     }
     let mut below = 0_usize;
     for (a, r) in pairs {
-        let verdict = actual.frame(a).and_then(|ours| reference.frame(r).map(|theirs| psnr_db(&ours, &theirs)));
+        let verdict = actual.frame(a).and_then(|ours| reference.frame(r).and_then(|theirs| closeness.judge(a, r, &ours, &theirs)));
         match verdict {
             Err(error) => failures.push(error),
-            Ok(None) => failures.push(format!("frame {a} cannot be compared with the reference's frame {r}")),
-            Ok(Some(db)) if db < MIN_PSNR_DB => {
+            Ok(Some(failure)) => {
                 below += 1;
                 if below <= NAMED {
-                    failures.push(format!("frame {a} is {db:.2} dB from the reference's frame {r}, below the {MIN_PSNR_DB} dB of D-12"));
+                    failures.push(failure);
                 }
             }
-            Ok(Some(_)) => {}
+            Ok(None) => {}
         }
     }
     if below > NAMED {
-        failures.push(format!("{} more frames are below {MIN_PSNR_DB} dB", below - NAMED));
+        failures.push(match closeness {
+            Closeness::D12 => format!("{} more frames are below {MIN_PSNR_DB} dB", below - NAMED),
+            Closeness::Exact => format!("{} more frames are not the reference's", below - NAMED),
+        });
     }
     failures
 }
@@ -199,6 +225,11 @@ mod tests {
         Clip::open(&path).expect("opens")
     }
 
+    /// The gradient with its red channel one level up: far above 40 dB from it, and not the same pixels.
+    fn near_gradient(scratch: &TempDir) -> Clip {
+        clip(scratch, "near.png", 32, 32, |x, y| [(x * 4) as u8 + 1, (y * 4) as u8, 80])
+    }
+
     /// Every colour sample raised by `by`, alpha as it was.
     fn shifted(frame: &[u8], by: u8) -> Vec<u8> {
         frame.iter().enumerate().map(|(i, value)| if i % 4 == 3 { *value } else { value + by }).collect()
@@ -233,9 +264,9 @@ mod tests {
         let reference = clip(&scratch, "ref.png", 32, 32, gradient);
         let same = clip(&scratch, "same.png", 32, 32, gradient);
         assert_eq!((reference.width, reference.height, reference.frames), (32, 32, 1));
-        assert!(conform(&same, &reference, None, None).is_empty());
-        let near = clip(&scratch, "near.png", 32, 32, |x, y| [(x * 4) as u8 + 1, (y * 4) as u8, 80]);
-        assert!(conform(&near, &reference, None, None).is_empty());
+        assert!(conform(&same, &reference, None, None, Closeness::D12).is_empty());
+        let near = near_gradient(&scratch);
+        assert!(conform(&near, &reference, None, None, Closeness::D12).is_empty());
     }
 
     #[test]
@@ -243,10 +274,10 @@ mod tests {
         let scratch = tempfile::tempdir().expect("scratch");
         let reference = clip(&scratch, "ref.png", 32, 32, gradient);
         let far = clip(&scratch, "far.png", 32, 32, |x, y| [(x * 4) as u8, (y * 4) as u8, 120]);
-        let failures = conform(&far, &reference, None, None);
+        let failures = conform(&far, &reference, None, None, Closeness::D12);
         assert!(failures.iter().any(|f| f.contains("frame 0") && f.contains("dB") && f.contains("D-12")), "{failures:?}");
         let wide = clip(&scratch, "wide.png", 48, 32, gradient);
-        assert!(conform(&wide, &reference, None, None).iter().any(|f| f.contains("48x32")));
+        assert!(conform(&wide, &reference, None, None, Closeness::D12).iter().any(|f| f.contains("48x32")));
     }
 
     /// A movie of `count` flat 2x2 frames, each `step` brighter than the last.
@@ -256,14 +287,14 @@ mod tests {
 
     #[test]
     fn two_movies_conform_when_their_frame_counts_match_and_every_frame_is_close() {
-        assert!(conform(&movie(5, 1), &movie(5, 1), None, None).is_empty());
-        assert!(conform(&movie(5, 1), &movie(4, 1), None, None).iter().any(|f| f.contains("5 frames are not the reference's 4")));
+        assert!(conform(&movie(5, 1), &movie(5, 1), None, None, Closeness::D12).is_empty());
+        assert!(conform(&movie(5, 1), &movie(4, 1), None, None, Closeness::D12).iter().any(|f| f.contains("5 frames are not the reference's 4")));
     }
 
     #[test]
     fn every_frame_of_a_movie_is_compared_not_only_the_first_and_the_worst_are_counted() {
         // Frame 0 is the same in both; the movies drift apart from frame 1 on.
-        let failures = conform(&movie(8, 0), &movie(8, 20), None, None);
+        let failures = conform(&movie(8, 0), &movie(8, 20), None, None, Closeness::D12);
         let named = failures.iter().filter(|f| f.starts_with("frame ")).count();
         assert_eq!(named, NAMED, "{failures:?}");
         assert!(failures.iter().any(|f| f.contains("frame 1 is")) && !failures.iter().any(|f| f.starts_with("frame 0 ")), "{failures:?}");
@@ -289,11 +320,28 @@ mod tests {
     }
 
     #[test]
+    fn an_exact_comparison_names_every_pixel_where_d12_allows_a_difference_it_cannot_see() {
+        let scratch = tempfile::tempdir().expect("scratch");
+        let reference = clip(&scratch, "ref.png", 32, 32, gradient);
+        let near = near_gradient(&scratch);
+        assert!(conform(&near, &reference, None, None, Closeness::D12).is_empty());
+        let failures = conform(&near, &reference, None, None, Closeness::Exact);
+        assert_eq!(failures, ["frame 0 is not the reference's frame 0, pixel for pixel"]);
+        let same = clip(&scratch, "same.png", 32, 32, gradient);
+        assert!(conform(&same, &reference, None, None, Closeness::Exact).is_empty());
+        // Every frame of a movie is held to it, and the ones past the named few are counted.
+        let failures = conform(&movie(8, 0), &movie(8, 1), None, None, Closeness::Exact);
+        assert_eq!(failures.iter().filter(|f| f.starts_with("frame ")).count(), NAMED, "{failures:?}");
+        assert!(failures.iter().any(|f| f == "4 more frames are not the reference's"), "{failures:?}");
+        assert!(conform(&movie(5, 1), &movie(4, 1), None, None, Closeness::Exact).iter().any(|f| f.contains("5 frames are not the reference's 4")));
+    }
+
+    #[test]
     fn a_frame_index_beyond_the_clip_is_an_error() {
         let scratch = tempfile::tempdir().expect("scratch");
         let still = clip(&scratch, "a.png", 8, 8, |_, _| [1, 2, 3]);
-        assert!(conform(&still, &still, Some(1), None).iter().any(|f| f.contains("does not exist")));
-        assert!(conform(&still, &still, Some(0), Some(0)).is_empty());
+        assert!(conform(&still, &still, Some(1), None, Closeness::D12).iter().any(|f| f.contains("does not exist")));
+        assert!(conform(&still, &still, Some(0), Some(0), Closeness::D12).is_empty());
     }
 
     #[test]

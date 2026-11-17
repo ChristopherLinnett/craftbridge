@@ -39,7 +39,12 @@ mod tests {
             stdin: vec!["a line in <container>".to_string()],
             fails: false,
             host: Host { plugins: plugins.map(str::to_string), gpu: true },
-            calls: vec![Call::Request { method: "info".to_string(), params: serde_json::json!({"path": "<container>/x"}), files: Default::default() }],
+            calls: vec![Call::Request {
+                method: "info".to_string(),
+                params: serde_json::json!({"path": "<container>/x"}),
+                files: Default::default(),
+                progress: None,
+            }],
         }
     }
 
