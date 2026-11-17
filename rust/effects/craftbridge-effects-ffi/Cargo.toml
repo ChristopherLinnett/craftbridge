@@ -12,8 +12,24 @@ publish.workspace = true
 crate-type = ["staticlib", "cdylib", "lib"]
 
 [dependencies]
+# The engine's start the constructor makes, `Engine::start_in`, and the guard it builds the app
+# behind, both the core's.
+craftbridge-core.workspace = true
+# The app the constructor builds: the EffectCraft plugin.
 craftbridge-effects.workspace = true
+# The boundary the constructor answers through: its `Engine`, `Folders` and `CraftError`.
 craftbridge-core-ffi.workspace = true
+# The one call this crate exports is a UniFFI export; the scaffolding it generates joins the core's
+# in this library (plan §20).
+uniffi.workspace = true
+
+[dev-dependencies]
+# The tests drive the handle's async calls to their answer without a runtime.
+pollster.workspace = true
+# The scratch container the engine starts in.
+tempfile.workspace = true
+# The journal a killed export left, written as the core reads it.
+serde_json.workspace = true
 
 [lints]
 workspace = true

@@ -710,8 +710,13 @@ dependencies = [
 name = "craftbridge-effects-ffi"
 version = "0.1.0"
 dependencies = [
+ "craftbridge-core",
  "craftbridge-core-ffi",
  "craftbridge-effects",
+ "pollster",
+ "serde_json",
+ "tempfile",
+ "uniffi",
 ]
 
 [[package]]
