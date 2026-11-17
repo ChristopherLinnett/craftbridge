@@ -109,6 +109,10 @@ pub enum GpuDevice {
     /// A device on the platform's backend. `adapter`, `device` and `queue` go together to
     /// `effectcraft_gpu::Gpu::new` when the engine attaches the GPU (§17).
     Device {
+        /// The instance the adapter and device were made on. A surface for a preview is made on
+        /// this instance and no other (§20): one made on a second instance would name adapters
+        /// this device does not know, and a wgpu surface and a wgpu device must come from one.
+        instance: wgpu::Instance,
         /// The adapter the device was requested from; `info.gpu` names it.
         adapter: wgpu::Adapter,
         /// The logical device the compositor renders on.
@@ -160,6 +164,17 @@ impl GpuDevice {
     pub fn parts(&self) -> Option<(&wgpu::Adapter, &wgpu::Device, &wgpu::Queue)> {
         match self {
             GpuDevice::Device { adapter, device, queue, .. } => Some((adapter, device, queue)),
+            GpuDevice::CpuOnly { .. } => None,
+        }
+    }
+
+    /// The instance the device was made on, or nothing while the render is on the CPU: the one a
+    /// platform surface must be made on, as [`Self::parts`] names the device that surface will
+    /// show its frames with (§20).
+    #[must_use]
+    pub fn instance(&self) -> Option<&wgpu::Instance> {
+        match self {
+            GpuDevice::Device { instance, .. } => Some(instance),
             GpuDevice::CpuOnly { .. } => None,
         }
     }
@@ -248,15 +263,15 @@ fn on_backends(backends: wgpu::Backends) -> GpuDevice {
         }
     };
     let limits = required_limits(&adapter.limits());
-    open(adapter, limits)
+    open(&instance, adapter, limits)
 }
 
 /// The device on this adapter with these limits, asked of the adapter. A refused request — the
 /// limits more than it gives, the features more than it has — is the reason `info.gpu` reports
 /// and the CPU renders, never a panic (§17's *CPU only* state).
-fn open(adapter: wgpu::Adapter, required: wgpu::Limits) -> GpuDevice {
+fn open(instance: &wgpu::Instance, adapter: wgpu::Adapter, required: wgpu::Limits) -> GpuDevice {
     match pollster::block_on(adapter.request_device(&device_descriptor(required))) {
-        Ok((device, queue)) => GpuDevice::Device { adapter, device, queue, failure: GpuFailure::default() },
+        Ok((device, queue)) => GpuDevice::Device { instance: instance.clone(), adapter, device, queue, failure: GpuFailure::default() },
         Err(error) => GpuDevice::CpuOnly { reason: format!("no device on {}: {error}", adapter.get_info().name) },
     }
 }
@@ -372,7 +387,7 @@ mod tests {
             panic!("limits above the adapter's must not build a device");
         };
         let name = adapter.get_info().name;
-        let gpu = open(adapter, too_much);
+        let gpu = open(&instance, adapter, too_much);
         let GpuDevice::CpuOnly { reason } = &gpu else {
             panic!("limits above the adapter's must not build a device");
         };

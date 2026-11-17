@@ -3,6 +3,7 @@
 use crate::Result;
 use crate::error::CraftError;
 use crate::frames::{FrameBytes, PixelFormat};
+use crate::preview::Surface;
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -83,6 +84,25 @@ pub trait CraftApp: Send {
     fn frame(&mut self, params: Value, format: PixelFormat) -> Result<FrameBytes> {
         let _ = (params, format);
         Err(CraftError::unsupported("this app renders no frames"))
+    }
+
+    /// Draw one preview frame into `surface` (plan §16, §17).
+    ///
+    /// What the frame is is the app's: `params` is the present call's own (§17's `{comp, time}`
+    /// for EffectCraft's preview), and the app renders for it and draws the result through the
+    /// surface — a composited texture through [`Surface::present`], a CPU-rendered one whole
+    /// through [`Surface::present_frame`]. The surface is the engine's: choosing what it is
+    /// configured with, acquiring a frame, drawing and showing it, and every way a surface is
+    /// outdated, lost or fails answers [`crate::CraftError::Gpu`] with the session kept, so the
+    /// app never sees a driver's panic, and an app that just wants a picture asks nothing else of
+    /// it.
+    ///
+    /// An app that previews nothing keeps this default, which answers
+    /// [`crate::CraftError::Unsupported`]: the refusal is the same for every such app, so it is
+    /// written once, here.
+    fn present(&mut self, params: Value, surface: &mut Surface) -> Result<()> {
+        let _ = (params, surface);
+        Err(CraftError::unsupported("this app previews no frames"))
     }
 
     /// Answer one line of the app's MCP transport (a JSON-RPC message) with the one line it replies

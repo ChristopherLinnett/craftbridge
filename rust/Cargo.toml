@@ -91,18 +91,23 @@ filmcraft-isobmff = { git = "https://github.com/storytold/filmcraft", rev = "d5e
 
 # Apple's frameworks, through the bindings generated from their headers: the media ones for the iOS hardware
 # decoder in craftbridge-media (plan §18), CoreText for the faces craftbridge-core's iOS platform module reads
-# (plan §16). Each crate turns on only the framework headers it reads.
+# (plan §16), and QuartzCore's (Core Animation's) layer class the preview surface is made on (plan §20), with
+# the Objective-C runtime crate they stand on, whose retained reference holds the app's layer. Each crate turns
+# on only the framework headers it reads.
+objc2 = "0.6"
 objc2-core-foundation = { version = "0.3.2", default-features = false }
 objc2-core-media = { version = "0.3.2", default-features = false }
 objc2-audio-toolbox = { version = "0.3.2", default-features = false }
 objc2-core-audio-types = { version = "0.3.2", default-features = false }
 objc2-core-text = { version = "0.3.2", default-features = false }
 objc2-core-video = { version = "0.3.2", default-features = false }
+objc2-quartz-core = { version = "0.3.2", default-features = false }
 objc2-video-toolbox = { version = "0.3.2", default-features = false }
 
 # Android's official NDK bindings (rust-mobile/ndk), for the Android hardware decoder in craftbridge-media
-# (plan §18): MediaCodec, AImageReader and their formats. The crate turns on only the media feature and the
-# API level the SDK's minSdk names.
+# (plan §18): MediaCodec, AImageReader and their formats; and for the window the preview draws on in
+# craftbridge-core-ffi (plan §20). Each crate turns on only the features it reads: craftbridge-media the media
+# feature and the API level the SDK's minSdk names.
 ndk = { version = "0.9", default-features = false }
 
 # One definition for every crate: each manifest says `[lints] workspace = true`, and

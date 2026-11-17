@@ -7,10 +7,11 @@ use crate::engine::{Engine, Message};
 use crate::folders::Folders;
 use crate::gpu::{GpuChoice, GpuDevice};
 use serde_json::Value;
+use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -183,4 +184,120 @@ pub(crate) fn read_back(rig: &Rig, texture: &wgpu::Texture) -> Vec<[u8; 4]> {
         }
     }
     pixels
+}
+
+/// Raise a validation error on `device`, as wgpu does on a refused acquire or present: a texture
+/// with no width.
+pub(crate) fn refuse(device: &wgpu::Device) {
+    let _ = texture(device, (0, 4), 1, wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureUsages::TEXTURE_BINDING);
+}
+
+/// What a surface reports, written out: formats, present modes, alpha modes.
+pub(crate) fn caps(formats: &[wgpu::TextureFormat], modes: &[wgpu::PresentMode], alpha: &[wgpu::CompositeAlphaMode]) -> wgpu::SurfaceCapabilities {
+    wgpu::SurfaceCapabilities { formats: formats.to_vec(), present_modes: modes.to_vec(), alpha_modes: alpha.to_vec(), ..Default::default() }
+}
+
+pub(crate) const EVERYTHING: [wgpu::CompositeAlphaMode; 4] =
+    [wgpu::CompositeAlphaMode::Opaque, wgpu::CompositeAlphaMode::PostMultiplied, wgpu::CompositeAlphaMode::PreMultiplied, wgpu::CompositeAlphaMode::Inherit];
+pub(crate) const MODES: [wgpu::PresentMode; 2] = [wgpu::PresentMode::Immediate, wgpu::PresentMode::Fifo];
+pub(crate) const BOTH: [wgpu::TextureFormat; 4] =
+    [wgpu::TextureFormat::Rgba8UnormSrgb, wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Bgra8UnormSrgb, wgpu::TextureFormat::Bgra8Unorm];
+
+/// A surface that is a script: it reports what it is told, records every configuration, and
+/// answers acquisitions from a queue, raising a device error while it acquires when told to.
+/// Shared and movable, so a test can hand it in a preview maker across the engine thread just
+/// as a platform hands its real surface there.
+#[derive(Clone)]
+pub(crate) struct Scripted(Arc<Mutex<ScriptState>>);
+
+struct ScriptState {
+    size: (u32, u32),
+    capabilities: wgpu::SurfaceCapabilities,
+    configured: Vec<(u32, u32)>,
+    acquisitions: VecDeque<wgpu::CurrentSurfaceTexture>,
+    acquired: u32,
+    refuse: Option<wgpu::Device>,
+    panic_when_dropped: bool,
+}
+
+impl Drop for ScriptState {
+    fn drop(&mut self) {
+        if self.panic_when_dropped {
+            panic!("the scripted surface panicked as it was dropped");
+        }
+    }
+}
+
+impl Scripted {
+    pub(crate) fn new(size: (u32, u32), acquisitions: impl IntoIterator<Item = wgpu::CurrentSurfaceTexture>) -> Self {
+        Self(Arc::new(Mutex::new(ScriptState {
+            size,
+            capabilities: caps(&BOTH, &MODES, &EVERYTHING),
+            configured: Vec::new(),
+            acquisitions: acquisitions.into_iter().collect(),
+            acquired: 0,
+            refuse: None,
+            panic_when_dropped: false,
+        })))
+    }
+
+    /// The size the surface reports from now on.
+    pub(crate) fn set_size(&self, size: (u32, u32)) {
+        self.0.lock().unwrap().size = size;
+    }
+
+    /// Replace what the surface reports it supports.
+    pub(crate) fn set_caps(&self, capabilities: wgpu::SurfaceCapabilities) {
+        self.0.lock().unwrap().capabilities = capabilities;
+    }
+
+    /// Panic as the last holder lets go of the script, as a platform's surface that fails in its drop.
+    pub(crate) fn panic_when_dropped(&self) {
+        self.0.lock().unwrap().panic_when_dropped = true;
+    }
+
+    /// Raise a device error on every acquire from now on, as wgpu does on a refused one.
+    pub(crate) fn refuse(&self, device: wgpu::Device) {
+        self.0.lock().unwrap().refuse = Some(device);
+    }
+
+    /// The sizes every configuration so far named.
+    pub(crate) fn configured(&self) -> Vec<(u32, u32)> {
+        self.0.lock().unwrap().configured.clone()
+    }
+
+    /// How many acquisitions the surface has been asked for.
+    pub(crate) fn acquired(&self) -> u32 {
+        self.0.lock().unwrap().acquired
+    }
+
+    /// How many holders the script has, this one included: a test sees through it whether the engine
+    /// still holds the surface it was handed.
+    pub(crate) fn holders(&self) -> usize {
+        Arc::strong_count(&self.0)
+    }
+}
+
+impl crate::surface::Swapchain for Scripted {
+    fn capabilities(&self, _: &wgpu::Adapter) -> wgpu::SurfaceCapabilities {
+        let state = self.0.lock().unwrap();
+        caps(&state.capabilities.formats, &state.capabilities.present_modes, &state.capabilities.alpha_modes)
+    }
+
+    fn configure(&self, _: &wgpu::Device, configuration: &wgpu::SurfaceConfiguration) {
+        self.0.lock().unwrap().configured.push((configuration.width, configuration.height));
+    }
+
+    fn current_size(&self) -> (u32, u32) {
+        self.0.lock().unwrap().size
+    }
+
+    fn acquire(&self) -> wgpu::CurrentSurfaceTexture {
+        let mut state = self.0.lock().unwrap();
+        state.acquired += 1;
+        if let Some(device) = &state.refuse {
+            refuse(device);
+        }
+        state.acquisitions.pop_front().unwrap_or(wgpu::CurrentSurfaceTexture::Lost)
+    }
 }

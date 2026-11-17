@@ -108,17 +108,7 @@ pub const fn premultiply_channel(value: u8, alpha: u8) -> u8 {
 /// own, quietly mis-sized output. A frame built through [`FrameBytes::new`] never brings one: its
 /// length is already the exact size.
 pub fn swizzle_and_premultiply_to_bgra(rgba: &mut [u8]) -> Result<()> {
-    let length = rgba.len();
-    // The leftover is split off and judged before any pixel is written, so a refused buffer is never
-    // returned half converted.
-    let (pixels, leftover) = rgba.as_chunks_mut::<BYTES_PER_PIXEL>();
-    if !leftover.is_empty() {
-        return Err(CraftError::invalid_params(format!(
-            "frame buffer of {length} bytes ends with {}/{BYTES_PER_PIXEL} of a pixel, which cannot be converted",
-            leftover.len()
-        )));
-    }
-    for [red, green, blue, alpha] in pixels {
+    for [red, green, blue, alpha] in whole_pixels(rgba)? {
         // Every output byte reads its inputs before any of them is written, so one pass over the
         // buffer converts a pixel to itself and never to one of its own already-written bytes.
         let (straight_red, straight_green, straight_blue, straight_alpha) = (*red, *green, *blue, *alpha);
@@ -127,6 +117,33 @@ pub fn swizzle_and_premultiply_to_bgra(rgba: &mut [u8]) -> Result<()> {
         *blue = premultiply_channel(straight_red, straight_alpha);
     }
     Ok(())
+}
+
+/// Premultiply a straight RGBA buffer in place, keeping its order: the premultiplied `Rgba8Unorm` a
+/// display frame is (plan §17), which the preview uploads a CPU frame as before the blit pass reads
+/// it. A length that is not a whole number of pixels is refused as
+/// [`swizzle_and_premultiply_to_bgra`] refuses it.
+pub(crate) fn premultiply_rgba(rgba: &mut [u8]) -> Result<()> {
+    for [red, green, blue, alpha] in whole_pixels(rgba)? {
+        *red = premultiply_channel(*red, *alpha);
+        *green = premultiply_channel(*green, *alpha);
+        *blue = premultiply_channel(*blue, *alpha);
+    }
+    Ok(())
+}
+
+/// The buffer's pixels, or the refusal naming its leftover bytes. The leftover is judged before any
+/// pixel is handed out, so a refused buffer is never returned half converted.
+fn whole_pixels(rgba: &mut [u8]) -> Result<&mut [[u8; BYTES_PER_PIXEL]]> {
+    let length = rgba.len();
+    let (pixels, leftover) = rgba.as_chunks_mut::<BYTES_PER_PIXEL>();
+    if !leftover.is_empty() {
+        return Err(CraftError::invalid_params(format!(
+            "frame buffer of {length} bytes ends with {}/{BYTES_PER_PIXEL} of a pixel, which cannot be converted",
+            leftover.len()
+        )));
+    }
+    Ok(pixels)
 }
 
 /// Refuse a frame of no pixels: both sides are call parameters, and a frame with a side of zero
@@ -142,7 +159,7 @@ fn check_frame_size(width: u32, height: u32) -> Result<()> {
 /// in u128, where it is total: two u32 sides of four-byte pixels need up to 66 bits, past what u64
 /// holds, and a product that wrapped would answer a huge size with a length a small buffer matches.
 /// No buffer of the size named is allocated to answer it: only the length already in hand is compared.
-fn check_raw_length(width: u32, height: u32, data: &[u8]) -> Result<()> {
+pub(crate) fn check_raw_length(width: u32, height: u32, data: &[u8]) -> Result<()> {
     // A buffer's length and the pixel size are `usize`, which no target makes wider than 64 bits, so
     // widening them to u128 is exact.
     let expected = u128::from(width) * u128::from(height) * BYTES_PER_PIXEL as u128;

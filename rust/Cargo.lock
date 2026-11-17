@@ -647,11 +647,16 @@ name = "craftbridge-core-ffi"
 version = "0.1.0"
 dependencies = [
  "craftbridge-core",
+ "ndk",
+ "objc2",
+ "objc2-core-foundation",
+ "objc2-quartz-core",
  "oneshot",
  "pollster",
  "serde_json",
  "tempfile",
  "uniffi",
+ "wgpu",
 ]
 
 [[package]]

@@ -7,6 +7,7 @@ use crate::error::CraftError;
 use crate::frames::{FrameBytes, PixelFormat};
 use crate::progress::ProgressListener;
 use crate::recovery::Recovery;
+use craftbridge_core::SurfaceMaker;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -28,6 +29,13 @@ impl Engine {
     #[must_use]
     pub fn from_core(core: craftbridge_core::Engine) -> Arc<Self> {
         Arc::new(Self { core: Arc::new(core), limits: Limits::BOUNDARY })
+    }
+
+    /// Hand the surface the platform modules made to the engine thread to attach (plan §20): the surface
+    /// is the platform's own kind, but the call it crosses on is this one, and it is made there, where the
+    /// engine's device lives.
+    pub(crate) async fn attach_surface(&self, make: SurfaceMaker) -> Result<(), CraftError> {
+        self.core.send_attach_preview(make)?.answered().await
     }
 
     /// A request's answer as the JSON text that crosses, refused when the boundary cannot carry it.
@@ -93,6 +101,22 @@ impl Engine {
     /// an error's text does: no call's parameters make it grow.
     pub async fn resume_gpu(&self) -> Result<Option<String>, CraftError> {
         self.core.send_resume_gpu()?.answered().await
+    }
+
+    /// Draw one frame on the preview surface the app attached, and show it: the parameters are the app's
+    /// `present` call's, and the frame waits its turn behind a running export as every call does. With
+    /// nothing attached it throws `Gpu` with `no surface`; a surface lost or changed mid-preview throws
+    /// `Gpu` too — the session is kept either way, and the next `present` draws once the surface answers
+    /// again or a new one is attached.
+    pub async fn present(&self, params: String) -> Result<(), CraftError> {
+        self.core.send_present(parse(&params)?)?.answered().await
+    }
+
+    /// Give up the preview surface the app attached, if one is: after this the `present` is the same empty
+    /// answer it was before the attach, and detaching nothing answers `Ok`. Like every call it waits its
+    /// turn, so ending a preview waits behind a running export.
+    pub async fn detach_preview(&self) -> Result<(), CraftError> {
+        self.core.send_detach_preview()?.answered().await
     }
 
     /// Stop the engine after the calls it has accepted. Stopping twice is not an error.

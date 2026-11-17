@@ -14,6 +14,7 @@ pub mod frames;
 pub mod gpu;
 mod gpu_lifecycle;
 pub mod journal;
+pub mod preview;
 pub mod surface;
 #[cfg(test)]
 mod testing;
@@ -33,6 +34,7 @@ pub use frames::{FrameBytes, PixelFormat};
 pub use gpu::{GpuChoice, GpuDevice, GpuFailure, Platform};
 pub use journal::{JOURNAL_FILE, Recovery};
 pub use platform::memory::available_memory;
+pub use preview::{Surface, SurfaceMaker};
 pub use surface::{Presented, PreviewSurface};
 
 /// The result of a runtime call: what the call answers, or the [`CraftError`] it failed with. The
