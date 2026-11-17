@@ -16,6 +16,15 @@
 //! earlier build's: a copy is traced by file identity to the file rustc wrote. That reaches code behind
 //! a feature, a target or a profile exactly where the stage compiles it, and refuses `include_str!` and
 //! `include_bytes!` of any other file too: nothing here needs data the rules cannot see.
+//!
+//! The same messages say which profile cargo built each unit in, as cargo resolved it, so this also holds
+//! CraftBridge's own crates to overflow checks and debug assertions in every build of tests the gate makes
+//! (AGENTS.md §7): a profile that switches them off is found however it is spelt — in `[profile.test]` or a
+//! profile it `inherits`, in a package override under any form of package spec, for any member — since only
+//! cargo's answer, not a reading of the manifest, follows every rule by which cargo picks a unit's settings.
+//! Such a build is held in every unit of ours it compiles, not only in its tests: a test runs the libraries
+//! of ours it links, a crate with no test of its own included, and the code our build scripts and
+//! proc-macros make for them, which run on the host as the build goes.
 
 use crate::scan;
 use std::collections::{BTreeMap, BTreeSet};
@@ -23,7 +32,32 @@ use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-/// One unit cargo reports having built: its package, its target, and the files it wrote.
+/// The settings of a unit's profile, as cargo's report names them, that make an integer overflow and a
+/// failed `debug_assert!` panic, each with the words a finding calls it by.
+const PANICKING_CHECKS: [(&str, &str); 2] = [("overflow_checks", "overflow checks"), ("debug_assertions", "debug assertions")];
+
+/// What cargo reports of the profile it built a unit in: whether the unit is a test, and which of the
+/// [`PANICKING_CHECKS`] it was built without, by their words.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct UnitProfile {
+    pub(crate) test: bool,
+    pub(crate) without: Vec<&'static str>,
+}
+
+impl UnitProfile {
+    /// The `profile` of a `compiler-artifact` message. A field the report leaves out counts against the
+    /// unit, as a test and as a check that is off, so a change in what cargo reports fails the check instead
+    /// of passing it.
+    fn of(profile: &serde_json::Value) -> Self {
+        let flag = |key: &str| profile.get(key).and_then(serde_json::Value::as_bool);
+        Self {
+            test: flag("test") != Some(false),
+            without: PANICKING_CHECKS.iter().filter(|(key, _)| flag(key) != Some(true)).map(|(_, words)| *words).collect(),
+        }
+    }
+}
+
+/// One unit cargo reports having built: its package, its target, the files it wrote and its profile.
 pub(crate) struct Artifact {
     pub(crate) package_id: String,
     pub(crate) target_name: String,
@@ -32,6 +66,8 @@ pub(crate) struct Artifact {
     pub(crate) filenames: Vec<String>,
     /// The program the unit built, when it built one.
     pub(crate) executable: Option<String>,
+    /// The profile cargo built the unit in, when the message says.
+    pub(crate) profile: Option<UnitProfile>,
 }
 
 impl Artifact {
@@ -50,6 +86,7 @@ impl Artifact {
             target_kinds: strings(target.and_then(|target| target.get("kind"))),
             filenames: strings(message.get("filenames")),
             executable: message.get("executable").and_then(serde_json::Value::as_str).map(str::to_string),
+            profile: message.get("profile").map(UnitProfile::of),
         }
     }
 }
@@ -315,6 +352,28 @@ fn is_lint_library_build(path: &Path, builds: &Path) -> bool {
     path.starts_with(builds) && path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with(&prefix))
 }
 
+/// The finding for a unit of a crate of ours that cargo built without overflow checks or debug assertions
+/// in a build of tests (`builds_tests`), so an overflow or a broken invariant in its code would pass
+/// unnoticed, or whose profile cargo did not report. Every unit of ours such a build compiles is held: the
+/// tests run a test target and each library it links, its own crate's or another's, whether or not that
+/// crate has a test of its own, and a build script, a proc-macro or a library one of them links runs on the
+/// host to make what they run. A build that compiles no test, such as a release build, may build without
+/// them.
+fn profile_error(name: &str, artifact: &Artifact, builds_tests: bool) -> Option<String> {
+    let target = &artifact.target_name;
+    match &artifact.profile {
+        None => Some(format!("{name}: cargo reported no profile for {target}, so whether its tests keep overflow checks and debug assertions is unknown")),
+        Some(profile) if builds_tests && !profile.without.is_empty() => {
+            let unit = if profile.test { format!("the test {target}") } else { target.to_string() };
+            Some(format!(
+                "{name}: cargo built {unit} without {} in a build of tests: CraftBridge's own crates keep overflow checks and debug assertions in every unit a build of tests compiles, so an overflow or a broken debug assertion in their code fails the build or the test instead of passing unnoticed (AGENTS.md §7)",
+                profile.without.join(" or ")
+            ))
+        }
+        Some(_) => None,
+    }
+}
+
 /// The errors of every unit among `artifacts` of a crate the rules read: the workspace's members, and
 /// the gate's lint library, which is a workspace of its own the gate compiles too. Each is judged from the
 /// root of the workspace it builds in.
@@ -332,9 +391,12 @@ fn errors(root: &Path, rust_dir: &Path, artifacts: &[Artifact]) -> Result<Vec<St
     let target_directory = crate::meta::target_directory(rust_dir)?;
     let folders = rustc_folders(artifacts);
     let mut dep_infos: BTreeMap<PathBuf, &(crate::meta::Crate, PathBuf)> = BTreeMap::new();
+    let builds_tests =
+        artifacts.iter().any(|artifact| members.contains_key(&artifact.package_id) && artifact.profile.as_ref().is_some_and(|profile| profile.test));
     let mut errors = Vec::new();
     for artifact in artifacts {
         let Some(package) = members.get(&artifact.package_id) else { continue };
+        errors.extend(profile_error(&package.0.name, artifact, builds_tests));
         let found = dep_infos_of(artifact, &folders);
         if found.is_empty() {
             errors.push(format!("{}: no dep-info rustc wrote for {:?} is found, so what its compilation read is unknown", package.0.name, artifact.filenames));
@@ -392,6 +454,19 @@ mod tests {
             target_kinds: vec!["bin".to_string()],
             filenames: files.iter().map(|file| scratch.0.join(file).to_string_lossy().into_owned()).collect(),
             executable: None,
+            profile: Some(UnitProfile::default()),
+        }
+    }
+
+    /// The lint library's unit as a message names it, package `id` having written `file`.
+    fn library_unit(id: &str, file: &Path) -> Artifact {
+        Artifact {
+            package_id: id.to_string(),
+            target_name: "never-crash-lints".to_string(),
+            target_kinds: vec!["lib".to_string()],
+            filenames: vec![file.to_string_lossy().into_owned()],
+            executable: None,
+            profile: Some(UnitProfile::default()),
         }
     }
 
@@ -649,13 +724,7 @@ mod tests {
         let library = crate::meta::read(&root.join(crate::machinery::LINT_LIBRARY), crate::meta::Graph::Workspace).unwrap();
         let target = crate::meta::target_directory(&root.join("rust")).unwrap();
         assert_eq!(target, scratch.join("pushed/target-7"), "cargo names the folder the environment sets");
-        let artifact = Artifact {
-            package_id: library[0].id.clone(),
-            target_name: "never-crash-lints".to_string(),
-            target_kinds: vec!["lib".to_string()],
-            filenames: vec![scratch.join("deps/libnever_crash_lints-0123456789abcdef.rmeta").to_string_lossy().into_owned()],
-            executable: None,
-        };
+        let artifact = library_unit(&library[0].id, &scratch.join("deps/libnever_crash_lints-0123456789abcdef.rmeta"));
         let found = errors(&root, &root.join("rust"), &[artifact]).unwrap();
         assert_eq!(found.len(), 1, "{found:?}");
         assert!(found[0].contains("unrelated/dylint/libraries/"), "{found:?}");
@@ -694,13 +763,7 @@ mod tests {
         let scratch = Scratch::new("compiled-library");
         scratch.write("deps/never_crash_lints-0123456789abcdef.d", "deps/libnever_crash_lints-0123456789abcdef.rmeta: src/lib.rs Cargo.toml ../../README.md\n");
         scratch.write("deps/libnever_crash_lints-0123456789abcdef.rmeta", "");
-        let artifact = Artifact {
-            package_id: library[0].id.clone(),
-            target_name: "never-crash-lints".to_string(),
-            target_kinds: vec!["lib".to_string()],
-            filenames: vec![scratch.0.join("deps/libnever_crash_lints-0123456789abcdef.rmeta").to_string_lossy().into_owned()],
-            executable: None,
-        };
+        let artifact = library_unit(&library[0].id, &scratch.0.join("deps/libnever_crash_lints-0123456789abcdef.rmeta"));
         let found = errors(&root, &root.join("rust"), &[artifact]).unwrap();
         assert_eq!(found.len(), 1, "{found:?}");
         assert!(found[0].starts_with("README.md: never-crash-lints's compilation reads it"), "{found:?}");
@@ -752,5 +815,124 @@ mod tests {
         let errors = errors(&copy.0, &copy.0.join("rust"), &artifacts).unwrap();
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].starts_with("rust/core/craftbridge-core/src/hidden.txt: craftbridge-core's compilation reads it"), "{errors:?}");
+    }
+
+    /// The finding for a unit of crate `name` built in a build of tests without `without`, in its words.
+    fn refusal(name: &str, unit: &str, without: &str) -> String {
+        format!(
+            "{name}: cargo built {unit} without {without} in a build of tests: CraftBridge's own crates keep overflow checks and debug assertions in every unit a build of tests compiles, so an overflow or a broken debug assertion in their code fails the build or the test instead of passing unnoticed (AGENTS.md §7)"
+        )
+    }
+
+    /// Cargo's report of a unit's profile, read as cargo gives it: in a build of tests, a unit built without
+    /// either check is a finding naming the crate, the unit and the checks, a test and a library the tests
+    /// link alike; a unit with both is not, nor is any unit of a build that compiles no test, as a release
+    /// build's; a unit whose profile cargo leaves out, or a check it leaves out of one, is a finding, and a
+    /// report that leaves out whether the unit is a test counts it as one.
+    #[test]
+    fn a_unit_cargo_built_for_tests_without_overflow_checks_or_debug_assertions_is_refused() {
+        let unit = |profile: &str| {
+            let line = format!(
+                "{{\"reason\":\"compiler-artifact\",\"package_id\":\"p\",\"target\":{{\"name\":\"t\",\"kind\":[\"lib\"]}},\"filenames\":[]{profile}}}\n"
+            );
+            read_messages(line.as_bytes()).unwrap().remove(0)
+        };
+        let profile = |test: bool, overflow: bool, assertions: bool| {
+            format!(",\"profile\":{{\"opt_level\":\"1\",\"debuginfo\":1,\"debug_assertions\":{assertions},\"overflow_checks\":{overflow},\"test\":{test}}}")
+        };
+        let (test, linked) = ("the test t", "t");
+        assert_eq!(profile_error("x", &unit(&profile(true, false, true)), true), Some(refusal("x", test, "overflow checks")));
+        assert_eq!(profile_error("x", &unit(&profile(true, true, false)), true), Some(refusal("x", test, "debug assertions")));
+        assert_eq!(profile_error("x", &unit(&profile(true, false, false)), true), Some(refusal("x", test, "overflow checks or debug assertions")));
+        assert_eq!(profile_error("x", &unit(&profile(false, false, true)), true), Some(refusal("x", linked, "overflow checks")), "a library the tests link");
+        assert_eq!(profile_error("x", &unit(&profile(true, true, true)), true), None);
+        assert_eq!(profile_error("x", &unit(&profile(false, false, false)), false), None, "a build that compiles no test may build without them");
+        let unknown = "x: cargo reported no profile for t, so whether its tests keep overflow checks and debug assertions is unknown";
+        assert_eq!(profile_error("x", &unit(""), false), Some(unknown.to_string()));
+        assert_eq!(profile_error("x", &unit(",\"profile\":{\"test\":true}"), true), Some(refusal("x", test, "overflow checks or debug assertions")));
+        let untold = unit(",\"profile\":{\"debug_assertions\":true,\"overflow_checks\":true}");
+        assert_eq!(untold.profile, Some(UnitProfile { test: true, without: Vec::new() }), "a report silent on `test` counts the unit as a test");
+    }
+
+    /// The whole path with the real cargo, over a probe workspace whose members, named as no crate of ours
+    /// is, are a library with a test, the library it links, which has no test of its own and a build script,
+    /// and a proc-macro it uses: each way a profile can switch a check off for what a build of tests compiles
+    /// — a test profile that inherits another, a package override by a package spec's URL, one by the bare
+    /// name in the dev profile tests inherit, one for the library with no test, and the build override,
+    /// which reaches only what runs on the host — is found from cargo's report, naming each unit it reaches;
+    /// switching them off only for dependencies, or only in the release profile, is not, and neither is a
+    /// release build, which compiles no test.
+    #[test]
+    fn a_member_s_units_built_for_tests_without_the_checks_are_found_however_the_profile_spells_it() {
+        let scratch = Scratch::new("compiled-profiles");
+        let package = |name: &str, rest: &str| format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n{rest}");
+        scratch.write("rust/probe/Cargo.toml", package("probe", "[dependencies]\nlinked = { path = \"../linked\" }\nshaped = { path = \"../shaped\" }\n"));
+        scratch.write("rust/probe/src/lib.rs", "pub fn probe() {\n    shaped::same!(linked::linked());\n}\n");
+        scratch.write("rust/probe/tests/behaviour.rs", "#[test]\nfn probes() {\n    probe::probe();\n}\n");
+        scratch.write("rust/linked/Cargo.toml", package("linked", "[lib]\ntest = false\n"));
+        scratch.write("rust/linked/build.rs", "fn main() {}\n");
+        scratch.write("rust/linked/src/lib.rs", "pub fn linked() {}\n");
+        scratch.write("rust/shaped/Cargo.toml", package("shaped", "[lib]\nproc-macro = true\n"));
+        scratch.write(
+            "rust/shaped/src/lib.rs",
+            "/// Its input, unchanged.\n#[proc_macro]\npub fn same(input: proc_macro::TokenStream) -> proc_macro::TokenStream {\n    input\n}\n",
+        );
+        let spec = format!("path+file://{}#0.1.0", std::fs::canonicalize(scratch.0.join("rust/probe")).unwrap().display());
+        let probe = [("probe", "the test behaviour"), ("probe", "the test probe"), ("probe", "probe")];
+        let linked = [("linked", "linked"), ("linked", "build-script-build")];
+        let shaped = [("shaped", "the test shaped"), ("shaped", "shaped")];
+        let tests: &[&str] = &["test", "--no-run"];
+        let cases: [(String, &[&str], Vec<(&str, &str)>, &str); 7] = [
+            (
+                "[profile.fast]\ninherits = \"release\"\n\n[profile.test]\ninherits = \"fast\"\n".to_string(),
+                tests,
+                [probe.as_slice(), &linked, &shaped].concat(),
+                "overflow checks or debug assertions",
+            ),
+            (format!("[profile.test.package.\"{spec}\"]\noverflow-checks = false\n"), tests, probe.to_vec(), "overflow checks"),
+            ("[profile.dev.package.probe]\ndebug-assertions = false\n".to_string(), tests, probe.to_vec(), "debug assertions"),
+            ("[profile.test.package.linked]\noverflow-checks = false\n".to_string(), tests, linked.to_vec(), "overflow checks"),
+            (
+                "[profile.dev.build-override]\noverflow-checks = false\ndebug-assertions = false\n".to_string(),
+                tests,
+                vec![("linked", "build-script-build"), ("shaped", "shaped")],
+                "overflow checks or debug assertions",
+            ),
+            (
+                "[profile.test.package.\"*\"]\noverflow-checks = false\ndebug-assertions = false\n\n[profile.release]\noverflow-checks = false\n".to_string(),
+                tests,
+                Vec::new(),
+                "",
+            ),
+            (String::new(), &["build", "--release"], Vec::new(), ""),
+        ];
+        for (profiles, command, units, without) in cases {
+            scratch.write("rust/Cargo.toml", format!("[workspace]\nmembers = [\"probe\", \"linked\", \"shaped\"]\nresolver = \"3\"\n\n{profiles}"));
+            let output = std::process::Command::new(env!("CARGO"))
+                .current_dir(scratch.0.join("rust"))
+                .env("CARGO_BUILD_BUILD_DIR", scratch.0.join("target"))
+                .args(command)
+                .args(["--offline", "--message-format=json", "--target-dir"])
+                .arg(scratch.0.join("target"))
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{profiles}: {}", String::from_utf8_lossy(&output.stderr));
+            let artifacts = read_messages(output.stdout.as_slice()).unwrap();
+            let mut found = errors(&scratch.0, &scratch.0.join("rust"), &artifacts).unwrap();
+            found.sort();
+            let mut expected: Vec<String> = units.iter().map(|(name, unit)| refusal(name, unit, without)).collect();
+            expected.sort();
+            assert_eq!(found, expected, "{profiles} {command:?}");
+        }
+    }
+
+    /// What the check above holds every build of our tests to, seen from inside one: this crate's tests,
+    /// built in the workspace's test profile, panic on an overflow and on a failed debug assertion.
+    #[test]
+    fn an_overflow_in_a_crate_of_ours_panics_in_a_test() {
+        let overflow = std::panic::catch_unwind(|| std::hint::black_box(u8::MAX) + std::hint::black_box(1));
+        assert!(overflow.is_err(), "overflow-checks must stay on in the profile tests are built with");
+        let broken = std::panic::catch_unwind(|| debug_assert!(std::hint::black_box(false)));
+        assert!(broken.is_err(), "debug-assertions must stay on in the profile tests are built with");
     }
 }

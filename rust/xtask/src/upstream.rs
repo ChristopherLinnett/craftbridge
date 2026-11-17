@@ -2,15 +2,15 @@
 //! update script wrote it (AGENTS.md §7, plan §15 "Pins", §24, D-21, PD4, PD17).
 //!
 //! CraftBridge builds EffectCraft as it is: the workspace's EffectCraft and FilmCraft dependencies
-//! point at one official revision each, and the `[patch]` tables, the release profile and the starting
+//! point at one official revision each, and the `[patch]` tables, the dev and release profiles and the starting
 //! `Cargo.lock` come from that revision's own manifest and lock — through this module, which
 //! `tools/update-upstream.sh` runs, so they are never written by hand. This check then asks Cargo's own
 //! questions, and nothing else:
 //!
 //! * the EffectCraft pin is an official revision: a commit, named by its id, that official main
 //!   reaches, and the FilmCraft pin is the revision that commit itself names,
-//! * `[patch]` and `[profile.release]` in `rust/Cargo.toml` hold exactly the entries the generator would
-//!   write from the pinned upstream,
+//! * `[patch]`, `[profile.dev]` and `[profile.release]` in `rust/Cargo.toml` hold exactly the entries the
+//!   generator would write from the pinned upstream,
 //! * every EffectCraft, FilmCraft or Craft library package in `rust/Cargo.lock` resolves to a source the
 //!   pin sanctions, compared whole, down to the commit Cargo builds — a registry copy, a fork, another
 //!   branch or commit, a local path, or a second copy of a library crate upstream's own lock holds
@@ -245,29 +245,62 @@ fn transplant(ours: &mut toml_edit::DocumentMut, upstream: &toml_edit::DocumentM
     }
 }
 
-/// `[profile.release]` moves whole: it lives under `[profile]`, whose other tables (a future
-/// `[profile.dev]`, say) stay ours. The `[profile]` parent is created implicit when ours has none, so
-/// only `[profile.release]` prints its header, exactly as upstream writes it.
-fn transplant_release(ours: &mut toml_edit::DocumentMut, upstream: &toml_edit::DocumentMut) {
-    let release = upstream.get("profile").and_then(toml_edit::Item::as_table_like).and_then(|profile| profile.get("release")).cloned();
-    match release {
-        Some(mut release) => {
-            if let Some(table) = release.as_table_mut() {
-                table.decor_mut().set_prefix(format!("\n{GENERATED_BY}"));
+/// The profiles of the pinned EffectCraft's manifest that move whole into ours. `release` is what the
+/// shipped libraries are built with. `dev` is what every `cargo test` is built with: it optimises
+/// EffectCraft's and FilmCraft's pixel and codec crates even in debug, so a test here runs them as
+/// EffectCraft's own tests do instead of unoptimised. Each is copied with upstream's own comments, so a
+/// setting keeps its reason beside it.
+const GENERATED_PROFILES: &[&str] = &["dev", "release"];
+
+/// Where the table that prints first in `table` and its sub-tables is: its position in the file and its
+/// keys down from `table`. Upstream writes `[profile.dev.package."*"]` above `[profile.dev]` itself, and a
+/// table prints in the order of its position, whatever it holds.
+fn first_printed(table: &toml_edit::Table) -> Option<(isize, Vec<String>)> {
+    let own = table.position().map(|position| (position, Vec::new()));
+    let children = table.iter().filter_map(|(key, item)| {
+        let (position, mut path) = first_printed(item.as_table()?)?;
+        path.insert(0, key.to_string());
+        Some((position, path))
+    });
+    own.into_iter().chain(children).min_by_key(|(position, _)| *position)
+}
+
+/// Put `prefix` before the header of the sub-table of `table` that `path` names.
+fn set_prefix_at(table: &mut toml_edit::Table, path: &[String], prefix: &str) {
+    match path.split_first() {
+        None => table.decor_mut().set_prefix(prefix),
+        Some((key, rest)) => {
+            if let Some(child) = table.get_mut(key).and_then(toml_edit::Item::as_table_mut) {
+                set_prefix_at(child, rest, prefix);
+            }
+        }
+    }
+}
+
+/// One profile moves whole, its `package` overrides with it: it lives under `[profile]`, whose other
+/// tables (`dev-full`, a debugger's profile, say) stay ours. The `[profile]` parent is created implicit
+/// when ours has none, so only the profiles' own headers print, exactly as upstream writes them.
+fn transplant_profile(ours: &mut toml_edit::DocumentMut, upstream: &toml_edit::DocumentMut, name: &str) {
+    let moved = upstream.get("profile").and_then(toml_edit::Item::as_table_like).and_then(|profile| profile.get(name)).cloned();
+    match moved {
+        Some(mut profile) => {
+            if let Some(table) = profile.as_table_mut() {
+                let path = first_printed(table).map(|(_, path)| path).unwrap_or_default();
+                set_prefix_at(table, &path, &format!("\n{GENERATED_BY}"));
             }
             if !ours.get("profile").is_some_and(toml_edit::Item::is_table) {
-                let mut profile = toml_edit::Table::new();
-                profile.set_implicit(true);
-                *ours.as_table_mut().entry("profile").or_insert(toml_edit::Item::None) = toml_edit::Item::Table(profile);
+                let mut parent = toml_edit::Table::new();
+                parent.set_implicit(true);
+                *ours.as_table_mut().entry("profile").or_insert(toml_edit::Item::None) = toml_edit::Item::Table(parent);
             }
-            if let Some(profile) = ours.get_mut("profile").and_then(toml_edit::Item::as_table_mut) {
-                *profile.entry("release").or_insert(toml_edit::Item::None) = release;
+            if let Some(parent) = ours.get_mut("profile").and_then(toml_edit::Item::as_table_mut) {
+                *parent.entry(name).or_insert(toml_edit::Item::None) = profile;
             }
         }
         None => {
-            if let Some(profile) = ours.get_mut("profile").and_then(toml_edit::Item::as_table_like_mut) {
-                profile.remove("release");
-                if profile.is_empty() {
+            if let Some(parent) = ours.get_mut("profile").and_then(toml_edit::Item::as_table_like_mut) {
+                parent.remove(name);
+                if parent.is_empty() {
                     ours.as_table_mut().remove("profile");
                 }
             }
@@ -276,7 +309,7 @@ fn transplant_release(ours: &mut toml_edit::DocumentMut, upstream: &toml_edit::D
 }
 
 /// Write what `tools/update-upstream.sh` writes for one revision into the manifest text: the pins, and
-/// the `[patch]` and `[profile.release]` tables copied from the upstream manifest. Everything else in
+/// the `[patch]` table and the [`GENERATED_PROFILES`] copied from the upstream manifest. Everything else in
 /// the file is kept byte for byte.
 pub(crate) fn regenerate(ours: &str, upstream_manifest: &str, effectcraft_rev: &str, filmcraft_rev: &str) -> Result<String, String> {
     let mut document = ours.parse::<toml_edit::DocumentMut>().map_err(|error| format!("rust/Cargo.toml does not parse: {error}"))?;
@@ -297,12 +330,15 @@ pub(crate) fn regenerate(ours: &str, upstream_manifest: &str, effectcraft_rev: &
         set_pin(dependencies, name, &film_url, filmcraft_rev, at == 0);
     }
     transplant(&mut document, &upstream, "patch");
-    transplant_release(&mut document, &upstream);
+    for name in GENERATED_PROFILES {
+        transplant_profile(&mut document, &upstream, name);
+    }
     Ok(document.to_string())
 }
 
 /// Flatten one generated table into named entries: `[patch]` becomes one entry per source-and-crate
-/// (`crates-io.egui`), `[profile.release]` one per key (`lto`). A whole missing table shows up as its
+/// (`crates-io.egui`), `[profile.release]` one per key (`lto`), `[profile.dev]` one per key and per
+/// package override (`opt-level`, `package.effectcraft-raster`). A whole missing table shows up as its
 /// entries all missing, so every finding names the entry a reader can act on.
 fn flatten_entries(table: Option<&toml::Value>) -> BTreeMap<String, toml::Value> {
     let mut entries = BTreeMap::new();
@@ -335,7 +371,9 @@ pub(crate) fn generated_table_errors(ours: &str, regenerated: &str) -> Vec<Strin
     };
     let list = |names: &[String]| -> String { names.join(", ") };
     let mut errors = Vec::new();
-    for (table, sub, name) in [("patch", "", "[patch]"), ("profile", "release", "[profile.release]")] {
+    let tables = std::iter::once(("patch", "", "[patch]".to_string()))
+        .chain(GENERATED_PROFILES.iter().map(|profile| ("profile", *profile, format!("[profile.{profile}]"))));
+    for (table, sub, name) in tables {
         let mine = flatten_entries(read(&ours, table, sub).as_ref());
         let theirs = flatten_entries(read(&written, table, sub).as_ref());
         let extra: Vec<String> = mine.keys().filter(|entry| !theirs.contains_key(entry.as_str())).cloned().collect();
@@ -999,11 +1037,13 @@ fn rev_text(ours: &str, full: &str, requested: &str, cache: &Cache) -> String {
 }
 
 /// Steps 1 and 2 of plan \u{a7}24, which `cargo xtask upstream update` takes first: fetch official main
-/// into the cache when it does not reach `rev` yet, then write the pins, `[patch]`, `[profile.release]`
+/// into the cache when it does not reach `rev` yet, then write the pins, `[patch]`, `[profile.dev]`, `[profile.release]`
 /// and the starting lock for that revision and let Cargo resolve the workspace on top of that lock. When
 /// the tree already holds exactly what the revision writes, nothing is written: the lock then stays as
 /// Cargo left it, rather than having CraftBridge's own crates resolved again against whatever the
-/// registry offers on the day, so a second run on the same revision changes nothing.
+/// registry offers on the day, so a second run on the same revision changes nothing. A tree that holds
+/// the revision and its `[patch]` tables but not yet the profiles the script writes gets them, and keeps
+/// its lock for the same reason ([`keeps_lock`]).
 pub(crate) fn pin(root: &Path, rev: &str) -> Result<String, String> {
     // Before the cache is touched: a name that is no commit id neither makes a cache nor fetches.
     commit_id(rev)?;
@@ -1025,7 +1065,12 @@ fn pin_from(root: &Path, cache: &Cache, rev: &str, full: &str) -> Result<String,
     if written == ours {
         return Ok(format!("rust/Cargo.toml already holds effectcraft {spelling} ({full}), filmcraft {filmcraft_rev} and their tables: nothing written"));
     }
-    std::fs::write(&manifest_path, written).map_err(|error| format!("cannot write rust/Cargo.toml: {error}"))?;
+    std::fs::write(&manifest_path, &written).map_err(|error| format!("cannot write rust/Cargo.toml: {error}"))?;
+    if keeps_lock(&ours, &written, &spelling, &filmcraft_rev) {
+        return Ok(format!(
+            "rewrote the generated tables of rust/Cargo.toml for effectcraft {spelling} ({full}); the pins and the [patch] tables name what they named, so rust/Cargo.lock is unchanged"
+        ));
+    }
     std::fs::write(root.join("rust/Cargo.lock"), &upstream_lock).map_err(|error| format!("cannot write rust/Cargo.lock: {error}"))?;
     // Resolve CraftBridge's own crates on top of the copied lock (D-21): versions upstream locked
     // stay locked; only what CraftBridge adds beyond them resolves fresh.
@@ -1038,6 +1083,15 @@ fn pin_from(root: &Path, cache: &Cache, rev: &str, full: &str) -> Result<String,
         return Err(format!("cargo metadata failed while resolving the pin:\n{}", String::from_utf8_lossy(&output.stderr).trim()));
     }
     Ok(format!("pinned effectcraft {spelling} ({full}), filmcraft {filmcraft_rev}; rust/Cargo.lock started from upstream's and resolved"))
+}
+
+/// Whether writing `written` over `ours` keeps the lock Cargo resolved on `ours`. While the pins and the
+/// `[patch]` tables say what they said, what changed is a profile or the way a table is written, neither of
+/// which Cargo's resolution reads, and seeding the lock again would resolve CraftBridge's own crates afresh
+/// on the day. A pin or a patch that moved changes what resolves, so the lock starts again from upstream's.
+fn keeps_lock(ours: &str, written: &str, effectcraft_rev: &str, filmcraft_rev: &str) -> bool {
+    let patch = |text: &str| toml::from_str::<toml::Value>(text).ok().and_then(|document| document.get("patch").cloned());
+    pins_from_manifest(ours).is_ok_and(|held| held.effectcraft_rev == effectcraft_rev && held.filmcraft_rev == filmcraft_rev) && patch(ours) == patch(written)
 }
 
 /// A bare scratch repository fetching from official EffectCraft, holding nothing yet: the cache a test
@@ -1155,7 +1209,7 @@ mod tests {
 
     fn upstream_manifest(film_rev: &str, library_rev: &str) -> String {
         format!(
-            "[workspace.dependencies]\neffectcraft-engine = {{ path = \"crates/engine\" }}\nfilmcraft-codecs = {{ git = \"https://github.com/storytold/filmcraft\", rev = \"{film_rev}\" }}\ncraft-docpath = {{ git = \"https://github.com/storytold/craft-libs\", rev = \"{library_rev}\" }}\n\n[profile.release]\nlto = \"thin\"\ncodegen-units = 1\n\n[patch.crates-io]\nserde = {{ git = \"https://github.com/storytold/example\", rev = \"beef\" }}\n"
+            "[workspace.dependencies]\neffectcraft-engine = {{ path = \"crates/engine\" }}\nfilmcraft-codecs = {{ git = \"https://github.com/storytold/filmcraft\", rev = \"{film_rev}\" }}\ncraft-docpath = {{ git = \"https://github.com/storytold/craft-libs\", rev = \"{library_rev}\" }}\n\n[profile.dev.package.\"*\"]\nopt-level = 2\n\n[profile.dev]\nopt-level = 1\n\n[profile.dev.package.effectcraft-raster]\nopt-level = 3\n\n[profile.dev-full]\ninherits = \"dev\"\ndebug = true\n\n[profile.release]\nlto = \"thin\"\ncodegen-units = 1\n\n[patch.crates-io]\nserde = {{ git = \"https://github.com/storytold/example\", rev = \"beef\" }}\n"
         )
     }
 
@@ -1223,6 +1277,15 @@ mod tests {
         let ours = workspace_manifest("10376058", "d5ead4ba");
         let once = regenerate(&ours, &upstream_manifest("d5ead4ba", "e7c3dda"), "10376058", "d5ead4ba").expect("the fixture parses");
         assert!(once.contains("lto = \"thin\"") && once.contains("[patch.crates-io]"), "{once}");
+        assert!(
+            once.contains("[profile.dev]") && once.contains("[profile.dev.package.\"*\"]") && once.contains("[profile.dev.package.effectcraft-raster]"),
+            "the dev profile moves with its package overrides: {once}"
+        );
+        assert!(
+            once.contains(&format!("{GENERATED_BY}[profile.dev.package.\"*\"]")),
+            "the line saying who writes the profile sits above its first table, as upstream orders them: {once}"
+        );
+        assert!(!once.contains("dev-full"), "a profile the script does not name is not copied: {once}");
         assert_eq!(
             once,
             regenerate(&once, &upstream_manifest("d5ead4ba", "e7c3dda"), "10376058", "d5ead4ba").expect("the rerun parses"),
@@ -1231,7 +1294,7 @@ mod tests {
         assert!(generated_table_errors(&once, &once).is_empty(), "the generated tables of a generated file match themselves");
         let missing = generated_table_errors(&ours, &once);
         assert!(
-            missing.iter().any(|error| error.contains("[patch]")) && missing.iter().any(|error| error.contains("[profile.release]")),
+            ["[patch]", "[profile.dev]", "[profile.release]"].iter().all(|table| missing.iter().any(|error| error.contains(table))),
             "tables the script has not written yet are findings: {missing:?}"
         );
         assert!(once.contains("craftbridge-core"), "what the script does not generate is kept: {once}");
@@ -1247,16 +1310,22 @@ mod tests {
         );
     }
 
+    /// A scratch cache whose official main holds one commit, `manifest` and a lock, and that commit's id.
+    fn pinned_cache(tag: &str, manifest: &str) -> (Scratch, Cache, String) {
+        let scratch = official_scratch(tag);
+        let full = crate::git::commit_files(&scratch.0, None, "pinned", &[("Cargo.toml", manifest), ("Cargo.lock", "# upstream's lock\n")]);
+        point_main_at(&scratch, &full);
+        let cache = Cache::at(scratch.0.clone()).unwrap();
+        (scratch, cache, full)
+    }
+
     /// The dry run of E12: taking the revision the tree already holds again, by the abbreviated id the
     /// manifest spells it with or in full, writes nothing, the lock included. The cache is a scratch one,
     /// so the test needs neither the machine's cache nor the network.
     #[test]
     fn taking_the_revision_the_tree_holds_again_writes_nothing() {
         let upstream = upstream_manifest("d5ead4ba", "e7c3dda");
-        let scratch = official_scratch("upstream-dry-run");
-        let full = crate::git::commit_files(&scratch.0, None, "pinned", &[("Cargo.toml", &upstream), ("Cargo.lock", "# upstream's lock\n")]);
-        point_main_at(&scratch, &full);
-        let cache = Cache::at(scratch.0.clone()).unwrap();
+        let (_scratch, cache, full) = pinned_cache("upstream-dry-run", &upstream);
         let abbreviated = full.get(..8).unwrap();
         let manifest = regenerate(&workspace_manifest(abbreviated, "d5ead4ba"), &upstream, abbreviated, "d5ead4ba").unwrap();
         let lock = "# the lock as Cargo resolved it\n";
@@ -1271,6 +1340,54 @@ mod tests {
         }
     }
 
+    /// A tree that holds its pin and its `[patch]` tables as the revision gives them but not the dev
+    /// profile, as one the script wrote before it wrote that profile, gets the profile alone: the lock
+    /// Cargo resolved on that pin stays as it is.
+    #[test]
+    fn a_table_the_tree_lacks_is_written_without_seeding_the_lock_again() {
+        let upstream = upstream_manifest("d5ead4ba", "e7c3dda");
+        let (_scratch, cache, full) = pinned_cache("upstream-new-table", &upstream);
+        let abbreviated = full.get(..8).unwrap();
+        let dev_profile =
+            "[profile.dev.package.\"*\"]\nopt-level = 2\n\n[profile.dev]\nopt-level = 1\n\n[profile.dev.package.effectcraft-raster]\nopt-level = 3\n\n";
+        assert!(upstream.contains(dev_profile));
+        let without_the_profile =
+            regenerate(&workspace_manifest(abbreviated, "d5ead4ba"), &upstream.replace(dev_profile, ""), abbreviated, "d5ead4ba").unwrap();
+        assert!(without_the_profile.contains("[patch.crates-io]") && !without_the_profile.contains("[profile.dev"), "{without_the_profile}");
+        let lock = "# the lock as Cargo resolved it\n";
+        let tree = Scratch::new("upstream-new-table-tree");
+        tree.write("rust/Cargo.toml", &without_the_profile);
+        tree.write("rust/Cargo.lock", lock);
+        let said = pin_from(&tree.0, &cache, abbreviated, &full).unwrap();
+        assert_eq!(
+            said,
+            format!(
+                "rewrote the generated tables of rust/Cargo.toml for effectcraft {abbreviated} ({full}); the pins and the [patch] tables name what they named, so rust/Cargo.lock is unchanged"
+            )
+        );
+        let manifest = std::fs::read_to_string(tree.0.join("rust/Cargo.toml")).unwrap();
+        assert!(generated_table_errors(&manifest, &manifest).is_empty() && manifest.contains("[profile.dev]"), "{manifest}");
+        assert_eq!(std::fs::read_to_string(tree.0.join("rust/Cargo.lock")).unwrap(), lock);
+    }
+
+    /// The lock stays only while nothing Cargo's resolution reads moves: a profile alone, or the way a
+    /// `[patch]` table is written, keeps it, and a `[patch]` entry the script puts back, or a pin that moves,
+    /// starts it again from upstream's.
+    #[test]
+    fn only_a_change_resolution_never_reads_keeps_the_lock() {
+        let written = regenerate(&workspace_manifest("10376058", "d5ead4ba"), &upstream_manifest("d5ead4ba", "e7c3dda"), "10376058", "d5ead4ba").unwrap();
+        let without_a_profile = written.replace("[profile.dev.package.effectcraft-raster]\nopt-level = 3\n", "");
+        assert_ne!(without_a_profile, written);
+        assert!(keeps_lock(&without_a_profile, &written, "10376058", "d5ead4ba"));
+        let annotated = written.replace("[patch.crates-io]\n", "[patch.crates-io]\n# A note written by hand.\n");
+        assert_ne!(annotated, written);
+        assert!(keeps_lock(&annotated, &written, "10376058", "d5ead4ba"), "a comment in a [patch] table changes nothing that resolves");
+        let patched_by_hand = written.replace("rev = \"beef\"", "rev = \"cafe\"");
+        assert_ne!(patched_by_hand, written);
+        assert!(!keeps_lock(&patched_by_hand, &written, "10376058", "d5ead4ba"), "a [patch] entry the script puts back changes what resolves");
+        assert!(!keeps_lock(&written, &written, "abcdef12", "d5ead4ba"), "a pin that moves changes what resolves");
+    }
+
     #[test]
     fn a_hand_written_patch_entry_or_profile_key_is_a_finding() {
         let ours = workspace_manifest("10376058", "d5ead4ba");
@@ -1280,6 +1397,13 @@ mod tests {
         assert!(errors.iter().any(|error| error.contains("[patch]")), "{errors:?}");
         let slower = written.replace("lto = \"thin\"", "lto = false");
         assert!(generated_table_errors(&slower, &written).iter().any(|error| error.contains("[profile.release]")));
+        let unoptimised = written.replace("opt-level = 1", "opt-level = 0");
+        assert!(generated_table_errors(&unoptimised, &written).iter().any(|error| error.contains("[profile.dev]") && error.contains("opt-level")));
+        let one_crate = written.replace("[profile.dev.package.effectcraft-raster]\nopt-level = 3", "[profile.dev.package.effectcraft-raster]\nopt-level = 0");
+        let errors = generated_table_errors(&one_crate, &written);
+        assert!(errors.iter().any(|error| error.contains("[profile.dev]") && error.contains("package.effectcraft-raster")), "{errors:?}");
+        let dropped = written.replace("[profile.dev.package.effectcraft-raster]\nopt-level = 3\n", "");
+        assert!(generated_table_errors(&dropped, &written).iter().any(|error| error.contains("it lacks package.effectcraft-raster")));
     }
 
     fn lock_entry(name: &str, source: &str) -> String {

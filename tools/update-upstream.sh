@@ -8,7 +8,7 @@
 # rust/xtask/src/upstream.rs, fetch official main into the machine's read-only cache of the official
 # repository when the cache does not reach <rev> yet, refuse a <rev> that is a branch, a tag or any name
 # that moves, or a commit official main does not reach, then write the EffectCraft and FilmCraft pins,
-# the [patch] tables and [profile.release] of rust/Cargo.toml from that revision's own manifest — copied,
+# the [patch] tables, [profile.dev] and [profile.release] of rust/Cargo.toml from that revision's own manifest — copied,
 # never retyped — seed rust/Cargo.lock from that revision's own lock, and let Cargo resolve CraftBridge's
 # own crates on top (D-21). FilmCraft is pinned to the revision EffectCraft itself names (plan §24),
 # never to one of CraftBridge's choosing.
