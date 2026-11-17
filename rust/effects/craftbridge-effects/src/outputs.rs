@@ -104,7 +104,7 @@ mod tests {
 
     fn rig(width: u32, height: u32, seconds: f64) -> Rig {
         let dir = tempfile::tempdir().expect("a scratch folder");
-        let mut backend = Backend::headless(session::build(Platform::current(), &session::tests::folders(None)));
+        let mut backend = Backend::headless(session::build(Platform::current(), &session::tests::folders(None), &crate::hardware::HardwareChoice::default()));
         for (command, params) in [
             ("comp.new", json!({"name": "A", "width": width, "height": height, "duration": seconds, "frameRate": 10})),
             ("layer.newSolid", json!({"comp": 1, "name": "Bg"})),

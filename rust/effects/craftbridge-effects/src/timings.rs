@@ -331,7 +331,8 @@ mod tests {
     #[test]
     fn the_gpu_section_compares_both_sizes_when_an_accelerator_is_attached() {
         let folders = crate::session::tests::folders(None);
-        let mut backend = Backend::headless(crate::session::build(craftbridge_core::Platform::current(), &folders));
+        let mut backend =
+            Backend::headless(crate::session::build(craftbridge_core::Platform::current(), &folders, &crate::hardware::HardwareChoice::default()));
         backend.exec("file.openDemoProject", json!({})).expect("the demo opens");
         let Ok(gpu) = effectcraft_gpu::Gpu::try_headless() else {
             let refused = timings(&mut backend, &json!({"gpu": true, "runs": 1}));

@@ -14,7 +14,7 @@ use craftbridge_core::folders::Folders;
 use effectcraft_engine::project::Footage;
 use effectcraft_engine::{Importer, Session};
 
-use crate::exporter::PooledExporter;
+use crate::hardware::{HardwareChoice, HardwareExporter};
 use crate::{fonts, plugins};
 
 /// The importer EffectCraft's host uses: a probe is EffectCraft's own media probe, so a phone reads
@@ -29,20 +29,22 @@ impl Importer for MediaImporter {
 
 /// The exporter seam: the one place the session's exporter is chosen. It is CraftBridge's own (AD7):
 /// EffectCraft's file exporter, the one the command line exports through, run on a pool the phone's
-/// memory can feed.
-fn exporter() -> Arc<PooledExporter> {
-    Arc::new(PooledExporter::new())
+/// memory can feed, with the device's hardware encoder for the H.264 and HEVC movies `choice` says a request
+/// chose it for.
+fn exporter(choice: HardwareChoice) -> Arc<HardwareExporter> {
+    Arc::new(HardwareExporter::new(choice))
 }
 
 /// Build the session (plan §19, steps 1 and 2): every field from public inputs, the plug-in hooks from the
 /// PD13 switch for `platform`, no helper hooks, and then EffectCraft's own script-runner install. The
 /// platform is a parameter so a test can build the iOS session's shape on the host and pin its
-/// policy there, while the gate's phone builds prove the code compiles for the phones.
-pub(crate) fn build(platform: Platform, folders: &Folders) -> Session {
+/// policy there, while the gate's phone builds prove the code compiles for the phones. The exporter
+/// encodes in hardware while `choice` says the request being answered chose it.
+pub(crate) fn build(platform: Platform, folders: &Folders, choice: &HardwareChoice) -> Session {
     let hooks = plugins::hooks_for(platform, folders);
     let mut session = Session {
         models_dir: Some(folders.models.clone()),
-        exporter: Some(exporter()),
+        exporter: Some(exporter(choice.clone())),
         footage: Arc::new(effectcraft_media::MediaPool::new()),
         importer: Some(Arc::new(MediaImporter)),
         expr: Some(Arc::new(effectcraft_expr::Expressions)),
@@ -129,34 +131,35 @@ pub(crate) mod tests {
 
     #[test]
     fn the_session_exports_through_craftbridges_exporter() {
-        // The exporter is the same on every desktop as EffectCraft's own and differs from it only on a
-        // phone, so what a host test can pin is the type the seam hands out.
-        let _: Arc<PooledExporter> = exporter();
-        assert!(build(Platform::current(), &folders(None)).exporter.is_some());
+        // The seam hands out one exporter type everywhere; what a platform changes is only what that
+        // exporter can reach at runtime — a pool the memory sizes, a hardware encoder the device has —
+        // so this test pins the type, and the export tests pin what an export of each kind comes to.
+        let _: Arc<HardwareExporter> = exporter(HardwareChoice::default());
+        assert!(build(Platform::current(), &folders(None), &HardwareChoice::default()).exporter.is_some());
     }
 
     #[test]
     fn the_session_carries_no_helper_hooks() {
         // The acceptance: no helper process can start, because the hooks that start one are not there.
-        let session = build(Platform::current(), &folders(None));
+        let session = build(Platform::current(), &folders(None), &HardwareChoice::default());
         assert!(session.helpers.is_none(), "a phone's session must hold no helper hooks at all");
     }
 
     #[test]
     fn the_session_is_built_as_effectcrafts_own_host_builds_it() {
-        let session = build(Platform::current(), &folders(None));
+        let session = build(Platform::current(), &folders(None), &HardwareChoice::default());
         assert!(session.script.is_some(), "EffectCraft's own install is made, though the confinement refuses every command that reaches it");
     }
 
     #[test]
     fn the_session_keeps_its_models_in_the_apps_folder() {
-        let session = build(Platform::current(), &folders(None));
+        let session = build(Platform::current(), &folders(None), &HardwareChoice::default());
         assert_eq!(session.models_dir.as_deref(), Some(std::path::Path::new("/app/models")));
     }
 
     #[test]
     fn plug_ins_are_off_without_a_folder() {
-        let session = build(Platform::current(), &folders(None));
+        let session = build(Platform::current(), &folders(None), &HardwareChoice::default());
         assert!(session.plugin_loader.is_none());
         assert!(session.plugin_previewer.is_none());
         assert!(session.plugins_dir.is_none());
@@ -165,7 +168,7 @@ pub(crate) mod tests {
     #[test]
     fn plug_ins_are_on_with_a_folder() {
         let plugins = std::path::PathBuf::from("/app/plug-ins");
-        let session = build(Platform::current(), &folders(Some(plugins.clone())));
+        let session = build(Platform::current(), &folders(Some(plugins.clone())), &HardwareChoice::default());
         // The engine answers with EffectCraft's own runtime gate on top of the app's switch.
         assert_eq!(session.plugin_loader.is_some(), effectcraft_plugin::wasm_available());
         assert_eq!(session.plugin_previewer.is_some(), effectcraft_plugin::wasm_available());

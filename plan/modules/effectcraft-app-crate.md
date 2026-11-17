@@ -9,7 +9,7 @@
 
 | File | Change | What |
 |---|---|---|
-| `Cargo.toml` | NEW | `effectcraft-engine`, `-host`, `-automation`, `-gpu`, `-render`, `-text`, `-media`, `-expr`, `-script` and `-plugin` from the workspace pins; `[target.'cfg(target_os = "android")'.dependencies] boa_engine = { workspace = true, features = ["jsvalue-enum"] }`, the workspace's entry being EffectCraft's own `{ version = "0.22", default-features = false }`, so Android's boa adds the layout and nothing else (D-8) |
+| `Cargo.toml` | NEW | `effectcraft-engine`, `-host`, `-automation`, `-gpu`, `-render`, `-time`, `-text`, `-media`, `-expr`, `-script`, `-plugin` and `-raster` from the workspace pins; `craftbridge-core`, and `craftbridge-media` for the hardware encoders (§18), with `image` and `symphonia` to read the Targa frames and the WAV the hardware export takes from EffectCraft's; `[target.'cfg(target_os = "android")'.dependencies] boa_engine = { workspace = true, features = ["jsvalue-enum"] }`, the workspace's entry being EffectCraft's own `{ version = "0.22", default-features = false }`, so Android's boa adds the layout and nothing else (D-8) |
 | `src/app.rs` | NEW | `EffectCraftApp`: construction and its confinement (AD9), GPU attach, the method table of §14 |
 | `src/methods.rs` | NEW | `commands`, `exec` and `run`, each calling the upstream function named in §14's table, the one door every command passes, the one mapping of EffectCraft's failures onto §14's rows (AD10), the model downloads withheld at the door (AD11) and the renders nothing has listed (§19) |
 | `src/plugins.rs` | NEW | PD13: plug-in policy |
@@ -25,7 +25,8 @@
 | `src/staging.rs` | NEW | AD5: the staging of a source the session may read from a folder it may not write: a copy in the cache, which the import reads so what it writes beside the source lands inside the container (§19) |
 | `src/outputs.rs` | NEW | AD19: the files a render may write, handed to `list_outputs` (§19) |
 | `src/timings.rs` | NEW | AD6 |
-| `src/exporter.rs` | NEW | AD7: CraftBridge's exporter, `FileExporter` run on a rayon pool sized from the core's `available_memory()` and the job's largest frame (the caller's own pool when that is its size, otherwise one kept from job to job), the one `Session.exporter` is set to |
+| `src/hardware.rs` | NEW | AD7: the exporter `Session.exporter` is set to: `FileExporter` through `src/exporter.rs`'s pools, and for an H.264 or HEVC job whose request chose `hardware` the Targa sequence and WAV run, the frames' conversion and order and the call into `craftbridge-media`'s encoders (§18); the choice is the one `export` request's, held by the app for the length of that call |
+| `src/exporter.rs` | NEW | AD7: CraftBridge's exporter, `FileExporter` run on a rayon pool sized from the core's `available_memory()` and the job's largest frame (the caller's own pool when that is its size, otherwise one kept from job to job), the one `Session.exporter` is set to (through `src/hardware.rs`) |
 
 **Construction.**
 1. CraftBridge builds the session (AD1): `Session { models_dir, plugins_dir, footage: MediaPool::new(), importer, exporter, expr, expr_check, plugin_loader, plugin_previewer, ..Default::default() }` with the app's folders, CraftBridge's exporter (AD7) and no helper hooks, then `effectcraft_script::install`, then the phone's fonts (AD2).

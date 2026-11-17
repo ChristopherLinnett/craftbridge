@@ -57,7 +57,7 @@ use crate::reference::{Given, given, reference};
 const EXPORT: &str = "export";
 
 /// Every parameter `export` takes, one per flag of `render`; any other name is refused.
-const FIELDS: [&str; 26] = [
+const FIELDS: [&str; 27] = [
     "comp",
     "output",
     "format",
@@ -84,6 +84,7 @@ const FIELDS: [&str; 26] = [
     "exrCompression",
     "exrDepth",
     "queue",
+    "hardware",
 ];
 
 /// A composition named by its id or by its name.
@@ -213,6 +214,10 @@ pub struct RenderRequest {
     /// `--queue`: render the project's own queue; every other field is then left unread, as the
     /// command line leaves its flags, so a value it would refuse is not refused either.
     pub queue: bool,
+    /// CraftBridge's own option, no flag of the command line: encode an H.264 or HEVC movie with the
+    /// device's hardware encoder where it has one (plan §18). Every other format, and a device without the
+    /// encoder, export through EffectCraft's encoders as the command line does.
+    pub hardware: bool,
 }
 
 impl RenderRequest {
@@ -223,6 +228,12 @@ impl RenderRequest {
         let obj = object_params(params, EXPORT)?;
         reject_unknown(&obj, EXPORT, &FIELDS)?;
         Ok(obj)
+    }
+
+    /// Whether a call of `method` with `params` is an `export` that chooses hardware encoding. A call whose
+    /// parameters do not read chooses nothing, and the render runner refuses it in its own words.
+    pub(crate) fn chooses_hardware(method: &str, params: &Value) -> bool {
+        method == EXPORT && Self::from_params(params).is_ok_and(|request| request.hardware)
     }
 
     /// Read the parameters of an `export` call. Absent parameters are an empty request, which
@@ -261,6 +272,7 @@ impl RenderRequest {
             exr_compression: text("exrCompression")?,
             exr_depth: text("exrDepth")?,
             queue: false,
+            hardware: bool_param(&obj, "hardware", EXPORT)?.unwrap_or(false),
         })
     }
 
@@ -653,6 +665,7 @@ mod tests {
             ("exrCompression", json!("zip")),
             ("exrDepth", json!("half")),
             ("queue", json!(true)),
+            ("hardware", json!(true)),
         ];
         assert_eq!(values.iter().map(|(name, _)| *name).collect::<Vec<_>>(), FIELDS, "a value for each accepted name");
         let left_out = RenderRequest::from_params(&json!({})).expect("reads");
@@ -660,6 +673,32 @@ mod tests {
             let given = RenderRequest::from_params(&Value::Object(Map::from_iter([(name.to_string(), value)]))).expect("reads");
             assert_ne!(given, left_out, "`{name}` is accepted but never read");
         }
+    }
+
+    #[test]
+    fn hardware_is_an_option_of_the_request_and_never_a_render_queue_parameter() {
+        let request = |extra: Value| {
+            let mut request = json!({"output": "/c/x.mp4", "format": "h264"});
+            request.as_object_mut().expect("an object").extend(extra.as_object().expect("an object").clone());
+            request
+        };
+        assert!(!RenderRequest::from_params(&request(json!({}))).expect("reads").hardware, "off unless asked for");
+        assert!(!RenderRequest::from_params(&request(json!({"hardware": false}))).expect("reads").hardware);
+        assert!(RenderRequest::from_params(&request(json!({"hardware": true}))).expect("reads").hardware);
+        assert_eq!(params(request(json!({"hardware": true}))), params(request(json!({}))), "the queue item is the same either way");
+        assert_eq!(RenderRequest::from_params(&request(json!({"hardware": "yes"}))), Err(CraftError::invalid_params("`export`: `hardware` must be a bool")));
+    }
+
+    #[test]
+    fn a_call_chooses_hardware_only_when_it_says_true_and_reads() {
+        assert!(RenderRequest::chooses_hardware(EXPORT, &json!({"output": "/c/x.mp4", "hardware": true})));
+        assert!(!RenderRequest::chooses_hardware(EXPORT, &json!({"output": "/c/x.mp4", "hardware": false})));
+        assert!(!RenderRequest::chooses_hardware(EXPORT, &json!({"output": "/c/x.mp4"})));
+        assert!(!RenderRequest::chooses_hardware(EXPORT, &json!({"output": "/c/x.mp4", "hardware": "yes"})), "a value that does not read chooses nothing");
+        assert!(!RenderRequest::chooses_hardware(EXPORT, &json!({"output": "/c/x.mp4", "hardware": true, "widht": 1})), "nor does a call that is refused");
+        assert!(!RenderRequest::chooses_hardware(EXPORT, &json!({"queue": true, "hardware": true})), "the project's own queue is no request's export");
+        assert!(!RenderRequest::chooses_hardware(EXPORT, &Value::Null));
+        assert!(!RenderRequest::chooses_hardware("render", &json!({"output": "/c/x.mp4", "hardware": true})), "only an export chooses");
     }
 
     /// A frame number is seconds at the comp's own rate, and at 30 frames a second where the comp

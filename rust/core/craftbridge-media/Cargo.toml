@@ -1,6 +1,6 @@
 [package]
 name = "craftbridge-media"
-description = "Hardware video decoders for Craft app plugins, registered through FilmCraft's decoder registry."
+description = "Hardware video decoders for Craft app plugins, registered through FilmCraft's decoder registry, and hardware encoders with the MP4 they write."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -19,13 +19,16 @@ filmcraft-isobmff.workspace = true
 filmcraft-color.workspace = true
 filmcraft-frame.workspace = true
 
-# Apple's frameworks, which only an iPhone or its simulator has; the features are the framework headers the
-# decoder reads (src/platform/videotoolbox.rs).
-[target.'cfg(target_os = "ios")'.dependencies]
-objc2-core-foundation = { workspace = true, features = ["std", "CFBase", "CFDictionary", "CFNumber", "CFData", "CFString"] }
+# Apple's frameworks, which only an iPhone, its simulator or a Mac has; the features are the framework headers
+# the decoder (iOS only) and the encoders read (src/platform/). The encoders build on a Mac too, so the host
+# tests run the same framework calls the phone makes.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+objc2-core-foundation = { workspace = true, features = ["std", "CFArray", "CFBase", "CFDictionary", "CFNumber", "CFData", "CFString"] }
 objc2-core-media = { workspace = true, features = ["std", "CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMTime"] }
 objc2-core-video = { workspace = true, features = ["std", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVReturn"] }
-objc2-video-toolbox = { workspace = true, features = ["std", "VTDecompressionSession", "VTDecompressionProperties", "VTErrors", "objc2-core-media", "objc2-core-video"] }
+objc2-video-toolbox = { workspace = true, features = ["std", "VTCompressionProperties", "VTCompressionSession", "VTDecompressionSession", "VTDecompressionProperties", "VTErrors", "VTSession", "objc2-core-media", "objc2-core-video"] }
+objc2-audio-toolbox = { workspace = true, features = ["std", "AudioCodec", "AudioConverter", "objc2-core-audio-types"] }
+objc2-core-audio-types = { workspace = true, features = ["std", "CoreAudioBaseTypes"] }
 
 # Android's media NDK, which only an Android build has; the features are the media bindings and the API level
 # the SDK's minSdk names (src/platform/mediacodec.rs).

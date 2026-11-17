@@ -12,6 +12,8 @@ use effectcraft_automation::{Backend, McpServer};
 use serde_json::Value;
 use std::path::PathBuf;
 
+use crate::hardware::HardwareChoice;
+use crate::requests::RenderRequest;
 use crate::runner::{self, ListOutputs, Progress};
 use crate::{files, info, mcp, methods, plugins, properties, replay, session, templates, timings};
 
@@ -33,6 +35,8 @@ pub struct EffectCraftApp {
     /// The app's cache folder, inside the container, where a source the session may not write beside
     /// is copied to be read ([`crate::staging`]).
     cache: PathBuf,
+    /// Whether the export being answered chose hardware encoding, which the session's exporter reads.
+    hardware: HardwareChoice,
     /// The app's place in the iOS plug-in gate's folder list, held while the app lives (§19).
     _admission: plugins::Admission,
 }
@@ -57,10 +61,13 @@ impl EffectCraftApp {
         // reach it, since a loader is a plain function pointer (§19); the folder is resolved on
         // disk, so it is handed over once the folders are prepared.
         let admission = plugins::admit(platform, folders);
-        let mut backend = Backend::headless(session::build(platform, folders));
+        // The session's exporter reads this choice while an export is being answered; the app starts
+        // it with nothing chosen, and `request_with_progress` sets it for the length of one call.
+        let hardware = HardwareChoice::default();
+        let mut backend = Backend::headless(session::build(platform, folders, &hardware));
         let confinement = EngineConfinement::new(roots.read_roots(), &[roots.write_root().to_path_buf()]).map_err(|error| CraftError::io(error.to_string()))?;
         backend.confine(confinement);
-        Ok(Self { server: McpServer::new(backend), gpu_failure: None, cache: folders.cache.clone(), _admission: admission })
+        Ok(Self { server: McpServer::new(backend), gpu_failure: None, cache: folders.cache.clone(), hardware, _admission: admission })
     }
 
     /// The parameters of a call this app answers, with a template the session may not write beside
@@ -134,6 +141,7 @@ impl CraftApp for EffectCraftApp {
         match PROGRESS_METHODS.iter().find(|(name, _)| *name == method) {
             Some((_, answer)) => {
                 let params = self.staged(method, params)?;
+                let _chosen = self.hardware.scope(RenderRequest::chooses_hardware(method, &params));
                 answer(self.server.backend(), &params, on_progress, list_outputs)
             }
             None => Err(CraftError::unsupported(not_answered(method, "request_with_progress", PROGRESS_METHODS.iter().map(|(name, _)| *name)))),

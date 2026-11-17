@@ -10,6 +10,8 @@ publish.workspace = true
 
 [dependencies]
 craftbridge-core.workspace = true
+# The hardware encoders and the movie they write (plan §18); the plugin keeps the choice of when to use them.
+craftbridge-media.workspace = true
 
 # The plugin builds against EffectCraft itself: an adaptation (AGENTS.md §7) calls EffectCraft's public
 # interfaces, so the interfaces are dependencies. Every rev is the pin `tools/update-upstream.sh` wrote
@@ -25,10 +27,17 @@ effectcraft-media.workspace = true
 effectcraft-expr.workspace = true
 effectcraft-script.workspace = true
 effectcraft-plugin.workspace = true
+# The colour conversion EffectCraft's own export makes before it encodes (plan §18): the hardware export feeds
+# its encoder the same planes.
+effectcraft-raster.workspace = true
 serde_json.workspace = true
 rustix.workspace = true
 # The export's thread pool (AD7).
 rayon.workspace = true
+# The Targa frames and the WAV the hardware export takes from EffectCraft's export (plan §18);
+# the crate's tests read PNGs with the same `image`.
+image.workspace = true
+symphonia.workspace = true
 # The plugin hands the core's wgpu device to the compositor and installs its failure callbacks,
 # which speak wgpu's own types (plan §17); the version is the workspace's, shared with the core.
 wgpu.workspace = true
@@ -47,7 +56,6 @@ boa_engine = { workspace = true, features = ["jsvalue-enum"] }
 # The font listing's test of every app-facing entry writes the face list, which is one per process, so
 # it reruns itself alone in a child through the workspace's one helper for that.
 craftbridge-process.workspace = true
-image.workspace = true
 tempfile.workspace = true
 # The D-8 test reads the toolchain pin's targets with the TOML parser the workspace's tools use.
 toml.workspace = true
