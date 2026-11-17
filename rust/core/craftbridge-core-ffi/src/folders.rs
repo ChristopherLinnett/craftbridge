@@ -5,7 +5,9 @@
 /// engine starts.
 #[derive(uniffi::Record)]
 pub struct Folders {
-    /// The app's sandbox: the engine's read and write root.
+    /// The app's sandbox: the engine's read and write root, which holds every working folder. The start
+    /// proves it can write here through the working folders alone, since the top of an iOS app's sandbox
+    /// takes no new file while the folders in it do.
     pub container: String,
     /// The app bundle (iOS) or its unpacked assets (Android): a read root, or none.
     pub bundle: Option<String>,

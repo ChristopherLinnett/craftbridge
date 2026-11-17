@@ -1021,6 +1021,12 @@ impl LanguageServer {
         Ok(server)
     }
 
+    /// Open a document once, and wait for the server's answer to a question about it before anything else is
+    /// sent. SourceKit-LSP stops answering every request once about ninety `didOpen` notifications reach it
+    /// back to back (Xcode 26.6's: with ninety of the package's files opened at once not even `semanticTokens`
+    /// answered, while the same ninety opened one at a time each answered at once), so a package grown past
+    /// that would leave the stage waiting on a server that never answers. The question is the document's
+    /// symbols, which the server reads from the text alone, so the wait is for the open and for no build.
     fn open(&mut self, uri: &str, text: &str) -> Result<(), String> {
         if self.opened.insert(uri.to_string()) {
             self.notify(
@@ -1030,6 +1036,7 @@ impl LanguageServer {
                     object([("uri", Value::from(uri)), ("languageId", Value::from("swift")), ("version", Value::from(1)), ("text", Value::from(text))]),
                 )]),
             )?;
+            self.request("textDocument/documentSymbol", object([("textDocument", object([("uri", Value::from(uri))]))]), ANSWER_WAIT)?;
         }
         Ok(())
     }

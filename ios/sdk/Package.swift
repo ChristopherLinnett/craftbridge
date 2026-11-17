@@ -17,7 +17,8 @@ let package = Package(
         .target(name: "CraftBridgeFFI", dependencies: ["CraftBridgeFFIBinary"]),
         .target(name: "CraftBridge", dependencies: ["CraftBridgeFFI"]),
         .target(name: "CraftBridgeEffects", dependencies: ["CraftBridge"]),
-        .testTarget(name: "CraftBridgeEffectsTests", dependencies: ["CraftBridge", "CraftBridgeEffects"]),
+        .testTarget(
+            name: "CraftBridgeEffectsTests", dependencies: ["CraftBridge", "CraftBridgeEffects", "CraftBridgeFFI"]),
     ],
     swiftLanguageModes: [.v6]
 )

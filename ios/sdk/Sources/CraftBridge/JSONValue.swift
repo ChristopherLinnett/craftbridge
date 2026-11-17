@@ -1,5 +1,6 @@
 // The JSON the native boundary speaks, and the values every Craft app's calls are made of.
 
+import CraftBridgeFFI
 import Foundation
 
 /// A JSON value: what a request carries to the engine and what its reply holds.
@@ -169,6 +170,30 @@ public enum CraftColor: Sendable, Hashable, JSONRepresentable {
         switch self {
         case .rgb(let red, let green, let blue): [.number(red), .number(green), .number(blue)]
         case .hex(let value): .string(value)
+        }
+    }
+}
+
+extension JSONValue {
+    /// The value as the JSON text a call's parameters cross the boundary in. JSON has no number for NaN or
+    /// an infinity, the one value a `JSONValue` can hold that it cannot write, so parameters holding one are
+    /// refused as the call's parameters.
+    package func jsonText() throws -> String {
+        do {
+            return String(decoding: try JSONEncoder().encode(self), as: UTF8.self)
+        } catch {
+            throw CraftError.InvalidParams(
+                detail: "the parameters hold NaN or an infinity, which JSON has no number for")
+        }
+    }
+
+    /// The value the JSON text an engine answers with holds. The engine answers with JSON alone, so text
+    /// that is none is the engine's own failure.
+    package init(jsonText text: String) throws {
+        do {
+            self = try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
+        } catch {
+            throw CraftError.Internal(detail: "the engine answered with text that is not JSON")
         }
     }
 }

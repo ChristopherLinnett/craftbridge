@@ -24,4 +24,28 @@ import Testing
         #expect(2.5.jsonValue == 2.5)
         #expect("a".jsonValue == "a")
     }
+
+    @Test func aValueCrossesAsTheJSONTextItHolds() throws {
+        let value: JSONValue = ["output": "/Library/Caches/card.mp4", "end": 4, "queue": false, "rendered": [nil]]
+        #expect(try JSONValue(jsonText: try value.jsonText()) == value)
+        #expect(try JSONValue(jsonText: #"{"rendered":[{"seconds":1.5}]}"#) == ["rendered": [["seconds": 1.5]]])
+        // An answer is any JSON, a bare value too.
+        #expect(try JSONValue(jsonText: "null") == .null)
+        #expect(try JSONValue(jsonText: #""done""#) == "done")
+    }
+
+    @Test func parametersJSONHasNoNumberForAreRefusedAsTheCallsParameters() {
+        let refusal = CraftError.InvalidParams(
+            detail: "the parameters hold NaN or an infinity, which JSON has no number for")
+        for value: JSONValue in [.number(.nan), ["end": [.number(.infinity)]], [.number(-.infinity)]] {
+            #expect(throws: refusal) { try value.jsonText() }
+        }
+    }
+
+    @Test func anAnswerThatIsNotJSONIsTheEnginesOwnFailure() {
+        let failure = CraftError.Internal(detail: "the engine answered with text that is not JSON")
+        for text in ["", "{", "{\"rendered\": }", "NaN"] {
+            #expect(throws: failure) { try JSONValue(jsonText: text) }
+        }
+    }
 }

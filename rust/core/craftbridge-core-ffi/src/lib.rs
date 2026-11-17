@@ -9,7 +9,8 @@
 //! as `request` does, so a reply the app never wrote is never read as one, and an `mcp` line that
 //! needs no reply answers `None`.
 //!
-//! `recovery` answers at once with what the start cleaned up after an export the system killed.
+//! `recovery` answers at once with what the start cleaned up after an export the system killed, and
+//! [`craft_error_message`] with the words a [`CraftError`] shows the app's user.
 //!
 //! No value crosses without a copy: only an object crosses as a handle. UniFFI serialises every
 //! record, a [`FrameBytes`] with its `data` included, into a buffer it hands to the foreign side,
@@ -42,7 +43,7 @@ mod surface_tests;
 pub use cancel::CancelToken;
 pub use crossing::{MAX_ANSWER_BYTES, MAX_FRAME_BYTES, MAX_MCP_LINE_BYTES};
 pub use engine::Engine;
-pub use error::CraftError;
+pub use error::{CraftError, craft_error_message};
 pub use folders::Folders;
 pub use frames::{FrameBytes, PixelFormat};
 pub use gpu::GpuChoice;

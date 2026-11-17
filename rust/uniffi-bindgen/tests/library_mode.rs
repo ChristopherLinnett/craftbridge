@@ -132,6 +132,9 @@ fn the_core_s_kotlin_holds_every_export_and_no_name_kotlin_owns() {
         "enum class GpuChoice {",
         "enum class PixelFormat {",
         "sealed class CraftException: kotlin.Exception() {",
+        // The words an error shows its user, read from the core's own `Display`, written on the line its
+        // documentation's comment ends on.
+        "*/ fun `craftErrorMessage`(`error`: CraftException): kotlin.String {",
     ];
     assert_eq!(missing(&kotlin, &expected), Vec::<&str>::new(), "the Kotlin bindings lack these");
     // Every generated object is an `AutoCloseable` whose own `close()` frees its handle, and every
@@ -191,8 +194,10 @@ fn the_core_s_swift_holds_every_export_in_files_named_for_its_crate() {
         // The iOS attach of plan §20 is a top-level call taking the engine, as the plan names it.
         "public func attachMetalLayer(engine: Engine, layer: UInt64)async throws {",
         "public enum PixelFormat: Equatable, Hashable {",
-        // UniFFI writes the error's `public` on a line of its own.
-        "enum CraftError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {",
+        // UniFFI writes the error's `public` on a line of its own. It declares no `LocalizedError`, which
+        // `CraftBridge` declares with the core's words (`uniffi.toml` says why).
+        "enum CraftError: Swift.Error, Equatable, Hashable {",
+        "public func craftErrorMessage(error: CraftError) -> String {",
         "case CommandFailed(command: String, detail: String, step: UInt32?",
     ];
     let single: Vec<String> =
