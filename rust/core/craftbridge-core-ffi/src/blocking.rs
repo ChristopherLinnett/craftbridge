@@ -2,7 +2,7 @@
 //! the engine cannot answer on a oneshot, such as stopping, which joins its thread.
 
 use crate::error::CraftError;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use craftbridge_core::engine::guarded;
 use std::thread;
 
 /// Run `work`, which blocks until the engine answers, on a thread of its own and wait for its answer
@@ -20,7 +20,7 @@ where
     thread::Builder::new()
         .name("craftbridge-call".to_string())
         .spawn(move || {
-            let outcome = catch_unwind(AssertUnwindSafe(work)).unwrap_or_else(|caught| Err(CraftError::from_panic(caught)));
+            let outcome = guarded(work).flatten();
             // The receiver is gone when the caller stopped waiting, and nobody wants the answer then.
             let _ = answer.send(outcome);
         })

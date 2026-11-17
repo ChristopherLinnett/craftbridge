@@ -1,5 +1,6 @@
 //! The workspace's bindgen, run in library mode on the distribution library an app links, writes the
-//! core's Swift and Kotlin with every exported type and call, under names both languages can hold.
+//! core's and the plug-in's Swift and Kotlin with every exported type and call, under names both
+//! languages can hold.
 //!
 //! No gate stage compiles generated bindings until the Swift package and the Android build take them
 //! in, so this reads what the generator wrote for the declarations it must hold, line by line as
@@ -136,4 +137,52 @@ fn the_core_s_swift_holds_every_export_in_files_named_for_its_crate() {
         TEXT_VARIANTS.iter().filter(|variant| **variant != "CommandFailed").map(|variant| format!("case {variant}(detail: String")).collect();
     expected.extend(single.iter().map(String::as_str));
     assert_eq!(missing(&swift, &expected), Vec::<&str>::new(), "the Swift bindings lack these");
+}
+
+#[test]
+fn the_plugin_s_kotlin_holds_its_constructor_over_the_core_s_types() {
+    let out = tempfile::tempdir().expect("a scratch folder");
+    generate("kotlin", out.path()).expect("the library generates Kotlin");
+    // The package comes from the distribution crate's own `uniffi.toml`; the file at all, from its
+    // scaffolding being in the library beside the core's.
+    let kotlin =
+        lines(&out.path().join("io/github/christopherlinnett/craftbridge/ffi/effects/craftbridge_effects_ffi.kt")).expect("the plugin's Kotlin was written");
+    let expected = [
+        "package io.github.christopherlinnett.craftbridge.ffi.effects",
+        // The plugin's package loads the one native library too, the same name the core's loads.
+        "return \"craftbridge_effects_ffi\"",
+        // The constructor, named as Kotlin holds it, throwing the core's error, answering the core's handle.
+        "@Throws(CraftException::class) fun `startEffectsEngine`(`folders`: Folders, `gpu`: GpuChoice): Engine {",
+        // The types it crosses in are the core's package's, not a second copy: one package per crate,
+        // the one answer to which package owns `Engine`, `Folders` and the error.
+        "import io.github.christopherlinnett.craftbridge.ffi.core.CraftException",
+        "import io.github.christopherlinnett.craftbridge.ffi.core.Engine",
+        "import io.github.christopherlinnett.craftbridge.ffi.core.Folders",
+        "import io.github.christopherlinnett.craftbridge.ffi.core.GpuChoice",
+    ];
+    assert_eq!(missing(&kotlin, &expected), Vec::<&str>::new(), "the plugin's Kotlin bindings lack these");
+    // The plugin defines no type of its own: everything the core owns it takes by import, so no
+    // package holds two answers to which file declares them.
+    for owned in ["open class Engine", "data class Folders", "enum class GpuChoice", "sealed class CraftException"] {
+        assert!(!kotlin.iter().any(|line| line.contains(owned)), "the plugin's package redefines `{owned}` the core owns");
+    }
+}
+
+#[test]
+fn the_plugin_s_swift_holds_its_constructor_in_files_named_for_its_crate() {
+    let out = tempfile::tempdir().expect("a scratch folder");
+    generate("swift", out.path()).expect("the library generates Swift");
+    // Named for the distribution crate, so these sit beside the core's of the same kinds without
+    // overwriting them, as the core's test checks its own.
+    for file in ["craftbridge_effects_ffiFFI.h", "craftbridge_effects_ffiFFI.modulemap"] {
+        assert!(out.path().join(file).is_file(), "{file} was not written");
+    }
+    let swift = lines(&out.path().join("craftbridge_effects_ffi.swift")).expect("the plugin's Swift was written");
+    let expected = [
+        // The constructor, as Swift holds it: the core's `Folders` and `GpuChoice` in, the core's `Engine` out,
+        // throwing — so `start_effects_engine` stands in the Swift of the one native library as it
+        // does in the Kotlin. The line reads as UniFFI writes it, runs of spaces read as one.
+        "public func startEffectsEngine(folders: Folders, gpu: GpuChoice)throws -> Engine {",
+    ];
+    assert_eq!(missing(&swift, &expected), Vec::<&str>::new(), "the plugin's Swift bindings lack these");
 }

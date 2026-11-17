@@ -525,13 +525,20 @@ fn next_message(pending: &mut VecDeque<Message>, incoming: &Receiver<Message>) -
 }
 
 /// Run `work` behind the never-crash boundary (AGENTS §3): a panic that unwinds out of it becomes
-/// `Internal` carrying the panic's message, and the engine thread goes on.
+/// `Internal` carrying the panic's message, and the thread that ran it goes on. It is the one panic
+/// guard: the engine thread runs each call of the app behind it, and the boundary runs behind it
+/// what it runs off the engine thread, a constructor building the app among them, so every caught
+/// panic answers alike.
 ///
 /// `AssertUnwindSafe` is deliberate: a panic may leave the session half-changed, and plan §14 and §16
 /// keep the session as the panic left it — the document is kept, not rolled back — as EffectCraft's
 /// own guard does. Only an unwinding panic can be caught: one raised while another unwinds, by a
 /// destructor in the app's own cleanup, is an abort Rust itself makes, before any guard runs.
-pub(crate) fn guarded<T>(work: impl FnOnce() -> T) -> Result<T> {
+///
+/// # Errors
+///
+/// `Internal` when `work` panics.
+pub fn guarded<T>(work: impl FnOnce() -> T) -> Result<T> {
     panic::catch_unwind(AssertUnwindSafe(work)).map_err(|caught| {
         // Reading the payload drops it, and its drop is app code as well, run after the guard above
         // has returned: one that panics again is caught here, and what it panicked with is leaked

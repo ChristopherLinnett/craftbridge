@@ -1,0 +1,10 @@
+# Binding settings for the generators `cargo xtask generate` runs (plan §20), which read this crate's
+# exports in library mode from the one native library, as they read the core's from the same one.
+# Library mode names that library for Kotlin to load, so no setting here repeats its name.
+#
+# Swift keeps UniFFI's own `module_name`, the crate's name, as the core's settings explain: it names
+# the files this crate's Swift is written to, and the two crates' files share the one `CraftBridgeFFI`
+# module without sharing a name that would overwrite.
+
+[bindings.kotlin]
+package_name = "io.github.christopherlinnett.craftbridge.ffi.effects"
