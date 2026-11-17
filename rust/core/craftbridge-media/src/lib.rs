@@ -1,28 +1,40 @@
-//! Hardware video decoders that every Craft app plugin imports.
+//! Hardware video decoders and encoders that every Craft app plugin imports.
 //!
-//! VideoToolbox on iOS and MediaCodec on Android, registered through FilmCraft's public decoder
-//! registry so the software decoders stay the fallback. Platform code lives in `platform/`.
+//! The decoders, VideoToolbox on iOS and MediaCodec on Android, are registered through FilmCraft's public
+//! decoder registry so the software decoders stay the fallback. The encoders, VideoToolbox and AudioToolbox
+//! on Apple platforms, feed [`Movie`], which writes the MP4; a platform without them answers
+//! [`EncodeError::Unavailable`], and its caller encodes another way. Platform code lives in `platform/`.
 
+mod aac;
 #[cfg(any(target_os = "ios", target_os = "android", test))]
 mod biplanar;
+mod encode;
 mod fallback;
+mod hardware;
 #[cfg(any(target_os = "ios", target_os = "android", test))]
 mod layout;
 #[cfg(any(target_os = "android", test))]
 mod mediacodec_input;
+mod movie;
 #[cfg(any(target_os = "ios", target_os = "android", test))]
 mod order;
-#[cfg(any(target_os = "ios", target_os = "android"))]
+#[cfg(any(target_vendor = "apple", target_os = "android"))]
 #[allow(unsafe_code)]
 mod platform;
+#[cfg(any(target_vendor = "apple", test))]
+mod settings;
 
 use filmcraft_codecs::hw::{StreamInfo, hardware_decoding, note_hw_declined, set_hardware_decoding, set_hw_backend};
 use filmcraft_codecs::{Result, VideoDecoder, register_video_decoder};
 use filmcraft_isobmff::SampleEntry;
 
+pub use aac::AacSpec;
+pub use encode::{ColourCodes, EncodeError, RateControl, Reorder, VideoCodec, VideoSpec, Yuv420};
 pub use fallback::{Draining, Fallback};
+pub use hardware::{HardwareEncoder, encode_aac};
 #[cfg(target_os = "android")]
 pub use mediacodec_input::CodecInfo;
+pub use movie::{AAC_FRAME, AudioTrack, Backend, Finished, Movie, Packet};
 
 /// What [`register`] left the process able to do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

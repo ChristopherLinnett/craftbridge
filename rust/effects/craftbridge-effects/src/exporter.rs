@@ -96,16 +96,10 @@ impl PooledExporter {
     }
 }
 
-impl Exporter for PooledExporter {
-    fn formats(&self) -> Vec<OutputFormat> {
-        self.inner.formats()
-    }
-
-    fn supports_skip_existing(&self, settings: &RenderSettings) -> bool {
-        self.inner.supports_skip_existing(settings)
-    }
-
-    fn export(&self, job: &ExportJob, progress: &mut dyn FnMut(u64, u64) -> bool) -> Result<ExportResult, String> {
+impl PooledExporter {
+    /// `job` through `inner`, on the pool the memory allows: the one place a job's pool is chosen, so the
+    /// exports CraftBridge makes of its own (plan §18) are held to the memory as EffectCraft's are.
+    pub(crate) fn run(&self, inner: &dyn Exporter, job: &ExportJob, progress: &mut dyn FnMut(u64, u64) -> bool) -> Result<ExportResult, String> {
         // The pool's ceiling is the size of the pool a thread outside any pool would run on, which is
         // what EffectCraft's own rule counts threads in: the machine's cores, or the count rayon's
         // environment variables set.
@@ -115,7 +109,7 @@ impl Exporter for PooledExporter {
             // The caller's own pool already has that many threads, so the job runs there, as
             // EffectCraft's exporter alone runs it: a desktop's exports, which report no figure, keep
             // their threads and what EffectCraft keeps on them.
-            return self.inner.export(job, progress);
+            return inner.export(job, progress);
         }
         let pool = self.pool(threads)?;
         // The caller's progress hook is not `Send`, so it cannot move onto the pool. The export runs on
@@ -126,7 +120,7 @@ impl Exporter for PooledExporter {
         pool.in_place_scope(|scope| {
             let slot = &mut outcome;
             scope.spawn(move |_| {
-                *slot = Some(self.inner.export(job, &mut |done, total| {
+                *slot = Some(inner.export(job, &mut |done, total| {
                     let (answer, reply) = mpsc::channel();
                     // A hook that cannot be reached cannot say to go on: the export stops.
                     asks.send((done, total, answer)).is_ok() && reply.recv().unwrap_or(false)
@@ -140,8 +134,22 @@ impl Exporter for PooledExporter {
     }
 }
 
+impl Exporter for PooledExporter {
+    fn formats(&self) -> Vec<OutputFormat> {
+        self.inner.formats()
+    }
+
+    fn supports_skip_existing(&self, settings: &RenderSettings) -> bool {
+        self.inner.supports_skip_existing(settings)
+    }
+
+    fn export(&self, job: &ExportJob, progress: &mut dyn FnMut(u64, u64) -> bool) -> Result<ExportResult, String> {
+        self.run(&*self.inner, job, progress)
+    }
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
     use std::thread::ThreadId;
@@ -207,7 +215,7 @@ mod tests {
 
     /// The pieces of an export job: a project holding one composition `width` by `height`, and a queue
     /// item that renders it, for the test to change before it builds the job.
-    fn project_with_comp(width: u32, height: u32) -> (Arc<Project>, RenderQueueItem) {
+    pub(crate) fn project_with_comp(width: u32, height: u32) -> (Arc<Project>, RenderQueueItem) {
         let mut backend = Backend::headless(Session::default());
         let params = serde_json::json!({"name": "A", "width": width, "height": height, "duration": 1, "frameRate": 10});
         backend.exec("comp.new", params).expect("the composition is made");
@@ -217,7 +225,7 @@ mod tests {
     }
 
     /// `body` with a job for `item` over `project`, which writes to `path`.
-    fn with_job<R>(project: &Project, item: &RenderQueueItem, body: impl FnOnce(&ExportJob) -> R) -> R {
+    pub(crate) fn with_job<R>(project: &Project, item: &RenderQueueItem, body: impl FnOnce(&ExportJob) -> R) -> R {
         let footage = MediaPool::new();
         let job = ExportJob {
             project,

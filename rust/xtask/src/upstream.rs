@@ -21,7 +21,8 @@
 //!   the cargo home's, whatever those `include`, and the environment the gate runs in — each is
 //!   Cargo's word on where the build takes its crates, exactly like the lock is its word on commits, and
 //! * the workspace still depends on the pinned crates: a pin nothing imports would let the check
-//!   verify nothing.
+//!   verify nothing, and pins no Craft app's crate the update does not write, which would stay behind
+//!   when the pin moves.
 //!
 //! Everything here reads Cargo's own data — manifests and the lock as TOML, never a scanned line of
 //! text — and git's, through [`crate::git`]. The generator keeps the rest of `rust/Cargo.toml` byte for
@@ -48,6 +49,7 @@ pub(crate) const EFFECTCRAFT_CRATES: &[&str] = &[
     "effectcraft-expr",
     "effectcraft-script",
     "effectcraft-plugin",
+    "effectcraft-raster",
 ];
 
 fn effectcraft_app() -> Result<&'static layers::CraftApp, String> {
@@ -96,9 +98,25 @@ pub(crate) struct Pin {
 pub(crate) fn pins_from_manifest(text: &str) -> Result<Pin, Vec<String>> {
     let document: toml::Value = toml::from_str(text).map_err(|error| vec![format!("rust/Cargo.toml does not parse: {error}")])?;
     let dependencies = document.get("workspace").and_then(|workspace| workspace.get("dependencies")).and_then(toml::Value::as_table);
-    let effects_url = app_url(effectcraft_app().map_err(|error| vec![error])?);
-    let film_url = app_url(film_app().map_err(|error| vec![error])?);
+    let (effects, film) = (effectcraft_app().map_err(|error| vec![error])?, film_app().map_err(|error| vec![error])?);
+    let (effects_url, film_url) = (app_url(effects), app_url(film));
+    let film_crates = core_named_upstream();
     let mut errors = Vec::new();
+    // The update writes only the crates its lists name, so a Craft app's crate pinned beside them and named
+    // in neither would keep its revision when the pin moves, and the build would hold two of that app.
+    for (name, entry) in dependencies.into_iter().flatten() {
+        let git = entry.get("git").and_then(toml::Value::as_str);
+        let (pinned, list): (&[&str], &str) = match family(name, git) {
+            Some(CraftFamily::App(app)) if std::ptr::eq(app, effects) => (EFFECTCRAFT_CRATES, "EFFECTCRAFT_CRATES in rust/xtask/src/upstream.rs"),
+            Some(CraftFamily::App(app)) if std::ptr::eq(app, film) => (&film_crates, "a core row's `upstream` in rust/xtask/src/layers.rs"),
+            _ => continue,
+        };
+        if !pinned.contains(&name.as_str()) {
+            errors.push(format!(
+                "rust/Cargo.toml: [workspace.dependencies].{name} is a Craft app's crate tools/update-upstream.sh does not pin, so it would keep its revision when the pin moves: name it in {list}"
+            ));
+        }
+    }
     let read = |names: &[&str], url: &str, what: &str, errors: &mut Vec<String>| -> Option<String> {
         let mut rev: Option<String> = None;
         for name in names {
@@ -128,7 +146,7 @@ pub(crate) fn pins_from_manifest(text: &str) -> Result<Pin, Vec<String>> {
         rev
     };
     let effectcraft_rev = read(EFFECTCRAFT_CRATES, &effects_url, "EffectCraft", &mut errors);
-    let filmcraft_rev = read(&core_named_upstream(), &film_url, "FilmCraft", &mut errors);
+    let filmcraft_rev = read(&film_crates, &film_url, "FilmCraft", &mut errors);
     if !errors.is_empty() {
         return Err(errors);
     }
@@ -1169,6 +1187,28 @@ mod tests {
             "effectcraft-time = { git = \"https://github.com/storytold/effectcraft\", rev = \"another\" }",
         );
         assert!(pins_from_manifest(&mixed).is_err_and(|errors| errors.iter().any(|error| error.contains("two different revisions"))));
+    }
+
+    #[test]
+    fn a_craft_apps_crate_the_update_does_not_pin_is_refused() {
+        let refused = |extra: &str| pins_from_manifest(&format!("{}{extra}\n", workspace_manifest("10376058", "d5ead4ba"))).unwrap_err();
+        let unlisted = refused("effectcraft-export = { git = \"https://github.com/storytold/effectcraft\", rev = \"10376058\" }");
+        assert_eq!(
+            unlisted,
+            [
+                "rust/Cargo.toml: [workspace.dependencies].effectcraft-export is a Craft app's crate tools/update-upstream.sh does not pin, so it would keep its revision when the pin moves: name it in EFFECTCRAFT_CRATES in rust/xtask/src/upstream.rs"
+            ]
+        );
+        // Known by its repository whatever it is called, and FilmCraft's crates by the layer table's list.
+        assert!(
+            refused("renamed = { git = \"https://github.com/storytold/effectcraft\", rev = \"10376058\", package = \"effectcraft-export\" }")
+                .iter()
+                .any(|error| error.contains(".renamed is a Craft app's crate"))
+        );
+        let film = refused("filmcraft-audio = { git = \"https://github.com/storytold/filmcraft\", rev = \"d5ead4ba\" }");
+        assert!(film.iter().any(|error| error.contains(".filmcraft-audio is") && error.ends_with("rust/xtask/src/layers.rs")), "{film:?}");
+        // Every other dependency is no pin of either.
+        assert!(pins_from_manifest(&format!("{}serde = \"1\"\n", workspace_manifest("10376058", "d5ead4ba"))).is_ok());
     }
 
     #[test]

@@ -32,6 +32,7 @@ mod app;
 mod exporter;
 mod files;
 mod fonts;
+mod hardware;
 /// What the generator writes, one file to a module under `src/generated/`.
 mod generated {
     pub(crate) mod version;

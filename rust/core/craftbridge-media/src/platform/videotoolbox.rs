@@ -43,6 +43,7 @@ use objc2_video_toolbox::{
     kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder,
 };
 
+use super::check;
 use crate::biplanar::{self, Plane};
 use crate::layout::{self, Codec, Layout};
 use crate::order::{HardwareDecoder, RawDecoder};
@@ -52,11 +53,6 @@ type Failure = String;
 
 /// The backend's name, which [`crate::register`] reports and every decoder's name starts with.
 pub(crate) const BACKEND: &str = "VideoToolbox";
-
-/// `Ok` when a CoreMedia, CoreVideo or VideoToolbox `status` says success.
-fn check(status: i32, call: &str) -> std::result::Result<(), Failure> {
-    if status == 0 { Ok(()) } else { Err(format!("{call} failed ({status})")) }
-}
 
 /// Whether this device has a hardware decoder for `codec`. It does not promise a session will start
 /// (resources can be taken), only that starting one is worth trying.

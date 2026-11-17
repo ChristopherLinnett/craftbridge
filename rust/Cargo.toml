@@ -43,8 +43,12 @@ quote = "1"
 # craftbridge-effects-conformance runs each scenario in one.
 tempfile = "3"
 # `image` writes the PNG a straight-RGBA frame is held in and reads the PNGs a scenario compares in
-# craftbridge-effects-conformance, and writes the PNGs the tests of that crate and craftbridge-effects compare.
-image = { version = "0.25", default-features = false, features = ["png"] }
+# craftbridge-effects-conformance, writes the PNGs the tests of that crate and craftbridge-effects compare,
+# and reads the Targa frames craftbridge-effects' hardware export takes from EffectCraft's export (plan §18).
+image = { version = "0.25", default-features = false, features = ["png", "tga"] }
+# Reads the WAV EffectCraft's export hands craftbridge-effects' hardware export, in the crate and with the
+# features FilmCraft's codecs already build symphonia with.
+symphonia = { version = "0.5.5", default-features = false, features = ["pcm", "wav"] }
 # The core creates its wgpu device itself (plan §17, D-7). The version and features are exactly the
 # pinned EffectCraft workspace's, so one wgpu builds both and the device the core makes is of the type
 # the compositor's `Gpu::new` takes: with a second wgpu in the lock they would be two types, and the
@@ -79,6 +83,7 @@ effectcraft-media = { git = "https://github.com/storytold/effectcraft", rev = "1
 effectcraft-expr = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
 effectcraft-script = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
 effectcraft-plugin = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
+effectcraft-raster = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
 filmcraft-codecs = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
 filmcraft-color = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
 filmcraft-frame = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
@@ -89,6 +94,8 @@ filmcraft-isobmff = { git = "https://github.com/storytold/filmcraft", rev = "d5e
 # (plan §16). Each crate turns on only the framework headers it reads.
 objc2-core-foundation = { version = "0.3.2", default-features = false }
 objc2-core-media = { version = "0.3.2", default-features = false }
+objc2-audio-toolbox = { version = "0.3.2", default-features = false }
+objc2-core-audio-types = { version = "0.3.2", default-features = false }
 objc2-core-text = { version = "0.3.2", default-features = false }
 objc2-core-video = { version = "0.3.2", default-features = false }
 objc2-video-toolbox = { version = "0.3.2", default-features = false }
