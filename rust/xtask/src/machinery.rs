@@ -1,11 +1,9 @@
 //! Rule 10 — the gate's own machinery holds one copy of each configuration.
 //!
-//! The gate's machinery (`tools/ci.sh`, `tools/env.sh`, `tools/refused-switches.tsv`, `tools/oracle.sh`,
-//! `tools/hooks/`, `rust/xtask/`, `rust/effects/craftbridge-effects-conformance/`,
-//! `rust/.cargo/config.toml`, `android/sdk/settings.gradle.kts`, `android/sdk/gradle.properties`,
-//! `android/sdk/build-logic/`, and the one copy of each configuration listed below) decides what the gate
-//! checks, so it cannot guard itself: a change to one of those files is a gate change, which its pull
-//! request names and its review checks for weakened rules. What a check can enforce is the other half:
+//! The gate's machinery (the files and folders `MACHINERY` lists, which the docs test holds AGENTS.md §10
+//! and the plan to, and the one copy of each configuration listed below) decides what the gate checks, so
+//! it cannot guard itself: a change to one of those files is a gate change, which its pull request names
+//! and its review checks for weakened rules. What a check can enforce is the other half:
 //! that each configuration stays the only copy. A tool reads its configuration from the folder of what it
 //! checks and the folders above it, so a second copy somewhere in the tree is read for the code below it
 //! and not beside others, and the gate would then run two rule sets while printing the name of one. Every
@@ -83,6 +81,8 @@ const MACHINERY: &[&str] = &[
     "tools/hooks/",
     "rust/xtask/",
     "rust/effects/craftbridge-effects-conformance/",
+    // The runner and the pre-push tests stop the processes they start through it.
+    "rust/craftbridge-process/",
     LINT_LIBRARY,
     CARGO_CONFIGURATION,
     "android/sdk/settings.gradle.kts",

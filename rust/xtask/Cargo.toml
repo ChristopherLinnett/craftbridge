@@ -25,5 +25,10 @@ toml_edit.workspace = true
 roxmltree.workspace = true
 unicode-normalization.workspace = true
 
+# The pre-push tests start pushes in groups of their own and stop them as groups; that code is the
+# support crate's, shared with the conformance runner.
+[dev-dependencies]
+craftbridge-process.workspace = true
+
 [lints]
 workspace = true

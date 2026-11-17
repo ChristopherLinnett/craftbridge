@@ -15,6 +15,7 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 tempfile.workspace = true
+craftbridge-process.workspace = true
 effectcraft-media.workspace = true
 effectcraft-time.workspace = true
 

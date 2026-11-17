@@ -26,6 +26,10 @@ pub(crate) enum Kind {
     App(&'static str),
     /// A host tool: may depend on anything, and nothing may depend on it.
     Tool,
+    /// A host-only support crate, which the tools share (starting a process and stopping its group). A
+    /// tool may depend on it; the core's and the apps' crates only from their tests, since nothing they
+    /// ship may carry host code; and it depends on no CraftBridge crate and no Craft app's crate.
+    Support,
 }
 
 /// One row of the table.
@@ -34,8 +38,8 @@ pub(crate) struct Entry {
     /// The crate name, which is also the folder it lives in.
     pub(crate) name: &'static str,
     pub(crate) kind: Kind,
-    /// Layer within its kind: an edge must point at a smaller rank. Tools are unordered: theirs is 0 and
-    /// never read.
+    /// Layer within its kind: an edge must point at a smaller rank. Tools and support crates are unordered:
+    /// theirs is 0 and never read.
     pub(crate) rank: u8,
     /// A UniFFI boundary, so it may depend on `uniffi` and allow `unsafe_code` crate-wide.
     pub(crate) ffi: bool,
@@ -77,6 +81,7 @@ pub(crate) const ENTRIES: &[Entry] = &[
     Entry { name: "craftbridge-effects-ffi", kind: Kind::App("effects"), rank: 1, ffi: true, distribution: true, platform: false, build: false, upstream: &[] },
     Entry { name: "craftbridge-effects-codegen", kind: Kind::Tool, rank: 0, ffi: false, distribution: false, platform: false, build: false, upstream: &[] },
     Entry { name: "craftbridge-effects-conformance", kind: Kind::Tool, rank: 0, ffi: false, distribution: false, platform: false, build: false, upstream: &[] },
+    Entry { name: "craftbridge-process", kind: Kind::Support, rank: 0, ffi: false, distribution: false, platform: false, build: false, upstream: &[] },
     Entry { name: "xtask", kind: Kind::Tool, rank: 0, ffi: false, distribution: false, platform: false, build: false, upstream: &[] },
 ];
 
@@ -196,14 +201,16 @@ pub(crate) struct CrateInput {
 }
 
 /// The one folder the table says a crate lives in: `<app>/<name>` for an app plugin, `core/<name>` for
-/// the core, and for a tool `<app>/<name>` when it is an app's tool (`craftbridge-<app>-…`) or `<name>`
-/// directly under `rust/` when it is no app's. The folder name is always the crate's name. Which tool is
+/// the core, for a tool `<app>/<name>` when it is an app's tool (`craftbridge-<app>-…`) or `<name>`
+/// directly under `rust/` when it is no app's, and `<name>` directly under `rust/` for a support crate,
+/// which serves every app's tools alike. The folder name is always the crate's name. Which tool is
 /// an app's comes from [`CRAFT_APPS`], the list the naming rule reads, so a tool's folder and its name
 /// never disagree about its app, whether or not the app has a plugin row yet.
 fn expected_folder(row: &Entry) -> String {
     match row.kind {
         Kind::Core => format!("core/{}", row.name),
         Kind::App(app) => format!("{app}/{}", row.name),
+        Kind::Support => row.name.to_string(),
         Kind::Tool => match CRAFT_APPS.iter().map(|app| app.noun).find(|app| row.name.starts_with(&format!("craftbridge-{app}-"))) {
             Some(app) => format!("{app}/{}", row.name),
             None => row.name.to_string(),
@@ -296,6 +303,14 @@ fn check_name(row: &Entry, at: &str, errors: &mut Vec<String>) {
                 errors.push(format!("{at}: {}: a core crate names no app: {noun} is one, and the core serves them all", row.name));
             }
         }
+        Kind::Support => {
+            if !row.name.starts_with("craftbridge-") {
+                errors.push(format!("{at}: {}: a support crate is named craftbridge-<job>", row.name));
+            }
+            if let Some(noun) = named_app(row.name) {
+                errors.push(format!("{at}: {}: a support crate names no app: {noun} is one, and every app's tools share it", row.name));
+            }
+        }
         Kind::App(app) => {
             let prefixed = format!("craftbridge-{app}-");
             if row.name != format!("craftbridge-{app}") && !row.name.starts_with(&prefixed) {
@@ -324,6 +339,9 @@ fn check_edge(row: &Entry, target: &Entry, dev: bool, at: &str, errors: &mut Vec
     match (&row.kind, &target.kind) {
         // A tool may depend on anything; nothing may depend on a tool.
         (Kind::Tool, _) => {}
+        (Kind::Support, _) => {
+            errors.push(edge(at, row, target, "a support crate depends on no CraftBridge crate: every tool shares it, so it stays below them all"))
+        }
         (Kind::Core, Kind::App(app)) => {
             errors.push(edge(at, row, target, format!("the universal core never depends on the {app} plugin, not even in its tests")))
         }
@@ -331,6 +349,9 @@ fn check_edge(row: &Entry, target: &Entry, dev: bool, at: &str, errors: &mut Vec
             errors.push(edge(at, row, target, format!("an app plugin never depends on another app's plugin ({other} on {app}), not even in its tests")))
         }
         (_, Kind::Tool) => errors.push(edge(at, row, target, "nothing depends on a host tool, not even a crate's tests: a tool may reach every app")),
+        (_, Kind::Support) if !dev => {
+            errors.push(edge(at, row, target, "a support crate is host code: a shipped crate takes it only from its tests (a dev-dependency)"));
+        }
         _ if dev => {}
         // Within one kind, and only within it, ranks order the edges; the same rank is a cycle waiting
         // to happen, so equality is not allowed either.
@@ -367,6 +388,7 @@ fn check_external(row: &Entry, name: &str, source: Option<&str>, dev: bool, at: 
                 row.name
             ));
         }
+        Kind::Support => errors.push(format!("{at}: {} depends on {name}: a support crate knows nothing about any Craft app", row.name)),
         _ => {}
     }
 }
@@ -395,8 +417,10 @@ fn table_errors(table: &[Entry]) -> Vec<String> {
                 errors.push(format!("{at}: {}: the {noun} plugin's distribution library is craftbridge-{noun}-ffi", row.name));
             }
             Kind::App(_) => {}
-            Kind::Core | Kind::Tool if row.distribution => errors.push(format!("{at}: {}: only an app plugin has a distribution library", row.name)),
-            Kind::Core | Kind::Tool => {}
+            Kind::Core | Kind::Tool | Kind::Support if row.distribution => {
+                errors.push(format!("{at}: {}: only an app plugin has a distribution library", row.name))
+            }
+            Kind::Core | Kind::Tool | Kind::Support => {}
         }
     }
     for noun in app_nouns(table) {
@@ -867,6 +891,47 @@ mod tests {
             Vec::new(),
         ));
         assert!(tool.is_empty(), "{tool:?}");
+    }
+
+    /// The support crate is host code the tools share: a tool takes it freely, a shipped crate only from
+    /// its tests, and it takes no CraftBridge crate nor any Craft app's crate.
+    #[test]
+    fn a_support_crate_is_taken_by_tools_and_by_tests_only_and_takes_no_crate_of_ours() {
+        let support = "craftbridge-process";
+        let tool = check_crate(&input("xtask", "xtask", vec![workspace(support)], Vec::new()));
+        assert!(tool.is_empty(), "{tool:?}");
+        let app_tool =
+            check_crate(&input("craftbridge-effects-conformance", "effects/craftbridge-effects-conformance", vec![dev(workspace(support))], Vec::new()));
+        assert!(app_tool.is_empty(), "{app_tool:?}");
+        for (name, folder) in [("craftbridge-core", "core/craftbridge-core"), ("craftbridge-effects", "effects/craftbridge-effects")] {
+            let tests = check_crate(&input(name, folder, vec![dev(workspace(support))], Vec::new()));
+            assert!(tests.is_empty(), "{name}: a test may take it: {tests:?}");
+            let shipped = check_crate(&input(name, folder, vec![workspace(support)], Vec::new()));
+            assert!(shipped.len() == 1 && shipped[0].contains(&format!("depends on {support}: a support crate is host code")), "{name}: {shipped:?}");
+        }
+        for (target, dev_only) in [("craftbridge-core", false), ("craftbridge-effects", true), ("xtask", false)] {
+            let dependency = if dev_only { dev(workspace(target)) } else { workspace(target) };
+            let errors = check_crate(&input(support, support, vec![dependency], Vec::new()));
+            assert!(errors.len() == 1 && errors[0].contains("a support crate depends on no CraftBridge crate"), "{target}: {errors:?}");
+        }
+        for craft_crate in [external("effectcraft-time"), dev(external("effectcraft-time"))] {
+            let craft = check_crate(&input(support, support, vec![craft_crate], Vec::new()));
+            assert!(craft.len() == 1 && craft[0].contains("a support crate knows nothing about any Craft app"), "even from its tests: {craft:?}");
+        }
+        let plain = check_crate(&input(support, support, vec![external("serde")], Vec::new()));
+        assert!(plain.is_empty(), "external crates that are no Craft app's are allowed: {plain:?}");
+        let misplaced = check_crate(&input(support, "core/craftbridge-process", Vec::new(), Vec::new()));
+        assert!(misplaced.iter().any(|e| e.contains("the table says `craftbridge-process`")), "{misplaced:?}");
+    }
+
+    /// A support crate is named for its job: `craftbridge-<job>`, and no Craft app's noun.
+    #[test]
+    fn a_support_crate_carries_the_prefix_and_no_app_noun() {
+        let row = ENTRIES.iter().find(|row| row.name == "craftbridge-process").unwrap();
+        assert!(check_name_of(row, "craftbridge-process").is_empty());
+        assert!(check_name_of(row, "process-support").iter().any(|e| e.contains("a support crate is named craftbridge-<job>")));
+        let named = check_name_of(row, "craftbridge-film-process");
+        assert!(named.len() == 1 && named[0].contains("a support crate names no app"), "{named:?}");
     }
 
     #[test]

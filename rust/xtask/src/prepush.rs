@@ -14,11 +14,12 @@ mod tests {
     use crate::git::{command, output};
     use crate::repo_root;
     use crate::scratch::Scratch;
+    use craftbridge_process::{output_of, poll_until, signal_group, stop_group};
     use std::collections::BTreeMap;
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::process::CommandExt;
     use std::path::{Path, PathBuf};
-    use std::process::{Child, Command, Output, Stdio};
+    use std::process::{Child, Command, Stdio};
     use std::time::{Duration, Instant, SystemTime};
 
     /// The stub gate a scratch repository commits in place of this repository's `tools/ci.sh`. It judges
@@ -194,9 +195,10 @@ fi
     /// stuck push behind, where an unbounded wait would hang the suite on it.
     impl Drop for Pushing {
         fn drop(&mut self) {
+            // A push that has ended was reaped by the look that saw it, and a reaped push's group id may since
+            // be another's, so only a running one is stopped.
             if !self.ended() {
-                let _ = signal_group(self.child.id(), "KILL");
-                poll_until(STUCK_AFTER, || self.ended());
+                let _ = stop_group(&mut self.child);
             }
         }
     }
@@ -211,39 +213,6 @@ fi
                 log: log.to_path_buf(),
             })
             .collect()
-    }
-
-    /// Run `command` to its end and keep what it printed. A program that cannot be started is named in the
-    /// error, from the command itself, so a missing tool says which one it is wherever these tests start it.
-    fn output_of(command: &mut Command) -> Result<Output, String> {
-        command.output().map_err(|error| format!("could not run {}: {error}", command.get_program().to_string_lossy()))
-    }
-
-    /// Send `signal` to every process in the group `group` leads, as a terminal sends Ctrl-C. A group with
-    /// nothing left alive in it is as gone as one that no longer exists: the signal has no one to reach,
-    /// and that is no failure. Only a group that still holds a live process the signal did not reach is
-    /// one, and the system's own words are the error. Nothing here panics: a push's `Drop` sends its kill
-    /// while a failed test unwinds, where a panic would abort the whole suite.
-    fn signal_group(group: u32, signal: &str) -> Result<(), String> {
-        let sent = output_of(Command::new("kill").args(["-s", signal, "--", &format!("-{group}")]))?;
-        if sent.status.success() || !group_has_live_process(group)? {
-            return Ok(());
-        }
-        Err(String::from_utf8_lossy(&sent.stderr).trim().to_string())
-    }
-
-    /// Does the process group `group` hold a process that has not yet exited? `kill` answers "No such
-    /// process" for a group that is gone, but macOS refuses a group whose every process has exited and
-    /// not yet been reaped as "Operation not permitted", since its kernel signals no zombie. `pgrep -g`,
-    /// which matches no zombie either, says which of the two a refusal was by its exit status alone: 0
-    /// for a match, 1 for none, anything else for a `pgrep` that could not tell, which judges nothing.
-    fn group_has_live_process(group: u32) -> Result<bool, String> {
-        let found = output_of(Command::new("pgrep").args(["-g", &group.to_string()]))?;
-        match found.status.code() {
-            Some(0) => Ok(true),
-            Some(1) => Ok(false),
-            _ => Err(format!("pgrep could not search the group {group}: {}", String::from_utf8_lossy(&found.stderr).trim())),
-        }
     }
 
     /// `command`, set to start with every signal in `INTERRUPTS` at its default, as a push from a terminal
@@ -270,18 +239,6 @@ fi
 
     fn running(pid: &str) -> bool {
         output_of(Command::new("kill").args(["-0", pid])).unwrap().status.success()
-    }
-
-    /// Poll `done` until it holds, and say whether it did before `stuck_after` passed.
-    fn poll_until(stuck_after: Duration, mut done: impl FnMut() -> bool) -> bool {
-        let deadline = Instant::now() + stuck_after;
-        while !done() {
-            if Instant::now() > deadline {
-                return false;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        true
     }
 
     /// Wait for the event `done` tells of, or call the hook stuck.
@@ -486,31 +443,6 @@ fi
 
     fn let_go(hold: &Path) {
         std::fs::write(hold.with_extension("go"), "").unwrap();
-    }
-
-    /// A process group is signalled quietly and correctly whatever state it is in: a live one is killed, one
-    /// whose every process has exited but not been reaped (which macOS refuses as "Operation not
-    /// permitted", a zombie taking no signal) and one that is gone altogether are no failure, and say
-    /// nothing; a live one the signal did not reach is a failure, in `kill`'s own words.
-    #[test]
-    fn a_group_is_killed_when_alive_and_left_quietly_when_gone() {
-        let leader =
-            |program: &str, args: &[&str]| Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::null()).process_group(0).spawn().unwrap();
-        let mut live = leader("sleep", &["120"]);
-        let unsent = signal_group(live.id(), "NOSUCHSIGNAL");
-        assert!(unsent.as_ref().is_err_and(|words| words.contains("NOSUCHSIGNAL")), "a live group no signal reached is a failure, in kill's words: {unsent:?}");
-        assert_eq!(live.try_wait().unwrap(), None, "and the group it did not reach lives on");
-        signal_group(live.id(), "KILL").unwrap();
-        assert!(!live.wait().unwrap().success(), "the live group's leader was killed");
-        let exited = leader("true", &[]);
-        wait_until("the group's only process to exit", || {
-            let state = output_of(Command::new("ps").args(["-o", "stat=", "-p", &exited.id().to_string()])).unwrap();
-            String::from_utf8_lossy(&state.stdout).trim().starts_with('Z')
-        });
-        assert_eq!(signal_group(exited.id(), "KILL"), Ok(()), "a group of exited processes is gone, not unreachable");
-        let mut exited = exited;
-        exited.wait().unwrap();
-        assert_eq!(signal_group(exited.id(), "KILL"), Ok(()), "and so is one whose processes were all reaped");
     }
 
     /// A push dropped while it runs is killed with its whole group and reaped before the drop returns, so

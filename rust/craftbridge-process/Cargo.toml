@@ -1,0 +1,16 @@
+[package]
+name = "craftbridge-process"
+description = "Host-only process support for CraftBridge's gate: starting a process in a group of its own and stopping the whole group."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# std only, and no CraftBridge crate: a host tool's tests and runners share this code, and nothing may
+# reach it through a crate that ships.
+[dependencies]
+
+[lints]
+workspace = true
