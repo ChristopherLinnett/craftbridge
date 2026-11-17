@@ -10,7 +10,8 @@
 //! land beside it inside the container. The copies belong to what a saved project may name, so they
 //! sit where the system will not clear them as it may clear the cache. [`stage`] knows nothing of
 //! what the file is: each caller names the source a command reads, and hands the command the path it
-//! answers.
+//! answers. The callers are the template runner ([`crate::templates`]) and the imports that write their
+//! images beside a Lottie or a vector file ([`crate::imports`]).
 //!
 //! A copy is named by what it holds, never by where its source sits. An app update installs the
 //! bundle at a new path on iOS, and may change a file at the same path on Android: a copy named by its
@@ -18,15 +19,49 @@
 //! wrote, for nothing to name again, or be written over where it was, under the media a project saved
 //! before the update still names.
 
+use std::cell::RefCell;
 use std::ffi::OsString;
 use std::hash::Hasher;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use craftbridge_core::{CraftError, Result};
 use effectcraft_automation::Backend;
-use effectcraft_automation::confine::Access;
+use effectcraft_automation::confine::{Access, Confinement};
 use siphasher::sip128::{Hasher128, SipHasher13};
+
+thread_local! {
+    /// The staged folder of the app whose call this thread is answering: the method table's rows take
+    /// no folder, and the door every command passes ([`crate::methods::execute`]) reaches a command
+    /// that writes beside its source only through them, so the app names its folder for the length of
+    /// a call, as it names the hardware choice a render reads.
+    static FOLDER: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+/// The guard that has `folder` stand as the staged folder of the calls this thread answers, until it
+/// is dropped; the folder named before it comes back then, so a call made inside another keeps its own.
+pub(crate) struct Scope(Option<PathBuf>);
+
+/// Name `folder` as the staged folder for as long as the returned guard lives.
+#[must_use = "the folder is named only while the guard lives"]
+pub(crate) fn scope(folder: &Path) -> Scope {
+    Scope(FOLDER.with(|slot| slot.try_borrow_mut().ok().and_then(|mut slot| slot.replace(folder.to_path_buf()))))
+}
+
+impl Drop for Scope {
+    fn drop(&mut self) {
+        FOLDER.with(|slot| {
+            if let Ok(mut slot) = slot.try_borrow_mut() {
+                *slot = self.0.take();
+            }
+        });
+    }
+}
+
+/// The staged folder of the call this thread is answering, `None` outside a call of an app.
+pub(crate) fn folder() -> Option<PathBuf> {
+    FOLDER.with(|slot| slot.try_borrow().ok().and_then(|slot| slot.clone()))
+}
 
 /// The path to read `source` from: a copy inside the container when the folder that holds `source`,
 /// as it is named, is one the confinement lets the session read and not write; `None` when it is read
@@ -44,15 +79,8 @@ use siphasher::sip128::{Hasher128, SipHasher13};
 /// is written again on every call, whole before it takes the name ([`write_partial`]).
 pub(crate) fn stage(backend: &Backend, staged: &Path, source: &str) -> Result<Option<String>> {
     let Some(confinement) = backend.confinement() else { return Ok(None) };
-    let Ok(resolved) = confinement.check(source, Access::Read) else { return Ok(None) };
-    if !resolved.is_file() {
-        return Ok(None);
-    }
-    let named = Path::new(source);
-    let (Some(folder), Some(name)) = (named.parent(), named.file_name()) else { return Ok(None) };
-    if confinement.check(&folder.to_string_lossy(), Access::Write).is_ok() {
-        return Ok(None);
-    }
+    let Some(resolved) = needs_copy(confinement, source) else { return Ok(None) };
+    let Some(name) = Path::new(source).file_name() else { return Ok(None) };
     let refused = |error: &dyn std::fmt::Display| CraftError::io(format!("cannot copy {source} into the container: {error}"));
     let mut partial_name = OsString::from(".");
     partial_name.push(name);
@@ -76,6 +104,17 @@ pub(crate) fn stage(backend: &Backend, staged: &Path, source: &str) -> Result<Op
         let _ = std::fs::remove_file(&partial);
     }
     placed.map(|()| Some(copy.to_string_lossy().into_owned()))
+}
+
+/// Where `source` is read from when [`stage`] copies it: resolved, when the confinement lets the
+/// session read it, it is a regular file, and the folder holding its name may not be written; `None`
+/// when it is read where it is. A caller that must know before anything is copied asks this, so the
+/// rule is the one [`stage`] keeps.
+pub(crate) fn needs_copy(confinement: &Confinement, source: &str) -> Option<PathBuf> {
+    let resolved = confinement.check(source, Access::Read).ok().filter(|resolved| resolved.is_file())?;
+    let named = Path::new(source);
+    let (folder, _) = named.parent().zip(named.file_name())?;
+    confinement.check(&folder.to_string_lossy(), Access::Write).is_err().then_some(resolved)
 }
 
 /// Copy `source` to `partial`, made new, and answer the name of the folder the copy belongs in: the
