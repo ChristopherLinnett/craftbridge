@@ -2,7 +2,7 @@
 //!
 //! It is a plain library: an app's distribution crate links it into the one native library.
 //!
-//! Every call of an [`Engine`] — `request`, `request_with_progress`, `frame`, `mcp` and `shut_down` —
+//! Every call of an [`Engine`] — `request`, `request_with_progress`, `frame`, `mcp`, `suspend_gpu`, `resume_gpu` and `shut_down` —
 //! is an `async` function that fails by throwing [`CraftError`], never by answering with one: a
 //! closed engine and a panic the engine caught throw as `request` does, so a reply the app never
 //! wrote is never read as one, and an `mcp` line that needs no reply answers `None`.

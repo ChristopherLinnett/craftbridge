@@ -126,6 +126,21 @@ impl Swapchain for wgpu::Surface<'static> {
     }
 }
 
+/// A surface of any kind, as the engine holds the app's preview surface for the platform that made it.
+impl Swapchain for Box<dyn Swapchain + Send> {
+    fn capabilities(&self, adapter: &wgpu::Adapter) -> wgpu::SurfaceCapabilities {
+        (**self).capabilities(adapter)
+    }
+
+    fn configure(&self, device: &wgpu::Device, configuration: &wgpu::SurfaceConfiguration) {
+        (**self).configure(device, configuration);
+    }
+
+    fn acquire(&self) -> wgpu::CurrentSurfaceTexture {
+        (**self).acquire()
+    }
+}
+
 /// Why no frame could be drawn this time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Fault {

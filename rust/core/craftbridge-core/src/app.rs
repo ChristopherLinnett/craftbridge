@@ -96,8 +96,12 @@ pub trait CraftApp: Send {
 
     /// Hand the app the engine's GPU, as [`crate::gpu::GpuDevice::request`] answered it (plan §16,
     /// §17): a device to render on, or `CpuOnly` with the reason every render runs on the CPU (L7),
-    /// which the app reports in `info.gpu`. An answer of [`CraftError::Gpu`] says the device could
-    /// not be taken, and the app keeps rendering on the CPU.
+    /// which the app reports in `info.gpu`. The engine calls it on its own thread between two calls,
+    /// at its start (again with a `CpuOnly` note naming the refusal, when this answered an error for
+    /// the device) and on every [`crate::Engine::resume_gpu`] that finds no device held, and the app
+    /// installs its failure callbacks on the device so the device's notice
+    /// ([`crate::gpu::GpuDevice::device_failure_notifier`]) gets the first failure. An answer of
+    /// [`CraftError::Gpu`] says the device could not be taken, and the app keeps rendering on the CPU.
     ///
     /// An app that renders on no GPU keeps this default, which answers
     /// [`CraftError::Unsupported`]: the refusal is the same for every such app, so it is written
@@ -107,10 +111,11 @@ pub trait CraftApp: Send {
         Err(CraftError::unsupported("this app attaches no GPU device"))
     }
 
-    /// Take the GPU away: every render runs on the CPU again and `info.gpu` says why (plan §17).
-    /// It is how the GPU goes once the device's failure notice has its first report, and when a
-    /// device that was handed over is taken back. Dropping a GPU the app does not hold is not a
-    /// failure, so an app with nothing to drop keeps this default, which does nothing.
+    /// Take the GPU away: every render runs on the CPU again and `info.gpu` says why (plan §17). The
+    /// engine calls it between two calls once the device's failure notice has its first report, and
+    /// on [`crate::Engine::suspend_gpu`], so the app never checks the notice itself. Dropping a GPU the
+    /// app does not hold is not a failure, so an app with nothing to drop keeps this default, which
+    /// does nothing.
     fn drop_gpu(&mut self) {}
 }
 

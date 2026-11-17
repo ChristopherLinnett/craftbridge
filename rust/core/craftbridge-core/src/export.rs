@@ -153,6 +153,7 @@ mod tests {
     use super::*;
     use crate::engine::{Engine, Message, THREAD_NAME, lock};
     use crate::frames::{FrameBytes, PixelFormat};
+    use crate::gpu::GpuChoice;
     use crate::testing::{DEADLINE, Gate, close_begun, eventually, queue_call, recv};
     use serde_json::json;
     use std::path::PathBuf;
@@ -387,7 +388,7 @@ mod tests {
     /// export, between two beats.
     fn start_export(listen: impl FnMut(u64, u64, Option<f64>) + Send + 'static) -> (Arc<Engine>, Arc<Shared>, CancelToken, mpsc::Receiver<Result<Value>>) {
         let (app, shared) = export_app();
-        let engine = Arc::new(Engine::start(app).unwrap());
+        let engine = Arc::new(Engine::start(app, GpuChoice::CpuOnly).unwrap());
         let cancel = CancelToken::new();
         let (answer, answers) = mpsc::channel();
         let (exporting, token) = (engine.clone(), cancel.clone());
@@ -580,7 +581,7 @@ mod tests {
     #[test]
     fn an_export_already_cancelled_before_it_starts_answers_cancelled_without_running() {
         let (app, shared) = export_app();
-        let engine = Engine::start(app).unwrap();
+        let engine = Engine::start(app, GpuChoice::CpuOnly).unwrap();
         let cancel = CancelToken::new();
         cancel.cancel();
         let (progress, answers) = queue_export(&engine, &cancel);
@@ -620,7 +621,7 @@ mod tests {
     #[test]
     fn a_panicking_export_answers_internal_and_the_session_stays() {
         let (app, shared) = export_app();
-        let engine = Engine::start(app).unwrap();
+        let engine = Engine::start(app, GpuChoice::CpuOnly).unwrap();
         shared.panics_in_export.store(true, Ordering::SeqCst);
         let (progress, answers) = queue_export(&engine, &CancelToken::new());
         assert_eq!(recv(&answers), Err(CraftError::Internal { message: "boom in export".to_string() }));
@@ -798,7 +799,7 @@ mod tests {
                 Ok(params)
             }
         }
-        let engine = Engine::start(PlainApp).unwrap();
+        let engine = Engine::start(PlainApp, GpuChoice::CpuOnly).unwrap();
         let (progress, answers) = queue_export(&engine, &CancelToken::new());
         assert_eq!(recv(&answers), Err(CraftError::unsupported("`export` does not run with progress in this app")));
         assert!(progress.none_yet(), "an app without the request reported progress");

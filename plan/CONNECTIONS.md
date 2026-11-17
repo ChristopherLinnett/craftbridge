@@ -16,7 +16,7 @@ CraftBridge is new, so compatibility is with EffectCraft's documents and release
 | B5 | EffectCraft removes or renames a command or key | the update reports a breaking change; the next CraftBridge version is a major version and its notes list the removals | §21 diff |
 | B6 | A device whose GPU lacks what the compositor needs | renders on the CPU; frames byte-identical to the desktop's CPU frames | L7, §17 |
 | B7 | An Android device offering only GL | CPU rendering | GL is never requested (§17) |
-| B8 | iOS app in the background without the GPU entitlement | the export continues on the CPU | L7, §17 |
+| B8 | iOS app in the background without the GPU entitlement | an export started after the suspend renders on the CPU; one already running keeps its device until it ends (what the app does about it is IOS-2, #82) | L7, §17 |
 | B9 | Footage in a codec or profile without a hardware decoder | software decoding, identical frames | §18 |
 | B10 | One app wants EffectCraft and a later FilmCraft plugin | one combined native library | §20 |
 | B11 | An EffectCraft update changes code an adaptation relies on | the update names the adaptation, which is rechecked before the update merges | §15, §24 |

@@ -10,7 +10,7 @@
 use super::super::common::Scratch;
 use super::super::scratch::folders_in;
 use super::outputs_in;
-use craftbridge_core::{CancelToken, Engine};
+use craftbridge_core::{CancelToken, Engine, GpuChoice};
 use craftbridge_effects::EffectCraftApp;
 use serde_json::{Value, json};
 use std::os::unix::process::ExitStatusExt;
@@ -83,7 +83,7 @@ fn case_json(dir: &Path, case: &Case) -> Value {
 fn start(container: &Path) -> Result<Engine, String> {
     let folders = folders_in(container, None, Vec::new());
     let app = EffectCraftApp::new(&folders).map_err(|error| error.to_string())?;
-    Engine::start_in(&folders, app).map_err(|error| error.to_string())
+    Engine::start_in(&folders, app, GpuChoice::CpuOnly).map_err(|error| error.to_string())
 }
 
 /// Set the demo project up as the case says and run its export to the end, answering what it answered.

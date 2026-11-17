@@ -693,6 +693,7 @@ mod tests {
     use crate::app::CraftApp;
     use crate::cancel::CancelToken;
     use crate::engine::Engine;
+    use crate::gpu::GpuChoice;
     use crate::testing::{Gate, scratch_folders};
     use serde_json::json;
     use std::sync::mpsc;
@@ -781,7 +782,12 @@ mod tests {
         }
 
         fn start(&self) -> std::result::Result<Engine, CraftError> {
-            Engine::start_in(&self.folders, Scripted::idle())
+            Engine::start_in(&self.folders, Scripted::idle(), GpuChoice::CpuOnly)
+        }
+
+        /// An engine on these folders whose export runs `script`.
+        fn start_running(&self, script: Script) -> std::result::Result<Engine, CraftError> {
+            Engine::start_in(&self.folders, Scripted(script), GpuChoice::CpuOnly)
         }
 
         /// The resolved place of `name` in the container, as a recovery reports it.
@@ -916,7 +922,7 @@ mod tests {
                     _ => panic!("boom mid-export"),
                 }
             });
-            let engine = Engine::start_in(&sand.folders, Scripted(script))?;
+            let engine = sand.start_running(script)?;
             let answered = engine.request_with_progress("export", Value::Null, |_, _, _| {}, &CancelToken::new());
             match how {
                 "finishes" => assert_eq!(answered, Ok(json!({"done": true}))),
@@ -938,7 +944,7 @@ mod tests {
             list_outputs(std::slice::from_ref(&output))?;
             Ok(Value::Null)
         });
-        let engine = Engine::start_in(&sand.folders, Scripted(script))?;
+        let engine = sand.start_running(script)?;
         let cancel = CancelToken::new();
         cancel.cancel();
         assert_eq!(engine.request_with_progress("export", Value::Null, |_, _, _| {}, &cancel), Err(CraftError::Cancelled));
@@ -956,7 +962,7 @@ mod tests {
             list_outputs(std::slice::from_ref(&output))?;
             Ok(json!("ran"))
         });
-        let engine = Engine::start(Scripted(script))?;
+        let engine = Engine::start(Scripted(script), GpuChoice::CpuOnly)?;
         assert_eq!(engine.request_with_progress("export", Value::Null, |_, _, _| {}, &CancelToken::new()), Ok(json!("ran")));
         assert!(!sand.file().exists());
         Ok(())
@@ -976,7 +982,7 @@ mod tests {
             on_progress(1, 2, None);
             Err(CraftError::command_failed("export", "stopped by its caller", None))
         });
-        let engine = Arc::new(Engine::start_in(&sand.folders, Scripted(script))?);
+        let engine = Arc::new(sand.start_running(script)?);
         let cancel = CancelToken::new();
         let exporting = (engine.clone(), cancel.clone());
         let export = thread::spawn(move || exporting.0.request_with_progress("export", Value::Null, |_, _, _| {}, &exporting.1));
@@ -1024,7 +1030,7 @@ mod tests {
             fs::write(&written, b"never").unwrap();
             Ok(Value::Null)
         });
-        let engine = Engine::start_in(&sand.folders, Scripted(script))?;
+        let engine = sand.start_running(script)?;
         let answered = engine.request_with_progress("export", Value::Null, |_, _, _| {}, &CancelToken::new());
         assert!(matches!(answered, Err(CraftError::Io { .. })), "{answered:?}");
         assert!(!output.exists() && !sand.file().exists());
@@ -1241,11 +1247,11 @@ mod tests {
                 fs::set_permissions(&journal, fs::Permissions::from_mode(0o000)).unwrap();
                 if another_engine_starts {
                     // Its start meets the unreadable journal before this export's clear does.
-                    Engine::start_in(&folders, Scripted::idle()).unwrap();
+                    Engine::start_in(&folders, Scripted::idle(), GpuChoice::CpuOnly).unwrap();
                 }
                 Ok(json!({"done": true}))
             });
-            let engine = Engine::start_in(&sand.folders, Scripted(script))?;
+            let engine = sand.start_running(script)?;
             let answered = engine.request_with_progress("export", Value::Null, |_, _, _| {}, &CancelToken::new());
             assert_eq!(answered, Ok(json!({"done": true})));
             // The disk reads every file again, and the process ends.
@@ -1392,7 +1398,7 @@ mod tests {
         std::os::unix::fs::symlink(&pipe, sand.file())?;
         let start = thread::spawn({
             let folders = sand.folders.clone();
-            move || Engine::start_in(&folders, Scripted::idle()).map(|engine| engine.recovery().clone())
+            move || Engine::start_in(&folders, Scripted::idle(), GpuChoice::CpuOnly).map(|engine| engine.recovery().clone())
         });
         // Opening the pipe to write returns once the start opens it to read, which it does after taking
         // the lock, and then the start waits for what is written.
@@ -1472,7 +1478,7 @@ mod tests {
             .map(|_| {
                 thread::spawn({
                     let folders = folders.clone();
-                    move || Engine::start_in(&folders, Scripted::idle()).map(|engine| engine.recovery().clone())
+                    move || Engine::start_in(&folders, Scripted::idle(), GpuChoice::CpuOnly).map(|engine| engine.recovery().clone())
                 })
             })
             .collect();
@@ -1629,7 +1635,7 @@ mod tests {
             assert!(wait.wait(), "the test never let the export end");
             Ok(Value::Null)
         });
-        let first = Arc::new(Engine::start_in(&sand.folders, Scripted(script))?);
+        let first = Arc::new(sand.start_running(script)?);
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o700))?;
         if first.recovery().failed.is_empty() {
             // A user the permissions do not hold back (root) deleted it anyway.
@@ -1730,7 +1736,7 @@ mod tests {
             fs::set_permissions(&config, fs::Permissions::from_mode(0o500)).unwrap();
             Ok(json!({"done": true}))
         });
-        let engine = Engine::start_in(&sand.folders, Scripted(script))?;
+        let engine = sand.start_running(script)?;
         let answered = engine.request_with_progress("export", Value::Null, |_, _, _| {}, &CancelToken::new());
         let held_back = fs::write(sand.folders.config.join("probe"), b"").is_err();
         fs::set_permissions(&sand.folders.config, fs::Permissions::from_mode(0o700))?;

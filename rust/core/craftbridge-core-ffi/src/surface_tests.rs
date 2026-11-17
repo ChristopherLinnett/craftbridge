@@ -2,7 +2,7 @@
 //! engine and a caught panic, and never answers with either as a reply.
 
 use crate::crossing::Limits;
-use crate::{CancelToken, CraftError, Engine, Folders, FrameBytes, PixelFormat, ProgressListener, Recovery, RecoveryNote};
+use crate::{CancelToken, CraftError, Engine, Folders, FrameBytes, GpuChoice, PixelFormat, ProgressListener, Recovery, RecoveryNote};
 use craftbridge_core::CraftApp;
 use serde_json::{Value, json};
 use std::future::Future;
@@ -84,10 +84,23 @@ impl CraftApp for Probe {
             _ => Some(format!("reply to {line}")),
         }
     }
+
+    /// The probe renders on no GPU: it takes the CPU note and refuses a device.
+    fn attach_gpu(&mut self, gpu: &craftbridge_core::GpuDevice) -> craftbridge_core::Result<()> {
+        match gpu.parts() {
+            Some(_) => Err(CraftError::gpu("the probe renders on no GPU")),
+            None => Ok(()),
+        }
+    }
 }
 
 fn engine() -> Arc<Engine> {
-    Engine::from_core(craftbridge_core::Engine::start(Probe { panics_on_drop: false, counted: 0 }).expect("the engine starts"))
+    started(GpuChoice::CpuOnly)
+}
+
+/// An engine on the probe, started with the GPU `gpu` asks for.
+fn started(gpu: GpuChoice) -> Arc<Engine> {
+    Engine::from_core(craftbridge_core::Engine::start(Probe { panics_on_drop: false, counted: 0 }, gpu).expect("the engine starts"))
 }
 
 fn closed_engine() -> Arc<Engine> {
@@ -151,6 +164,21 @@ fn calls_run_in_the_order_they_were_made_however_their_answers_are_awaited() {
     let answers: Vec<_> = made.into_iter().rev().map(|made| made.unwrap_or_else(pollster::block_on)).collect();
     let expected: Vec<_> = (0..16).rev().map(Ok).collect();
     assert_eq!(answers, expected);
+}
+
+#[test]
+fn a_resume_with_no_device_answers_the_cpu_note_and_one_the_app_cannot_take_throws() {
+    let engine = engine();
+    assert_eq!(pollster::block_on(engine.suspend_gpu()), Ok(()));
+    assert_eq!(pollster::block_on(engine.resume_gpu()), Ok(Some("the app asked for CPU-only rendering".to_string())), "the CPU note crosses as the answer");
+    let on_a_device = started(GpuChoice::Preferred);
+    assert_eq!(pollster::block_on(on_a_device.suspend_gpu()), Ok(()));
+    assert_eq!(
+        pollster::block_on(on_a_device.resume_gpu()),
+        Err(CraftError::gpu("the probe renders on no GPU")),
+        "the app's refusal crosses as the thrown error"
+    );
+    assert_eq!(pollster::block_on(on_a_device.request("echo".into(), "1".into())), Ok("1".to_string()), "the engine answers on");
 }
 
 #[test]
@@ -365,7 +393,9 @@ fn every_call_on_a_closed_engine_throws_internal_and_none_answers_a_reply() {
     let progress = pollster::block_on(engine.request_with_progress("export".into(), "{}".into(), Arc::new(Heard::default()), CancelToken::new()));
     assert_eq!(progress, Err(closed.clone()));
     assert_eq!(pollster::block_on(engine.frame("{}".into(), PixelFormat::Png)), Err(closed.clone()));
-    assert_eq!(pollster::block_on(engine.mcp("ping".into())), Err(closed));
+    assert_eq!(pollster::block_on(engine.mcp("ping".into())), Err(closed.clone()));
+    assert_eq!(pollster::block_on(engine.suspend_gpu()), Err(closed.clone()));
+    assert_eq!(pollster::block_on(engine.resume_gpu()), Err(closed));
     assert_eq!(pollster::block_on(engine.shut_down()), Ok(()), "shutting down twice is no error");
 }
 
@@ -413,7 +443,9 @@ fn engine_after_a_killed_export(container: &std::path::Path) -> Arc<Engine> {
     std::fs::write(container.join("card.mp4"), b"half a movie").expect("the half-written output");
     let journal = core_folders.config.join(craftbridge_core::JOURNAL_FILE);
     std::fs::write(journal, json!({ "outputs": [{ "path": "card.mp4" }] }).to_string()).expect("the journal a kill left");
-    Engine::from_core(craftbridge_core::Engine::start_in(&core_folders, Probe { panics_on_drop: false, counted: 0 }).expect("the engine starts"))
+    Engine::from_core(
+        craftbridge_core::Engine::start_in(&core_folders, Probe { panics_on_drop: false, counted: 0 }, GpuChoice::CpuOnly).expect("the engine starts"),
+    )
 }
 
 #[test]

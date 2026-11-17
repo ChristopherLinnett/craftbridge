@@ -12,6 +12,7 @@ pub mod export;
 pub mod folders;
 pub mod frames;
 pub mod gpu;
+mod gpu_lifecycle;
 pub mod journal;
 pub mod surface;
 #[cfg(test)]

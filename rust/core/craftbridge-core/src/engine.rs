@@ -8,6 +8,8 @@ use crate::error::CraftError;
 use crate::export::{self, ExportCall};
 use crate::folders::Folders;
 use crate::frames::{FrameBytes, PixelFormat};
+use crate::gpu::GpuChoice;
+use crate::gpu_lifecycle::GpuLifecycle;
 use crate::journal::{Journal, Recovery};
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -39,6 +41,8 @@ pub(crate) enum Message {
     Request { method: String, params: Value, answer: Answering<Value> },
     Frame { params: Value, format: PixelFormat, answer: Answering<FrameBytes> },
     Mcp { line: String, answer: Answering<Option<String>> },
+    SuspendGpu { answer: Answering<()> },
+    ResumeGpu { answer: Answering<Option<String>> },
     Export { call: ExportCall },
     Close,
 }
@@ -93,6 +97,18 @@ impl Message {
         let line = line.to_string();
         move |answer| Message::Mcp { line, answer }
     }
+
+    /// The call that gives the GPU up for the background, built once the engine gives it the channel
+    /// its answer goes back on.
+    pub(crate) fn suspend_gpu() -> impl FnOnce(Answering<()>) -> Message {
+        |answer| Message::SuspendGpu { answer }
+    }
+
+    /// The call that asks for the GPU again, built once the engine gives it the channel its answer
+    /// goes back on.
+    pub(crate) fn resume_gpu() -> impl FnOnce(Answering<Option<String>>) -> Message {
+        |answer| Message::ResumeGpu { answer }
+    }
 }
 
 /// A handle to one engine: its own thread, and its own session of a [`CraftApp`].
@@ -124,31 +140,35 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Start one engine with no folders: spawn its thread and run `app`'s session there, and answer
-    /// with the handle every call goes through. It keeps no pending-export journal, so a kill
-    /// mid-export leaves its partial files: an app's own engine starts with [`Engine::start_in`].
-    /// The later steps of plan §16's `start` (the GPU, the decoders) arrive around this spawn, which
-    /// is the step that defines the thread and the inbox.
+    /// Start one engine with no folders: spawn its thread, and there ask for the GPU `gpu` allows and
+    /// hand it to `app`, before the first call it makes (plan §16 behaviour 1, §17). A device that
+    /// cannot be had, or that the app cannot take, is no failure to start: the engine runs on the CPU
+    /// and `info.gpu` says why. Every start names its `gpu`, so no engine stays on the CPU because
+    /// its caller did not choose. It keeps no pending-export journal, so a kill mid-export leaves its
+    /// partial files: an app's own engine starts with [`Engine::start_in`].
     ///
-    /// [`Result::Err`] only when the thread itself cannot start; a session that fails to build is the
-    /// app crate's own `start` to judge, once the steps around this one exist.
-    pub fn start<A: CraftApp + 'static>(app: A) -> Result<Engine> {
-        Self::spawn(app, None, Recovery::default())
+    /// # Errors
+    ///
+    /// Only when the thread itself cannot start; a session that fails to build is the app crate's own
+    /// `start` to judge.
+    pub fn start<A: CraftApp + 'static>(app: A, gpu: GpuChoice) -> Result<Engine> {
+        Self::spawn(app, None, Recovery::default(), gpu)
     }
 
-    /// Start one engine in the app's `folders`, the start an app crate's constructor makes: prepare
-    /// them, deal with the files the pending-export journal still lists (deleting those an export
-    /// the system killed was writing) and clear it, then start as [`Engine::start`] does, with every
-    /// export from then on journaled (plan §16, D-17). What the journal step did is
-    /// [`Engine::recovery`]; a journal it cannot read or a file it cannot delete never fails the start.
+    /// Start one engine in the app's `folders` on the GPU `gpu` allows, the start an app crate's
+    /// constructor makes with the app's own choice: prepare them, deal with the files the
+    /// pending-export journal still lists (deleting those an export the system killed was writing)
+    /// and clear it, then start as [`Engine::start`] does, with every export from then on journaled
+    /// (plan §16, D-17). What the journal step did is [`Engine::recovery`]; a journal it cannot read
+    /// or a file it cannot delete never fails the start.
     ///
     /// # Errors
     ///
     /// What [`Folders::prepare`] refuses, or the thread that cannot start.
-    pub fn start_in<A: CraftApp + 'static>(folders: &Folders, app: A) -> Result<Engine> {
+    pub fn start_in<A: CraftApp + 'static>(folders: &Folders, app: A, gpu: GpuChoice) -> Result<Engine> {
         let journal = Journal::new(folders, &folders.prepare()?)?;
         let recovery = journal.recover();
-        Self::spawn(app, Some(journal), recovery)
+        Self::spawn(app, Some(journal), recovery, gpu)
     }
 
     /// What the start did about the pending-export journal.
@@ -157,14 +177,14 @@ impl Engine {
         &self.recovery
     }
 
-    fn spawn<A: CraftApp + 'static>(app: A, journal: Option<Journal>, recovery: Recovery) -> Result<Engine> {
+    fn spawn<A: CraftApp + 'static>(app: A, journal: Option<Journal>, recovery: Recovery, gpu: GpuChoice) -> Result<Engine> {
         let (inbox, incoming) = mpsc::channel();
         let closing = CancelToken::new();
         let thread = thread::Builder::new()
             .name(THREAD_NAME.to_string())
             .spawn({
                 let closing = closing.clone();
-                move || run(Box::new(app), incoming, closing, journal)
+                move || run(Box::new(app), incoming, closing, journal, gpu)
             })
             .map_err(|error| CraftError::internal(format!("cannot start the engine thread: {error}")))?;
         Ok(Engine { id: thread.thread().id(), inbox: Mutex::new(Some(inbox)), thread: Mutex::new(Some(thread)), closing, recovery })
@@ -268,6 +288,56 @@ impl Engine {
     /// What [`Engine::send_request`] refuses.
     pub fn send_mcp(&self, line: &str) -> Result<Answer<Option<String>>> {
         self.send(Message::mcp(line))
+    }
+
+    /// Give the GPU up and wait for the engine to have done it (plan §14, §17, L7): the app's device,
+    /// the engine's own handle to it and the preview surface made on it, so nothing of the engine can
+    /// submit GPU work while the app is in the background, which iOS ends an app for. Every render
+    /// answers on the CPU until [`Engine::resume_gpu`]. It waits its turn as any call does, so the
+    /// calls made before it ran on the GPU, and suspending twice is not an error. One made during an
+    /// export waits for the export to end (plan §16 behaviour 3), since the engine cannot reach the
+    /// session while the export runs: the export renders on the device it started on until then.
+    ///
+    /// # Errors
+    ///
+    /// What [`Engine::send_request`] refuses, and `Internal` when the app's own `drop_gpu` panicked.
+    pub fn suspend_gpu(&self) -> Result<()> {
+        self.send_suspend_gpu()?.wait()
+    }
+
+    /// Hand [`Engine::suspend_gpu`]'s call to the engine and answer with its [`Answer`], without
+    /// waiting for it, as [`Engine::send_request`] does for a plain call.
+    ///
+    /// # Errors
+    ///
+    /// What [`Engine::send_request`] refuses.
+    pub fn send_suspend_gpu(&self) -> Result<Answer<()>> {
+        self.send(Message::suspend_gpu())
+    }
+
+    /// Ask for a device again as the start did, hand it to the app and wait for the engine to have
+    /// done it (plan §14, §17), answering `None` once the app holds a device and the CPU note when
+    /// none came. An engine that never suspended, or that holds a device already, keeps it. No
+    /// device is no failure: the app is handed the CPU note `info.gpu` reports and the engine stays
+    /// on the CPU, so the caller hears it as an answer, never as an error.
+    ///
+    /// # Errors
+    ///
+    /// What [`Engine::send_request`] refuses, `Internal` when the app panicked, and what the app
+    /// answers when it cannot take the device (an engine that failed so stays on the CPU, and a later
+    /// resume asks again).
+    pub fn resume_gpu(&self) -> Result<Option<String>> {
+        self.send_resume_gpu()?.wait()
+    }
+
+    /// Hand [`Engine::resume_gpu`]'s call to the engine and answer with its [`Answer`], without
+    /// waiting for it, as [`Engine::send_request`] does for a plain call.
+    ///
+    /// # Errors
+    ///
+    /// What [`Engine::send_request`] refuses.
+    pub fn send_resume_gpu(&self) -> Result<Answer<Option<String>>> {
+        self.send(Message::resume_gpu())
     }
 
     /// Hand one call to the engine thread and answer with what its caller waits on.
@@ -399,11 +469,22 @@ fn answer_of<T>(waiting: oneshot::Receiver<Result<T>>) -> Result<T> {
 /// that arrive are taken into `pending` at the export's beats, in order, and run from there before
 /// anything made after them (plan §13, L3); `pending` is why the loop takes its next message from
 /// it before it waits on the inbox.
-fn run(mut app: Box<dyn CraftApp>, incoming: Receiver<Message>, closing: CancelToken, journal: Option<Journal>) -> Result<()> {
+fn run(mut app: Box<dyn CraftApp>, incoming: Receiver<Message>, closing: CancelToken, journal: Option<Journal>, choice: GpuChoice) -> Result<()> {
     let mut pending: VecDeque<Message> = VecDeque::new();
+    let mut gpu = GpuLifecycle::start(&mut *app, choice);
     while let Some(message) = next_message(&mut pending, &incoming) {
+        // A device that failed since the last call is dropped before this one runs, whatever the call is
+        // (plan §17, L7), so no call of the app, an export's included, starts on a lost device.
+        if !matches!(message, Message::Close) {
+            gpu.settle(&mut *app);
+        }
         match message {
             Message::Close => break,
+            Message::SuspendGpu { answer } => answer_call(answer, || {
+                gpu.suspend(&mut *app);
+                Ok(())
+            }),
+            Message::ResumeGpu { answer } => answer_call(answer, || gpu.resume(&mut *app)),
             Message::Request { method, params, answer } => answer_call(answer, || app.request(&method, params)),
             Message::Frame { params, format, answer } => answer_call(answer, || app.frame(params, format)),
             Message::Mcp { line, answer } => answer_call(answer, || Ok(app.mcp(&line))),
@@ -419,6 +500,8 @@ fn run(mut app: Box<dyn CraftApp>, incoming: Receiver<Message>, closing: CancelT
     // Their callers read the disconnect as `engine is closed`.
     drop(incoming);
     drop(pending);
+    // The surface and the device go with the engine (plan §16 behaviour 4), the surface first.
+    drop(gpu);
     // The session's drop is app code too, so it runs behind the same guard as a call: a panic there
     // is the close's answer rather than a thread that died outside its guard.
     guarded(move || drop(app))
@@ -626,7 +709,7 @@ mod tests {
     /// call need.
     fn self_aware_engine() -> (Arc<Engine>, Arc<Shared>) {
         let (app, shared) = FakeApp::new();
-        let engine = Arc::new(Engine::start(app).unwrap());
+        let engine = Arc::new(Engine::start(app, GpuChoice::CpuOnly).unwrap());
         assert!(shared.engine.set(Arc::downgrade(&engine)).is_ok());
         (engine, shared)
     }
@@ -659,7 +742,7 @@ mod tests {
     #[test]
     fn calls_run_in_order_on_the_engine_thread() {
         let (app, _shared) = FakeApp::new();
-        let engine = Engine::start(app).unwrap();
+        let engine = Engine::start(app, GpuChoice::CpuOnly).unwrap();
         // The plan's own name for the thread, written out rather than read from the constant, so a
         // renamed thread fails here.
         assert_eq!(call(&engine, "thread").unwrap(), Value::from("craftbridge-engine"), "plan §16 names the thread");
@@ -688,7 +771,7 @@ mod tests {
     #[test]
     fn calls_from_many_threads_are_each_answered_once_with_their_own_answer() {
         let (app, _shared) = FakeApp::new();
-        let engine = Arc::new(Engine::start(app).unwrap());
+        let engine = Arc::new(Engine::start(app, GpuChoice::CpuOnly).unwrap());
         let workers: Vec<_> = (0..8)
             .map(|worker| {
                 let engine = engine.clone();
@@ -715,7 +798,7 @@ mod tests {
     #[test]
     fn calls_queued_behind_a_running_call_run_in_the_order_they_were_made() {
         let (app, shared) = FakeApp::new();
-        let engine = Arc::new(Engine::start(app).unwrap());
+        let engine = Arc::new(Engine::start(app, GpuChoice::CpuOnly).unwrap());
         let blocked = busy(&engine, &shared);
         let queued: Vec<_> = (0..5).map(|n| queue_call(&engine, "echo", json!({ "n": n }))).collect();
         assert!(queued.iter().all(|answer| answer.try_recv().is_err()), "a queued call was answered while the engine was inside the running call");
@@ -735,7 +818,7 @@ mod tests {
     #[test]
     fn frames_run_on_the_engine_thread_in_call_order_each_answered_with_its_own() {
         let (app, shared) = FakeApp::new();
-        let engine = Arc::new(Engine::start(app).unwrap());
+        let engine = Arc::new(Engine::start(app, GpuChoice::CpuOnly).unwrap());
         let blocked = busy(&engine, &shared);
         let waiting: Vec<_> = (1..=3_u8).map(|n| engine.submit(Message::frame(json!({ "v": n }), PixelFormat::Rgba8Straight)).unwrap()).collect();
         let echo = queue_call(&engine, "echo", json!({ "after": true }));
@@ -756,7 +839,7 @@ mod tests {
     #[test]
     fn a_frame_is_answered_in_the_format_it_was_asked_in() {
         let (app, _shared) = FakeApp::new();
-        let engine = Engine::start(app).unwrap();
+        let engine = Engine::start(app, GpuChoice::CpuOnly).unwrap();
         let straight = engine.frame(json!({ "v": 200 }), PixelFormat::Rgba8Straight).unwrap();
         assert_eq!((straight.width, straight.height, straight.format, straight.data), (1, 1, PixelFormat::Rgba8Straight, vec![200, 0, 0, 255]));
         let bgra = engine.frame(json!({ "v": 200 }), PixelFormat::Bgra8Premultiplied).unwrap();
@@ -769,7 +852,7 @@ mod tests {
     #[test]
     fn a_failed_frame_is_answered_and_the_session_stays() {
         let (app, _shared) = FakeApp::new();
-        let engine = Engine::start(app).unwrap();
+        let engine = Engine::start(app, GpuChoice::CpuOnly).unwrap();
         engine.request("value_set", json!({ "v": 5 })).unwrap();
         let refused = engine.frame(json!({ "how": "short" }), PixelFormat::Rgba8Straight).unwrap_err();
         assert_eq!(refused.to_string(), "frame 2x2 needs 16 raw bytes (width x height x 4), the buffer holds 4");
@@ -786,7 +869,7 @@ mod tests {
     #[test]
     fn an_mcp_line_reaches_the_session_a_request_set_and_a_panic_keeps_it() {
         let (app, _shared) = FakeApp::new();
-        let engine = Engine::start(app).unwrap();
+        let engine = Engine::start(app, GpuChoice::CpuOnly).unwrap();
         engine.request("value_set", json!({ "v": 11 })).unwrap();
         assert_eq!(engine.mcp("ping").unwrap(), Some("ping@craftbridge-engine:11".to_string()));
         assert_eq!(engine.mcp("").unwrap(), None, "a line that needs no reply is not a failure");
@@ -810,7 +893,7 @@ mod tests {
     /// An app that keeps the trait's default has no frames: `Unsupported`, and the engine serves on.
     #[test]
     fn an_app_without_frames_answers_unsupported_and_keeps_serving() {
-        let engine = Engine::start(EchoApp).unwrap();
+        let engine = Engine::start(EchoApp, GpuChoice::CpuOnly).unwrap();
         assert_eq!(engine.frame(Value::Null, PixelFormat::Png), Err(CraftError::unsupported("this app renders no frames")));
         assert_eq!(engine.request("echo", json!({ "n": 1 })), Ok(json!({ "n": 1 })));
         engine.close().unwrap();
@@ -828,7 +911,7 @@ mod tests {
     /// none is a failure.
     #[test]
     fn an_app_without_an_mcp_endpoint_replies_to_no_line() {
-        let engine = Engine::start(EchoApp).unwrap();
+        let engine = Engine::start(EchoApp, GpuChoice::CpuOnly).unwrap();
         assert_eq!(engine.mcp(r#"{"jsonrpc": "2.0", "id": 1, "method": "ping"}"#), Ok(None));
         assert_eq!(engine.request("echo", json!({ "after": "the line" })), Ok(json!({ "after": "the line" })), "the session still answers");
         engine.close().unwrap();
@@ -850,7 +933,7 @@ mod tests {
     #[test]
     fn a_panic_becomes_internal_and_the_session_stays() {
         let (app, _shared) = FakeApp::new();
-        let engine = Engine::start(app).unwrap();
+        let engine = Engine::start(app, GpuChoice::CpuOnly).unwrap();
         engine.request("value_set", json!({ "v": 7 })).unwrap();
         for (method, expected) in [("panic_str", "boom"), ("panic_fmt", "boom 7")] {
             assert_eq!(call(&engine, method), Err(CraftError::Internal { message: expected.to_string() }), "{method}");
@@ -871,7 +954,7 @@ mod tests {
     #[test]
     fn a_panic_mid_mutation_keeps_the_document_as_it_stood() {
         let (app, _shared) = FakeApp::new();
-        let engine = Engine::start(app).unwrap();
+        let engine = Engine::start(app, GpuChoice::CpuOnly).unwrap();
         engine.request("value_set", json!({ "v": 3 })).unwrap();
         // This call writes and then panics: the write is part of the kept document.
         let answer = engine.request("panic_after_write", json!({ "v": 4 }));
@@ -888,7 +971,7 @@ mod tests {
     #[test]
     fn calls_after_close_answer_internal_and_close_is_idempotent() {
         let (app, _shared) = FakeApp::new();
-        let engine = Engine::start(app).unwrap();
+        let engine = Engine::start(app, GpuChoice::CpuOnly).unwrap();
         engine.close().unwrap();
         // Plan §16's own words for a call after close, written out rather than read from the
         // constant, so a reworded refusal fails here.
@@ -897,7 +980,7 @@ mod tests {
         // Four closes racing each other: exactly one takes the thread and joins it, the rest
         // answer `Ok` once it has, and none of them panics or hangs.
         let (app, _shared) = FakeApp::new();
-        let engine = Arc::new(Engine::start(app).unwrap());
+        let engine = Arc::new(Engine::start(app, GpuChoice::CpuOnly).unwrap());
         let closers: Vec<_> = (0..4)
             .map(|_| {
                 let engine = engine.clone();
@@ -915,7 +998,7 @@ mod tests {
     #[test]
     fn close_waits_for_the_call_in_flight() {
         let (app, shared) = FakeApp::new();
-        let engine = Arc::new(Engine::start(app).unwrap());
+        let engine = Arc::new(Engine::start(app, GpuChoice::CpuOnly).unwrap());
         let blocked = busy(&engine, &shared);
         let closer = close_begun(&engine);
         assert!(!closer.is_finished(), "close answered before the call in flight ended");
@@ -931,7 +1014,7 @@ mod tests {
     #[test]
     fn a_close_racing_calls_and_a_close_answers_each_as_close_promises() {
         let (app, shared) = FakeApp::new();
-        let engine = Arc::new(Engine::start(app).unwrap());
+        let engine = Arc::new(Engine::start(app, GpuChoice::CpuOnly).unwrap());
         let blocked = busy(&engine, &shared);
         // Handed over before the close begins, so it is queued ahead of `Close`.
         let queued = queue_call(&engine, "echo", json!({ "n": 1 }));
@@ -961,7 +1044,7 @@ mod tests {
     #[test]
     fn a_call_that_loses_its_race_to_close_is_refused_never_answered() {
         let (app, shared) = FakeApp::new();
-        let engine = Arc::new(Engine::start(app).unwrap());
+        let engine = Arc::new(Engine::start(app, GpuChoice::CpuOnly).unwrap());
         call(&engine, "hold_drop").unwrap();
         let racer = engine.racer().unwrap();
         let blocked = busy(&engine, &shared);
@@ -988,7 +1071,7 @@ mod tests {
     #[test]
     fn dropping_the_engine_ends_the_session_before_the_drop_returns() {
         let (app, shared) = FakeApp::new();
-        let engine = Engine::start(app).unwrap();
+        let engine = Engine::start(app, GpuChoice::CpuOnly).unwrap();
         // A session whose drop is held, so a handle's drop that left the thread to end on its own
         // would have returned while the session's drop is still running.
         call(&engine, "hold_drop").unwrap();
@@ -1007,7 +1090,7 @@ mod tests {
     #[test]
     fn begin_close_refuses_later_calls_at_once_and_a_later_close_joins() {
         let (app, shared) = FakeApp::new();
-        let engine = Arc::new(Engine::start(app).unwrap());
+        let engine = Arc::new(Engine::start(app, GpuChoice::CpuOnly).unwrap());
         let blocked = busy(&engine, &shared);
         let before = engine.send_request("echo", json!({ "n": 1 })).unwrap();
         assert!(engine.begin_close(), "outside the engine's own calls the thread may be waited for");
@@ -1031,7 +1114,7 @@ mod tests {
     #[test]
     fn a_panic_in_the_sessions_drop_is_the_closes_answer() {
         let (app, shared) = FakeApp::new();
-        let engine = Engine::start(app).unwrap();
+        let engine = Engine::start(app, GpuChoice::CpuOnly).unwrap();
         call(&engine, "drop_panicking").unwrap();
         assert_eq!(engine.close(), Err(CraftError::Internal { message: "boom on drop".to_string() }));
         assert!(shared.dropped.load(Ordering::SeqCst));
@@ -1068,7 +1151,7 @@ mod tests {
     #[test]
     fn sent_calls_run_in_the_order_they_were_sent_and_each_awaited_answer_is_its_own() {
         let (app, shared) = FakeApp::new();
-        let engine = Arc::new(Engine::start(app).unwrap());
+        let engine = Arc::new(Engine::start(app, GpuChoice::CpuOnly).unwrap());
         let blocked = busy(&engine, &shared);
         let requests: Vec<_> = (0..3).map(|n| engine.send_request("echo", json!({ "n": n })).unwrap()).collect();
         let frame = engine.send_frame(json!({ "v": 7 }), PixelFormat::Rgba8Straight).unwrap();
@@ -1106,7 +1189,7 @@ mod tests {
     #[test]
     fn a_call_whose_caller_stopped_waiting_still_runs_and_the_engine_answers_on() {
         let (app, _shared) = FakeApp::new();
-        let engine = Engine::start(app).unwrap();
+        let engine = Engine::start(app, GpuChoice::CpuOnly).unwrap();
         let (answer, waiting) = oneshot::channel();
         drop(waiting);
         let inbox = engine.racer().unwrap();
@@ -1120,8 +1203,8 @@ mod tests {
     fn two_engines_have_their_own_session_and_thread() {
         let (one, _shared) = FakeApp::new();
         let (two, _shared) = FakeApp::new();
-        let first = Engine::start(one).unwrap();
-        let second = Engine::start(two).unwrap();
+        let first = Engine::start(one, GpuChoice::CpuOnly).unwrap();
+        let second = Engine::start(two, GpuChoice::CpuOnly).unwrap();
         first.request("value_set", json!({ "v": 1 })).unwrap();
         second.request("value_set", json!({ "v": 2 })).unwrap();
         assert_eq!(call(&first, "value_get").unwrap(), Value::from(1));
