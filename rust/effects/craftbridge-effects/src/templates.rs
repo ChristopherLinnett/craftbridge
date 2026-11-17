@@ -124,6 +124,11 @@ fn read_open(params: &Value) -> Result<Call> {
     Call::parse(params, OPEN, None, |_, _| Ok(()))
 }
 
+/// Where a `template.render` call's render request sits: under `output`.
+pub(crate) fn render_request(params: &Value) -> Option<&Value> {
+    params.get(OUTPUT)
+}
+
 /// `template.render`: export the instance. The request under `output` is `export`'s, bar the two fields
 /// the command line refuses beside `--template`, which renders a new instance and so names neither a
 /// comp nor the queue; the answer is `export`'s with the template's `warnings` beside `rendered`.

@@ -38,6 +38,11 @@ enum Ended {
     Stopped,
 }
 
+/// Where an `export` call's render request sits: its parameters are the request.
+pub(crate) fn export_request(params: &Value) -> Option<&Value> {
+    Some(params)
+}
+
 /// `export`: queue the request (or take the project's own queue), list every file the render may
 /// write with `list_outputs`, render it in the background, report
 /// its progress every [`PROGRESS_INTERVAL`] and answer `{rendered: [{comp, output, seconds}]}`, or

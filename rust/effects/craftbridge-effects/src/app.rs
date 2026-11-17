@@ -105,9 +105,15 @@ const METHODS: [(&str, Method); 14] = [
 /// that answers `false` to stop it, and the lister of the files it may write.
 type ProgressMethod = for<'a> fn(&mut Backend, &Value, Progress<'a>, ListOutputs<'a>) -> Result<Value>;
 
+/// Where a progress method's render request sits in its parameters, which is what the session's hardware
+/// choice is read from.
+type RequestOf = fn(&Value) -> Option<&Value>;
+
 /// The methods `request_with_progress` answers, by name, the one list of them as [`METHODS`] is of
-/// `request`'s: the dispatch reads it and so does its refusal.
-const PROGRESS_METHODS: [(&str, ProgressMethod); 2] = [("export", runner::export), ("template.render", templates::render)];
+/// `request`'s: the dispatch reads it and so does its refusal. Each names where its render request sits,
+/// so a method added here cannot render without its hardware choice being read.
+const PROGRESS_METHODS: [(&str, ProgressMethod, RequestOf); 2] =
+    [("export", runner::export, runner::export_request), ("template.render", templates::render, templates::render_request)];
 
 impl CraftApp for EffectCraftApp {
     /// Answer one method of the plan's §14 table through the function [`METHODS`] names for it.
@@ -138,13 +144,13 @@ impl CraftApp for EffectCraftApp {
         on_progress: &mut dyn FnMut(u64, u64, Option<f64>) -> bool,
         list_outputs: &mut dyn FnMut(&[PathBuf]) -> Result<()>,
     ) -> Result<Value> {
-        match PROGRESS_METHODS.iter().find(|(name, _)| *name == method) {
-            Some((_, answer)) => {
+        match PROGRESS_METHODS.iter().find(|(name, ..)| *name == method) {
+            Some((_, answer, request_of)) => {
                 let params = self.staged(method, params)?;
-                let _chosen = self.hardware.scope(RenderRequest::chooses_hardware(method, &params));
+                let _chosen = self.hardware.scope(request_of(&params).is_some_and(RenderRequest::chooses_hardware));
                 answer(self.server.backend(), &params, on_progress, list_outputs)
             }
-            None => Err(CraftError::unsupported(not_answered(method, "request_with_progress", PROGRESS_METHODS.iter().map(|(name, _)| *name)))),
+            None => Err(CraftError::unsupported(not_answered(method, "request_with_progress", PROGRESS_METHODS.iter().map(|(name, ..)| *name)))),
         }
     }
 
@@ -246,6 +252,21 @@ mod tests {
     use super::*;
     use crate::session::tests::Scratch;
     use craftbridge_core::GpuChoice;
+    use serde_json::json;
+
+    /// Every progress method's render request is found where the method reads it, so the hardware choice
+    /// is read from the request the method renders and from nothing else in its parameters.
+    #[test]
+    fn each_progress_method_names_where_its_render_request_sits() {
+        let request = json!({"output": "/c/x.mp4", "hardware": true});
+        let calls = [("export", request.clone()), ("template.render", json!({"template": "/c/t.ectemplate", "output": request.clone(), "hardware": false}))];
+        for (method, params) in calls {
+            let (_, _, request_of) = PROGRESS_METHODS.iter().find(|(name, ..)| *name == method).expect("a progress method");
+            assert_eq!(request_of(&params), Some(&request), "{method}");
+        }
+        let (_, _, request_of) = PROGRESS_METHODS.iter().find(|(name, ..)| *name == "template.render").expect("a progress method");
+        assert_eq!(request_of(&json!({"template": "/c/t.ectemplate"})), None, "a render without its request chooses nothing");
+    }
 
     /// The failure path tells the compositor as well as the core, whichever of wgpu's two callbacks
     /// reports: after the failure, and before any request has dropped the GPU, the compositor's own

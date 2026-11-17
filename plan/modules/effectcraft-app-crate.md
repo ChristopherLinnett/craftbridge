@@ -25,7 +25,7 @@
 | `src/staging.rs` | NEW | AD5: the staging of a source the session may read from a folder it may not write: a copy in the cache, which the import reads so what it writes beside the source lands inside the container (§19) |
 | `src/outputs.rs` | NEW | AD19: the files a render may write, handed to `list_outputs` (§19) |
 | `src/timings.rs` | NEW | AD6 |
-| `src/hardware.rs` | NEW | AD7: the exporter `Session.exporter` is set to: `FileExporter` through `src/exporter.rs`'s pools, and for an H.264 or HEVC job whose request chose `hardware` the Targa sequence and WAV run, the frames' conversion and order and the call into `craftbridge-media`'s encoders (§18); the choice is the one `export` request's, held by the app for the length of that call |
+| `src/hardware.rs` | NEW | AD7: the exporter `Session.exporter` is set to: `FileExporter` through `src/exporter.rs`'s pools, and for an H.264 or HEVC job whose request chose `hardware` the Targa sequence and WAV run, the frames' conversion and order and the call into `craftbridge-media`'s encoders (§18); the choice is that of the one request being rendered (an `export`'s parameters or a `template.render`'s `output`), held by the app for the length of that call |
 | `src/exporter.rs` | NEW | AD7: CraftBridge's exporter, `FileExporter` run on a rayon pool sized from the core's `available_memory()` and the job's largest frame (the caller's own pool when that is its size, otherwise one kept from job to job), the one `Session.exporter` is set to (through `src/hardware.rs`) |
 
 **Construction.**
