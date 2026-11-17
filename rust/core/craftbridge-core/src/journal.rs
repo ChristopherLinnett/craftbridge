@@ -8,6 +8,12 @@
 //! ends, whatever its outcome. At the next start each file the journal still lists is dealt with as
 //! the clean cancel the kill prevented would have dealt with it, and the journal is cleared.
 //!
+//! A writer makes the folders a file's path needs, so the journal also keeps, apart from the files,
+//! each folder of a listed file's path that was not there when the file was listed. The next start
+//! deals with those after the files, the deepest first, and removes each one that is then an empty
+//! folder, so a killed export leaves the container as it found it: a folder that holds anything the
+//! export did not write stays, as does every folder that was there before the export.
+//!
 //! These rules keep this from doing harm:
 //!
 //! * **Every write is atomic.** The journal is written to a temporary file in its own folder and
@@ -18,16 +24,19 @@
 //!   when it is not that file, so a finished file the export was about to replace but never reached
 //!   (a later item of a queue, the rest of an older sequence, a kill between listing and writing)
 //!   stays as it was, as a clean cancel leaves it.
-//! * **Only regular files inside the container are touched.** Entries are stored relative to the
-//!   container, because the absolute path of an iOS app's container can change between one launch
-//!   and the next (an update moves it). A start joins each entry to the container it has now,
-//!   resolves the entry's folder and refuses one outside the container, and looks at the file itself
-//!   without following a link, so a folder, a link and everything outside the container are left
-//!   alone and reported. Apple's File System Programming Guide calls a path-based URL "potentially
-//!   fragile between launches" (*Accessing Files and Directories*), and an Apple engineer answers on
-//!   the developer forums (thread 92693) that the path to an app's container, "and hence everything
-//!   inside" it, "can change", with the system making sure the app is not running when it does, and
-//!   tells apps to store paths relative to the container's root.
+//! * **Only regular files, and empty folders an export made, inside the container are touched.**
+//!   Entries are stored relative to the container, because the absolute path of an iOS app's
+//!   container can change between one launch and the next (an update moves it). A start joins each
+//!   entry to the container it has now, resolves the entry's folder and refuses one outside the
+//!   container, and looks at what is there without following a link: a listed file is deleted only
+//!   when it is a regular file, and a listed folder only when it is a folder that holds nothing,
+//!   which the system's own removal of a folder checks as it removes it, so a link, a folder that
+//!   holds anything and everything outside the container are left alone and reported. Apple's File
+//!   System Programming Guide calls a path-based URL "potentially fragile between launches"
+//!   (*Accessing Files and Directories*), and an Apple engineer answers on the developer forums
+//!   (thread 92693) that the path to an app's container, "and hence everything inside" it, "can
+//!   change", with the system making sure the app is not running when it does, and tells apps to
+//!   store paths relative to the container's root.
 //! * **A journal that cannot be read is an answer, not a crash.** One whose content is no journal
 //!   names no file, so nothing is deleted, and the start replaces it and says so. One the disk will
 //!   not read when a process first starts on it is a killed run's, so it is renamed, unread, to a
@@ -68,8 +77,8 @@ use crate::engine::lock;
 use crate::error::CraftError;
 use crate::folders::{Confinement, Folders, entry_in, resolved, written_file};
 use serde_json::{Map, Value};
-use std::collections::BTreeMap;
 use std::collections::btree_map::Entry as Slot;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, TryLockError};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -87,6 +96,9 @@ pub const MAX_JOURNAL_BYTES: u64 = 16 << 20;
 
 /// The key of the list of entries in the journal's JSON object.
 const OUTPUTS: &str = "outputs";
+/// The key of the list of folders the listed files' writers make, kept apart from the files, since a
+/// start deals with them only once the files are dealt with; absent when there are none.
+const FOLDERS: &str = "folders";
 /// An entry's path below the container.
 const PATH: &str = "path";
 /// The size of the file at the entry's path when it was listed; absent when there was none.
@@ -141,15 +153,18 @@ impl Known {
 /// disk. The files are named where they are now, inside the container.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Recovery {
-    /// Listed files the killed exports wrote, now deleted.
+    /// Listed files the killed exports wrote, now deleted, then the folders they made for them,
+    /// each removed once it held nothing.
     pub removed: Vec<PathBuf>,
-    /// Listed files still as they were when listed: the export never reached them, so they are left.
+    /// Listed files still as they were when listed: the export never reached them, so they are left;
+    /// and folders an export made that hold something it did not write, which are left too.
     pub untouched: Vec<PathBuf>,
-    /// Listed paths the start refused to touch, with why: one outside the container, a folder or a
-    /// link. They are dropped from the journal, since no later start would act on them.
+    /// Listed paths the start refused to touch, with why: one outside the container, a folder where
+    /// a file was listed, anything but a folder where a folder was, or a link. They are dropped from
+    /// the journal, since no later start would act on them.
     pub refused: Vec<(PathBuf, String)>,
-    /// Listed files that could not be deleted, with why. They stay listed, so the next start tries
-    /// again.
+    /// Listed files and folders that could not be deleted, with why. They stay listed, so the next
+    /// start tries again.
     pub failed: Vec<(PathBuf, String)>,
     /// What the start found about the journal files themselves: one it could not read, set aside or
     /// clear, each journal an earlier start set aside that is still unread, and each it read now,
@@ -170,15 +185,28 @@ pub(crate) struct Journal {
 pub(crate) struct Pending {
     journal: Journal,
     listed: Vec<Entry>,
+    /// Every folder of a listed file's path this export has looked at, there or not, so each is looked
+    /// at once however many files of a sequence it holds.
+    looked: BTreeSet<PathBuf>,
 }
 
-/// One listed file.
+/// One listed path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Entry {
-    /// Where the file is below the container, as the export's writer opens it.
+    /// Where it is below the container, as the export's writer opens it.
     path: String,
-    /// The file that was there when the entry was listed, or none.
-    found: Option<Stamp>,
+    /// What the export's writer puts there.
+    kind: Kind,
+}
+
+/// What a listed path is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    /// A file the export is about to write, with the file that was there when it was listed, or none.
+    File(Option<Stamp>),
+    /// A folder of a listed file's path that was not there when the file was listed, which the
+    /// export's writer makes as it writes the file.
+    Folder,
 }
 
 /// What tells the file that was at a path when it was listed from one written there since: writing
@@ -211,9 +239,10 @@ enum Locked {
 enum Settled {
     /// Nothing is at its path.
     Absent,
-    /// It is the file that was there when it was listed, so it is left.
+    /// It is the file that was there when it was listed, or a folder that holds something the export
+    /// did not write, so it is left.
     Untouched,
-    /// The export wrote it, and it is deleted.
+    /// The export wrote it, or made it and it holds nothing, and it is deleted.
     Removed,
 }
 
@@ -221,6 +250,8 @@ enum Settled {
 enum Refusal {
     /// It is not a regular file, which is all an export writes: what it is instead.
     NotAFile(&'static str),
+    /// It is not a folder, which is all a writer makes for a file: what it is instead.
+    NotAFolder(&'static str),
     /// The disk refused.
     Disk(String),
 }
@@ -297,25 +328,46 @@ impl Journal {
                 }
             }
         }
+        // The files first, in the order they were listed, then the folders their writers made, the
+        // deepest first, so each folder is looked at once what the export put in it has gone.
+        let (files, mut folders): (Vec<Entry>, Vec<Entry>) = stale.into_iter().partition(|entry| matches!(entry.kind, Kind::File(_)));
+        folders.sort_by(|a, b| depth(&b.path).cmp(&depth(&a.path)).then_with(|| b.path.cmp(&a.path)));
+        folders.dedup();
         let mut held = Vec::new();
-        for entry in stale {
+        for entry in files.into_iter().chain(folders) {
             // A file another engine of this process is writing now belongs to that export, not to a
-            // killed one, whatever an older entry says.
-            if running.iter().any(|ours| ours.path == entry.path) {
+            // killed one, whatever an older entry says, and so does a folder that holds one.
+            let below = Path::new(&entry.path);
+            let ours = |listed: &Entry| match entry.kind {
+                Kind::File(_) => listed.path == entry.path,
+                Kind::Folder => Path::new(&listed.path).starts_with(below),
+            };
+            if running.iter().any(ours) {
                 continue;
             }
-            let target = match entry_in(&self.root, Path::new(&entry.path)) {
+            // A folder that holds a file this start could not delete stays listed with it, for the
+            // start that deletes the file.
+            if entry.kind == Kind::Folder && held.iter().any(ours) {
+                held.push(entry);
+                continue;
+            }
+            let target = match entry_in(&self.root, below) {
                 Ok(target) => target,
                 Err(refusal) => {
                     recovery.refused.push((PathBuf::from(entry.path), refusal.to_string()));
                     continue;
                 }
             };
-            match settle(&target, entry.found) {
+            let settled = match entry.kind {
+                Kind::File(found) => settle(&target, found),
+                Kind::Folder => settle_folder(&target),
+            };
+            match settled {
                 Ok(Settled::Absent) => {}
                 Ok(Settled::Untouched) => recovery.untouched.push(target),
                 Ok(Settled::Removed) => recovery.removed.push(target),
                 Err(Refusal::NotAFile(what)) => recovery.refused.push((target, format!("it is {what}, not a file an export writes"))),
+                Err(Refusal::NotAFolder(what)) => recovery.refused.push((target, format!("it is {what}, not a folder a writer makes"))),
                 Err(Refusal::Disk(reason)) => {
                     recovery.failed.push((target, reason));
                     held.push(entry);
@@ -419,7 +471,7 @@ impl Journal {
 
     /// An export's entry, empty until the export lists the files it is about to write.
     pub(crate) fn pending(&self) -> Pending {
-        Pending { journal: self.clone(), listed: Vec::new() }
+        Pending { journal: self.clone(), listed: Vec::new(), looked: BTreeSet::new() }
     }
 
     /// The entry of `output`, a file an export is about to write: where its writer's open lands,
@@ -439,7 +491,29 @@ impl Journal {
             // its target wherever it points.
             Ok(_) => return Err(CraftError::io(format!("the output file {} is a folder or a link, not a file an export writes", target.display()))),
         };
-        Ok(Entry { path: path.to_string(), found })
+        Ok(Entry { path: path.to_string(), kind: Kind::File(found) })
+    }
+
+    /// The folders of the path `file` (an entry's, below the container) that are not there now, the
+    /// deepest first: the ones its writer makes. A folder this export has looked at already (in
+    /// `looked`, or in `seen` during this listing) is not looked at again, and nor is any folder
+    /// above it, which was looked at with it; one that is there holds only folders that are.
+    fn made_folders(&self, file: &str, looked: &BTreeSet<PathBuf>, seen: &mut BTreeSet<PathBuf>) -> Vec<Entry> {
+        let mut made = Vec::new();
+        for folder in Path::new(file).ancestors().skip(1).take_while(|folder| !folder.as_os_str().is_empty()) {
+            if looked.contains(folder) || !seen.insert(folder.to_path_buf()) {
+                break;
+            }
+            match fs::symlink_metadata(self.root.join(folder)) {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    made.push(Entry { path: folder.to_string_lossy().into_owned(), kind: Kind::Folder });
+                }
+                // Whatever is there was there before the export, so it is not the export's to remove;
+                // one the disk will not show is not counted as the export's either.
+                _ => break,
+            }
+        }
+        made
     }
 
     /// Rename the journal, unread, to a file of its own beside it, so a start that can read it deals
@@ -483,10 +557,15 @@ impl Journal {
         }
         let document: Value = serde_json::from_slice(&bytes).map_err(|error| damaged(&format!("is not JSON: {error}")))?;
         let outputs = document.get(OUTPUTS).and_then(Value::as_array).ok_or_else(|| damaged(&format!("has no `{OUTPUTS}` list")))?;
-        outputs
+        let folders = match document.get(FOLDERS) {
+            None => &[][..],
+            Some(folders) => folders.as_array().map(Vec::as_slice).ok_or_else(|| damaged(&format!("has a `{FOLDERS}` that is not a list")))?,
+        };
+        let files = outputs
             .iter()
-            .map(|output| Entry::from_value(output).ok_or_else(|| damaged(&format!("lists an entry that is not a `{PATH}` with what was there: {output}"))))
-            .collect()
+            .map(|output| Entry::file_from(output).ok_or_else(|| damaged(&format!("lists an entry that is not a `{PATH}` with what was there: {output}"))));
+        let made = folders.iter().map(|folder| Entry::folder_from(folder).ok_or_else(|| damaged(&format!("lists a folder that is not a `{PATH}`: {folder}"))));
+        files.chain(made).collect()
     }
 
     /// Replace the journal with one listing `entries`, atomically; with none to list the file is
@@ -498,8 +577,13 @@ impl Journal {
                 _ => Ok(()),
             };
         }
-        let document = Value::Object(Map::from_iter([(OUTPUTS.to_string(), Value::Array(entries.iter().map(Entry::to_value).collect()))]));
-        let bytes = serde_json::to_vec(&document).map_err(io::Error::from)?;
+        let (files, folders): (Vec<&Entry>, Vec<&Entry>) = entries.iter().partition(|entry| matches!(entry.kind, Kind::File(_)));
+        let listed = |entries: Vec<&Entry>| Value::Array(entries.into_iter().map(Entry::to_value).collect());
+        let mut document = Map::from_iter([(OUTPUTS.to_string(), listed(files))]);
+        if !folders.is_empty() {
+            document.insert(FOLDERS.to_string(), listed(folders));
+        }
+        let bytes = serde_json::to_vec(&Value::Object(document)).map_err(io::Error::from)?;
         if u64::try_from(bytes.len()).map_or(true, |length| length > MAX_JOURNAL_BYTES) {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("the journal would grow past the {MAX_JOURNAL_BYTES} bytes it holds")));
         }
@@ -542,7 +626,13 @@ impl Pending {
     /// export must not write them, when one lies outside the container or the journal cannot be
     /// written: an export that could be killed unlisted would leave partial files nothing deletes.
     pub(crate) fn list(&mut self, outputs: &[PathBuf]) -> Result<()> {
-        let entries = outputs.iter().map(|output| self.journal.entry_of(output)).collect::<Result<Vec<_>>>()?;
+        let (mut entries, mut seen) = (Vec::with_capacity(outputs.len()), BTreeSet::new());
+        for output in outputs {
+            let file = self.journal.entry_of(output)?;
+            let made = self.journal.made_folders(&file.path, &self.looked, &mut seen);
+            entries.push(file);
+            entries.extend(made);
+        }
         if entries.is_empty() {
             return Ok(());
         }
@@ -562,6 +652,7 @@ impl Pending {
             CraftError::io(format!("cannot list the export's files in the pending-export journal {}: {error}", self.journal.file.display()))
         })?;
         self.listed.extend(entries);
+        self.looked.extend(seen);
         Ok(())
     }
 
@@ -570,14 +661,16 @@ impl Pending {
     /// wrote, finished or not, so the error says that and the caller must pass it on rather than
     /// answer success.
     pub(crate) fn clear(self) -> Result<()> {
-        let Self { journal, listed } = self;
+        let Self { journal, listed, .. } = self;
         if listed.is_empty() {
             return Ok(());
         }
         let mut known = lock(&KNOWN);
         let uncleared = |error: String| {
-            let first = listed.first().map_or_else(PathBuf::new, |entry| journal.root.join(&entry.path));
-            let more = listed.len().saturating_sub(1);
+            // A start removes a folder only once it holds nothing, so only the files are named.
+            let files: Vec<&Entry> = listed.iter().filter(|entry| matches!(entry.kind, Kind::File(_))).collect();
+            let first = files.first().map_or_else(PathBuf::new, |entry| journal.root.join(&entry.path));
+            let more = files.len().saturating_sub(1);
             CraftError::io(format!(
                 "the export ended but its entries in the pending-export journal {} could not be cleared, so the next start may delete {}{}: copy what it wrote elsewhere first ({error})",
                 journal.file.display(),
@@ -600,8 +693,8 @@ impl Pending {
 }
 
 impl Entry {
-    /// The entry a journal's JSON holds, or none for one that is not an entry.
-    fn from_value(value: &Value) -> Option<Self> {
+    /// The file entry a journal's JSON holds, or none for one that is not an entry.
+    fn file_from(value: &Value) -> Option<Self> {
         let path = value.get(PATH)?.as_str()?.to_string();
         let found = match (value.get(BYTES), value.get(MODIFIED)) {
             (None, None) => None,
@@ -614,13 +707,18 @@ impl Entry {
             }
             (None, Some(_)) => return None,
         };
-        Some(Self { path, found })
+        Some(Self { path, kind: Kind::File(found) })
+    }
+
+    /// The folder entry a journal's JSON holds, or none for one that is not an entry.
+    fn folder_from(value: &Value) -> Option<Self> {
+        Some(Self { path: value.get(PATH)?.as_str()?.to_string(), kind: Kind::Folder })
     }
 
     fn to_value(&self) -> Value {
         let mut fields = Map::new();
         fields.insert(PATH.to_string(), Value::from(self.path.as_str()));
-        if let Some(found) = self.found {
+        if let Kind::File(Some(found)) = self.kind {
             fields.insert(BYTES.to_string(), Value::from(found.bytes));
             if let Some(modified) = found.modified {
                 fields.insert(MODIFIED.to_string(), Value::from(modified));
@@ -641,26 +739,62 @@ impl Stamp {
 /// followed: leave it when it is missing or is still the file `found` describes, delete it when
 /// the export wrote it, and refuse anything that is not a regular file.
 fn settle(target: &Path, found: Option<Stamp>) -> std::result::Result<Settled, Refusal> {
-    let now = match fs::symlink_metadata(target) {
-        // A folder of the path that is now a file holds nothing either.
-        Err(error) if matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => return Ok(Settled::Absent),
-        Err(error) => return Err(Refusal::Disk(error.to_string())),
-        Ok(now) => now,
-    };
+    let Some(now) = found_at(target)? else { return Ok(Settled::Absent) };
     let kind = now.file_type();
-    if kind.is_symlink() {
-        return Err(Refusal::NotAFile("a symbolic link"));
-    }
-    if kind.is_dir() {
-        return Err(Refusal::NotAFile("a folder"));
-    }
     if !kind.is_file() {
-        return Err(Refusal::NotAFile("neither a file nor a folder"));
+        return Err(Refusal::NotAFile(what_is(kind)));
     }
     if found == Some(Stamp::of(&now)) {
         return Ok(Settled::Untouched);
     }
     fs::remove_file(target).map(|()| Settled::Removed).map_err(|error| Refusal::Disk(error.to_string()))
+}
+
+/// Deal with the listed folder at `target`, a path inside the container whose own name is not
+/// followed: remove it when it is a folder that holds nothing, leave it when it holds anything, and
+/// refuse anything that is not a folder. The system's removal of a folder removes only an empty one
+/// and never follows a link at its name, so nothing a folder holds, or a link reaches, is touched
+/// even if the folder changed since it was looked at.
+fn settle_folder(target: &Path) -> std::result::Result<Settled, Refusal> {
+    let Some(now) = found_at(target)? else { return Ok(Settled::Absent) };
+    let kind = now.file_type();
+    if !kind.is_dir() {
+        return Err(Refusal::NotAFolder(what_is(kind)));
+    }
+    match fs::remove_dir(target) {
+        Ok(()) => Ok(Settled::Removed),
+        // POSIX lets `rmdir` answer a folder that holds anything with either error.
+        Err(error) if matches!(error.kind(), io::ErrorKind::DirectoryNotEmpty | io::ErrorKind::AlreadyExists) => Ok(Settled::Untouched),
+        Err(error) => Err(Refusal::Disk(error.to_string())),
+    }
+}
+
+/// What is at `target` now, its own name not followed, or `None` when nothing is: a folder of its
+/// path that is now a file holds nothing either.
+fn found_at(target: &Path) -> std::result::Result<Option<fs::Metadata>, Refusal> {
+    match fs::symlink_metadata(target) {
+        Err(error) if matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => Ok(None),
+        Err(error) => Err(Refusal::Disk(error.to_string())),
+        Ok(now) => Ok(Some(now)),
+    }
+}
+
+/// What a start found at a listed path, as its refusal names it.
+fn what_is(kind: fs::FileType) -> &'static str {
+    if kind.is_symlink() {
+        "a symbolic link"
+    } else if kind.is_dir() {
+        "a folder"
+    } else if kind.is_file() {
+        "a file"
+    } else {
+        "neither a file nor a folder"
+    }
+}
+
+/// How many names deep `path` (an entry's, below the container) lies.
+fn depth(path: &str) -> usize {
+    Path::new(path).components().count()
 }
 
 /// The lock file at `path`, made if it is not there, whose content is never read or written.
@@ -781,6 +915,11 @@ mod tests {
             fs::write(self.file(), json!({ OUTPUTS: entries }).to_string()).unwrap();
         }
 
+        /// The journal a killed run left, with these entries and folders as written.
+        fn write_journal_with(&self, entries: &[Value], folders: &[Value]) {
+            fs::write(self.file(), json!({ OUTPUTS: entries, FOLDERS: folders }).to_string()).unwrap();
+        }
+
         fn start(&self) -> std::result::Result<Engine, CraftError> {
             Engine::start_in(&self.folders, Scripted::idle(), GpuChoice::CpuOnly)
         }
@@ -899,8 +1038,8 @@ mod tests {
 
         let after = Sandbox::at(root, "Application-2")?;
         let engine = after.start()?;
-        assert_eq!(engine.recovery().removed, [after.real("exports/card.mp4")], "{:?}", engine.recovery());
-        assert!(!after.folders.container.join("exports/card.mp4").exists());
+        assert_eq!(engine.recovery().removed, [after.real("exports/card.mp4"), after.real("exports")], "{:?}", engine.recovery());
+        assert!(!after.folders.container.join("exports").exists());
         Ok(())
     }
 
@@ -1095,6 +1234,9 @@ mod tests {
             r#"{"outputs": [{"path": "card.mp4", "bytes": "four"}]}"#,
             r#"{"outputs": [{"path": "card.mp4", "modified": 1}]}"#,
             r#"{"files": []}"#,
+            r#"{"outputs": [{"path": "card.mp4"}], "folders": "exports"}"#,
+            r#"{"outputs": [{"path": "card.mp4"}], "folders": [{"path": 1}]}"#,
+            r#"{"outputs": [{"path": "card.mp4"}], "folders": ["exports"]}"#,
             "\u{0}\u{1}",
             too_long.as_str(),
         ];
@@ -1149,7 +1291,7 @@ mod tests {
     }
 
     /// The folders of an output may not exist yet when it is listed (a segment's numbered folder):
-    /// the file is still found at the next start.
+    /// the file is still found at the next start, and the folder its writer made goes after it.
     #[test]
     fn a_file_in_a_folder_made_after_it_was_listed_is_found_at_the_next_start() -> Test {
         let sand = Sandbox::new()?;
@@ -1158,7 +1300,115 @@ mod tests {
         sand.put("card_001/card_00000.png", b"half");
         export.killed();
         let engine = sand.start()?;
-        assert_eq!(engine.recovery().removed, [sand.real("card_001/card_00000.png")], "{:?}", engine.recovery());
+        assert_eq!(engine.recovery().removed, [sand.real("card_001/card_00000.png"), sand.real("card_001")], "{:?}", engine.recovery());
+        Ok(())
+    }
+
+    /// The folders a listed file's path needs that are not there when it is listed are kept apart from
+    /// the files, each once however many files of a sequence and however many listings name it, and a
+    /// folder that is there is never kept: it is not the export's.
+    #[test]
+    fn the_folders_a_listing_needs_are_kept_apart_once_each() -> Test {
+        let sand = Sandbox::new()?;
+        let container = &sand.folders.container;
+        sand.put("kept/old.png", b"there before");
+        let mut export = sand.journal().pending();
+        export.list(&[container.join("seq/a/f_00000.png"), container.join("seq/a/f_00001.png"), container.join("kept/f_00000.png")])?;
+        export.list(&[container.join("seq/a/f_00002.png"), container.join("seq/b/f_00000.png"), container.join("top.png")])?;
+        let journal: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
+        assert_eq!(journal[FOLDERS], json!([{ PATH: "seq/a" }, { PATH: "seq" }, { PATH: "seq/b" }]), "{journal}");
+        assert_eq!(journal[OUTPUTS].as_array().map(Vec::len), Some(6), "{journal}");
+        export.clear()?;
+        assert!(!sand.file().exists());
+        // A listing of files whose folders are all there keeps no folder list at all.
+        let mut plain = sand.journal().pending();
+        plain.list(&[container.join("kept/f_00001.png"), container.join("top.png")])?;
+        let journal: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
+        assert_eq!(journal.get(FOLDERS), None, "{journal}");
+        plain.clear()?;
+        Ok(())
+    }
+
+    /// The acceptance for folders: a killed export leaves the container as it found it. Its files go
+    /// first, then each folder it made, the deepest first, once it holds nothing; a folder it made
+    /// that holds a file it did not write stays, and so does a folder that was there before it.
+    #[test]
+    fn a_restart_removes_the_folders_a_killed_export_made_once_they_hold_nothing() -> Test {
+        let sand = Sandbox::new()?;
+        let container = &sand.folders.container;
+        sand.put("kept/old.png", b"there before");
+        let listed = ["a/b/one.png", "a/b/two.png", "a/three.png", "kept/four.png", "shared/five.png"];
+        let mut export = sand.journal().pending();
+        export.list(&listed.map(|name| container.join(name)))?;
+        // The writer reached all but `two.png`, and someone put a file of their own beside `five.png`.
+        for name in ["a/b/one.png", "a/three.png", "kept/four.png", "shared/five.png"] {
+            sand.put(name, b"half");
+        }
+        let theirs = sand.put("shared/notes.txt", b"not the export's");
+        export.killed();
+
+        let engine = sand.start()?;
+        let recovery = engine.recovery();
+        let real = |names: &[&str]| names.iter().map(|name| sand.real(name)).collect::<Vec<_>>();
+        assert_eq!(recovery.removed, real(&["a/b/one.png", "a/three.png", "kept/four.png", "shared/five.png", "a/b", "a"]), "{recovery:?}");
+        assert_eq!(recovery.untouched, real(&["shared"]), "{recovery:?}");
+        assert!(recovery.refused.is_empty() && recovery.failed.is_empty() && recovery.journal.is_empty(), "{recovery:?}");
+        assert!(!container.join("a").exists(), "a folder the export made was left");
+        assert_eq!(fs::read(container.join("kept/old.png"))?, b"there before", "a folder that was there lost what it held");
+        assert_eq!(fs::read(&theirs)?, b"not the export's", "a file the export did not write was deleted");
+        assert!(!sand.file().exists(), "the journal was not cleared");
+        Ok(())
+    }
+
+    /// Two exports that each listed a file below a folder neither found there leave it listed twice;
+    /// a start deals with it once, and reports a folder it leaves once.
+    #[test]
+    fn a_folder_two_killed_exports_listed_is_dealt_with_and_reported_once() -> Test {
+        let sand = Sandbox::new()?;
+        let container = &sand.folders.container;
+        let (mut one, mut two) = (sand.journal().pending(), sand.journal().pending());
+        one.list(&[container.join("shared/one.png")])?;
+        two.list(&[container.join("shared/two.png")])?;
+        sand.put("shared/one.png", b"half");
+        sand.put("shared/notes.txt", b"not the export's");
+        one.killed();
+        two.killed();
+
+        let engine = sand.start()?;
+        assert_eq!(engine.recovery().removed, [sand.real("shared/one.png")], "{:?}", engine.recovery());
+        assert_eq!(engine.recovery().untouched, [sand.real("shared")], "{:?}", engine.recovery());
+        assert!(!sand.file().exists());
+        Ok(())
+    }
+
+    /// A folder entry is removed only as the empty folder it names: one that is now a link, out of the
+    /// container or not, or a file, is refused and nothing it reaches is touched, and one that is not
+    /// there is no answer at all.
+    #[cfg(unix)]
+    #[test]
+    fn a_listed_folder_is_never_removed_through_a_link_or_as_a_file() -> Test {
+        let sand = Sandbox::new()?;
+        let container = &sand.folders.container;
+        fs::write(sand.outside.join("photo.jpg"), b"not ours")?;
+        std::os::unix::fs::symlink(&sand.outside, container.join("out"))?;
+        fs::create_dir(container.join("inner"))?;
+        std::os::unix::fs::symlink(container.join("inner"), container.join("linked"))?;
+        sand.put("plain", b"a file where a folder was listed");
+        sand.write_journal_with(&[], &[entry("out"), entry("linked"), entry("plain"), entry("gone"), entry("../outside")]);
+
+        let engine = sand.start()?;
+        let recovery = engine.recovery();
+        assert!(recovery.removed.is_empty() && recovery.untouched.is_empty() && recovery.failed.is_empty(), "{recovery:?}");
+        let why = |name: &str| recovery.refused.iter().find(|(path, _)| path.ends_with(name)).map(|(_, why)| why.as_str());
+        assert_eq!(recovery.refused.len(), 4, "{recovery:?}");
+        assert_eq!(why("out"), Some("it is a symbolic link, not a folder a writer makes"));
+        assert_eq!(why("linked"), Some("it is a symbolic link, not a folder a writer makes"));
+        assert_eq!(why("plain"), Some("it is a file, not a folder a writer makes"));
+        assert!(why("../outside").is_some_and(|why| why.contains("it must be a plain name below it")), "{recovery:?}");
+        assert_eq!(fs::read(sand.outside.join("photo.jpg"))?, b"not ours");
+        assert!(fs::symlink_metadata(container.join("out"))?.file_type().is_symlink() && container.join("inner").is_dir());
+        assert!(container.join("plain").is_file() && sand.outside.is_dir());
+        assert!(!sand.file().exists(), "refused folders stayed listed");
         Ok(())
     }
 
@@ -1224,6 +1474,61 @@ mod tests {
         first.clear()?;
         second.clear()?;
         assert!(!sand.file().exists());
+        Ok(())
+    }
+
+    /// The folders an export made are kept through every way the journal stops being read: one the
+    /// disk will not read at a start is set aside whole and a later start removes the folders it lists
+    /// after its files; one it stops reading mid-run is replaced with the folders the process knows;
+    /// and a journal of an older build, which has no folder list, or of a newer one, which has keys
+    /// this one does not know, is read for what it lists.
+    #[cfg(unix)]
+    #[test]
+    fn the_folders_an_export_made_survive_an_unreadable_journal_and_an_older_or_newer_one() -> Test {
+        use std::os::unix::fs::PermissionsExt;
+        let sand = Sandbox::new()?;
+        if !permissions_hold(&sand)? {
+            return Ok(());
+        }
+        let container = &sand.folders.container;
+        let mut export = sand.journal().pending();
+        export.list(&[container.join("seq/take/f_00000.png")])?;
+        let (frame, folder) = (sand.put("seq/take/f_00000.png", b"half"), container.join("seq"));
+        export.killed();
+        fs::set_permissions(sand.file(), fs::Permissions::from_mode(0o000))?;
+        let engine = sand.start()?;
+        assert!(frame.exists(), "a file was deleted on the word of a journal nobody read: {:?}", engine.recovery());
+        let shelf = shelved(&sand)?;
+        assert_eq!(shelf.len(), 1, "the unread journal was not set aside");
+        for one in &shelf {
+            fs::set_permissions(one, fs::Permissions::from_mode(0o600))?;
+        }
+        let later = sand.start()?;
+        assert_eq!(later.recovery().removed, [sand.real("seq/take/f_00000.png"), sand.real("seq/take"), sand.real("seq")], "{:?}", later.recovery());
+        assert!(!folder.exists() && shelved(&sand)?.is_empty() && !sand.file().exists());
+
+        // The disk stops reading the journal while two exports run: the second's listing writes the
+        // first's folders with its own.
+        let (mut first, mut second) = (sand.journal().pending(), sand.journal().pending());
+        first.list(&[container.join("made/f_00000.png")])?;
+        fs::set_permissions(sand.file(), fs::Permissions::from_mode(0o000))?;
+        second.list(&[container.join("other.png")])?;
+        let now: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
+        assert_eq!(now[FOLDERS], json!([entry("made")]), "{now}");
+        first.clear()?;
+        second.clear()?;
+        assert!(!sand.file().exists());
+
+        // A newer build writes keys this build does not read, and an older one wrote no folder list.
+        let old = sand.put("old.mp4", b"half");
+        let made = sand.put("new/f.png", b"half");
+        fs::write(sand.file(), json!({ OUTPUTS: [entry("new/f.png")], FOLDERS: [entry("new")], "version": 9 }).to_string())?;
+        let engine = sand.start()?;
+        assert!(!made.exists() && !container.join("new").exists() && old.exists(), "{:?}", engine.recovery());
+        assert_eq!(engine.recovery().removed, [sand.real("new/f.png"), sand.real("new")]);
+        sand.write_journal(&[entry("old.mp4")]);
+        let engine = sand.start()?;
+        assert!(!old.exists() && engine.recovery().removed == [sand.real("old.mp4")], "{:?}", engine.recovery());
         Ok(())
     }
 
@@ -1587,7 +1892,7 @@ mod tests {
         sand.write_journal(&[entry("old.mp4")]);
         let before = fs::read(sand.file())?;
         let long = "x".repeat(1 << 20);
-        let entries: Vec<Entry> = (0..17).map(|n| Entry { path: format!("{n}{long}"), found: None }).collect();
+        let entries: Vec<Entry> = (0..17).map(|n| Entry { path: format!("{n}{long}"), kind: Kind::File(None) }).collect();
         let refused = journal.write(&entries);
         assert!(refused.is_err(), "a journal past its bound was written");
         assert_eq!(fs::read(sand.file())?, before);
@@ -1612,6 +1917,34 @@ mod tests {
         Ok(())
     }
 
+    /// An export that lists `output` and is then held, with the gate it opens once it has listed and
+    /// the gate that lets it end: it writes `output` before it is held when `early`, and once it is let
+    /// go otherwise.
+    fn held_export(output: &Path, early: bool) -> (Script, Arc<Gate>, Arc<Gate>) {
+        let (listed, release) = (Arc::new(Gate::default()), Arc::new(Gate::default()));
+        let (opened, wait, written) = (listed.clone(), release.clone(), output.to_path_buf());
+        let script: Script = Box::new(move |_, list_outputs| {
+            list_outputs(std::slice::from_ref(&written))?;
+            let write = || fs::write(&written, b"being written").map_err(|error| CraftError::io(error.to_string()));
+            if early {
+                write()?;
+            }
+            opened.open();
+            assert!(wait.wait(), "the test never let the export end");
+            if !early {
+                write()?;
+            }
+            Ok(Value::Null)
+        });
+        (script, listed, release)
+    }
+
+    /// The export of `engine`, run on a thread of its own as an app makes its call with progress.
+    fn exporting(engine: &Arc<Engine>) -> thread::JoinHandle<Result<Value>> {
+        let engine = engine.clone();
+        thread::spawn(move || engine.request_with_progress("export", Value::Null, |_, _, _| {}, &CancelToken::new()))
+    }
+
     /// Engines of one app share the journal: a second engine started while the first one's export
     /// runs does not delete what it is writing nor drop its entry, even where an entry the first
     /// start could not deal with names the same file, deals with what a killed run of another process
@@ -1626,15 +1959,7 @@ mod tests {
         sand.write_journal(&[entry("locked/running.mp4")]);
         let locked = sand.folders.container.join("locked");
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o500))?;
-        let (listed, release) = (Arc::new(Gate::default()), Arc::new(Gate::default()));
-        let (opened, wait, written) = (listed.clone(), release.clone(), output.clone());
-        let script: Script = Box::new(move |_, list_outputs| {
-            list_outputs(std::slice::from_ref(&written))?;
-            fs::write(&written, b"being written").unwrap();
-            opened.open();
-            assert!(wait.wait(), "the test never let the export end");
-            Ok(Value::Null)
-        });
+        let (script, listed, release) = held_export(&output, true);
         let first = Arc::new(sand.start_running(script)?);
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o700))?;
         if first.recovery().failed.is_empty() {
@@ -1647,8 +1972,7 @@ mod tests {
         let mut journal: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
         journal[OUTPUTS].as_array_mut().ok_or("no list")?.push(entry("stale.mp4"));
         fs::write(sand.file(), journal.to_string())?;
-        let exporting = first.clone();
-        let export = thread::spawn(move || exporting.request_with_progress("export", Value::Null, |_, _, _| {}, &CancelToken::new()));
+        let export = exporting(&first);
         assert!(listed.wait(), "the export never listed its output");
 
         let second = sand.start()?;
@@ -1661,6 +1985,30 @@ mod tests {
         release.open();
         assert_eq!(export.join().unwrap(), Ok(Value::Null));
         assert!(!sand.file().exists(), "the running export's entry outlived it");
+        Ok(())
+    }
+
+    /// A second engine's start never removes a folder a running export of the process is about to
+    /// write into, even one that is empty now and that a killed run listed as one it made.
+    #[test]
+    fn a_second_engines_start_leaves_the_folder_a_running_export_writes_into() -> Test {
+        let sand = Sandbox::new()?;
+        let output = sand.folders.container.join("busy/card.mp4");
+        let (script, listed, release) = held_export(&output, false);
+        let first = Arc::new(sand.start_running(script)?);
+        // A killed run of another process made the folder, and the export's listing reads its entry
+        // when it takes the journal.
+        fs::create_dir(sand.folders.container.join("busy"))?;
+        sand.write_journal_with(&[], &[entry("busy")]);
+        let export = exporting(&first);
+        assert!(listed.wait(), "the export never listed its output");
+
+        let second = sand.start()?;
+        assert!(sand.folders.container.join("busy").is_dir(), "the start removed the folder a running export writes into: {:?}", second.recovery());
+        assert!(second.recovery().removed.is_empty(), "{:?}", second.recovery());
+        release.open();
+        assert_eq!(export.join().unwrap(), Ok(Value::Null));
+        assert_eq!(fs::read(&output)?, b"being written");
         Ok(())
     }
 
@@ -1695,14 +2043,15 @@ mod tests {
         Ok(())
     }
 
-    /// A listed file the disk will not let go stays listed, so the next start tries again.
+    /// A listed file the disk will not let go stays listed, so the next start tries again, and so does
+    /// a folder the export made that holds it, which that start removes after it.
     #[cfg(unix)]
     #[test]
     fn a_file_that_cannot_be_deleted_stays_listed() -> Test {
         use std::os::unix::fs::PermissionsExt;
         let sand = Sandbox::new()?;
-        let partial = sand.put("locked/card.mp4", b"half");
-        sand.write_journal(&[entry("locked/card.mp4")]);
+        let partial = sand.put("made/locked/card.mp4", b"half");
+        sand.write_journal_with(&[entry("made/locked/card.mp4")], &[entry("made/locked"), entry("made")]);
         let locked = partial.parent().unwrap().to_path_buf();
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o500))?;
 
@@ -1713,11 +2062,14 @@ mod tests {
             return Ok(());
         }
         assert_eq!(engine.recovery().failed.len(), 1, "{:?}", engine.recovery());
-        assert!(fs::read_to_string(sand.file())?.contains("locked/card.mp4"), "an entry that could not be deleted was dropped");
+        assert!(engine.recovery().untouched.is_empty() && engine.recovery().removed.is_empty(), "{:?}", engine.recovery());
+        let journal: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
+        assert_eq!(journal[OUTPUTS], json!([entry("made/locked/card.mp4")]), "an entry that could not be deleted was dropped");
+        assert_eq!(journal[FOLDERS], json!([entry("made/locked"), entry("made")]), "the folders that hold it were dropped");
         // The next start of the same process tries it again, from the journal it reads again.
         let again = sand.start()?;
-        assert_eq!(again.recovery().removed, [sand.real("locked/card.mp4")], "{:?}", again.recovery());
-        assert!(!sand.file().exists());
+        assert_eq!(again.recovery().removed, [sand.real("made/locked/card.mp4"), sand.real("made/locked"), sand.real("made")], "{:?}", again.recovery());
+        assert!(!sand.file().exists() && !sand.folders.container.join("made").exists());
         Ok(())
     }
 

@@ -3,7 +3,7 @@
 //!
 //! `replay::run` executes each line on the session itself, so a line never passes the checks
 //! `Backend::exec` makes — the confinement's, and the door that withholds the model downloads
-//! and the renders no one has listed (AD11, AD3). The method therefore reads the script's lines
+//! and the renders and fills no one has listed (AD11, AD3, AD20). The method therefore reads the script's lines
 //! before running any of them and refuses the whole call if either check refuses one of them, the way `run` checks its whole batch before its
 //! first step: a refused line must not leave the earlier lines' work behind.
 

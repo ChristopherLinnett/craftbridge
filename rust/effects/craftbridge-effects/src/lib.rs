@@ -7,14 +7,15 @@
 //! loader only where the app names a plug-in folder (PD13) — and runs it headless, confined before its first command to
 //! the container as the write root with the container and bundle as read roots (L5, AD9). No helper
 //! hooks exist: a helper is a separate process, and a phone starts none, so the commands that need
-//! one answer `Unsupported`, as do the model downloads, which would start the system `curl` (AD11), and the renders no one has
-//! listed the files of for the pending-export journal (AD3, §19).
+//! one answer `Unsupported`, as do the model downloads, which would start the system `curl` (AD11), and the renders and fills no one has
+//! listed the files of for the pending-export journal (AD3, AD20, §19).
 //!
 //! Every call reaches the session through the MCP server built at construction, so the `mcp` call's
 //! line transport and the method table act on one session. The methods the plugin answers are the
 //! plan's §14 rows its method lists name — one for `request`, `replay` and `timings` among them, and
-//! one for `request_with_progress`, which answers `export` through the render runner (AD3) and
-//! `template.render` through the template runner (AD5) — each
+//! one for `request_with_progress`, which answers `export` through the render runner (AD3),
+//! `template.render` through the template runner (AD5) and `contentFill.generate` through the fill
+//! runner (AD20) — each
 //! with the result shape and failure words of the EffectCraft command line at the pin (AD10); `mcp`
 //! is a call of its own, not a row of either list, and `script` is not a method of the phone build
 //! (PD13): a script's commands reach the session past the confinement, so an app runs the engine's
@@ -31,6 +32,7 @@
 mod app;
 mod exporter;
 mod files;
+mod fill;
 mod fonts;
 mod hardware;
 /// What the generator writes, one file to a module under `src/generated/`.

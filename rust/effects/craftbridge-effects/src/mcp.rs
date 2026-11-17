@@ -2,8 +2,8 @@
 //! construction (plan §14, §16).
 //!
 //! The server runs a tool's command through the confined backend, so the confinement holds on this
-//! path as on every other. The model downloads and the renders no one has listed the files of are
-//! what the backend does not withhold, so the door that withholds them (AD11, AD3) is held here too:
+//! path as on every other. The model downloads and the renders and fills no one has listed the files of are
+//! what the backend does not withhold, so the door that withholds them (AD11, AD3, AD20) is held here too:
 //! a tool call that reaches one is answered as a failed tool call, in the words every other path
 //! refuses it in, and the server never sees it.
 //! The tools also run their commands past `methods::execute`, so each reply to a tool call that
@@ -105,7 +105,7 @@ fn commands_in(message: &Value) -> Option<Commands> {
 }
 
 /// The words of the refusal of the first command a `tools/call` request reaches that the door
-/// withholds, a model download or a render nothing has listed, if it reaches one.
+/// withholds, a model download or a render or a fill nothing has listed, if it reaches one.
 fn withheld_in(message: &Value) -> Option<String> {
     let commands = commands_in(message)?;
     commands.steps.iter().flatten().find_map(|(command, params)| withheld(command, params))

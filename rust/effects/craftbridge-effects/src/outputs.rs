@@ -20,13 +20,19 @@ use effectcraft_engine::render_queue::output_bits;
 /// too long to hold without this ever collecting the whole sequence in memory.
 const CHUNK: usize = 8192;
 
-/// Hand `list` every file the next render of the queued items may write, [`CHUNK`] paths at a time,
-/// and stop at the first refusal `list` answers.
+/// Hand `list` every file the next render of the queued items may write, in chunks, and stop at the
+/// first refusal `list` answers.
 pub(crate) fn list_queued(session: &Session, list: &mut dyn FnMut(&[PathBuf]) -> Result<()>) -> Result<()> {
     let formats = session.exporter.as_ref().map(|exporter| exporter.formats()).unwrap_or_default();
+    list_in_chunks(queued_files(session, &formats).map(PathBuf::from), list)
+}
+
+/// Hand `list` each of `paths`, [`CHUNK`] at a time, and stop at the first refusal `list` answers: the
+/// one way any runner lists, so none ever collects a whole sequence's paths.
+pub(crate) fn list_in_chunks(paths: impl Iterator<Item = PathBuf>, list: &mut dyn FnMut(&[PathBuf]) -> Result<()>) -> Result<()> {
     let mut chunk = Vec::with_capacity(CHUNK);
-    for path in queued_files(session, &formats) {
-        chunk.push(PathBuf::from(path));
+    for path in paths {
+        chunk.push(path);
         if chunk.len() == CHUNK {
             list(&chunk)?;
             chunk.clear();
@@ -89,7 +95,7 @@ mod tests {
     use super::*;
     use crate::runner::export;
     use crate::session;
-    use craftbridge_core::{CraftError, Platform};
+    use craftbridge_core::CraftError;
     use effectcraft_automation::Backend;
     use serde_json::{Value, json};
     use std::collections::BTreeSet;
@@ -104,13 +110,10 @@ mod tests {
 
     fn rig(width: u32, height: u32, seconds: f64) -> Rig {
         let dir = tempfile::tempdir().expect("a scratch folder");
-        let mut backend = Backend::headless(session::build(Platform::current(), &session::tests::folders(None), &crate::hardware::HardwareChoice::default()));
-        for (command, params) in [
+        let backend = session::tests::backend_running([
             ("comp.new", json!({"name": "A", "width": width, "height": height, "duration": seconds, "frameRate": 10})),
             ("layer.newSolid", json!({"comp": 1, "name": "Bg"})),
-        ] {
-            backend.exec(command, params).expect("the project builds");
-        }
+        ]);
         Rig { backend, dir }
     }
 

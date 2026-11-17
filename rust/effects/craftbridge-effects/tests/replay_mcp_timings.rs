@@ -23,6 +23,11 @@ const DOWNLOADS: [&str; 2] = ["roto.model.download", "face.model.download"];
 /// withholds on every path.
 const RENDERS: [&str; 5] = ["renderQueue.render", "file.watchFolder", "file.watchFolder.poll", "render.saveCurrentPreview", "file.exportTimeline"];
 
+/// The two commands that can have a fill's frames written, which the door withholds on every path.
+const FILLS: [&str; 2] = ["contentFill.generate", "layer.newContentAwareFill"];
+
+const FILL_WORDS: &str = "is not available in this build: it generates the frames of a Content-Aware Fill, whose files the pending-export journal cannot list, and `contentFill.generate` called with progress lists them";
+
 /// A file outside the container, which the confinement refuses to read.
 const OUTSIDE: &str = "/etc/hosts";
 
@@ -31,7 +36,14 @@ const SCRIPT_THAT_LEAVES_A_COMP: &str = "app.run('comp.new', {name: 'Ran'})";
 
 /// The door's refusal of `id`, in the words every path refuses it in.
 fn withheld(id: &str) -> String {
-    format!("`{id}` {}", if DOWNLOADS.contains(&id) { DOWNLOAD_WORDS } else { RENDER_WORDS })
+    let words = if DOWNLOADS.contains(&id) {
+        DOWNLOAD_WORDS
+    } else if FILLS.contains(&id) {
+        FILL_WORDS
+    } else {
+        RENDER_WORDS
+    };
+    format!("`{id}` {words}")
 }
 
 /// What the confinement itself answers `command` with, built over the scratch app's own roots: the
@@ -109,7 +121,7 @@ fn a_replay_is_refused_whole_by_the_door_and_the_confinement_before_any_line_run
     let invalid: fn(&CraftError) -> bool = |e| matches!(e, CraftError::InvalidParams { .. });
     // Export Timeline that renders nothing, which the door reads past, ahead of a withheld step.
     let quiet = json!({"command": "file.exportTimeline", "params": {"path": "quiet.xml", "prerender": "none"}});
-    for id in DOWNLOADS.into_iter().chain(RENDERS) {
+    for id in DOWNLOADS.into_iter().chain(RENDERS).chain(FILLS) {
         for line in [
             json!({"command": id, "params": weights}),
             json!({"expect": {"query": id, "params": weights}}),
@@ -181,7 +193,7 @@ fn mcp_withholds_the_model_downloads_and_unlisted_renders_on_every_tool_that_run
     let scratch = Scratch::new().expect("a scratch folder");
     let mut app = scratch.app().expect("the app starts");
     let weights = json!({"id": "classical"});
-    for id in DOWNLOADS.into_iter().chain(RENDERS) {
+    for id in DOWNLOADS.into_iter().chain(RENDERS).chain(FILLS) {
         let step = json!({"command": id, "params": weights});
         let id_step = json!({"id": id, "params": weights});
         let in_a_batch = json!({"command": "engine.batch", "params": {"steps": [{"command": "comp.new"}, id_step]}});
@@ -365,6 +377,38 @@ fn no_tool_starts_an_unlisted_render_past_the_door() {
             app.mcp(&line);
             let queue = exec(&mut app, "renderQueue.list", json!({})).expect("the queue lists");
             assert!(queue["rendering"] == json!(false) && !output.exists(), "{line} started a render: {queue}");
+        }
+    }
+    assert_eq!(std::fs::read_dir(scratch.path()).expect("the container reads").count(), before, "a refused call wrote nothing");
+}
+
+/// Every tool the server offers, given each command that generates a fill in every shape its arguments
+/// take, starts no fill: with a layer holding a hole to fill, nothing is written and no task is left
+/// running or finished once the session has waited for its jobs, which is how a call that got past the
+/// door shows itself. Some tools change the project (the undo among them), so it is built again before
+/// each call.
+#[test]
+fn no_tool_generates_a_fill_nothing_has_listed_past_the_door() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts");
+    let exec = |app: &mut craftbridge_effects::EffectCraftApp, command: &str, params: Value| app.request("exec", json!({"command": command, "params": params}));
+    let out = scratch.path().join("fill");
+    let before = std::fs::read_dir(scratch.path()).expect("the container reads").count();
+    for id in FILLS {
+        for line in lines_naming(id, &json!({"layer": 1, "outputDir": out})) {
+            for (command, params) in [
+                ("file.newProject", json!({})),
+                ("comp.new", json!({"name": "Hole", "width": 40, "height": 30, "duration": 0.2, "frameRate": 10})),
+                ("layer.newSolid", json!({"comp": 1, "name": "Wall"})),
+                ("layer.addMask", json!({"rect": [12.0, 9.0, 8.0, 8.0], "mode": "subtract"})),
+            ] {
+                exec(&mut app, command, params).expect("the project builds");
+            }
+            app.mcp(&line);
+            exec(&mut app, "jobs.wait", json!({})).expect("the jobs are waited for");
+            assert!(!out.exists(), "{line} generated a fill");
+            let jobs = exec(&mut app, "jobs.list", json!({})).expect("the jobs list");
+            assert_eq!((&jobs["running"], &jobs["finished"]), (&json!([]), &json!([])), "{line} started a task: {jobs}");
         }
     }
     assert_eq!(std::fs::read_dir(scratch.path()).expect("the container reads").count(), before, "a refused call wrote nothing");

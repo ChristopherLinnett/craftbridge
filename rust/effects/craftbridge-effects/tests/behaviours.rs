@@ -247,6 +247,17 @@ fn model_downloads_answer_unsupported_and_start_no_process() {
     assert!(!matches!(error, CraftError::Unsupported { .. }), "installing weights from a file inside the container is not withheld: {error:?}");
 }
 
+/// Behind a step the door reads past, an Export Timeline that renders nothing writing `quiet`, a batch is
+/// still refused for its later step `command`, in `words`, and the quiet step does not run either.
+fn assert_refused_behind_a_quiet_step(app: &mut EffectCraftApp, quiet: &str, command: &str, params: &Value, words: &str) -> Result<(), String> {
+    let quiet = json!({"command": "file.exportTimeline", "params": {"comp": 1, "path": quiet, "prerender": "none"}});
+    let batched = json!({"command": "engine.batch", "params": {"steps": [quiet, {"command": command, "params": params}]}});
+    match request(app, "exec", batched) {
+        Err(CraftError::Unsupported { message }) if message == words => Ok(()),
+        other => Err(format!("`{command}` after a quiet step must be `Unsupported` in `{words}`: the later step is the one refused, got {other:?}")),
+    }
+}
+
 /// The project both timeline-export rules are checked on: one composition holding one text layer,
 /// which is a layer a rendering Export Timeline would pre-render to a movie.
 fn text_layer_project() -> craftbridge_core::Result<(Scratch, EffectCraftApp)> {
@@ -284,14 +295,7 @@ fn a_render_nothing_has_listed_is_refused_however_a_call_reaches_it() {
             "`{command}` is not available in this build: it starts a render whose files the pending-export journal cannot list, and `export` lists them"
         );
         assert_withheld_every_way(&mut app, command, &params, &words).expect("every way a call reaches the render is refused");
-        // Behind a step the door reads past, an Export Timeline that renders nothing, the batch is
-        // still refused for this later step, and the quiet step does not run either.
-        let quiet = json!({"command": "file.exportTimeline", "params": {"comp": 1, "path": at("quiet.xml"), "prerender": "none"}});
-        let batched = json!({"command": "engine.batch", "params": {"steps": [quiet, {"command": command, "params": params}]}});
-        match request(&mut app, "exec", batched) {
-            Err(CraftError::Unsupported { message }) => assert_eq!(message, words, "the later step is the one refused"),
-            other => panic!("`{command}` after a quiet step must be `Unsupported`, got {other:?}"),
-        }
+        assert_refused_behind_a_quiet_step(&mut app, &at("quiet.xml"), command, &params, &words).expect("the later step is refused");
     }
     // Withheld before the engine saw it: nothing rendered or was written.
     let queue = request(&mut app, "exec", json!({"command": "renderQueue.list"})).expect("the queue lists");
@@ -358,6 +362,42 @@ fn a_timeline_export_that_renders_nothing_answers_and_every_other_timeline_expor
         other => panic!("a `prerender` a batch fills in as it runs is not the door's to read, got {other:?}"),
     }
     assert!(!std::path::Path::new(&at("filled.xml")).exists(), "the refused batch step ran nothing");
+}
+
+/// The commands that can have a fill's frames written are withheld on every way a call reaches them,
+/// each with parameters it would generate with, and `contentFill.generate` called with progress is the
+/// way that generates. Behind a step the door reads past the refusal is still the later step's.
+#[test]
+fn a_fill_nothing_has_listed_is_refused_however_a_call_reaches_it() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    for (command, params) in [
+        ("comp.new", json!({"name": "Card", "width": 32, "height": 24, "duration": 0.3, "frameRate": 10})),
+        ("layer.newSolid", json!({"comp": 1, "name": "Bg"})),
+        ("layer.addMask", json!({"rect": [10.0, 8.0, 6.0, 6.0], "mode": "subtract"})),
+    ] {
+        request(&mut app, "exec", json!({"command": command, "params": params})).expect("the project builds");
+    }
+    let out = scratch.path().join("fill");
+    let before = std::fs::read_dir(scratch.path()).expect("the container reads").count();
+    for command in ["contentFill.generate", "layer.newContentAwareFill"] {
+        let words = format!(
+            "`{command}` is not available in this build: it generates the frames of a Content-Aware Fill, whose files the pending-export journal cannot list, and `contentFill.generate` called with progress lists them"
+        );
+        // With parameters it generates; `layer.newContentAwareFill` with none only opens a panel, and a
+        // headless session has none, so it is refused too.
+        for params in [json!({"layer": 1, "outputDir": out}), json!({"layer": 1, "outputDir": out, "wait": true}), json!({})] {
+            assert_withheld_every_way(&mut app, command, &params, &words).expect("every way a call reaches the fill is refused");
+            assert_refused_behind_a_quiet_step(&mut app, &scratch.path().join("quiet.xml").display().to_string(), command, &params, &words)
+                .expect("the later step is refused");
+        }
+    }
+    // Withheld before the engine saw it: no task started and nothing was written.
+    request(&mut app, "exec", json!({"command": "jobs.wait"})).expect("the jobs are waited for");
+    let jobs = request(&mut app, "exec", json!({"command": "jobs.list"})).expect("the jobs list");
+    assert_eq!((&jobs["running"], &jobs["finished"]), (&json!([]), &json!([])), "a task started: {jobs}");
+    assert!(!out.exists());
+    assert_eq!(std::fs::read_dir(scratch.path()).expect("the container reads").count(), before, "a withheld fill wrote nothing");
 }
 
 #[test]
@@ -500,14 +540,16 @@ fn the_method_table_answers_unwired_methods_as_unsupported() {
 fn a_call_with_progress_answers_its_methods_and_refuses_every_other_name() {
     let scratch = Scratch::new().expect("a scratch folder");
     let mut app = scratch.app().expect("the app starts from prepared folders");
-    // Every name but `export` and `template.render`, the `request` methods included, is refused in the one refusal that
-    // names what the call answers.
+    // Every name but `export`, `template.render` and `contentFill.generate`, the `request` methods included, is refused in
+    // the one refusal that names what the call answers.
     for method in ["info", "exec", "template.open", "frame", "script", "no.such.method"] {
         let error = app.request_with_progress(method, json!({}), &mut |_, _, _| true, &mut |_| Ok(())).expect_err("the call was meant to fail");
         match error {
             CraftError::Unsupported { message } => assert_eq!(
                 message,
-                format!("`{method}` is not answered by `request_with_progress` in this build, which answers `export` and `template.render`"),
+                format!(
+                    "`{method}` is not answered by `request_with_progress` in this build, which answers `export`, `template.render` and `contentFill.generate`"
+                ),
                 "the refusal names the method and what the call answers"
             ),
             other => panic!("a name the call does not answer must be `Unsupported`, got {other:?}"),

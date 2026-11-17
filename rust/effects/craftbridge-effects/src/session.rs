@@ -91,6 +91,16 @@ pub(crate) mod tests {
         }
     }
 
+    /// A headless session built as the app builds it, with `commands` run on it, which a test of a
+    /// runner or a listing fills its project with.
+    pub(crate) fn backend_running(commands: impl IntoIterator<Item = (&'static str, serde_json::Value)>) -> effectcraft_automation::Backend {
+        let mut backend = effectcraft_automation::Backend::headless(build(Platform::current(), &folders(None), &HardwareChoice::default()));
+        for (command, params) in commands {
+            backend.exec(command, params).unwrap_or_else(|error| panic!("{command}: {error}"));
+        }
+        backend
+    }
+
     /// An app's folders on disk, in a scratch folder of their own: the container with its working
     /// folders, a bundle beside it when asked for, and the plug-in folder the app names, given
     /// relative to the scratch folder, made. Each test makes its own, so nothing one test puts in

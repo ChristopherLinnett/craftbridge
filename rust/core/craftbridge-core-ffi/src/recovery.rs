@@ -7,13 +7,17 @@ use std::path::{Path, PathBuf};
 /// ([`craftbridge_core::Recovery`]) with every path as text: Swift and Kotlin hold paths as strings.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct Recovery {
-    /// Listed files the killed exports wrote, now deleted.
+    /// Listed files the killed exports wrote, now deleted, then the folders they made for them, each
+    /// removed once it held nothing.
     pub removed: Vec<String>,
-    /// Listed files still as they were when listed: the export never reached them, so they are left.
+    /// Listed files still as they were when listed: the export never reached them, so they are left;
+    /// and folders an export made that hold something it did not write, which are left too.
     pub untouched: Vec<String>,
-    /// Listed paths the start refused to touch, with why: one outside the container, a folder or a link.
+    /// Listed paths the start refused to touch, with why: one outside the container, a folder where a
+    /// file was listed, anything but a folder where a folder was, or a link.
     pub refused: Vec<RecoveryNote>,
-    /// Listed files that could not be deleted, with why. They stay listed, so the next start tries again.
+    /// Listed files and folders that could not be deleted, with why. They stay listed, so the next
+    /// start tries again.
     pub failed: Vec<RecoveryNote>,
     /// What the start found about the journal files themselves.
     pub journal: Vec<String>,

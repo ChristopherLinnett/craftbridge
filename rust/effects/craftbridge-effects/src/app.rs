@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use crate::hardware::HardwareChoice;
 use crate::requests::RenderRequest;
 use crate::runner::{self, ListOutputs, Progress};
-use crate::{files, info, mcp, methods, plugins, properties, replay, session, templates, timings};
+use crate::{files, fill, info, mcp, methods, plugins, properties, replay, session, templates, timings};
 
 /// A hosted EffectCraft session: the MCP server built at construction, which owns the headless
 /// [`Backend`] and the confined session behind it (plan §19).
@@ -112,8 +112,11 @@ type RequestOf = fn(&Value) -> Option<&Value>;
 /// The methods `request_with_progress` answers, by name, the one list of them as [`METHODS`] is of
 /// `request`'s: the dispatch reads it and so does its refusal. Each names where its render request sits,
 /// so a method added here cannot render without its hardware choice being read.
-const PROGRESS_METHODS: [(&str, ProgressMethod, RequestOf); 2] =
-    [("export", runner::export, runner::export_request), ("template.render", templates::render, templates::render_request)];
+const PROGRESS_METHODS: [(&str, ProgressMethod, RequestOf); 3] = [
+    ("export", runner::export, runner::export_request),
+    ("template.render", templates::render, templates::render_request),
+    (methods::FILL, fill::generate, fill::render_request),
+];
 
 impl CraftApp for EffectCraftApp {
     /// Answer one method of the plan's §14 table through the function [`METHODS`] names for it.
@@ -266,6 +269,8 @@ mod tests {
         }
         let (_, _, request_of) = PROGRESS_METHODS.iter().find(|(name, ..)| *name == "template.render").expect("a progress method");
         assert_eq!(request_of(&json!({"template": "/c/t.ectemplate"})), None, "a render without its request chooses nothing");
+        let (_, _, request_of) = PROGRESS_METHODS.iter().find(|(name, ..)| *name == methods::FILL).expect("a progress method");
+        assert_eq!(request_of(&json!({"layer": 1, "outputDir": "/c/fill"})), None, "a fill renders no movie, so it holds no render request");
     }
 
     /// The failure path tells the compositor as well as the core, whichever of wgpu's two callbacks
