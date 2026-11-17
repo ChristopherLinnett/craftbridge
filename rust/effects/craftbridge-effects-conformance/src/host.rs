@@ -51,15 +51,7 @@ fn document<const N: usize>(entries: [(&str, Value); N]) -> Value {
 /// The folders of an app whose container is `container`: the working folders sit inside it, and the
 /// configuration folder is the one the environment names.
 fn folders(container: &Path, config: PathBuf, host: &Host) -> Folders {
-    Folders {
-        container: container.to_path_buf(),
-        bundle: None,
-        config,
-        cache: container.join(".cache"),
-        models: container.join(".models"),
-        plugins: host.plugins.as_ref().map(|folder| container.join(folder)),
-        fonts: Vec::new(),
-    }
+    Folders { config, plugins: host.plugins.as_ref().map(|folder| container.join(folder)), ..Folders::inside(container.to_path_buf(), ".") }
 }
 
 /// Makes the plan's calls in order on a new app over `container`, whose configuration folder is `config`,
@@ -235,9 +227,10 @@ mod tests {
         let app = folders(container, config.clone(), &named);
         assert_eq!((app.container.as_path(), app.config.as_path()), (container, config.as_path()));
         assert_eq!(app.plugins, Some(container.join("plug-ins")));
-        let inside = [&app.cache, &app.models];
-        assert!(inside.iter().all(|folder| folder.starts_with(container) && folder.as_path() != container), "{inside:?}");
-        assert_ne!(app.cache, app.models);
+        let inside: Vec<&Path> = app.working().into_iter().map(|(_, folder)| folder).filter(|folder| *folder != config.as_path()).collect();
+        assert_eq!(inside.len(), app.working().len() - 1, "every working folder but the configuration one is the host's own: {inside:?}");
+        assert!(inside.iter().all(|folder| folder.starts_with(container) && *folder != container), "{inside:?}");
+        assert_eq!(inside.iter().collect::<std::collections::BTreeSet<_>>().len(), inside.len(), "each apart: {inside:?}");
         assert_eq!(folders(container, config, &Host::default()).plugins, None);
     }
 

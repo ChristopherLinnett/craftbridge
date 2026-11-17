@@ -408,9 +408,9 @@ pub(super) fn outputs_in(scratch: &Scratch) -> Result<Vec<PathBuf>, String> {
 /// Every file and every folder in the container, each by its path inside it, bar the app's own
 /// working folders and what they hold: the files, then the folders.
 pub(super) fn contents_in(scratch: &Scratch) -> Result<(Vec<PathBuf>, Vec<PathBuf>), String> {
-    let working = [&scratch.folders.config, &scratch.folders.cache, &scratch.folders.models];
+    let working = scratch.folders.working().map(|(_, folder)| folder.to_path_buf());
     let (mut files, mut folders) = (Vec::new(), Vec::new());
-    for path in entries_under(scratch.path(), &working)? {
+    for path in entries_under(scratch.path(), &working.iter().collect::<Vec<_>>())? {
         if scratch.path().join(&path).is_dir() {
             folders.push(path);
         } else {

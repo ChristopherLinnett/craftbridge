@@ -77,6 +77,8 @@ fn the_core_s_kotlin_holds_every_export_and_no_name_kotlin_owns() {
         "public interface ProgressListener {",
         "fun `progress`(`done`: kotlin.ULong, `total`: kotlin.ULong, `secondsLeft`: kotlin.Double?)",
         "data class Folders (",
+        // One field of the record, to show a working folder the app fills in crosses into Kotlin.
+        "var `staged`: kotlin.String",
         "data class FrameBytes (",
         "data class Recovery (",
         "var `removed`: List<kotlin.String>",
@@ -129,6 +131,8 @@ fn the_core_s_swift_holds_every_export_in_files_named_for_its_crate() {
         "public protocol ProgressListener: AnyObject, Sendable {",
         "func progress(done: UInt64, total: UInt64, secondsLeft: Double?)",
         "public struct Folders: Equatable, Hashable {",
+        // One field of the record, to show a working folder the app fills in crosses into Swift.
+        "public var staged: String",
         "public struct FrameBytes: Equatable, Hashable {",
         "public struct Recovery: Equatable, Hashable {",
         "public var removed: [String]",

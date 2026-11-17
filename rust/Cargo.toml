@@ -71,6 +71,10 @@ oneshot = { version = "0.2", features = ["std", "async"] }
 # asks for it — the same version, its default features off — so the one boa in the lock is that one, built
 # with only the features EffectCraft and this workspace turn on (D-8).
 boa_engine = { version = "0.22", default-features = false }
+# craftbridge-effects names each copy it stages after a SipHash of the bytes the copy holds: the name
+# outlives the build that made it, so it must not change with the toolchain or the platform, as std's
+# own hasher may. It resolves to the one copy boa's interner already brings into every build.
+siphasher = "1"
 
 effectcraft-engine = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
 effectcraft-host = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }

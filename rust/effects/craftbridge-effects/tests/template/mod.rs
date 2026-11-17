@@ -432,7 +432,7 @@ fn bundled_template(scratch: &Scratch, folder: &str) -> Result<(PathBuf, PathBuf
 #[test]
 fn a_template_in_the_bundle_is_imported_from_a_copy_inside_the_container() {
     // The import writes a template's media beside the template. A template in the bundle, a root the
-    // app may read and never write, is imported from a copy in the container's cache, so the media
+    // app may read and never write, is imported from a copy in the container's staged folder, so the media
     // come out whole and nothing is written under the bundle, which is made read-only here so that
     // a write would fail as it does on iOS and the media would then come out missing.
     let scratch = Scratch::with_bundle().expect("a scratch folder");
@@ -489,7 +489,10 @@ fn a_template_inside_the_container_is_imported_where_it_is() {
     let mut app = scratch.app().expect("the app starts");
     app.request("template.open", json!({"template": template.display().to_string()})).expect("the template opens");
     assert!(scratch.path().join("card Media").is_dir(), "the media are written beside the template");
-    assert!(!scratch.folders.cache.join("staged").exists(), "no copy is made of a template that may be written beside");
+    assert!(
+        entries_under(&scratch.folders.staged, &[]).expect("the staged folder reads").is_empty(),
+        "no copy is made of a template that may be written beside"
+    );
 }
 
 #[test]
@@ -536,7 +539,92 @@ fn a_bundle_the_system_lets_be_written_is_not_written_either() {
     let mut app = scratch.app().expect("the app starts");
     app.request("template.open", json!({"template": in_bundle.display().to_string()})).expect("the bundled template opens");
     assert_eq!(entries_under(&bundle, &[]).expect("the bundle reads"), before, "nothing was written under the bundle");
-    assert!(scratch.folders.cache.join("staged").is_dir(), "the template was imported from a copy in the cache");
+    assert!(
+        !entries_under(&scratch.folders.staged, &[]).expect("the staged folder reads").is_empty(),
+        "the template was imported from a copy in the staged folder"
+    );
+}
+
+#[test]
+fn a_bundled_template_keeps_its_media_after_the_system_empties_the_cache() {
+    // The instance of a bundled template reads its media from beside the staged copy, and the saved
+    // project names those files. The copies therefore live in the staged folder, which the system
+    // keeps, and not in the cache it may empty while the app is not running: open the saved project
+    // after such an emptying and every medium is there, the frame it renders unchanged.
+    let scratch = Scratch::with_bundle().expect("a scratch folder");
+    let (template, _) = make(&scratch, (96, 64), 1.0, "Arial").expect("the template is made");
+    let in_bundle = bundled(&template, scratch.bundle().expect("a bundle"), "assets").expect("the template is bundled");
+    let project = scratch.path().join("keep.ecproj");
+    let ours = {
+        let mut app = scratch.app().expect("the app starts");
+        app.request("template.open", json!({"template": in_bundle.display().to_string()})).expect("the bundled template opens");
+        let frame = app.frame(json!({}), PixelFormat::Png).expect("the instance renders").data;
+        app.request("saveAs", json!({"path": project.display().to_string()})).expect("the project saves");
+        frame
+    };
+    // The system empties the cache while no app runs, as iOS may do. The staged folder beside it
+    // stays as it was, and staging never wrote one file into the cache.
+    std::fs::remove_dir_all(&scratch.folders.cache).expect("the cache is emptied");
+    let mut again = scratch.app().expect("the app starts again");
+    again.request("open", json!({"path": project.display().to_string()})).expect("the saved project opens");
+    let after = again.frame(json!({}), PixelFormat::Png).expect("the reopened instance renders").data;
+    assert!(after == ours, "the reopened project renders every medium it saved, though the cache is gone");
+    assert!(
+        !entries_under(&scratch.folders.staged, &[]).expect("the staged folder reads").is_empty(),
+        "the copy whose media the project names sits in the staged folder the system keeps"
+    );
+    assert_eq!(std::fs::read_dir(&scratch.folders.cache).expect("the cache reads again").count(), 0, "nothing of the import was written into the cache");
+}
+
+#[test]
+fn a_bundled_template_keeps_one_copy_across_updates_and_a_saved_project_its_media() {
+    // An update installs the bundle anew, at a new path on iOS, and may change a template in it where
+    // it sits. The same template, wherever it is installed, is read from the copy it had, so no update
+    // leaves a set of copies and media that nothing names again; a changed one is read from a copy of
+    // what it holds now, never from the old one; and a project saved before both updates, the cache
+    // emptied on the way, still renders every medium it saved.
+    let scratch = Scratch::with_bundle().expect("a scratch folder");
+    let (first, _) = make(&scratch, (96, 64), 1.0, "Arial").expect("the template is made");
+    let first = std::fs::read(&first).expect("the template reads");
+    let (second, _) = make_over(&scratch, (96, 64), 1.0, "Arial", [30, 30, 200]).expect("the changed template is made");
+    let theirs = cli_frame(&scratch, &second, None, &[]).expect("the command line rendered the changed template's frame");
+    let second = std::fs::read(&second).expect("the changed template reads");
+    let install = |bundle: &Path, bytes: &[u8]| {
+        let path = bundle.join("assets").join(FILE);
+        std::fs::create_dir_all(path.parent().expect("a folder")).expect("the bundle's folder");
+        std::fs::write(&path, bytes).expect("the template is installed");
+        json!({"template": path.display().to_string()})
+    };
+    let copies = || std::fs::read_dir(&scratch.folders.staged).expect("the staged folder reads").flatten().filter(|entry| entry.path().is_dir()).count();
+    let rendered = |app: &mut EffectCraftApp| app.frame(json!({}), PixelFormat::Png).expect("the comp renders").data;
+    let project = scratch.path().join("before.ecproj");
+    let saved = {
+        let mut app = scratch.app().expect("the app starts");
+        app.request("template.open", install(scratch.bundle().expect("a bundle"), &first)).expect("the bundled template opens");
+        app.request("saveAs", json!({"path": project.display().to_string()})).expect("the project saves");
+        rendered(&mut app)
+    };
+    assert_eq!(copies(), 1);
+    // The update installs the same template at a new path; the system empties the cache meanwhile.
+    let moved = tempfile::tempdir().expect("the updated bundle's folder");
+    let updated = craftbridge_core::folders::Folders { bundle: Some(moved.path().to_path_buf()), ..scratch.folders.clone() };
+    let reinstalled = install(moved.path(), &first);
+    std::fs::remove_dir_all(&scratch.folders.cache).expect("the cache is emptied");
+    let mut app = EffectCraftApp::new(&updated).expect("the updated app starts");
+    app.request("open", json!({"path": project.display().to_string()})).expect("the saved project opens");
+    assert!(rendered(&mut app) == saved, "the project saved before the update renders every medium it saved");
+    app.request("template.open", reinstalled.clone()).expect("the reinstalled template opens");
+    assert!(rendered(&mut app) == saved, "the reinstalled template is the same template");
+    assert_eq!(copies(), 1, "the same template installed at a new path is read from the copy it had");
+    // A later update changes the template where it sits.
+    drop(app);
+    install(moved.path(), &second);
+    let mut app = EffectCraftApp::new(&updated).expect("the app starts after the second update");
+    app.request("template.open", reinstalled).expect("the changed template opens");
+    assert!(rendered(&mut app) == theirs, "the changed template is read as it is now, as the command line reads it");
+    app.request("open", json!({"path": project.display().to_string()})).expect("the saved project opens again");
+    assert!(rendered(&mut app) == saved, "the project saved before both updates still renders the media it saved");
+    assert_eq!(copies(), 2, "the changed template has a copy of its own");
 }
 
 #[test]
@@ -560,7 +648,7 @@ fn a_link_in_the_bundle_to_a_template_in_the_container_is_imported_from_a_copy()
 #[test]
 fn a_call_that_is_not_answered_makes_no_copy() {
     // A template is copied only for a call the app answers: one refused for its name never touches
-    // the cache.
+    // the staged folder.
     let scratch = Scratch::with_bundle().expect("a scratch folder");
     let (_, _, in_bundle) = bundled_template(&scratch, "assets").expect("the template is bundled");
     let params = json!({"template": in_bundle.display().to_string()});
@@ -571,7 +659,7 @@ fn a_call_that_is_not_answered_makes_no_copy() {
     }
     let refused = app.request_with_progress("template.open", params, &mut |_, _, _| true, &mut |_| Ok(())).expect_err("not answered");
     assert!(matches!(refused, CraftError::Unsupported { .. }), "{refused:?}");
-    assert!(!scratch.folders.cache.join("staged").exists(), "a refused call copied nothing");
+    assert!(entries_under(&scratch.folders.staged, &[]).expect("the staged folder reads").is_empty(), "a refused call copied nothing");
 }
 
 #[test]
@@ -598,7 +686,7 @@ fn a_folder_named_as_the_template_gets_the_commands_own_refusal() {
     let mut app = scratch.app().expect("the app starts");
     let refused = app.request("template.open", json!({"template": folder.display().to_string()})).expect_err("a folder is no template");
     assert!(!refused.to_string().contains("cannot copy"), "the command refuses it, not the copy: {refused}");
-    assert!(!scratch.folders.cache.join("staged").exists(), "nothing was copied");
+    assert!(entries_under(&scratch.folders.staged, &[]).expect("the staged folder reads").is_empty(), "nothing was copied");
 }
 
 #[test]
@@ -613,7 +701,7 @@ fn a_link_in_the_container_to_a_template_in_the_bundle_is_imported_where_it_is()
     app.request("template.open", json!({"template": link.display().to_string()})).expect("the linked template opens");
     assert_eq!(entries_under(&bundle, &[]).expect("the bundle reads"), before, "nothing was written under the bundle");
     assert!(scratch.path().join("linked Media").is_dir(), "the media are written beside the name given");
-    assert!(!scratch.folders.cache.join("staged").exists(), "no copy is made of a name inside the write root");
+    assert!(entries_under(&scratch.folders.staged, &[]).expect("the staged folder reads").is_empty(), "no copy is made of a name inside the write root");
 }
 
 #[test]
@@ -661,7 +749,7 @@ fn a_call_refused_for_its_shape_makes_no_copy() {
     let rendered =
         app.request_with_progress(RENDER, json!({"template": named, "output": {"output": 5}}), &mut |_, _, _| true, &mut |_| Ok(())).expect_err("refused");
     assert!(matches!(rendered, CraftError::InvalidParams { .. }), "{rendered:?}");
-    assert!(!scratch.folders.cache.join("staged").exists(), "a call refused for its shape copied nothing");
+    assert!(entries_under(&scratch.folders.staged, &[]).expect("the staged folder reads").is_empty(), "a call refused for its shape copied nothing");
 }
 
 #[test]

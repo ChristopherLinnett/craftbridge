@@ -4,11 +4,9 @@
 
 use crate::Result;
 use crate::engine::{Engine, Message};
-use crate::folders::Folders;
 use crate::gpu::{GpuChoice, GpuDevice};
 use serde_json::Value;
 use std::collections::VecDeque;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -94,20 +92,6 @@ pub(crate) fn close_begun(engine: &Arc<Engine>) -> JoinHandle<Result<()>> {
     let closer = thread::spawn(move || closing.close());
     assert!(eventually(|| engine.is_closing()), "the close never began");
     closer
-}
-
-/// The folders of an app's first launch with its sandbox at `container`: the working folders inside it,
-/// as an app names them, none created yet.
-pub(crate) fn scratch_folders(container: PathBuf) -> Folders {
-    Folders {
-        config: container.join("config"),
-        cache: container.join("cache"),
-        models: container.join("models"),
-        container,
-        bundle: None,
-        plugins: None,
-        fonts: Vec::new(),
-    }
 }
 
 /// The host's GPU, which the tests that draw run on.
