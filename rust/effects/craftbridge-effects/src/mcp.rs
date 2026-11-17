@@ -170,7 +170,7 @@ fn refusal(message: &Value, words: String) -> Option<Value> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::fonts::tests::{count_agrees, family_names, filtered_by_the_bundled_list, raw_listing};
     use effectcraft_automation::Backend;
@@ -189,7 +189,7 @@ mod tests {
         json!({ "jsonrpc": "2.0", "id": 1, "result": { "content": [{ "type": "text", "text": answer.to_string() }], "isError": false } })
     }
 
-    fn answer_of(reply: &Value) -> Value {
+    pub(crate) fn answer_of(reply: &Value) -> Value {
         let text = reply.pointer("/result/content/0/text").and_then(Value::as_str).unwrap_or("null");
         serde_json::from_str(text).unwrap_or(Value::Null)
     }
@@ -213,7 +213,7 @@ mod tests {
 
     /// Every tool path that carries a listing: the request, the server's answer to it holding the
     /// registry's raw listing, and where the listing sits in that answer.
-    fn paths() -> Vec<(&'static str, Value, Value, &'static str)> {
+    pub(crate) fn paths() -> Vec<(&'static str, Value, Value, &'static str)> {
         let raw = raw_listing();
         let named = json!({ "command": TEXT_FONTS });
         let by_id = json!({ "id": TEXT_FONTS, "params": "{}" });

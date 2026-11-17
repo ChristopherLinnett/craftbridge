@@ -309,7 +309,8 @@ pub(crate) mod tests {
     use std::sync::Once;
 
     // The tests hand the filter their own face list through `filtered_by` and never write the
-    // process-wide one, which every session build in this binary rewrites.
+    // process-wide one, which every session build in this binary rewrites, bar the one test that
+    // runs alone in a child process of its own.
 
     /// The crate's own bundled fonts, added to the registry once for the tests that filter against them.
     static ADD_BUNDLED: Once = Once::new();
@@ -381,10 +382,20 @@ pub(crate) mod tests {
         listing.get("count").and_then(Value::as_u64) == listing.get("families").and_then(Value::as_array).map(Vec::len).map(u64::try_from).and_then(Result::ok)
     }
 
-    /// Whether a bundled-only list trimmed this row: fewer families than the registry lists, the
-    /// bundled Simplified face among them, and `count` recounted. An untrimmed row fails it.
+    /// The families a bundled-only face list keeps: EffectCraft's built-in statics and the region
+    /// subsets the crate bundles.
+    const KEPT_BY_A_BUNDLED_ONLY_LIST: [&str; 5] = ["Inter", "JetBrains Mono", "Noto Serif", "Noto Sans SC", "Noto Sans TC"];
+
+    /// Whether a bundled-only list trimmed this row: only families that list keeps, each reporting
+    /// `bundled`, the bundled Simplified face among them, and `count` recounted. An untrimmed row
+    /// fails it by a family the list drops or, where a query left only kept families, by the
+    /// `system` origin the folder scan gives the bundled files.
     fn trimmed_to_the_bundled(row: &Value) -> bool {
-        family_names(row).len() < family_names(&raw_listing()).len() && family_of(row, "Noto Sans SC").is_some() && count_agrees(row)
+        let each_kept_as_bundled = row.get("families").and_then(Value::as_array).into_iter().flatten().all(|entry| {
+            entry.get("family").and_then(Value::as_str).is_some_and(|name| KEPT_BY_A_BUNDLED_ONLY_LIST.contains(&name))
+                && entry.get("origin").and_then(Value::as_str) == Some("bundled")
+        });
+        each_kept_as_bundled && family_of(row, "Noto Sans SC").is_some() && count_agrees(row)
     }
 
     /// A `{steps, results}` answer whose first row is the registry's listing.
@@ -448,7 +459,7 @@ pub(crate) mod tests {
             assert_eq!(entry.get("origin").and_then(Value::as_str), Some("bundled"));
         }
         let names: HashSet<String> = family_names(&trimmed).into_iter().collect();
-        let allowed: HashSet<String> = ["Inter", "JetBrains Mono", "Noto Serif", "Noto Sans SC", "Noto Sans TC"].into_iter().map(str::to_string).collect();
+        let allowed: HashSet<String> = KEPT_BY_A_BUNDLED_ONLY_LIST.into_iter().map(str::to_string).collect();
         assert!(names.is_subset(&allowed), "only statics and bundled faces survive an empty face list: {names:?}");
         assert!(names.len() < family_names(&raw_listing()).len(), "unlisted families must actually be dropped");
     }
@@ -517,5 +528,64 @@ pub(crate) mod tests {
         assert!(!step_is_text_fonts(&json!({ "command": "comp.new" })));
         // A batch step has no `engine.execute` method form: the engine refuses one before it runs.
         assert!(!step_is_text_fonts(&json!({ "method": "engine.execute", "params": { "id": TEXT_FONTS } })));
+    }
+
+    /// Every entry an app's font listing comes back through, driven as an app drives it, with the
+    /// bundled-only face list where a phone's engine start writes its own, so what is weighed is each
+    /// door's own call of [`filtered`]: the desktop answers no face list, and without one a door that
+    /// lost its filter answers exactly as one that kept it. The face list is one per process and
+    /// every session build rewrites it, so the child runs alone in a process of its own, where no
+    /// other test's build can rewrite it between the child's write and its reads.
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    #[test]
+    fn every_app_facing_entry_answers_through_the_face_list() {
+        craftbridge_process::rerun(
+            "fonts::tests::child_lists_through_every_app_facing_entry",
+            &[],
+            "an app-facing entry answered a listing the face list does not trim",
+        )
+        .unwrap();
+    }
+
+    /// The listing of `exec` of `text.fonts`, of a `run` step, of an `engine.batch` row and of each
+    /// MCP tool that runs a command, through the app's `mcp` line; each step spelling the batch reads
+    /// is one path. Every failing path is named at once, so one plant shows which paths a door's
+    /// filter covers.
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    #[test]
+    #[ignore = "run by every_app_facing_entry_answers_through_the_face_list, alone in a process of its own, since it writes the process-wide face list"]
+    fn child_lists_through_every_app_facing_entry() {
+        use craftbridge_core::{CraftApp, Platform};
+        // The app as an app builds it, confined, delivering the bundled folder as one of its
+        // `Folders.fonts`: every path below is one the shipped app answers.
+        let mut scratch = crate::session::tests::Scratch::new(false, None);
+        scratch.folders.fonts = vec![bundled_fonts_dir()];
+        let mut app = scratch.app(Platform::current());
+        // The build above wrote the desktop's answer, none; a phone's engine start writes its own.
+        *FACE_LIST.write().unwrap_or_else(PoisonError::into_inner) = Some(bundled_only());
+
+        let comp = json!({ "command": "comp.new", "params": { "name": "C", "width": 100, "height": 100, "duration": 1, "frameRate": 30 } });
+        let mut untrimmed: Vec<String> = Vec::new();
+        let mut weigh = |what: &str, answer: &Value, pointer: &str| {
+            let listing = answer.pointer(pointer).unwrap_or(&Value::Null);
+            if !trimmed_to_the_bundled(listing) {
+                untrimmed.push(format!("{what} lists {:?}", family_names(listing)));
+            }
+        };
+        let exec = app.request("exec", json!({ "command": TEXT_FONTS })).expect("`exec` answers");
+        weigh("`exec` of `text.fonts`", &exec, "");
+        // A listing that is not the first step, so a row is matched to its step by position.
+        let run = app.request("run", json!({ "steps": [comp, { "command": TEXT_FONTS }] })).expect("`run` answers");
+        weigh("a `run` step", &run, "/1/result");
+        let batch = json!({ "command": "engine.batch", "params": { "steps": [comp, { "command": TEXT_FONTS }, { "id": TEXT_FONTS }] } });
+        let batch = app.request("exec", batch).expect("the batch answers");
+        weigh("an `engine.batch` row naming the command", &batch, "/results/1");
+        weigh("an `engine.batch` row naming it by `id`", &batch, "/results/2");
+        for (tool, request, _, pointer) in crate::mcp::tests::paths() {
+            let reply = app.mcp(&request.to_string()).expect("the `mcp` line answers");
+            let reply: Value = serde_json::from_str(&reply).expect("the reply is JSON");
+            weigh(&format!("the `mcp` line's {tool}"), &crate::mcp::tests::answer_of(&reply), pointer);
+        }
+        assert!(untrimmed.is_empty(), "these entries answered listings the face list does not trim: {untrimmed:#?}");
     }
 }

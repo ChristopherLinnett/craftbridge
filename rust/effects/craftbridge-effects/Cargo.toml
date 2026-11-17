@@ -44,6 +44,9 @@ wgpu.workspace = true
 boa_engine = { workspace = true, features = ["jsvalue-enum"] }
 
 [dev-dependencies]
+# The font listing's test of every app-facing entry writes the face list, which is one per process, so
+# it reruns itself alone in a child through the workspace's one helper for that.
+craftbridge-process.workspace = true
 image.workspace = true
 tempfile.workspace = true
 # The D-8 test reads the toolchain pin's targets with the TOML parser the workspace's tools use.
