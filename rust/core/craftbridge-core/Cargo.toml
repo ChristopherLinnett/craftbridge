@@ -20,6 +20,8 @@ tempfile.workspace = true
 wgpu.workspace = true
 # Blocking on wgpu's adapter and device futures, as EffectCraft does (never a hand-written spin).
 pollster.workspace = true
+# Each call's answer, which the engine thread sends and a caller blocks on or awaits (plan §16).
+oneshot.workspace = true
 
 # The faces CoreText offers an iOS app, which only an iPhone or its simulator has; the features are the
 # framework headers the platform module reads (src/platform/coretext.rs).

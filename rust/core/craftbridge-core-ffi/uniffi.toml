@@ -1,0 +1,36 @@
+# Binding settings for the generators `cargo xtask generate` runs (plan §20), which read this crate's
+# exports in library mode from the one native library of the app's distribution crate. Library mode
+# names that library for Kotlin to load, so no setting here repeats its name.
+#
+# Swift keeps UniFFI's own `module_name`, the crate's name: it names the files the generator writes
+# (`<module_name>.swift`, `<module_name>FFI.h` and its module map), not the Swift module they compile
+# into, so one name shared by two -ffi crates would have the second crate's files overwrite the first's.
+# The Swift package's `CraftBridgeFFI` target compiles every crate's file into the one module UniFFI
+# needs for the types two crates share.
+
+[bindings.kotlin]
+package_name = "io.github.christopherlinnett.craftbridge.ffi.core"
+
+# Each `CraftError` variant's text crosses as `detail` in both languages. Kotlin's generated exception
+# for a variant extends `kotlin.Exception` and overrides its `message`, which a field of that name
+# collides with, and one name lets the Swift and Kotlin layers read the same field. UniFFI renames an
+# error's fields only per language here (its `#[uniffi(name)]` is refused on them), so the two tables
+# below are one list written twice; the library-mode test of `rust/uniffi-bindgen` fails if either
+# language's binding carries another name.
+[bindings.kotlin.rename]
+"CraftError.InvalidParams.message" = "detail"
+"CraftError.CommandFailed.message" = "detail"
+"CraftError.NotFound.message" = "detail"
+"CraftError.Unsupported.message" = "detail"
+"CraftError.Io.message" = "detail"
+"CraftError.Gpu.message" = "detail"
+"CraftError.Internal.message" = "detail"
+
+[bindings.swift.rename]
+"CraftError.InvalidParams.message" = "detail"
+"CraftError.CommandFailed.message" = "detail"
+"CraftError.NotFound.message" = "detail"
+"CraftError.Unsupported.message" = "detail"
+"CraftError.Io.message" = "detail"
+"CraftError.Gpu.message" = "detail"
+"CraftError.Internal.message" = "detail"

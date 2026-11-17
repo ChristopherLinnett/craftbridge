@@ -10,6 +10,17 @@ publish.workspace = true
 
 [dependencies]
 craftbridge-core.workspace = true
+uniffi.workspace = true
+# The boundary carries every call's parameters and answer as JSON text, which the core takes as `Value`.
+serde_json.workspace = true
+# Stopping's answer comes back to the foreign caller's future from the thread that waited for the engine.
+oneshot.workspace = true
+
+[dev-dependencies]
+# The tests drive the exported async calls to their answer without a runtime.
+pollster.workspace = true
+# The scratch container of the test that starts an engine in folders.
+tempfile.workspace = true
 
 [lints]
 workspace = true
