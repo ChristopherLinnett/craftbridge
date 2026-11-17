@@ -4,7 +4,7 @@
 //!
 //! Safe code, so every target tests it; the platform module only makes the calls.
 
-use filmcraft_codecs::hw::{NalStreamInfo, StreamInfo};
+use filmcraft_codecs::hw::{NalCodec, NalStreamInfo, StreamInfo};
 use filmcraft_isobmff::SampleEntry;
 
 use crate::biplanar::{Crop, Depth, Plane, Strided};
@@ -12,6 +12,9 @@ use crate::layout::{self, Codec, Layout};
 
 /// What every NAL unit of an Annex B byte stream starts with.
 const START_CODE: [u8; 4] = [0, 0, 0, 1];
+
+/// The NAL unit type of an H.264 picture parameter set.
+const H264_PPS: u8 = 8;
 
 /// MediaCodec's names for the codecs this module takes.
 pub(crate) const H264_MIME: &str = "video/avc";
@@ -115,20 +118,61 @@ pub(crate) fn stream_time(time: i64) -> i64 {
     time.saturating_sub(TIME_OFFSET)
 }
 
-/// Whether the decoder MediaCodec names `name` is one of the platform's own software codecs, which the
-/// software decoder already beats: it decodes in FilmCraft's code on every device alike, and a platform
-/// codec in software is no faster.
-pub(crate) fn is_software_codec(name: &str) -> bool {
-    name.starts_with("c2.android.") || name.starts_with("OMX.google.")
+/// One entry of the device's codec list, `MediaCodecList(MediaCodecList.REGULAR_CODECS)`, with what its
+/// `MediaCodecInfo` answers. The regular codecs are the ones the platform's own lookup by type chooses from;
+/// the others work only with special surfaces, secure-only or tunnelled-only ones, and an image reader's
+/// surface is neither.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CodecInfo {
+    /// `getName()`: the name the codec is created by.
+    pub name: String,
+    /// `getSupportedTypes()`: the MIME types the codec takes.
+    pub types: Vec<String>,
+    /// `isEncoder()`.
+    pub encoder: bool,
+    /// `isHardwareAccelerated()` (API 29, the SDK's minSdk): the platform's own answer to whether the codec
+    /// runs in hardware.
+    pub hardware_accelerated: bool,
 }
 
-/// The stream's codec-specific data (`csd-0`), which MediaCodec starts a decoder with: for H.264 and HEVC
-/// every parameter set in record order (H.264 SPS then PPS; HEVC VPS, SPS, PPS), each after a start code; for
-/// AV1 the `av1C` record itself, which is what Android's table of codec-specific data names.
-pub(crate) fn codec_specific_data(entry: &SampleEntry, stream: &StreamInfo) -> Result<Vec<u8>, &'static str> {
+/// The device's hardware decoders for `mime`, in the order the device lists them. A decoder counts as
+/// hardware by the platform's own answer, never by its name: neither a software-only codec nor a vendor's
+/// software one (not software-only, and not hardware-accelerated either: what the NDK, from API 36, calls
+/// `AMediaCodecType_SOFTWARE_WITH_DEVICE_ACCESS` in `NdkMediaCodecInfo.h`) decodes faster than FilmCraft's
+/// software decoder, which decodes the same way on every device. The platform's own default for a type is
+/// whatever the list ranks first for it, which can be a software codec (on the API 29 emulator, which lists
+/// no hardware H.264 decoder, it is), so the pick is made here, never taken from the default.
+pub(crate) fn hardware_decoders<'a>(codecs: &'a [CodecInfo], mime: &str) -> Vec<&'a str> {
+    // MIME types compare without regard to case (RFC 2045, section 5.1), as the platform's own lookup by type
+    // compares them.
+    let takes = |codec: &CodecInfo| codec.types.iter().any(|kind| kind.eq_ignore_ascii_case(mime));
+    codecs.iter().filter(|codec| !codec.encoder && codec.hardware_accelerated && takes(codec)).map(|codec| codec.name.as_str()).collect()
+}
+
+/// The keys of the codec-specific data MediaCodec starts a decoder with.
+pub(crate) const CSD_0: &str = "csd-0";
+pub(crate) const CSD_1: &str = "csd-1";
+
+/// The stream's codec-specific data as the buffers Android's table gives the codec: for H.264 and HEVC the
+/// parameter sets, each after a start code (H.264's SPS in `csd-0` and its PPS in `csd-1`; HEVC's VPS, SPS
+/// and PPS together in `csd-0`), in record order; for AV1 the `av1C` record itself in `csd-0`.
+pub(crate) fn codec_specific_data(entry: &SampleEntry, stream: &StreamInfo) -> Result<Vec<(&'static str, Vec<u8>)>, &'static str> {
     match stream {
-        StreamInfo::Nal(info) => Ok(info.parameter_sets.iter().flat_map(|set| START_CODE.iter().chain(set)).copied().collect()),
-        StreamInfo::Frame(_) => layout::av1c_record(entry),
+        StreamInfo::Nal(info) => Ok(parameter_set_buffers(info)),
+        StreamInfo::Frame(_) => Ok(vec![(CSD_0, layout::av1c_record(entry)?)]),
+    }
+}
+
+fn parameter_set_buffers(info: &NalStreamInfo) -> Vec<(&'static str, Vec<u8>)> {
+    let joined = |sets: &[&Vec<u8>]| -> Vec<u8> { sets.iter().flat_map(|set| START_CODE.iter().chain(set.iter())).copied().collect() };
+    let sets: Vec<&Vec<u8>> = info.parameter_sets.iter().collect();
+    match info.codec {
+        NalCodec::Hevc => vec![(CSD_0, joined(&sets))],
+        NalCodec::H264 => {
+            let (pictures, sequences): (Vec<_>, Vec<_>) =
+                sets.into_iter().partition(|set| set.first().is_some_and(|&header| info.nal_type(header) == H264_PPS));
+            vec![(CSD_0, joined(&sequences)), (CSD_1, joined(&pictures))]
+        }
     }
 }
 
@@ -276,43 +320,64 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_platforms_own_software_codecs_are_not_hardware_and_every_other_name_is() {
-        // The platform's own decoders by the names the emulators carry them under, AV1's two among them (API 34
-        // has the first, API 37 both).
-        for name in [
-            "c2.android.avc.decoder",
-            "c2.android.hevc.decoder",
-            "c2.android.av1.decoder",
-            "c2.android.av1-dav1d.decoder",
-            "OMX.google.h264.decoder",
-            "OMX.google.hevc.decoder",
-        ] {
-            assert!(is_software_codec(name), "{name}");
-        }
-        for name in ["c2.goldfish.h264.decoder", "c2.qti.avc.decoder", "OMX.qcom.video.decoder.avc", "c2.exynos.h264.decoder", "c2.android", "OMX.google"] {
-            assert!(!is_software_codec(name), "{name}");
-        }
+    fn codec(name: &str, types: &[&str], encoder: bool, hardware_accelerated: bool) -> CodecInfo {
+        CodecInfo { name: name.into(), types: types.iter().map(|kind| kind.to_string()).collect(), encoder, hardware_accelerated }
     }
 
     #[test]
-    fn every_parameter_set_follows_a_start_code_in_record_order() {
+    fn the_hardware_decoders_are_the_ones_the_platform_says_are_hardware_accelerated_in_the_devices_order() {
+        // The API 29 emulator's two H.264 decoders lead, both software, as its list ranks them: the platform's
+        // default for the type is the first.
+        let list = [
+            codec("c2.android.avc.decoder", &["video/avc"], false, false),
+            codec("OMX.google.h264.decoder", &["video/avc"], false, false),
+            codec("c2.vendor.avc.decoder", &["video/avc"], false, false),
+            codec("c2.vendor.avc.encoder", &["video/avc"], true, true),
+            codec("c2.android.hevc.decoder", &["video/hevc"], false, false),
+            codec("c2.vendor.hevc.decoder", &["Video/HEVC", "video/avc"], false, true),
+            codec("c2.vendor.vp9.decoder", &["video/x-vnd.on2.vp9"], false, true),
+            codec("hw.avc.decoder", &["video/avc"], false, true),
+            codec("c2.android.av1.decoder", &["video/av01"], false, false),
+            codec("c2.android.av1-dav1d.decoder", &["video/av01"], false, false),
+        ];
+        // The vendor's software decoder is left out although its name is a vendor's, and the last decoder is
+        // taken although its name starts with neither `OMX.` nor `c2.`: only the platform's answer counts.
+        assert_eq!(hardware_decoders(&list, "video/avc"), ["c2.vendor.hevc.decoder", "hw.avc.decoder"]);
+        assert_eq!(hardware_decoders(&list, "video/hevc"), ["c2.vendor.hevc.decoder"], "a type's case is not the platform's concern");
+        assert_eq!(hardware_decoders(&list, "VIDEO/AVC"), ["c2.vendor.hevc.decoder", "hw.avc.decoder"]);
+        assert_eq!(hardware_decoders(&list, "video/av01"), Vec::<&str>::new(), "the platform's software AV1 decoders are declined by its answer, not a name");
+        assert_eq!(hardware_decoders(&list[..4], "video/avc"), Vec::<&str>::new(), "software decoders and a hardware encoder only");
+        assert_eq!(hardware_decoders(&[], "video/avc"), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn every_parameter_set_follows_a_start_code_in_record_order_in_the_buffer_androids_table_gives_it() {
+        // H.264: the SPS is csd-0 and the PPS csd-1.
         let entry = avc_entry();
-        let stream = StreamInfo::Nal(nal());
-        let data = codec_specific_data(&entry, &stream).unwrap();
-        let expected: Vec<u8> = [&[0, 0, 0, 1][..], &sps(), &[0, 0, 0, 1], &pps()].concat();
+        let data = codec_specific_data(&entry, &StreamInfo::Nal(nal())).unwrap();
+        let expected = vec![("csd-0", [&[0, 0, 0, 1][..], &sps()].concat()), ("csd-1", [&[0, 0, 0, 1][..], &pps()].concat())];
         assert_eq!(data, expected);
-        // An HEVC stream's VPS too, which some decoders do without and others need.
+        // Several of either, in the record's order, each after a start code.
+        let mut many = nal();
+        let (sps2, pps2) = (vec![0x67, 1, 2], vec![0x68, 3]);
+        many.parameter_sets = vec![sps(), sps2.clone(), pps(), pps2.clone()];
+        let with_code = |sets: &[&[u8]]| -> Vec<u8> { sets.iter().flat_map(|set| [&[0, 0, 0, 1][..], set].concat()).collect() };
+        assert_eq!(
+            codec_specific_data(&entry, &StreamInfo::Nal(many)).unwrap(),
+            vec![("csd-0", with_code(&[&sps(), &sps2])), ("csd-1", with_code(&[&pps(), &pps2]))]
+        );
+        // HEVC: the VPS, SPS and PPS together in csd-0, which some decoders do without the VPS of and others need.
         let hevc = NalStreamInfo::from_entry(&hevc_entry()).unwrap().unwrap();
         assert_eq!(hevc.parameter_sets.iter().map(|set| (set[0] >> 1) & 0x3f).collect::<Vec<_>>(), [32, 33, 34], "the record's VPS, SPS and PPS");
         let expected: Vec<u8> = hevc.parameter_sets.iter().flat_map(|set| [&[0, 0, 0, 1][..], set].concat()).collect();
-        assert_eq!(codec_specific_data(&hevc_entry(), &StreamInfo::Nal(hevc)), Ok(expected));
+        assert_eq!(codec_specific_data(&hevc_entry(), &StreamInfo::Nal(hevc)), Ok(vec![("csd-0", expected)]));
     }
 
     #[test]
     fn an_av1_streams_codec_specific_data_is_its_av1c_record_and_its_samples_are_fed_as_they_are() {
         let entry = av1_entry();
-        let record = codec_specific_data(&entry, &av1()).unwrap();
+        let buffers = codec_specific_data(&entry, &av1()).unwrap();
+        let [("csd-0", record)] = buffers.as_slice() else { panic!("one buffer, csd-0: {buffers:?}") };
         // Pinned here because the emulator's AV1 decoder reads no codec-specific data (it decodes from the key
         // frame's own sequence header), so only a phone's hardware decoder reads these bytes. The record's
         // marker and version byte, then its profile and level, then the sequence header OBU.
