@@ -46,10 +46,36 @@
 //!   names no file, so nothing is deleted, and the start replaces it and says so. One the disk will
 //!   not read when a process first starts on it is a killed run's, so it is renamed, unread, to a
 //!   file of its own beside it (the start says so and why): its entries are not lost and no export is
-//!   refused for it. Every later start tries each such file again, deals with what it lists once it
-//!   reads, removes it and says so. At most [`MAX_SET_ASIDE`] wait at once; past that the unread
-//!   journal stays where it is, and each start deals with nothing and each listing is refused, naming
-//!   it, until one can read it.
+//!   refused for it. Every later start tries each such file again, deals with what they list once it
+//!   reads every one, removes them and says so. At most [`MAX_SET_ASIDE`] wait at once; past that
+//!   the unread journal stays where it is, and each start deals with nothing and each listing is
+//!   refused, naming it, until one can read it.
+//! * **A set-aside entry yields to every later export of its file.** A listing never reads the
+//!   journals set aside, which the disk may still refuse to read, so an export that lists one of their
+//!   files cannot take its entry over as it lists. Instead, while one waits, the journal also keeps
+//!   the files of each export that ended other than by a cancel (`taken`), and a start hands each
+//!   set-aside entry to the same take-over rule, with those exports as the later listing: the entry of
+//!   a file one of them ended at is the set-aside journal's no more, and the file that export left is
+//!   never deleted for it. A cancelled export has deleted what it wrote, and one a kill stopped is
+//!   still listed, so for those the set-aside entry deals with what is left, as the entry that took it
+//!   over would have. The start names the files whose entries yielded. Any journal may record such an
+//!   export, so a start deals with what the set-aside journals list only once it reads every one and
+//!   the journal: while one cannot be read, or their folder cannot be listed, they all wait. Nothing
+//!   expires: one never read may have recorded an export of any file, so while one never reads again
+//!   the others wait with it for as long, with the partial files they list and the record, and each
+//!   start says so. One that reads as no journal may have recorded an export of any file they list, so
+//!   the journal records instead that every set-aside entry of a file yields, and none of those is
+//!   deleted; it names no file itself, so it is replaced, or removed once that record is written, and
+//!   never waits or takes a place of the [`MAX_SET_ASIDE`], past which listings would be refused while
+//!   it lasts. The journal's own entries are later than every set-aside one, and a later listing takes
+//!   them over as it lists, so a start deals with them by their own record whatever the set-aside
+//!   journals hold. The record says nothing of when an export ended, so an entry the journal lists
+//!   after one, and keeps once the journal is set aside in its turn, yields to it as well, and a
+//!   partial file its killed run wrote there is left: a partial file left costs no work, while a
+//!   finished one deleted would. The record goes once no journal waits set aside, and only then: a
+//!   folder the disk will not list may hold some. It names at most [`MAX_TAKEN`] files, past which
+//!   every set-aside entry of a file yields, so a journal set aside that never reads again cannot grow
+//!   the journal without end.
 //! * **The journal is bounded** by [`MAX_JOURNAL_BYTES`], so a damaged or hostile file cannot run the
 //!   phone out of memory at start; an export whose list would grow past it is refused.
 //!
@@ -104,6 +130,19 @@ const OUTPUTS: &str = "outputs";
 /// The key of the list of folders the listed files' writers make, kept apart from the files, since a
 /// start deals with them only once the files are dealt with; absent when there are none.
 const FOLDERS: &str = "folders";
+/// The key of the list of files whose set-aside entries yield: each one an export ended at, other than
+/// by a cancel, while a journal waited set aside; or [`EVERY`], past [`MAX_TAKEN`] of them, or once a
+/// journal that is no journal may have recorded such an export of any file. Kept while a journal waits
+/// set aside; absent when there are none.
+const TAKEN: &str = "taken";
+/// What [`TAKEN`] holds in place of its list when every set-aside entry of a file yields.
+const EVERY: &str = "every";
+/// The most files [`TAKEN`] names one by one. Every listing and clear writes the whole journal, and a
+/// journal set aside that never reads again would have the list grow with each file exported until
+/// the journal passed [`MAX_JOURNAL_BYTES`] and every listing were refused. Past this many it records
+/// that every set-aside entry of a file yields instead, which may leave a partial file a set-aside
+/// journal lists, but never deletes a file an export left.
+const MAX_TAKEN: usize = 4096;
 /// An entry's path below the container.
 const PATH: &str = "path";
 /// The size of the file at the entry's path when it was listed; absent when there was none.
@@ -143,6 +182,8 @@ struct Known {
     held: Vec<Entry>,
     /// The entries of the exports running in this process now.
     running: Vec<Entry>,
+    /// The files whose set-aside entries yield ([`TAKEN`]).
+    taken: Taken,
     /// The lock on [`LOCK_FILE`], which keeps every other process from the journal while this one
     /// holds it; none on a disk that has no locks, where this process is the one it is used by.
     lock: Option<File>,
@@ -153,6 +194,131 @@ impl Known {
     fn entries(&self) -> Vec<Entry> {
         self.held.iter().chain(&self.running).cloned().collect()
     }
+}
+
+/// The files whose set-aside entries yield to an export that ended at them ([`TAKEN`]).
+#[derive(Debug, Default)]
+struct Taken {
+    /// Those files, by path below the container, while there are no more than [`MAX_TAKEN`].
+    files: BTreeSet<String>,
+    /// Every set-aside entry of a file yields, since more than [`MAX_TAKEN`] files were taken, or a
+    /// journal that is no journal may have recorded an export of any file.
+    every: bool,
+}
+
+impl Taken {
+    /// What is taken once every set-aside entry of a file yields.
+    fn every() -> Self {
+        Self { files: BTreeSet::new(), every: true }
+    }
+
+    /// Take `files` too, or every file once there would be more than [`MAX_TAKEN`].
+    fn extend(&mut self, files: impl IntoIterator<Item = String>) {
+        for file in files {
+            if self.every {
+                break;
+            }
+            self.files.insert(file);
+            self.every = self.files.len() > MAX_TAKEN;
+        }
+        if self.every {
+            self.files.clear();
+        }
+    }
+
+    /// Take what `other` takes too.
+    fn merge(&mut self, other: Self) {
+        self.every |= other.every;
+        self.extend(other.files);
+    }
+
+    /// Whether a set-aside entry of the file at `path` yields.
+    fn yields(&self, path: &str) -> bool {
+        self.every || self.files.contains(path)
+    }
+
+    fn is_empty(&self) -> bool {
+        !self.every && self.files.is_empty()
+    }
+
+    fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    /// The JSON [`TAKEN`] holds, or none when nothing is taken.
+    fn to_value(&self) -> Option<Value> {
+        if self.every {
+            Some(Value::from(EVERY))
+        } else if self.files.is_empty() {
+            None
+        } else {
+            Some(Value::Array(self.files.iter().map(|path| Value::Object(named(path))).collect()))
+        }
+    }
+}
+
+/// What a journal lists: its entries, and the files whose set-aside entries yield ([`TAKEN`]).
+#[derive(Debug, Default)]
+struct Contents {
+    entries: Vec<Entry>,
+    taken: Taken,
+}
+
+impl Contents {
+    fn extend(&mut self, other: Self) {
+        self.entries.extend(other.entries);
+        self.taken.merge(other.taken);
+    }
+}
+
+/// The journals earlier takes set aside, as a start reads them.
+#[derive(Debug, Default)]
+struct SetAside {
+    /// What those that read as journals list, together.
+    contents: Contents,
+    /// Each one read, with why it is no journal when it is not.
+    read: Vec<(PathBuf, Option<String>)>,
+    /// How many the disk would not read now, their folder counted as one when the disk will not list
+    /// it, since any journal there may be set aside.
+    unread: usize,
+}
+
+impl SetAside {
+    /// Say of each one read as a journal that it waits with the rest, unremoved, for a start that reads
+    /// them all, and answer those that are no journal, with why: they name no file to delete, and the
+    /// journal's record that every set-aside entry of a file yields stands for what they may have held,
+    /// so they need not wait.
+    fn wait(self, recovery: &mut Recovery) -> Vec<(PathBuf, Option<String>)> {
+        let (journals, damaged): (Vec<_>, Vec<_>) = self.read.into_iter().partition(|(_, damaged)| damaged.is_none());
+        for (shelf, _) in journals {
+            recovery.journal.push(format!(
+                "the set-aside journal {} waits for those that cannot be read now, which may hold a later export of a file it lists",
+                shelf.display()
+            ));
+        }
+        damaged
+    }
+}
+
+/// Say of each of `shelves`, set-aside journals a start read, that is no journal that it stays until
+/// a start can write the journal, which must first record what its going costs.
+fn kept_until_written(shelves: Vec<(PathBuf, Option<String>)>, recovery: &mut Recovery) {
+    for (_, damaged) in shelves {
+        if let Some(reason) = damaged {
+            recovery.journal.push(format!("{reason}; it names no file to delete, and goes when a start can write the journal"));
+        }
+    }
+}
+
+/// What a process that has just taken the journal found it to be.
+enum Found {
+    /// A journal, or nothing: what it lists.
+    Read(Contents),
+    /// No journal, which names nothing and is replaced: what the start says of it, and what the journal
+    /// that replaces it records set-aside entries yield to.
+    Replaced(String, Taken),
+    /// A journal the disk would not read, set aside unread for a later start: what the start says of it.
+    SetAside(String),
 }
 
 /// What a start did about the journal it found: the answer to each way it can disagree with the
@@ -173,8 +339,9 @@ pub struct Recovery {
     /// start tries again, unless an export lists one of those files first and takes its entry over.
     pub failed: Vec<(PathBuf, String)>,
     /// What the start found about the journal files themselves: one it could not read, set aside or
-    /// clear, each journal an earlier start set aside that is still unread, and each it read now,
-    /// dealt with and removed.
+    /// clear, each journal set aside earlier that is still unread, each it read that waits for those,
+    /// and each it read now, dealt with and removed; and which files the set-aside journals list it
+    /// left because an export ended at them while the journals waited, or might have.
     pub journal: Vec<String>,
 }
 
@@ -279,7 +446,7 @@ impl Journal {
         let mut recovery = Recovery::default();
         // While exports of this process run with the journal it holds it already, and knows what it
         // holds; otherwise the start takes it now and reads it.
-        let (Known { held, running, lock }, taken_now) = match known.remove(&self.file) {
+        let (Known { held, running, taken, lock }, taken_now) = match known.remove(&self.file) {
             Some(ours) => (ours, false),
             None => match self.take_lock() {
                 Locked::Taken(file) => (Known { lock: Some(file), ..Known::default() }, true),
@@ -298,57 +465,61 @@ impl Journal {
             },
         };
         self.sweep_temporaries(&mut recovery);
-        let mut stale = held;
-        // The journals set aside earlier that are dealt with now, removed once what they list has been
-        // dealt with and the journal is written, each with why it is no journal when it is not; and
-        // how many still wait unread.
-        let (mut read_now, mut waiting) = (Vec::new(), 0_usize);
-        for shelf in self.shelves() {
-            match self.read_at(&shelf) {
-                Ok(listed) => {
-                    stale.extend(listed);
-                    read_now.push((shelf, None));
-                }
-                Err(Unread::Damaged(reason)) => read_now.push((shelf, Some(reason))),
-                Err(Unread::Disk(reason)) => {
-                    recovery.journal.push(format!("{reason}; it stays set aside for a later start"));
-                    waiting = waiting.saturating_add(1);
-                }
-            }
-        }
+        let set_aside = self.read_set_aside(&mut recovery);
+        // Whether a journal this start cannot read now may hold a later export of a file a set-aside
+        // journal lists.
+        let mut waits = set_aside.unread > 0;
+        let mut found = Contents::default();
         if taken_now {
-            match self.take_entries(waiting) {
-                Ok((listed, note)) => {
-                    stale.extend(listed);
-                    recovery.journal.extend(note);
+            match self.take_entries() {
+                Ok(Found::Read(contents)) => found = contents,
+                Ok(Found::Replaced(note, taken)) => {
+                    found.taken = taken;
+                    recovery.journal.push(note);
+                }
+                Ok(Found::SetAside(note)) => {
+                    waits = true;
+                    recovery.journal.push(note);
                 }
                 // Writing the journal now would replace what nobody has read, so nothing is dealt with
                 // or written; the lock goes as the start returns.
                 Err(why) => {
                     recovery.journal.push(format!("{why}, so nothing is dealt with now, and each later start and listing tries again"));
-                    for (_, damaged) in read_now {
-                        if let Some(reason) = damaged {
-                            recovery.journal.push(format!("{reason}; it names no file to delete, and goes when a start can write the journal"));
-                        }
-                    }
+                    kept_until_written(set_aside.wait(&mut recovery), &mut recovery);
                     return recovery;
                 }
             }
         }
+        let (mut stale, mut taken) = (held, taken);
+        taken.merge(found.taken);
+        // A set-aside journal that is no journal may have recorded a later export of any file the others
+        // list, so from now on every set-aside entry of a file yields, which the journal records before
+        // it goes.
+        if set_aside.read.iter().any(|(_, damaged)| damaged.is_some()) {
+            taken.merge(Taken::every());
+        }
+        // The set-aside journals removed once what they list has been dealt with and the journal is
+        // written, each with why it is no journal when it is not: every one read, unless one waits,
+        // and then those that are no journal.
+        let read_now = if waits {
+            set_aside.wait(&mut recovery)
+        } else {
+            stale.extend(still_set_aside(set_aside.contents, &mut taken, &self.root, &mut recovery));
+            set_aside.read
+        };
+        stale.extend(found.entries);
         let held = self.deal_with_all(stale, &running, &mut recovery);
-        let state = Known { held, running, lock };
-        match self.write(&state.entries()) {
+        let mut state = Known { held, running, taken, lock };
+        let uncleared = |error: io::Error| format!("cannot clear the pending-export journal {}: {error}", self.file.display());
+        match self.write(&state.entries(), &state.taken) {
             // The set-aside journals stay for a start that can write the journal, since what they
-            // list is held nowhere else.
+            // list, or what their going costs, is held nowhere else.
             Err(error) => {
-                recovery.journal.push(format!("cannot clear the pending-export journal {}: {error}", self.file.display()));
-                for (_, damaged) in read_now {
-                    if let Some(reason) = damaged {
-                        recovery.journal.push(format!("{reason}; it names no file to delete, and goes when a start can write the journal"));
-                    }
-                }
+                recovery.journal.push(uncleared(error));
+                kept_until_written(read_now, &mut recovery);
             }
-            // What the set-aside journals listed is dealt with now, or held in the journal.
+            // What the set-aside journals listed is dealt with now, or held in the journal, and the
+            // record of what their entries yield to is written with it, for one the disk keeps.
             Ok(()) => {
                 for (shelf, damaged) in read_now {
                     match (fs::remove_file(&shelf), damaged) {
@@ -357,6 +528,13 @@ impl Journal {
                         }
                         (Ok(()), Some(reason)) => recovery.journal.push(format!("{reason}; it names no file to delete, so it is removed")),
                         (Err(error), _) => recovery.journal.push(format!("cannot remove the set-aside journal {}: {error}", shelf.display())),
+                    }
+                }
+                // With no journal set aside, no entry is left to yield, and the record goes.
+                if !state.taken.is_empty() && self.none_waits() {
+                    state.taken.clear();
+                    if let Err(error) = self.write(&state.entries(), &state.taken) {
+                        recovery.journal.push(uncleared(error));
                     }
                 }
             }
@@ -416,22 +594,41 @@ impl Journal {
     }
 
     /// What the journal holds, read by a process that has just taken it, when no export of any process
-    /// runs with it: its entries, with a line when it held no journal and is replaced or the disk would
-    /// not read it and it is set aside, which is safe now, since no running export's entries are in it.
-    /// Past [`MAX_SET_ASIDE`], with `waiting` set aside already, it stays, and the answer is why nothing
-    /// may be written over it.
-    fn take_entries(&self, waiting: usize) -> std::result::Result<(Vec<Entry>, Option<String>), String> {
+    /// runs with it: what it lists, or else a line saying what became of it. One that is no journal
+    /// names no file and is replaced; while a journal may wait set aside, it may have recorded a later
+    /// export of a file one of those lists, so the journal that replaces it records that every
+    /// set-aside entry of a file yields, and a damaged journal never waits or takes a place of the
+    /// [`MAX_SET_ASIDE`]. One the disk will not read is set aside, which is safe now, since no running
+    /// export's entries are in it; past [`MAX_SET_ASIDE`], or when the disk will not list the journals
+    /// set aside to count them, it stays, and the answer is why nothing may be written over it.
+    fn take_entries(&self) -> std::result::Result<Found, String> {
+        let none_waits = self.none_waits();
         match self.read_at(&self.file) {
-            Ok(listed) => Ok((listed, None)),
-            Err(Unread::Damaged(reason)) => Ok((Vec::new(), Some(format!("{reason}; it names no file to delete, so it is replaced")))),
+            Ok(mut contents) => {
+                // What exports ended at while a journal waited set aside matters to a set-aside entry
+                // alone, so with none waiting the record goes.
+                if none_waits {
+                    contents.taken.clear();
+                }
+                Ok(Found::Read(contents))
+            }
+            Err(Unread::Damaged(reason)) if none_waits => {
+                Ok(Found::Replaced(format!("{reason}; it names no file to delete, so it is replaced"), Taken::default()))
+            }
+            Err(Unread::Damaged(reason)) => Ok(Found::Replaced(
+                format!(
+                    "{reason}; it names no file to delete, so it is replaced, and since it may have held a later export of a file a set-aside journal lists, none of those is deleted"
+                ),
+                Taken::every(),
+            )),
             Err(Unread::Disk(reason)) => {
-                let set_aside = if waiting >= MAX_SET_ASIDE {
-                    Err(format!("{waiting} journals already wait set aside, the most kept"))
-                } else {
-                    self.shelve().map_err(|error| error.to_string())
+                let shelved = match self.shelves() {
+                    Err(why) => Err(why),
+                    Ok(shelves) if shelves.len() >= MAX_SET_ASIDE => Err(format!("{} journals already wait set aside, the most kept", shelves.len())),
+                    Ok(_) => self.shelve().map_err(|error| error.to_string()),
                 };
-                match set_aside {
-                    Ok(shelf) => Ok((Vec::new(), Some(format!("{reason}; it is set aside as {} for a later start", shelf.display())))),
+                match shelved {
+                    Ok(shelf) => Ok(Found::SetAside(format!("{reason}; it is set aside as {} for a later start", shelf.display()))),
                     Err(why) => Err(format!("{reason}; and it cannot be set aside ({why})")),
                 }
             }
@@ -440,7 +637,7 @@ impl Journal {
 
     /// This process's hold on the journal, for a listing or a clear: what it knows the journal holds
     /// while exports of its own run with it, or else the journal taken now, its lock and what it holds,
-    /// kept for a start to deal with.
+    /// kept for a start to deal with. The set-aside journals are left to a start.
     fn hold<'k>(&self, known: &'k mut BTreeMap<PathBuf, Known>) -> Result<&'k mut Known> {
         match known.entry(self.file.clone()) {
             Slot::Occupied(ours) => Ok(ours.into_mut()),
@@ -450,9 +647,13 @@ impl Journal {
                     Locked::Unsupported(_) => None,
                     Locked::Elsewhere(why) => return Err(CraftError::io(format!("{why}; nothing can be listed while it does"))),
                 };
-                let (held, _) =
-                    self.take_entries(self.shelves().len()).map_err(|why| CraftError::io(format!("{why}, so nothing can be listed until a start reads it")))?;
-                Ok(slot.insert(Known { held, running: Vec::new(), lock }))
+                let found = self.take_entries().map_err(|why| CraftError::io(format!("{why}, so nothing can be listed until a start reads it")))?;
+                let Contents { entries, taken } = match found {
+                    Found::Read(contents) => contents,
+                    Found::Replaced(_, taken) => Contents { entries: Vec::new(), taken },
+                    Found::SetAside(_) => Contents::default(),
+                };
+                Ok(slot.insert(Known { held: entries, running: Vec::new(), taken, lock }))
             }
         }
     }
@@ -527,7 +728,7 @@ impl Journal {
     /// Rename the journal, unread, to a file of its own beside it, so a start that can read it deals
     /// with what it lists and no export waits on it. Answers where it went.
     fn shelve(&self) -> io::Result<PathBuf> {
-        let folder = self.file.parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "the journal has no folder"))?;
+        let folder = self.folder()?;
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_nanos());
         // A rename replaces what it lands on, so the name is one nothing holds; the counter gives each
         // try a new one, and the tries are bounded so a disk that answers oddly cannot hold the start.
@@ -541,21 +742,62 @@ impl Journal {
         Err(io::Error::new(io::ErrorKind::AlreadyExists, "every name tried for it is taken"))
     }
 
-    /// The journals earlier starts set aside, in name order.
-    fn shelves(&self) -> Vec<PathBuf> {
-        let Some(folder) = self.file.parent() else { return Vec::new() };
-        let Ok(names) = fs::read_dir(folder) else { return Vec::new() };
-        let mut shelves: Vec<PathBuf> =
-            names.flatten().filter(|entry| entry.file_name().to_string_lossy().starts_with(SHELF_PREFIX)).map(|entry| entry.path()).collect();
-        shelves.sort();
-        shelves
+    /// The journal's folder, which holds its temporary files and the journals set aside.
+    fn folder(&self) -> io::Result<&Path> {
+        self.file.parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "the journal has no folder"))
     }
 
-    /// The entries of the journal at `file`. A missing file lists none.
-    fn read_at(&self, file: &Path) -> std::result::Result<Vec<Entry>, Unread> {
+    /// The journals earlier takes set aside, in name order, or why the disk will not list them.
+    fn shelves(&self) -> std::result::Result<Vec<PathBuf>, String> {
+        let folder = self.folder().map_err(|error| error.to_string())?;
+        let names = fs::read_dir(folder)
+            .and_then(Iterator::collect::<io::Result<Vec<_>>>)
+            .map_err(|error| format!("cannot list the journals set aside in {}: {error}", folder.display()))?;
+        let mut shelves: Vec<PathBuf> =
+            names.into_iter().filter(|entry| entry.file_name().to_string_lossy().starts_with(SHELF_PREFIX)).map(|entry| entry.path()).collect();
+        shelves.sort();
+        Ok(shelves)
+    }
+
+    /// Whether no journal waits set aside. A folder the disk will not list may hold some, whose
+    /// entries yield to what exports end at meanwhile, so it never counts as holding none.
+    fn none_waits(&self) -> bool {
+        self.shelves().is_ok_and(|shelves| shelves.is_empty())
+    }
+
+    /// Read every journal earlier takes set aside, for a start, each one the disk will not read now
+    /// answered in `recovery`.
+    fn read_set_aside(&self, recovery: &mut Recovery) -> SetAside {
+        let mut set_aside = SetAside::default();
+        let shelves = match self.shelves() {
+            Ok(shelves) => shelves,
+            Err(why) => {
+                recovery.journal.push(format!("{why}; they stay set aside for a later start"));
+                set_aside.unread = 1;
+                return set_aside;
+            }
+        };
+        for shelf in shelves {
+            match self.read_at(&shelf) {
+                Ok(contents) => {
+                    set_aside.contents.extend(contents);
+                    set_aside.read.push((shelf, None));
+                }
+                Err(Unread::Damaged(reason)) => set_aside.read.push((shelf, Some(reason))),
+                Err(Unread::Disk(reason)) => {
+                    recovery.journal.push(format!("{reason}; it stays set aside for a later start"));
+                    set_aside.unread = set_aside.unread.saturating_add(1);
+                }
+            }
+        }
+        set_aside
+    }
+
+    /// What the journal at `file` lists. A missing file lists nothing.
+    fn read_at(&self, file: &Path) -> std::result::Result<Contents, Unread> {
         let disk = |error: io::Error| Unread::Disk(format!("cannot read the pending-export journal {}: {error}", file.display()));
         let bytes = match fs::File::open(file) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Contents::default()),
             Err(error) => return Err(disk(error)),
             Ok(file) => bounded(file).map_err(disk)?,
         };
@@ -565,21 +807,30 @@ impl Journal {
         }
         let document: Value = serde_json::from_slice(&bytes).map_err(|error| damaged(&format!("is not JSON: {error}")))?;
         let outputs = document.get(OUTPUTS).and_then(Value::as_array).ok_or_else(|| damaged(&format!("has no `{OUTPUTS}` list")))?;
-        let folders = match document.get(FOLDERS) {
-            None => &[][..],
-            Some(folders) => folders.as_array().map(Vec::as_slice).ok_or_else(|| damaged(&format!("has a `{FOLDERS}` that is not a list")))?,
+        // The lists a journal holds only when it has something in them.
+        let optional = |key: &str| match document.get(key) {
+            None => Ok(&[][..]),
+            Some(list) => list.as_array().map(Vec::as_slice).ok_or_else(|| damaged(&format!("has a `{key}` that is not a list"))),
         };
+        let folders = optional(FOLDERS)?;
         let files = outputs
             .iter()
             .map(|output| Entry::file_from(output).ok_or_else(|| damaged(&format!("lists an entry that is not a `{PATH}` with what was there: {output}"))));
         let made = folders.iter().map(|folder| Entry::folder_from(folder).ok_or_else(|| damaged(&format!("lists a folder that is not a `{PATH}`: {folder}"))));
-        files.chain(made).collect()
+        let entries = files.chain(made).collect::<std::result::Result<_, _>>()?;
+        let mut taken = Taken { every: document.get(TAKEN).and_then(Value::as_str) == Some(EVERY), ..Taken::default() };
+        if !taken.every {
+            let files =
+                optional(TAKEN)?.iter().map(|file| path_from(file).ok_or_else(|| damaged(&format!("lists a taken file that is not a `{PATH}`: {file}"))));
+            taken.extend(files.collect::<std::result::Result<Vec<_>, _>>()?);
+        }
+        Ok(Contents { entries, taken })
     }
 
-    /// Replace the journal with one listing `entries`, atomically; with none to list the file is
-    /// removed, which reads as an empty journal.
-    fn write(&self, entries: &[Entry]) -> io::Result<()> {
-        if entries.is_empty() {
+    /// Replace the journal with one listing `entries` and `taken`, atomically; with nothing to list
+    /// the file is removed, which reads as an empty journal.
+    fn write(&self, entries: &[Entry], taken: &Taken) -> io::Result<()> {
+        if entries.is_empty() && taken.is_empty() {
             return match fs::remove_file(&self.file) {
                 Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
                 _ => Ok(()),
@@ -590,6 +841,9 @@ impl Journal {
         let mut document = Map::from_iter([(OUTPUTS.to_string(), listed(files))]);
         if !folders.is_empty() {
             document.insert(FOLDERS.to_string(), listed(folders));
+        }
+        if let Some(taken) = taken.to_value() {
+            document.insert(TAKEN.to_string(), taken);
         }
         let bytes = serde_json::to_vec(&Value::Object(document)).map_err(io::Error::from)?;
         if u64::try_from(bytes.len()).map_or(true, |length| length > MAX_JOURNAL_BYTES) {
@@ -602,7 +856,7 @@ impl Journal {
     /// the journal's own folder (so the rename is within one filesystem), with the journal itself
     /// untouched.
     fn stage(&self, bytes: &[u8]) -> io::Result<NamedTempFile> {
-        let folder = self.file.parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "the journal has no folder"))?;
+        let folder = self.folder()?;
         let mut staged = tempfile::Builder::new().prefix(TEMP_PREFIX).suffix(".tmp").tempfile_in(folder)?;
         staged.write_all(bytes)?;
         staged.as_file().sync_all()?;
@@ -617,7 +871,7 @@ impl Journal {
 
     /// Delete the temporary files a write killed before its rename left in the journal's folder.
     fn sweep_temporaries(&self, recovery: &mut Recovery) {
-        let Some(folder) = self.file.parent() else { return };
+        let Ok(folder) = self.folder() else { return };
         let Ok(names) = fs::read_dir(folder) else { return };
         for entry in names.flatten() {
             if entry.file_name().to_string_lossy().starts_with(TEMP_PREFIX)
@@ -649,7 +903,7 @@ impl Pending {
         let held = taken_over(&state.held, &mut entries);
         let mut listed: Vec<Entry> = held.iter().chain(&state.running).cloned().collect();
         listed.extend(entries.iter().cloned());
-        let written = self.journal.write(&listed);
+        let written = self.journal.write(&listed, &state.taken);
         if written.is_ok() {
             state.held = held;
             state.running.extend(entries.iter().cloned());
@@ -714,8 +968,15 @@ impl Pending {
             let held = journal.deal_with_all(listed.clone(), &state.running, &mut removal);
             file_kept = held.iter().any(|entry| matches!(entry.kind, Kind::File(_)));
             state.held.extend(held);
+        } else if !journal.none_waits() {
+            // What an export that ends other than by a cancel left at its files is its own, and the
+            // entry of one in a journal set aside unread could not be taken over as it listed: the
+            // record has the start that reads it hand it over now. A cancel records nothing, since
+            // the export deleted what it wrote by its own entries, and the set-aside entry deals with
+            // what was there before, as the entry this export would have taken over from it would.
+            state.taken.extend(listed.iter().filter(|entry| matches!(entry.kind, Kind::File(_))).map(|entry| entry.path.clone()));
         }
-        let written = journal.write(&state.entries());
+        let written = journal.write(&state.entries(), &state.taken);
         // The process's last export with the journal has ended: the lock goes, and another process may
         // take the journal.
         if state.running.is_empty() {
@@ -755,7 +1016,7 @@ impl Entry {
 
     /// The file entry a journal's JSON holds, or none for one that is not an entry.
     fn file_from(value: &Value) -> Option<Self> {
-        let path = value.get(PATH)?.as_str()?.to_string();
+        let path = path_from(value)?;
         let found = match (value.get(BYTES), value.get(MODIFIED)) {
             (None, None) => None,
             (Some(bytes), modified) => {
@@ -772,12 +1033,11 @@ impl Entry {
 
     /// The folder entry a journal's JSON holds, or none for one that is not an entry.
     fn folder_from(value: &Value) -> Option<Self> {
-        Some(Self { path: value.get(PATH)?.as_str()?.to_string(), kind: Kind::Folder })
+        Some(Self { path: path_from(value)?, kind: Kind::Folder })
     }
 
     fn to_value(&self) -> Value {
-        let mut fields = Map::new();
-        fields.insert(PATH.to_string(), Value::from(self.path.as_str()));
+        let mut fields = named(&self.path);
         if let Kind::File(Some(found)) = self.kind {
             fields.insert(BYTES.to_string(), Value::from(found.bytes));
             if let Some(modified) = found.modified {
@@ -786,6 +1046,16 @@ impl Entry {
         }
         Value::Object(fields)
     }
+}
+
+/// The path an entry's JSON names, or none for one that names none.
+fn path_from(value: &Value) -> Option<String> {
+    Some(value.get(PATH)?.as_str()?.to_string())
+}
+
+/// The JSON of an entry that names `path` and nothing more.
+fn named(path: &str) -> Map<String, Value> {
+    Map::from_iter([(PATH.to_string(), Value::from(path))])
 }
 
 impl Stamp {
@@ -870,13 +1140,14 @@ fn bounded(reader: impl Read) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// Hand `listing` the held entries of the files it lists again, and answer the entries still held. A
-/// file a start or a cancelled export could not delete stays listed for the next start, which deletes
-/// whatever is at its path then unless it is still the file that was there before that export; an
-/// export that lists the path again would otherwise have the finished file it writes there deleted.
-/// So the new entry takes the held one's place, with the file that was there before the export that
-/// left it: what is at the path is deleted only if this export is killed or cancelled, and the file
-/// it finishes is kept.
+/// Hand `listing` the held entries of the files it lists again, and answer the entries still held:
+/// the one rule by which a later listing of a file takes an earlier entry of it over, whether that
+/// entry is held or set aside ([`still_set_aside`]). A file a start or a cancelled export could not
+/// delete stays listed for the next start, which deletes whatever is at its path then unless it is
+/// still the file that was there before that export; an export that lists the path again would
+/// otherwise have the finished file it writes there deleted. So the new entry takes the held one's
+/// place, with the file that was there before the export that left it: what is at the path is
+/// deleted only if this export is killed or cancelled, and the file it finishes is kept.
 fn taken_over(held: &[Entry], listing: &mut [Entry]) -> Vec<Entry> {
     let same_file = |a: &Entry, b: &Entry| matches!((a.kind, b.kind), (Kind::File(_), Kind::File(_))) && a.path == b.path;
     for listed in listing.iter_mut() {
@@ -887,6 +1158,45 @@ fn taken_over(held: &[Entry], listing: &mut [Entry]) -> Vec<Entry> {
         }
     }
     held.iter().filter(|entry| !listing.iter().any(|listed| same_file(listed, entry))).cloned().collect()
+}
+
+/// What the journals set aside list (`set_aside`) that is still theirs to deal with. Each entry of a
+/// file `taken` names, which an export ended at other than by a cancel while a journal waited set
+/// aside, is handed to that export by the rule a later listing takes an entry over by, and is theirs
+/// no more: the export has ended, so what it left at the file is its own, and no entry of it is left
+/// to keep the older record. The record says nothing of when, so an entry listed after such an
+/// export, in a journal set aside in its turn, yields too, and a partial file its killed run wrote
+/// there is left: a file left costs no work, while one deleted may be a finished one. Once `taken`
+/// holds every file, past [`MAX_TAKEN`] or after a journal that is no journal, none of their files is
+/// deleted; their folders are still removed once they hold nothing, which costs no file. The start
+/// says which files yielded and why, naming them below `root`. `taken` gains what the set-aside
+/// journals recorded too, kept for a start that reads one of them again because the disk would not
+/// remove it.
+fn still_set_aside(set_aside: Contents, taken: &mut Taken, root: &Path, recovery: &mut Recovery) -> Vec<Entry> {
+    let Contents { entries, taken: recorded } = set_aside;
+    taken.merge(recorded);
+    let yielding: BTreeSet<String> =
+        entries.iter().filter(|entry| matches!(entry.kind, Kind::File(_)) && taken.yields(&entry.path)).map(|entry| entry.path.clone()).collect();
+    if let Some(first) = yielding.first() {
+        let files = format!(
+            "{}{}",
+            root.join(first).display(),
+            match yielding.len().saturating_sub(1) {
+                0 => String::new(),
+                more => format!(" and {more} more files"),
+            }
+        );
+        recovery.journal.push(if taken.every {
+            format!(
+                "an export may have ended at any file the set-aside journals list while they waited, since more than {MAX_TAKEN} files were exported meanwhile or a journal was no journal, so none of them is deleted: {files}"
+            )
+        } else {
+            format!("the set-aside journals' entries of {files} yield to the exports that ended there while they waited, so what is there is kept")
+        });
+    }
+    // The exports that ended at those files, as the later listing.
+    let mut ended: Vec<Entry> = yielding.into_iter().map(|path| Entry { path, kind: Kind::File(None) }).collect();
+    taken_over(&entries, &mut ended)
 }
 
 /// Remove one entry equal to `entry` from `entries`: two exports may list the same file, and each
@@ -1012,6 +1322,25 @@ mod tests {
         fn real(&self, name: &str) -> PathBuf {
             fs::canonicalize(&self.folders.container).unwrap().join(name)
         }
+
+        /// Run `program` with `args` on these folders: the sandbox lets go of its hold for the run
+        /// ([`run_alone`]), and the same folders come back, held again.
+        #[cfg(target_os = "macos")]
+        fn running(self, program: &str, args: &[&std::ffi::OsStr]) -> std::result::Result<Self, io::Error> {
+            let Self { root, _alive, .. } = self;
+            drop(_alive);
+            run_alone(program, args)?;
+            Self::at(root, "container")
+        }
+    }
+
+    /// Run `program` with `args` while no sandbox lives, as a test that starts a process must
+    /// ([`NO_PROCESS_STARTS`]).
+    #[cfg(unix)]
+    fn run_alone(program: &str, args: &[&std::ffi::OsStr]) -> io::Result<()> {
+        let _alone = NO_PROCESS_STARTS.write().unwrap_or_else(PoisonError::into_inner);
+        let status = std::process::Command::new(program).args(args).status()?;
+        if status.success() { Ok(()) } else { Err(io::Error::other(format!("{program} answered {status}"))) }
     }
 
     /// An entry as a run that listed `path` (below the container) with nothing there leaves it.
@@ -1449,6 +1778,10 @@ mod tests {
         KilledRunThatNeverWrote,
     }
 
+    /// What an export that finishes writes at the path it lists.
+    #[cfg(unix)]
+    const FINISHED: &[u8] = b"the finished movie";
+
     /// How the export that lists the path again ends.
     #[cfg(unix)]
     #[derive(Clone, Copy, Debug)]
@@ -1459,6 +1792,24 @@ mod tests {
         IsCancelled,
         /// It is killed before it writes.
         IsKilled,
+    }
+
+    #[cfg(unix)]
+    impl Then {
+        /// An export in `sand` that lists `path`, about to write it, and then ends so.
+        fn end_an_export_of(self, sand: &Sandbox, path: &Path) -> Test {
+            let mut export = sand.journal().pending();
+            export.list(&[path.to_path_buf()])?;
+            match self {
+                Then::Finishes => {
+                    fs::write(path, FINISHED)?;
+                    export.clear()?;
+                }
+                Then::IsCancelled => export.remove()?,
+                Then::IsKilled => export.killed(),
+            }
+            Ok(())
+        }
     }
 
     /// An entry a start or a cancel could not deal with stays listed, and an export that lists its path
@@ -1504,21 +1855,12 @@ mod tests {
                 };
                 lock_up(0o700)?;
                 assert!(fs::read_to_string(sand.file())?.contains("card.mp4"), "{left:?}: the path is not listed");
-                let mut export = sand.journal().pending();
-                export.list(std::slice::from_ref(&path))?;
-                match then {
-                    Then::Finishes => {
-                        fs::write(&path, b"the finished movie")?;
-                        export.clear()?;
-                    }
-                    Then::IsCancelled => export.remove()?,
-                    Then::IsKilled => export.killed(),
-                }
+                then.end_an_export_of(&sand, &path)?;
                 engine.close()?;
                 sand.journal().process_ended();
                 let restarted = sand.start()?;
                 let due: Option<&[u8]> = match (then, left) {
-                    (Then::Finishes, _) => Some(b"the finished movie"),
+                    (Then::Finishes, _) => Some(FINISHED),
                     (_, LeftBy::KilledRunThatNeverWrote) => Some(b"a finished movie"),
                     _ => None,
                 };
@@ -1621,7 +1963,8 @@ mod tests {
     }
 
     /// A journal whose content is no journal names no file: the start deletes nothing, goes on,
-    /// replaces it, and says what it found.
+    /// replaces it, and says what it found. A listing that takes it, with no journal set aside,
+    /// replaces it too.
     #[test]
     fn a_damaged_journal_is_answered_replaced_and_the_engine_starts() -> Test {
         let too_long = format!("{{\"outputs\": [{{\"path\": \"card.mp4\"}}]}}{}", " ".repeat(usize::try_from(MAX_JOURNAL_BYTES)?));
@@ -1649,6 +1992,14 @@ mod tests {
             assert_eq!(engine.recovery().journal.len(), 1, "{shown:?}: {:?}", engine.recovery());
             assert!(!sand.file().exists(), "{shown:?}: the damaged journal was kept");
         }
+        let sand = Sandbox::new()?;
+        fs::write(sand.file(), "\u{0}\u{1}")?;
+        let mut export = sand.journal().pending();
+        export.list(&[sand.folders.container.join("card.mp4")])?;
+        assert!(shelved(&sand)?.is_empty(), "a listing set aside a damaged journal with none waiting");
+        let now = fs::read_to_string(sand.file())?;
+        assert!(now.contains("card.mp4") && !now.contains(TAKEN), "the listing did not replace the damaged journal with its own: {now}");
+        export.clear()?;
         Ok(())
     }
 
@@ -1972,13 +2323,13 @@ mod tests {
         Ok(())
     }
 
-    /// Several journals set aside: a start reads each it can, deals with what each lists, keeps in the
-    /// journal what it could not delete so nothing listed is lost, removes those it read and the one
-    /// that is no journal, leaves the one still unread, and says one line for each.
+    /// Several journals set aside: while one cannot be read, a start deals with none of them and says
+    /// so of each, removing none; once every one reads, it deals with what each lists, keeps in the
+    /// journal what it could not delete so nothing listed is lost, removes them all, and says one line
+    /// for each.
     #[cfg(unix)]
     #[test]
     fn several_set_aside_journals_are_each_dealt_with_and_answered() -> Test {
-        use std::os::unix::fs::PermissionsExt;
         let sand = Sandbox::new()?;
         if !permissions_hold(&sand)? {
             return Ok(());
@@ -1988,30 +2339,34 @@ mod tests {
         let stuck = sand.put("locked/frame.png", b"half");
         fs::write(shelf(1), json!({ OUTPUTS: [entry("card.mp4")] }).to_string())?;
         fs::write(shelf(2), json!({ OUTPUTS: [entry("locked/frame.png")] }).to_string())?;
-        fs::write(shelf(3), b"{\"outputs\": [{\"path\": \"card")?;
-        fs::write(shelf(4), json!({ OUTPUTS: [entry("later.mp4")] }).to_string())?;
-        fs::set_permissions(shelf(4), fs::Permissions::from_mode(0o000))?;
-        let locked = sand.folders.container.join("locked");
-        fs::set_permissions(&locked, fs::Permissions::from_mode(0o500))?;
+        fs::write(shelf(3), json!({ OUTPUTS: [entry("later.mp4")] }).to_string())?;
+        set_mode(&shelf(3), 0o000)?;
+        let real = |n: u32| real_shelf(&sand, &shelf(n));
 
+        let first = sand.start()?;
+        assert_eq!(first.recovery().journal, [stays_unread(&real(3)?), waits(&real(1)?), waits(&real(2)?)]);
+        assert!(partial.exists() && stuck.exists() && first.recovery().removed.is_empty(), "{:?}", first.recovery());
+        assert_eq!(shelved(&sand)?.len(), 3, "a set-aside journal that waits was removed");
+
+        set_mode(&shelf(3), 0o600)?;
+        let locked = sand.folders.container.join("locked");
+        set_mode(&locked, 0o500)?;
         let engine = sand.start()?;
-        fs::set_permissions(&locked, fs::Permissions::from_mode(0o700))?;
+        set_mode(&locked, 0o700)?;
         let recovery = engine.recovery();
         assert!(!partial.exists() && stuck.exists(), "{recovery:?}");
         assert_eq!(recovery.removed, [sand.real("card.mp4")]);
         assert_eq!(recovery.failed.len(), 1, "{recovery:?}");
         assert!(fs::read_to_string(sand.file())?.contains("locked/frame.png"), "what a set-aside journal listed was lost");
-        assert_eq!(shelved(&sand)?, [shelf(4)], "the journals read and the damaged one were not all removed, or the unread one was");
-        let lines = &recovery.journal;
-        assert_eq!(lines.len(), 4, "{lines:?}");
-        assert_eq!(lines.iter().filter(|line| line.contains("read the set-aside journal")).count(), 2, "{lines:?}");
-        assert!(lines.iter().any(|line| line.contains("is not JSON") && line.contains("removed")), "{lines:?}");
-        assert!(lines.iter().any(|line| line.contains("stays set aside")), "{lines:?}");
+        assert!(shelved(&sand)?.is_empty(), "a set-aside journal that was read was kept");
+        assert_eq!(recovery.journal, [read_and_removed(&real(1)?), read_and_removed(&real(2)?), read_and_removed(&real(3)?)]);
         Ok(())
     }
 
     /// At most [`MAX_SET_ASIDE`] journals wait set aside: past that a start leaves the unread journal
-    /// where it is and refuses listings, naming it, and a later start that reads it deals with it.
+    /// where it is and refuses listings, naming it, and a later start that reads it deals with it. One
+    /// set aside that reads waits with the rest, and says so; one that is no journal stays too, since
+    /// nothing records yet what its going costs.
     #[cfg(unix)]
     #[test]
     fn set_aside_journals_are_bounded() -> Test {
@@ -2020,23 +2375,653 @@ mod tests {
         if !permissions_hold(&sand)? {
             return Ok(());
         }
+        let shelf = |n: usize| sand.folders.config.join(format!("{SHELF_PREFIX}0-{n}.json"));
         for n in 0..MAX_SET_ASIDE {
-            let shelf = sand.folders.config.join(format!("{SHELF_PREFIX}0-{n}.json"));
-            fs::write(&shelf, b"{\"outputs\": []}")?;
-            fs::set_permissions(&shelf, fs::Permissions::from_mode(0o000))?;
+            fs::write(shelf(n), if n == 1 { b"{".as_slice() } else { b"{\"outputs\": []}".as_slice() })?;
+            fs::set_permissions(shelf(n), fs::Permissions::from_mode(if n < 2 { 0o600 } else { 0o000 }))?;
         }
         let partial = sand.put("card.mp4", b"half");
         sand.write_journal(&[entry("card.mp4")]);
         fs::set_permissions(sand.file(), fs::Permissions::from_mode(0o000))?;
 
         let engine = sand.start()?;
-        assert_eq!(shelved(&sand)?.len(), MAX_SET_ASIDE, "a journal was set aside past the bound");
+        assert_eq!(shelved(&sand)?.len(), MAX_SET_ASIDE, "a journal was set aside past the bound, or one went while nothing was written");
         assert!(sand.file().exists() && partial.exists());
         assert!(engine.recovery().journal.iter().any(|line| line.contains("cannot be set aside")), "{:?}", engine.recovery());
+        let not_json = serde_json::from_slice::<Value>(b"{").err().ok_or("the damage reads as JSON")?;
+        let kept = format!(
+            "the pending-export journal {} is not JSON: {not_json}; it names no file to delete, and goes when a start can write the journal",
+            real_shelf(&sand, &shelf(1))?.display()
+        );
+        assert!(engine.recovery().journal.ends_with(&[waits(&real_shelf(&sand, &shelf(0))?), kept]), "{:?}", engine.recovery());
         assert_listing_refused(&sand, "until a start reads it");
 
         fs::set_permissions(sand.file(), fs::Permissions::from_mode(0o600))?;
         assert_start_frees_the_journal(&sand)
+    }
+
+    /// A journal that is no journal never waits set aside, so it refuses nothing however many wait: with
+    /// [`MAX_SET_ASIDE`] set aside and one of them unreadable, a listing and a start each replace it by
+    /// one that records that every set-aside entry of a file yields, and once every one reads, none of
+    /// the files they list is deleted.
+    #[cfg(unix)]
+    #[test]
+    fn a_journal_that_is_no_journal_is_replaced_however_many_wait() -> Test {
+        let sand = Sandbox::new()?;
+        if !permissions_hold(&sand)? {
+            return Ok(());
+        }
+        let shelf = |n: usize| sand.folders.config.join(format!("{SHELF_PREFIX}0-{n}.json"));
+        for n in 0..MAX_SET_ASIDE {
+            sand.put(&format!("p{n}.mp4"), b"half");
+            fs::write(shelf(n), json!({ OUTPUTS: [entry(&format!("p{n}.mp4"))] }).to_string())?;
+        }
+        set_mode(&shelf(0), 0o000)?;
+        let every = || -> std::result::Result<bool, Box<dyn std::error::Error>> {
+            Ok(serde_json::from_slice::<Value>(&fs::read(sand.file())?)?.get(TAKEN) == Some(&json!(EVERY)))
+        };
+        fs::write(sand.file(), b"{")?;
+        let mut export = sand.journal().pending();
+        export.list(&[sand.folders.container.join("new.mp4")])?;
+        export.clear()?;
+        assert!(every()?, "the listing did not record that every set-aside entry yields");
+        fs::write(sand.file(), b"{")?;
+        let start = sand.start()?;
+        assert!(!start.recovery().journal.iter().any(|line| line.contains("cannot be set aside")), "{:?}", start.recovery());
+        assert!(every()? && shelved(&sand)?.len() == MAX_SET_ASIDE, "{:?}", start.recovery());
+
+        set_mode(&shelf(0), 0o600)?;
+        let later = sand.start()?;
+        let recovery = later.recovery();
+        assert!((0..MAX_SET_ASIDE).all(|n| sand.folders.container.join(format!("p{n}.mp4")).exists()), "{recovery:?}");
+        assert_eq!(recovery.journal.first(), Some(&none_deleted(&sand.real("p0.mp4"), MAX_SET_ASIDE - 1)), "{recovery:?}");
+        assert!(shelved(&sand)?.is_empty() && !sand.file().exists(), "a journal outlived the start that dealt with it");
+        Ok(())
+    }
+
+    /// Give `path` the permissions `mode` spells.
+    #[cfg(unix)]
+    fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(mode))
+    }
+
+    /// What a start says of `shelf`, a set-aside journal it read, while one cannot be read now.
+    #[cfg(unix)]
+    fn waits(shelf: &Path) -> String {
+        format!("the set-aside journal {} waits for those that cannot be read now, which may hold a later export of a file it lists", shelf.display())
+    }
+
+    /// What a start says of `shelf`, a set-aside journal it read, dealt with and removed.
+    #[cfg(unix)]
+    fn read_and_removed(shelf: &Path) -> String {
+        format!("read the set-aside journal {}, dealt with what it listed and removed it", shelf.display())
+    }
+
+    /// How a start names `first` and `more` other files set-aside journals list, as the recovery names
+    /// files.
+    #[cfg(unix)]
+    fn named_files(first: &Path, more: usize) -> String {
+        let more = if more == 0 { String::new() } else { format!(" and {more} more files") };
+        format!("{}{more}", first.display())
+    }
+
+    /// What a start says of the entries of `first` and `more` other files that set-aside journals
+    /// list and that yielded to the exports that ended there.
+    #[cfg(unix)]
+    fn yields_to_exports(first: &Path, more: usize) -> String {
+        format!(
+            "the set-aside journals' entries of {} yield to the exports that ended there while they waited, so what is there is kept",
+            named_files(first, more)
+        )
+    }
+
+    /// What a start says of `first` and `more` other files set-aside journals list once every set-aside
+    /// entry of a file yields, past the record's bound or after a journal that is no journal.
+    #[cfg(unix)]
+    fn none_deleted(first: &Path, more: usize) -> String {
+        format!(
+            "an export may have ended at any file the set-aside journals list while they waited, since more than {MAX_TAKEN} files were exported meanwhile or a journal was no journal, so none of them is deleted: {}",
+            named_files(first, more)
+        )
+    }
+
+    /// What a start says of the journal it replaces, `reason` being why it is no journal, while
+    /// journals may wait set aside.
+    #[cfg(unix)]
+    fn replaced_while_one_waits(reason: &str) -> String {
+        format!(
+            "{reason}; it names no file to delete, so it is replaced, and since it may have held a later export of a file a set-aside journal lists, none of those is deleted"
+        )
+    }
+
+    /// What a start says of `shelf`, a set-aside journal its user may not read.
+    #[cfg(unix)]
+    fn stays_unread(shelf: &Path) -> String {
+        format!("cannot read the pending-export journal {}: {}; it stays set aside for a later start", shelf.display(), io::Error::from_raw_os_error(13))
+    }
+
+    /// Where `shelf`, a journal set aside in `sand`, is as a recovery names it.
+    #[cfg(unix)]
+    fn real_shelf(sand: &Sandbox, shelf: &Path) -> std::result::Result<PathBuf, Box<dyn std::error::Error>> {
+        Ok(fs::canonicalize(&sand.folders.config)?.join(shelf.file_name().ok_or("a set-aside journal has no name")?))
+    }
+
+    /// What a killed run left, its journal set aside unread by the start after it: partial files at
+    /// `card`, `card.mp4`, and `frame`, `frames/f_00000.png`, which it listed with nothing there, in a
+    /// folder it made.
+    #[cfg(unix)]
+    struct AfterAKill {
+        sand: Sandbox,
+        /// The set-aside journal, which the disk still will not read.
+        shelf: PathBuf,
+        card: PathBuf,
+        frame: PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl AfterAKill {
+        /// None for a user the permissions do not hold back (root), for whom the disk never refuses
+        /// to read the journal.
+        fn new() -> std::result::Result<Option<Self>, Box<dyn std::error::Error>> {
+            let sand = Sandbox::new()?;
+            if !permissions_hold(&sand)? {
+                return Ok(None);
+            }
+            let (card, frame) = (sand.folders.container.join("card.mp4"), sand.folders.container.join("frames/f_00000.png"));
+            let mut killed = sand.journal().pending();
+            killed.list(&[card.clone(), frame.clone()])?;
+            sand.put("card.mp4", b"half");
+            sand.put("frames/f_00000.png", b"half");
+            killed.killed();
+            set_mode(&sand.file(), 0o000)?;
+            sand.start()?;
+            let shelf = match shelved(&sand)?.as_slice() {
+                [shelf] => shelf.clone(),
+                other => return Err(format!("the unread journal was not set aside: {other:?}").into()),
+            };
+            Ok(Some(Self { sand, shelf, card, frame }))
+        }
+    }
+
+    /// The journal set aside in `sand` beside `older`, the one a later start set aside.
+    #[cfg(unix)]
+    fn newer_than(sand: &Sandbox, older: &Path) -> std::result::Result<PathBuf, Box<dyn std::error::Error>> {
+        Ok(shelved(sand)?.into_iter().find(|shelf| shelf != older).ok_or("the journal was not set aside")?)
+    }
+
+    /// The acceptance: a journal the disk would not read is set aside, so no export can take its
+    /// entries over as it lists, and an export lists one of its files again. Once a start can read it,
+    /// the file that export finished stays, and the start says so; one cancelled or killed before it
+    /// wrote has the partial file the killed run left deleted, as the take-over would have; and every
+    /// other entry the set-aside journal lists is dealt with as before, the journal cleared.
+    #[cfg(unix)]
+    #[test]
+    fn a_set_aside_entry_yields_to_a_later_export_of_its_file() -> Test {
+        // Every case is run and the faults listed together, so a fault in one never hides another.
+        let mut faults = Vec::new();
+        for then in [Then::Finishes, Then::IsCancelled, Then::IsKilled] {
+            let Some(AfterAKill { sand, shelf, card, .. }) = AfterAKill::new()? else { return Ok(()) };
+            then.end_an_export_of(&sand, &card)?;
+            set_mode(&shelf, 0o600)?;
+            let read = read_and_removed(&real_shelf(&sand, &shelf)?);
+            sand.journal().process_ended();
+            let restarted = sand.start()?;
+            let recovery = restarted.recovery();
+            let (due, removed, lines): (Option<&[u8]>, &[&str], Vec<String>) = match then {
+                Then::Finishes => (Some(FINISHED), &["frames/f_00000.png", "frames"], vec![yields_to_exports(&sand.real("card.mp4"), 0), read]),
+                Then::IsCancelled | Then::IsKilled => (None, &["card.mp4", "frames/f_00000.png", "frames"], vec![read]),
+            };
+            let now = fs::read(&card).ok();
+            if now.as_deref() != due {
+                let (now, due) = (now.as_deref().map(String::from_utf8_lossy), due.map(String::from_utf8_lossy));
+                faults.push(format!("{then:?}: the start left {now:?} where {due:?} was due ({recovery:?})"));
+            }
+            if recovery.removed != removed.iter().map(|name| sand.real(name)).collect::<Vec<_>>() || recovery.journal != lines {
+                faults.push(format!("{then:?}: the other set-aside entries were not dealt with as before: {recovery:?}"));
+            }
+            if !shelved(&sand)?.is_empty() || sand.file().exists() {
+                faults.push(format!("{then:?}: a journal outlived the start that dealt with it"));
+            }
+        }
+        assert!(faults.is_empty(), "{faults:#?}");
+        Ok(())
+    }
+
+    /// A set-aside entry may yield to an export another journal records, so a start deals with what
+    /// the set-aside journals list only once it reads every one and the journal: while one cannot be
+    /// read they all wait, unremoved, and the file the export finished stays. Here the record is in
+    /// the journal, which the disk then stops reading, so a start sets it aside in its turn.
+    #[cfg(unix)]
+    #[test]
+    fn set_aside_journals_wait_while_one_cannot_be_read() -> Test {
+        let Some(AfterAKill { sand, shelf: older, card, frame }) = AfterAKill::new()? else { return Ok(()) };
+        Then::Finishes.end_an_export_of(&sand, &card)?;
+        set_mode(&older, 0o600)?;
+        set_mode(&sand.file(), 0o000)?;
+        let waits = waits(&real_shelf(&sand, &older)?);
+        let untouched = |when: &str, recovery: &Recovery| -> Test {
+            assert_eq!(fs::read(&card)?, FINISHED, "{when}: the file a later export finished was deleted: {recovery:?}");
+            assert_eq!(fs::read(&frame)?, b"half", "{when}: a set-aside entry was dealt with while a journal could not be read: {recovery:?}");
+            assert_eq!(shelved(&sand)?.len(), 2, "{when}: a set-aside journal that waits was removed");
+            Ok(())
+        };
+
+        let first = sand.start()?;
+        untouched("the start that set the journal aside", first.recovery())?;
+        let newer = real_shelf(&sand, &newer_than(&sand, &older)?)?;
+        let set_aside = format!(
+            "cannot read the pending-export journal {}: {}; it is set aside as {} for a later start",
+            fs::canonicalize(&sand.folders.config)?.join(JOURNAL_FILE).display(),
+            io::Error::from_raw_os_error(13),
+            newer.display()
+        );
+        assert_eq!(first.recovery().journal, [set_aside, waits.clone()]);
+        let second = sand.start()?;
+        untouched("the start that could not read it", second.recovery())?;
+        assert_eq!(second.recovery().journal, [stays_unread(&newer), waits]);
+
+        set_mode(&newer, 0o600)?;
+        let third = sand.start()?;
+        assert_eq!(fs::read(&card)?, FINISHED, "the file a later export finished was deleted: {:?}", third.recovery());
+        assert_eq!(third.recovery().removed, [sand.real("frames/f_00000.png"), sand.real("frames")], "{:?}", third.recovery());
+        assert!(shelved(&sand)?.is_empty() && !sand.file().exists(), "a journal outlived the start that dealt with it");
+        Ok(())
+    }
+
+    /// Where a journal that is no journal lies, which may have recorded the export a set-aside entry
+    /// yields to.
+    #[cfg(unix)]
+    #[derive(Clone, Copy, Debug)]
+    enum NoJournal {
+        /// The journal, read by a start that reads every set-aside journal.
+        TheJournal,
+        /// A journal set aside unread, which the disk has damaged since, read by a start while
+        /// another cannot be read.
+        ASetAsideOne,
+        /// The journal, read by a start that cannot read a set-aside journal.
+        TheJournalWhileOneCannotBeRead,
+        /// The journal, read by a listing, which never reads the set-aside journals.
+        TheJournalAtAListing,
+    }
+
+    /// A journal that is no journal may have recorded an export a set-aside entry yields to, so it
+    /// costs no file: the journal records that every set-aside entry of a file yields, the journal that
+    /// is no journal is replaced or removed and never waits, and once every journal reads, none of the
+    /// files the set-aside journals list is deleted.
+    #[cfg(unix)]
+    #[test]
+    fn a_journal_that_is_no_journal_costs_no_file_a_set_aside_journal_lists() -> Test {
+        let garbage = br#"{"outputs": [{"path": "card"#;
+        let not_json = serde_json::from_slice::<Value>(garbage).err().ok_or("the damage reads as JSON")?;
+        let mut faults = Vec::new();
+        for no_journal in [NoJournal::TheJournal, NoJournal::ASetAsideOne, NoJournal::TheJournalWhileOneCannotBeRead, NoJournal::TheJournalAtAListing] {
+            let Some(AfterAKill { sand, shelf: older, card, frame }) = AfterAKill::new()? else { return Ok(()) };
+            Then::Finishes.end_an_export_of(&sand, &card)?;
+            let damaged = |file: &Path| format!("the pending-export journal {} is not JSON: {not_json}", file.display());
+            let journal = fs::canonicalize(&sand.folders.config)?.join(JOURNAL_FILE);
+            let older_real = real_shelf(&sand, &older)?;
+            let mut lines = Vec::new();
+            // What a start said while the older set-aside journal could not be read, with what was due.
+            let mut meanwhile = Vec::new();
+            match no_journal {
+                NoJournal::TheJournal => {
+                    fs::write(sand.file(), garbage)?;
+                    lines.push(replaced_while_one_waits(&damaged(&journal)));
+                }
+                NoJournal::ASetAsideOne => {
+                    set_mode(&sand.file(), 0o000)?;
+                    sand.start()?;
+                    let shelf = newer_than(&sand, &older)?;
+                    set_mode(&shelf, 0o600)?;
+                    fs::write(&shelf, garbage)?;
+                    let removed = format!("{}; it names no file to delete, so it is removed", damaged(&real_shelf(&sand, &shelf)?));
+                    meanwhile.push((sand.start()?.recovery().journal.clone(), vec![stays_unread(&older_real), removed]));
+                }
+                NoJournal::TheJournalWhileOneCannotBeRead => {
+                    fs::write(sand.file(), garbage)?;
+                    meanwhile.push((sand.start()?.recovery().journal.clone(), vec![stays_unread(&older_real), replaced_while_one_waits(&damaged(&journal))]));
+                    meanwhile.push((sand.start()?.recovery().journal.clone(), vec![stays_unread(&older_real)]));
+                }
+                NoJournal::TheJournalAtAListing => {
+                    fs::write(sand.file(), garbage)?;
+                    let mut other = sand.journal().pending();
+                    other.list(&[sand.folders.container.join("other.mp4")])?;
+                    other.clear()?;
+                }
+            }
+            for (said, due) in meanwhile {
+                if said != due {
+                    faults.push(format!("{no_journal:?}: while one could not be read, the start said {said:?}"));
+                }
+            }
+            if !matches!(no_journal, NoJournal::TheJournal) {
+                let record = serde_json::from_slice::<Value>(&fs::read(sand.file())?).ok().and_then(|now| now.get(TAKEN).cloned());
+                if shelved(&sand)? != [older.clone()] || record != Some(json!(EVERY)) {
+                    faults.push(format!("{no_journal:?}: what is no journal waits, or the journal does not record that every entry yields: {record:?}"));
+                }
+            }
+            set_mode(&older, 0o600)?;
+            let last = sand.start()?;
+            lines.extend([none_deleted(&sand.real("card.mp4"), 1), read_and_removed(&older_real)]);
+            let recovery = last.recovery();
+            if fs::read(&card).ok().as_deref() != Some(FINISHED) || fs::read(&frame).ok().as_deref() != Some(b"half".as_slice()) {
+                faults.push(format!("{no_journal:?}: a file a set-aside journal lists was deleted on the word of what is no journal: {recovery:?}"));
+            }
+            if recovery.journal != lines || !recovery.removed.is_empty() || !shelved(&sand)?.is_empty() || sand.file().exists() {
+                faults.push(format!("{no_journal:?}: the start did not answer and clear as due: {recovery:?}"));
+            }
+        }
+        assert!(faults.is_empty(), "{faults:#?}");
+        Ok(())
+    }
+
+    /// A start writes what the set-aside entries yield to with the journal before it removes the
+    /// journals set aside, so one the disk will not remove, which the next start reads again, still
+    /// yields. Here the record was in another set-aside journal, which went.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_set_aside_journal_the_disk_keeps_yields_again_at_the_next_start() -> Test {
+        let Some(AfterAKill { sand, shelf: older, card, .. }) = AfterAKill::new()? else { return Ok(()) };
+        Then::Finishes.end_an_export_of(&sand, &card)?;
+        set_mode(&older, 0o600)?;
+        set_mode(&sand.file(), 0o000)?;
+        sand.start()?;
+        set_mode(&newer_than(&sand, &older)?, 0o600)?;
+        // The system's flag that keeps a file from being removed, even by its owner, while it reads.
+        let sand = sand.running("chflags", &["uchg".as_ref(), older.as_os_str()])?;
+        let first = sand.start();
+        let sand = sand.running("chflags", &["nouchg".as_ref(), older.as_os_str()])?;
+        let first = first?;
+        let kept = format!("cannot remove the set-aside journal {}: {}", real_shelf(&sand, &older)?.display(), io::Error::from_raw_os_error(1));
+        assert!(first.recovery().journal.contains(&kept), "{:?}", first.recovery());
+        assert_eq!(fs::read(&card)?, FINISHED, "the file a later export finished was deleted: {:?}", first.recovery());
+
+        let second = sand.start()?;
+        assert_eq!(fs::read(&card)?, FINISHED, "a set-aside journal read again deleted the file a later export finished: {:?}", second.recovery());
+        assert!(second.recovery().removed.is_empty(), "{:?}", second.recovery());
+        assert!(shelved(&sand)?.is_empty() && !sand.file().exists(), "a journal outlived the start that dealt with it");
+        Ok(())
+    }
+
+    /// A set-aside journal that is no journal goes only once the journal records what its going costs,
+    /// that every set-aside entry of a file yields: while the disk will not take the journal's write it
+    /// stays, and the start says so, so the export it may have recorded keeps its file. Here it did
+    /// record one, the export that finished at a file the older set-aside journal lists.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_set_aside_journal_that_is_no_journal_goes_only_once_the_journal_is_written() -> Test {
+        let Some(AfterAKill { sand, shelf: older, card, frame }) = AfterAKill::new()? else { return Ok(()) };
+        Then::Finishes.end_an_export_of(&sand, &card)?;
+        set_mode(&sand.file(), 0o000)?;
+        sand.start()?;
+        let newer = newer_than(&sand, &older)?;
+        set_mode(&newer, 0o600)?;
+        fs::write(&newer, b"{")?;
+        let not_json = serde_json::from_slice::<Value>(b"{").err().ok_or("the damage reads as JSON")?;
+        let damaged = format!("the pending-export journal {} is not JSON: {not_json}", real_shelf(&sand, &newer)?.display());
+        let unread = stays_unread(&real_shelf(&sand, &older)?);
+        // A journal the disk reads, but will not let a start replace or remove.
+        let journal = sand.file();
+        fs::write(&journal, json!({ OUTPUTS: [] }).to_string())?;
+        let sand = sand.running("chflags", &["uchg".as_ref(), journal.as_os_str()])?;
+        let first = sand.start();
+        let sand = sand.running("chflags", &["nouchg".as_ref(), journal.as_os_str()])?;
+        let first = first?;
+        let uncleared = format!(
+            "cannot clear the pending-export journal {}: {}",
+            fs::canonicalize(&sand.folders.config)?.join(JOURNAL_FILE).display(),
+            io::Error::from_raw_os_error(1)
+        );
+        let kept = format!("{damaged}; it names no file to delete, and goes when a start can write the journal");
+        assert_eq!(first.recovery().journal, [unread.clone(), uncleared, kept]);
+        assert_eq!(shelved(&sand)?.len(), 2, "a journal that is no journal went before the journal recorded what that costs");
+
+        let second = sand.start()?;
+        assert_eq!(second.recovery().journal, [unread, format!("{damaged}; it names no file to delete, so it is removed")]);
+        set_mode(&older, 0o600)?;
+        let third = sand.start()?;
+        assert_eq!(fs::read(&card)?, FINISHED, "the file a later export finished was deleted: {:?}", third.recovery());
+        assert_eq!(fs::read(&frame)?, b"half", "{:?}", third.recovery());
+        assert!(shelved(&sand)?.is_empty() && !sand.file().exists(), "a journal outlived the start that dealt with it");
+        Ok(())
+    }
+
+    /// What set-aside entries yield to is kept only while a journal waits set aside: a journal that
+    /// holds it with none waiting, as a start killed before it dropped it leaves one, is read for its
+    /// entries alone, and the next change of it, a listing's or a start's, drops it.
+    #[test]
+    fn what_set_aside_entries_yield_to_goes_with_the_last_of_them() -> Test {
+        let stale = json!([entry("card.mp4"), entry("frames/f_00000.png")]);
+        let sand = Sandbox::new()?;
+        fs::write(sand.file(), json!({ OUTPUTS: [], TAKEN: stale }).to_string())?;
+        let mut export = sand.journal().pending();
+        export.list(&[sand.folders.container.join("other.mp4")])?;
+        assert!(!fs::read_to_string(sand.file())?.contains(TAKEN), "a listing kept what set-aside entries yield to with none waiting");
+        export.clear()?;
+        assert!(!sand.file().exists(), "what set-aside entries yield to outlived the last of them");
+
+        let partial = sand.put("card.mp4", b"half");
+        fs::write(sand.file(), json!({ OUTPUTS: [entry("card.mp4")], TAKEN: stale }).to_string())?;
+        let engine = sand.start()?;
+        assert!(!partial.exists(), "an entry of the journal yielded: {:?}", engine.recovery());
+        assert!(!sand.file().exists(), "what set-aside entries yield to outlived the last of them");
+        Ok(())
+    }
+
+    /// The journal's own entries are later than every set-aside one, so each is dealt with by its own
+    /// record, never a set-aside one's: an export killed after another finished at a file a set-aside
+    /// journal lists has its partial file deleted when it wrote one, and when it never did, the
+    /// finished file is kept, which the older record would delete.
+    #[cfg(unix)]
+    #[test]
+    fn an_export_killed_after_one_a_set_aside_entry_yields_to_is_dealt_with_by_its_own_record() -> Test {
+        let mut faults = Vec::new();
+        for wrote in [true, false] {
+            let Some(AfterAKill { sand, shelf, card, .. }) = AfterAKill::new()? else { return Ok(()) };
+            Then::Finishes.end_an_export_of(&sand, &card)?;
+            let mut killed = sand.journal().pending();
+            killed.list(std::slice::from_ref(&card))?;
+            if wrote {
+                fs::write(&card, b"half a newer movie")?;
+            }
+            killed.killed();
+            set_mode(&shelf, 0o600)?;
+            let restarted = sand.start()?;
+            let due = if wrote { None } else { Some(FINISHED) };
+            let now = fs::read(&card).ok();
+            if now.as_deref() != due {
+                let (now, due) = (now.as_deref().map(String::from_utf8_lossy), due.map(String::from_utf8_lossy));
+                faults.push(format!("wrote: {wrote}: the start left {now:?} where {due:?} was due ({:?})", restarted.recovery()));
+            }
+        }
+        assert!(faults.is_empty(), "{faults:#?}");
+        Ok(())
+    }
+
+    /// The record says nothing of when an export ended, so an entry listed after one, in a journal set
+    /// aside in its turn, yields to it too: the partial file its killed run wrote there is left, never
+    /// a finished file deleted, and the start names the files that yielded.
+    #[cfg(unix)]
+    #[test]
+    fn an_entry_set_aside_after_an_export_it_yields_to_leaves_its_partial_file_and_says_so() -> Test {
+        let Some(AfterAKill { sand, card, frame, .. }) = AfterAKill::new()? else { return Ok(()) };
+        for file in [&card, &frame] {
+            Then::Finishes.end_an_export_of(&sand, file)?;
+        }
+        let mut killed = sand.journal().pending();
+        killed.list(std::slice::from_ref(&card))?;
+        fs::write(&card, b"half a newer movie")?;
+        killed.killed();
+        set_mode(&sand.file(), 0o000)?;
+        sand.start()?;
+        for shelf in shelved(&sand)? {
+            set_mode(&shelf, 0o600)?;
+        }
+        let later = sand.start()?;
+        let recovery = later.recovery();
+        assert_eq!(fs::read(&card)?, b"half a newer movie", "{recovery:?}");
+        assert_eq!(fs::read(&frame)?, FINISHED, "a finished file was deleted: {recovery:?}");
+        assert!(recovery.removed.is_empty(), "{recovery:?}");
+        assert_eq!(recovery.journal.first(), Some(&yields_to_exports(&sand.real("card.mp4"), 1)), "{recovery:?}");
+        assert!(shelved(&sand)?.is_empty() && !sand.file().exists(), "a journal outlived the start that dealt with it");
+        Ok(())
+    }
+
+    /// The record names at most [`MAX_TAKEN`] files, and past that records that every set-aside entry
+    /// of a file yields, so a journal set aside that never reads again cannot grow the journal until
+    /// every listing is refused. Once it reads, none of the files it lists is deleted, the start says
+    /// which and why, and the record goes.
+    #[cfg(unix)]
+    #[test]
+    fn what_set_aside_entries_yield_to_is_bounded() -> Test {
+        let Some(AfterAKill { sand, shelf, card, frame }) = AfterAKill::new()? else { return Ok(()) };
+        let taken: Vec<Value> = (1..MAX_TAKEN).map(|n| entry(&format!("other-{n}.mp4"))).collect();
+        fs::write(sand.file(), json!({ OUTPUTS: [], TAKEN: taken }).to_string())?;
+        let recorded =
+            || -> std::result::Result<Value, Box<dyn std::error::Error>> { Ok(serde_json::from_slice::<Value>(&fs::read(sand.file())?)?[TAKEN].clone()) };
+        Then::Finishes.end_an_export_of(&sand, &sand.folders.container.join("other-0.mp4"))?;
+        assert_eq!(recorded()?.as_array().map(Vec::len), Some(MAX_TAKEN), "the record stopped naming files before its bound");
+        Then::Finishes.end_an_export_of(&sand, &sand.folders.container.join("one-more.mp4"))?;
+        assert_eq!(recorded()?, json!(EVERY), "the record grew past its bound");
+
+        set_mode(&shelf, 0o600)?;
+        let later = sand.start()?;
+        let recovery = later.recovery();
+        let half = Some(b"half".to_vec());
+        assert_eq!((fs::read(&card).ok(), fs::read(&frame).ok()), (half.clone(), half), "a file a set-aside journal lists was deleted: {recovery:?}");
+        assert_eq!(recovery.journal, [none_deleted(&sand.real("card.mp4"), 1), read_and_removed(&real_shelf(&sand, &shelf)?)]);
+        assert!(recovery.removed.is_empty(), "{recovery:?}");
+        assert!(shelved(&sand)?.is_empty() && !sand.file().exists(), "the record outlived the last journal set aside");
+        Ok(())
+    }
+
+    /// What runs while the disk will not list the journal's folder.
+    #[cfg(unix)]
+    #[derive(Clone, Copy, Debug)]
+    enum UnlistedDuring {
+        /// The end of an export of a file a set-aside journal lists.
+        ExportEnd,
+        /// A later listing's take, with the record of that export in the journal.
+        Listing,
+        /// A later listing's take, with the record in a journal that is no journal now.
+        ListingWithNoJournal,
+        /// A start, with the record in the journal.
+        Start,
+        /// A start, with the record in a journal that is no journal now.
+        StartWithNoJournal,
+    }
+
+    #[cfg(unix)]
+    impl UnlistedDuring {
+        fn meets_no_journal(self) -> bool {
+            matches!(self, UnlistedDuring::ListingWithNoJournal | UnlistedDuring::StartWithNoJournal)
+        }
+    }
+
+    /// A folder the disk will not list may hold journals set aside, so it never counts as holding
+    /// none: an export that ends records its files, a take keeps the record, a start that cannot list
+    /// them waits and says so, and a journal that is no journal is replaced by one that records that
+    /// every set-aside entry of a file yields, refusing nothing. Once the disk lists the folder again
+    /// the file the export finished stays.
+    #[cfg(unix)]
+    #[test]
+    fn a_journal_folder_the_disk_will_not_list_may_hold_journals_set_aside() -> Test {
+        let mut faults = Vec::new();
+        for when in [
+            UnlistedDuring::ExportEnd,
+            UnlistedDuring::Listing,
+            UnlistedDuring::ListingWithNoJournal,
+            UnlistedDuring::Start,
+            UnlistedDuring::StartWithNoJournal,
+        ] {
+            let Some(AfterAKill { sand, shelf, card, frame }) = AfterAKill::new()? else { return Ok(()) };
+            // An engine's journal is made at its start, while the folder lists.
+            let (journal, config) = (sand.journal(), sand.folders.config.clone());
+            let real = fs::canonicalize(&config)?;
+            let unlisted = format!(
+                "cannot list the journals set aside in {}: {}; they stay set aside for a later start",
+                real.display(),
+                io::Error::from_raw_os_error(13)
+            );
+            let garbage = b"{";
+            let not_json = serde_json::from_slice::<Value>(garbage).err().ok_or("the damage reads as JSON")?;
+            let damaged = format!("the pending-export journal {} is not JSON: {not_json}", real.join(JOURNAL_FILE).display());
+            let read = read_and_removed(&real_shelf(&sand, &shelf)?);
+            if matches!(when, UnlistedDuring::ExportEnd) {
+                let mut export = journal.pending();
+                export.list(std::slice::from_ref(&card))?;
+                fs::write(&card, FINISHED)?;
+                set_mode(&config, 0o300)?;
+                let cleared = export.clear();
+                set_mode(&config, 0o700)?;
+                cleared?;
+            } else {
+                Then::Finishes.end_an_export_of(&sand, &card)?;
+            }
+            let lines = if when.meets_no_journal() {
+                fs::write(sand.file(), garbage)?;
+                vec![none_deleted(&sand.real("card.mp4"), 1), read]
+            } else {
+                vec![yields_to_exports(&sand.real("card.mp4"), 0), read]
+            };
+            set_mode(&config, 0o300)?;
+            let meanwhile = match when {
+                UnlistedDuring::ExportEnd => None,
+                UnlistedDuring::Listing | UnlistedDuring::ListingWithNoJournal => {
+                    let mut other = journal.pending();
+                    let listed = other.list(&[sand.folders.container.join("other.mp4")]);
+                    Some(listed.and_then(|()| other.clear()).map(|()| Recovery::default()))
+                }
+                UnlistedDuring::Start | UnlistedDuring::StartWithNoJournal => Some(Ok(journal.recover())),
+            };
+            set_mode(&config, 0o700)?;
+            let due = match when {
+                UnlistedDuring::Start => Some(vec![unlisted]),
+                UnlistedDuring::StartWithNoJournal => Some(vec![unlisted, replaced_while_one_waits(&damaged)]),
+                UnlistedDuring::ExportEnd | UnlistedDuring::Listing | UnlistedDuring::ListingWithNoJournal => None,
+            };
+            match (meanwhile, due) {
+                (Some(Ok(recovery)), Some(due)) if recovery.journal != due => faults.push(format!("{when:?}: the start said {:?}", recovery.journal)),
+                (Some(Err(error)), _) => faults.push(format!("{when:?}: {error:?}")),
+                _ => {}
+            }
+            let record = serde_json::from_slice::<Value>(&fs::read(sand.file())?).ok().and_then(|now| now.get(TAKEN).cloned());
+            if when.meets_no_journal() && record != Some(json!(EVERY)) {
+                faults.push(format!("{when:?}: the journal that is no journal was not replaced by one recording that every entry yields: {record:?}"));
+            }
+            set_mode(&shelf, 0o600)?;
+            let later = sand.start()?;
+            let recovery = later.recovery();
+            let frame_due: Option<&[u8]> = if when.meets_no_journal() { Some(b"half") } else { None };
+            if fs::read(&card).ok().as_deref() != Some(FINISHED) || fs::read(&frame).ok().as_deref() != frame_due || recovery.journal != lines {
+                faults.push(format!("{when:?}: once the folder lists again, the start answered {recovery:?}"));
+            }
+        }
+        assert!(faults.is_empty(), "{faults:#?}");
+        Ok(())
+    }
+
+    /// What set-aside entries yield to is a list of paths, as the folders are: anything else makes the
+    /// journal no journal, which names no file to delete, and the start says why.
+    #[test]
+    fn a_journal_whose_record_of_what_entries_yield_to_is_no_list_of_paths_is_no_journal() -> Test {
+        for (taken, why) in [
+            (json!("card.mp4"), "has a `taken` that is not a list".to_string()),
+            (json!([{ PATH: 1 }]), format!("lists a taken file that is not a `path`: {}", json!({ PATH: 1 }))),
+        ] {
+            let sand = Sandbox::new()?;
+            let kept = sand.put("card.mp4", b"half");
+            fs::write(sand.file(), json!({ OUTPUTS: [entry("card.mp4")], TAKEN: taken }).to_string())?;
+            let engine = sand.start()?;
+            let journal = fs::canonicalize(&sand.folders.config)?.join(JOURNAL_FILE);
+            assert_eq!(
+                engine.recovery().journal,
+                [format!("the pending-export journal {} {why}; it names no file to delete, so it is replaced", journal.display())]
+            );
+            assert!(kept.exists(), "a file was deleted on the word of a damaged journal");
+        }
+        Ok(())
     }
 
     /// Another live process holds the journal's lock, so what it lists may be that process's running
@@ -2094,10 +3079,7 @@ mod tests {
     fn a_start_holds_the_journals_lock_while_it_deals_with_the_journal() -> Test {
         let pipes = TempDir::new()?;
         let pipe = pipes.path().join("journal");
-        {
-            let _alone = NO_PROCESS_STARTS.write().unwrap_or_else(PoisonError::into_inner);
-            assert!(std::process::Command::new("mkfifo").arg(&pipe).status()?.success(), "no pipe was made");
-        }
+        run_alone("mkfifo", &[pipe.as_os_str()])?;
         let sand = Sandbox::new()?;
         std::os::unix::fs::symlink(&pipe, sand.file())?;
         let start = thread::spawn({
@@ -2292,7 +3274,7 @@ mod tests {
         let before = fs::read(sand.file())?;
         let long = "x".repeat(1 << 20);
         let entries: Vec<Entry> = (0..17).map(|n| Entry { path: format!("{n}{long}"), kind: Kind::File(None) }).collect();
-        let refused = journal.write(&entries);
+        let refused = journal.write(&entries, &Taken::default());
         assert!(refused.is_err(), "a journal past its bound was written");
         assert_eq!(fs::read(sand.file())?, before);
         Ok(())
