@@ -27,5 +27,10 @@ objc2-core-media = { workspace = true, features = ["std", "CMBase", "CMBlockBuff
 objc2-core-video = { workspace = true, features = ["std", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVReturn"] }
 objc2-video-toolbox = { workspace = true, features = ["std", "VTDecompressionSession", "VTDecompressionProperties", "VTErrors", "objc2-core-media", "objc2-core-video"] }
 
+# Android's media NDK, which only an Android build has; the features are the media bindings and the API level
+# the SDK's minSdk names (src/platform/mediacodec.rs).
+[target.'cfg(target_os = "android")'.dependencies]
+ndk = { workspace = true, features = ["media", "api-level-29"] }
+
 [lints]
 workspace = true
