@@ -138,6 +138,49 @@ pub(crate) fn conform(actual: &Clip, reference: &Clip, actual_frame: Option<u32>
     failures
 }
 
+/// A PNG read as the straight 8-bit RGBA it holds, with its size: the pixels as the file has them, where
+/// a [`Clip`] decodes a still the way the engine does.
+fn straight_rgba(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
+    let name = path.display().to_string();
+    let image = image::open(path).map_err(|error| format!("cannot read {name}: {error}"))?.to_rgba8();
+    Ok((image.width(), image.height(), image.into_raw()))
+}
+
+/// The failures of two PNGs' pixels, `actual` against `reference`: each pixel is over when any channel is
+/// further than `tolerance` levels from the reference's, no more than `allowed_fraction` of the pixels may
+/// be, and none may be further than `cap` levels. With tolerance 0 and no fraction the pixels are the same.
+pub(crate) fn pixels(actual: &Path, reference: &Path, tolerance: u8, allowed_fraction: f64, cap: u8) -> Vec<String> {
+    let ((aw, ah, ours), (rw, rh, theirs)) = match (straight_rgba(actual), straight_rgba(reference)) {
+        (Ok(ours), Ok(theirs)) => (ours, theirs),
+        (Err(error), _) | (_, Err(error)) => return vec![error],
+    };
+    if (aw, ah) != (rw, rh) {
+        return vec![format!("size {aw}x{ah} is not the reference's {rw}x{rh}")];
+    }
+    let (mut over, mut furthest, mut total) = (0_usize, 0_u8, 0_usize);
+    let (ours, _) = ours.as_chunks::<4>();
+    let (theirs, _) = theirs.as_chunks::<4>();
+    for (a, b) in ours.iter().zip(theirs) {
+        let worst = a.iter().zip(b).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+        furthest = furthest.max(worst);
+        over += usize::from(worst > tolerance);
+        total += 1;
+    }
+    let fraction = if total == 0 { 0.0 } else { over as f64 / total as f64 };
+    let mut failures = Vec::new();
+    if fraction > allowed_fraction {
+        failures.push(format!(
+            "{over} of {total} pixels are more than {tolerance} levels from the reference's: {:.3}% where {:.3}% is allowed",
+            fraction * 100.0,
+            allowed_fraction * 100.0
+        ));
+    }
+    if furthest > cap {
+        failures.push(format!("a pixel is {furthest} levels from the reference's, past the {cap} allowed"));
+    }
+    failures
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,5 +303,31 @@ mod tests {
         std::fs::write(&path, b"not a png").expect("written");
         assert!(Clip::open(&path).err().is_some_and(|error| error.contains("not.png")));
         assert!(Clip::open(&scratch.path().join("absent.png")).is_err());
+    }
+
+    /// A PNG file of the pixels `shade` gives, in the scratch folder.
+    fn png_file(scratch: &TempDir, name: &str, width: u32, height: u32, shade: impl Fn(u32, u32) -> [u8; 3]) -> std::path::PathBuf {
+        let path = scratch.path().join(name);
+        std::fs::write(&path, png_bytes(width, height, shade)).expect("written");
+        path
+    }
+
+    #[test]
+    fn pixels_pass_within_the_tolerance_and_name_what_is_over_it() {
+        let scratch = tempfile::tempdir().expect("scratch");
+        let flat = |level: u8| move |_: u32, _: u32| [level; 3];
+        let reference = png_file(&scratch, "ref.png", 10, 10, flat(100));
+        assert!(pixels(&png_file(&scratch, "same.png", 10, 10, flat(100)), &reference, 0, 0.0, 0).is_empty());
+        let one_off = png_file(&scratch, "one.png", 10, 10, flat(101));
+        assert!(pixels(&one_off, &reference, 1, 0.0, 1).is_empty());
+        let exact = pixels(&one_off, &reference, 0, 0.0, 0);
+        assert!(exact.iter().any(|f| f.contains("100 of 100 pixels are more than 0 levels")) && exact.iter().any(|f| f.contains("1 levels")), "{exact:?}");
+        // Three pixels in a hundred are four levels out: the fraction allows them, and the cap sets how far.
+        let flips = png_file(&scratch, "flips.png", 10, 10, |x, y| if y == 0 && x < 3 { [104; 3] } else { [100; 3] });
+        assert!(pixels(&flips, &reference, 1, 0.03, 4).is_empty());
+        assert!(pixels(&flips, &reference, 1, 0.02, 4).iter().any(|f| f.contains("3 of 100 pixels") && f.contains("3.000% where 2.000% is allowed")));
+        assert!(pixels(&flips, &reference, 1, 0.03, 3).iter().any(|f| f.contains("4 levels from the reference's, past the 3 allowed")));
+        assert!(pixels(&png_file(&scratch, "wide.png", 12, 10, flat(100)), &reference, 9, 1.0, 9).iter().any(|f| f.contains("12x10")));
+        assert!(pixels(&scratch.path().join("absent.png"), &reference, 0, 0.0, 0).iter().any(|f| f.contains("absent.png")));
     }
 }

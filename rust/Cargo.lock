@@ -694,6 +694,8 @@ dependencies = [
 name = "craftbridge-effects-conformance"
 version = "0.1.0"
 dependencies = [
+ "craftbridge-core",
+ "craftbridge-effects",
  "craftbridge-process",
  "effectcraft-media",
  "effectcraft-time",

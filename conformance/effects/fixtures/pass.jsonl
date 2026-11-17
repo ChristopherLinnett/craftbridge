@@ -1,0 +1,4 @@
+{"start": "new"}
+{"command": "comp.new", "params": {"name": "R", "width": 64, "height": 64}}
+{"expect": {"query": "comp.info", "params": {"comp": 1}, "pointer": "/name", "equals": "R"}}
+{"expect_no_error": true}

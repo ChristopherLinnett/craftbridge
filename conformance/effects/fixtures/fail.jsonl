@@ -1,0 +1,5 @@
+{"start": "new"}
+{"command": "comp.new", "params": {"name": "R", "width": 64, "height": 64}}
+{"command": "comp.info", "params": {"comp": "nope"}}
+{"command": "comp.new", "params": {"name": "after"}}
+not json

@@ -1,27 +1,57 @@
 # The EffectCraft conformance corpus (plan §28): the scenarios every platform's runner reads, with the
 # EffectCraft command line as the oracle. A scenario is its steps, each one invocation of the command line
-# run in order in one scratch folder (a relative path in `args` is relative to that folder), and the checks
-# made afterwards:
+# (`args`, and what it reads on standard input as `stdin`) and the calls that make the same step on the
+# plug-in (`[[scenario.step.call]]`), run in order in one scratch folder per side (a relative path is
+# relative to that folder), and the checks made afterwards. Every step starts its side afresh, so what one
+# step leaves for the next is in files, as it is for the command line. The text <container> in an argument,
+# a line of stdin or a call is the side's own folder: the plug-in takes absolute paths, and both sides are
+# given the folder the same way.
 #
-#   [[scenario.expect]]   step, pointer (RFC 6901), equals: a value in the JSON a step printed
-#   [[scenario.compare]]  kind = "identical": two files are byte for byte the same
-#                         kind = "frames": two decoded images or movies have the same size and, for two
-#                         movies, frame count, and every frame is within 40 dB PSNR of its counterpart (D-12);
-#                         actual_frame / reference_frame pick the one frame compared
+#   sides = "both" | "oracle" | "plugin"   which sides run it; both by default
+#   [[scenario.fixture]]     from (relative to this file), to (in each side's folder): a file it starts with
+#   fails = true             on a step: the command line ends it with a failure status and prints its answer
+#   [scenario.step.host]     plugins (the plug-in folder the app names, relative to the container), gpu
+#                            (the app is handed the machine's GPU)
+#   [[scenario.step.call]]   kind = "request": method, params, files (a parameter read from a file)
+#                            kind = "frame": params, format = "png" | "rgba8", out
+#                            kind = "mcp": every line of stdin, each reply printed
+#   [[scenario.expect]]      step, output, pointer (RFC 6901), equals or length: a value in a JSON document
+#                            a step printed, on every side that ran; a plug-in call that fails prints
+#                            {"error", "kind"} where the command line's --json prints {"error"}
+#   [[scenario.same]]        kind = "output": the two sides printed the same documents, the scratch folder
+#                            as one marker, apart from omit (pointers), entries (pointers taken out of each
+#                            array entry whose key starts with a prefix) and within (pointers inside a
+#                            document a string holds)
+#                            kind = "timings": the same runs, layers, effects and playback were timed, no
+#                            measurement compared
+#   [[scenario.compare]]     kind = "identical": two files are byte for byte the same
+#                            kind = "frames": two decoded images or movies have the same size and, for two
+#                            movies, frame count, and every frame is within 40 dB PSNR of its counterpart
+#                            (D-12); actual_frame / reference_frame pick the one frame compared
+#                            kind = "pixels": two PNGs' straight RGBA pixels, each within tolerance levels
+#                            in all but allowed_fraction of the pixels and none past cap
+#                            kind = "json": two files are the same JSON document
 #
-# The side under test runs the same steps in a scratch folder of its own and meets the same expectations;
-# in a comparison `reference` is the file the oracle wrote and `actual` the one the side under test wrote.
-# Until craftbridge-effects answers the steps the desktop runner has the oracle alone, so the oracle is
-# both sides, and a comparison checks one file it wrote against another.
+# In a comparison `reference` is the file the oracle wrote and `actual` the one the plug-in wrote. A scenario
+# that runs on one side alone, on the oracle while the plug-in cannot answer it yet or on the plug-in where
+# the command line has nothing to compare, compares that side's own files, so both are its own.
 #
 # The values below are the pinned revision's (tools/update-upstream.sh moves it); a pin update that
 # changes one is rechecked against the new revision's command line, never edited to pass.
 
 [[scenario]]
 id = "T1"
-title = "info: the command and effect counts at the pin"
+title = "info: the command and effect counts and the version at the pin, and the command line's state"
 [[scenario.step]]
 args = ["info", "--json"]
+# The command line opens its demo project unless told not to, so the plug-in is asked to.
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [{ command = "file.openDemoProject" }] }
+[[scenario.step.call]]
+kind = "request"
+method = "info"
 [[scenario.expect]]
 step = 0
 pointer = "/version"
@@ -34,22 +64,247 @@ equals = 763
 step = 0
 pointer = "/effects"
 equals = 308
+# The plug-in names its engine and pin beside the same state, says where it renders, and has no
+# start flag for the renderer's note to name. The command line prints no pin to hold the plug-in's to:
+# that is the constant `cargo xtask generate` writes from the workspace's pin, which the gate regenerates.
+[[scenario.same]]
+kind = "output"
+step = 0
+omit = ["/mode", "/engine", "/pin", "/gpu", "/hardwareDecoding", "/renderer/why", "/project/renderer/why"]
+
+[[scenario]]
+id = "T2"
+title = "commands with schemas: identical ids, labels and schemas"
+[[scenario.step]]
+args = ["commands", "--json", "--schemas"]
+[[scenario.step.call]]
+kind = "request"
+method = "commands"
+params = { schemas = true }
+[[scenario.expect]]
+step = 0
+pointer = ""
+length = 763
+# A phone starts no helper process, so its session lists the helper commands as it cannot run them
+# (`enabled`, `why`), where the command line lists them as it can; their ids, labels and schemas are compared.
+[[scenario.same]]
+kind = "output"
+step = 0
+entries = [{ pointer = "", key = "id", prefix = "effect.helpers.", omit = ["/enabled", "/why"] }]
+
+[[scenario]]
+id = "T3"
+title = "run: comp, solid, text, Gaussian Blur; save; reopen"
+[[scenario.step]]
+args = [
+  "run", "--json", "--empty",
+  "comp.new", '{"name":"T3","width":640,"height":360,"duration":3,"frameRate":30}',
+  "layer.newSolid", '{"comp":1,"name":"Bg"}',
+  "layer.newText", '{"comp":1,"text":"Hello","name":"Title"}',
+  "effect.apply", '{"comp":1,"layer":"Title","effect":"Gaussian Blur"}',
+  "file.save", '{"path":"<container>/t3.ecproj"}',
+  "file.open", '{"path":"<container>/t3.ecproj"}',
+]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [
+  { command = "comp.new", params = { name = "T3", width = 640, height = 360, duration = 3, frameRate = 30 } },
+  { command = "layer.newSolid", params = { comp = 1, name = "Bg" } },
+  { command = "layer.newText", params = { comp = 1, text = "Hello", name = "Title" } },
+  { command = "effect.apply", params = { comp = 1, layer = "Title", effect = "Gaussian Blur" } },
+  { command = "file.save", params = { path = "<container>/t3.ecproj" } },
+  { command = "file.open", params = { path = "<container>/t3.ecproj" } },
+] }
+[[scenario.step]]
+args = ["info", "--json", "--project", "<container>/t3.ecproj"]
+[[scenario.step.call]]
+kind = "request"
+method = "open"
+params = { path = "<container>/t3.ecproj" }
+[[scenario.step.call]]
+kind = "request"
+method = "info"
+[[scenario.expect]]
+step = 0
+pointer = ""
+length = 6
+[[scenario.expect]]
+step = 1
+pointer = "/activeComp/name"
+equals = "T3"
+[[scenario.same]]
+kind = "output"
+step = 0
+[[scenario.same]]
+kind = "output"
+step = 1
+omit = ["/mode", "/engine", "/pin", "/gpu", "/hardwareDecoding", "/renderer/why", "/project/renderer/why"]
+[[scenario.compare]]
+kind = "json"
+actual = "t3.ecproj"
+reference = "t3.ecproj"
+
+[[scenario]]
+id = "T4"
+title = "props of the text layer: an identical tree"
+[[scenario.step]]
+args = [
+  "run", "--json", "--empty",
+  "comp.new", '{"name":"T4","width":320,"height":180,"duration":2,"frameRate":30}',
+  "layer.newText", '{"comp":1,"text":"Hello","name":"Title"}',
+  "file.save", '{"path":"<container>/t4.ecproj"}',
+]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [
+  { command = "comp.new", params = { name = "T4", width = 320, height = 180, duration = 2, frameRate = 30 } },
+  { command = "layer.newText", params = { comp = 1, text = "Hello", name = "Title" } },
+  { command = "file.save", params = { path = "<container>/t4.ecproj" } },
+] }
+[[scenario.step]]
+args = ["props", "--json", "--project", "<container>/t4.ecproj", "1", "Title"]
+[[scenario.step.call]]
+kind = "request"
+method = "open"
+params = { path = "<container>/t4.ecproj" }
+[[scenario.step.call]]
+kind = "request"
+method = "props"
+params = { comp = 1, layer = "Title" }
+[[scenario.expect]]
+step = 1
+pointer = "/properties/children/0/children/0/value"
+equals = "Hello"
+[[scenario.same]]
+kind = "output"
+step = 1
 
 [[scenario]]
 id = "T5"
 title = "set an expression on Rotation and get it at 1 s"
 [[scenario.step]]
-args = ["set", "-", "EFFECTCRAFT", "transform/rotation", "--expression", "time*90", "--save-as", "t5.ecproj"]
+args = ["set", "--json", "-", "EFFECTCRAFT", "transform/rotation", "--expression", "time*90", "--save-as", "<container>/t5.ecproj"]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [{ command = "file.openDemoProject" }] }
+[[scenario.step.call]]
+kind = "request"
+method = "set"
+params = { layer = "EFFECTCRAFT", path = "transform/rotation", expression = "time*90" }
+[[scenario.step.call]]
+kind = "request"
+method = "saveAs"
+params = { path = "<container>/t5.ecproj" }
 [[scenario.step]]
-args = ["get", "--project", "t5.ecproj", "-", "EFFECTCRAFT", "transform/rotation", "--time", "1", "--json"]
+args = ["get", "--project", "<container>/t5.ecproj", "-", "EFFECTCRAFT", "transform/rotation", "--time", "1", "--json"]
+[[scenario.step.call]]
+kind = "request"
+method = "open"
+params = { path = "<container>/t5.ecproj" }
+[[scenario.step.call]]
+kind = "request"
+method = "get"
+params = { layer = "EFFECTCRAFT", path = "transform/rotation", time = 1 }
 [[scenario.expect]]
 step = 1
 pointer = "/evaluated"
 equals = 90
+[[scenario.same]]
+kind = "output"
+step = 1
+
+[[scenario]]
+id = "T6"
+title = "frame PNG, demo project, 2 s, 960 px: byte-identical"
+[[scenario.step]]
+args = ["render-frame", "--json", "--time", "2", "--max-side", "960", "--out", "frame.png"]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [{ command = "file.openDemoProject" }] }
+[[scenario.step.call]]
+kind = "frame"
+params = { time = 2, maxSide = 960 }
+format = "png"
+out = "frame.png"
+[[scenario.compare]]
+kind = "identical"
+actual = "frame.png"
+reference = "frame.png"
+
+[[scenario]]
+id = "T7"
+title = "frame straight RGBA, transparent: byte-identical pixels"
+# A half-opaque box on a ground that is nothing: where the alpha is neither none nor full a straight pixel
+# differs from its premultiplied one, and a colour short of full (#ff8040) also in how each rounds, so the
+# pixels hold the straight alpha the frame keeps.
+[[scenario.step]]
+args = [
+  "run", "--json", "--empty",
+  "comp.new", '{"name":"T7","width":64,"height":48,"duration":2,"frameRate":10}',
+  "layer.newSolid", '{"comp":1,"name":"Box","color":"#ff8040","width":20,"height":20}',
+  "prop.set", '{"layer":"Box","path":"transform/opacity","value":50}',
+  "file.save", '{"path":"<container>/t7.ecproj"}',
+]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [
+  { command = "comp.new", params = { name = "T7", width = 64, height = 48, duration = 2, frameRate = 10 } },
+  { command = "layer.newSolid", params = { comp = 1, name = "Box", color = "#ff8040", width = 20, height = 20 } },
+  { command = "prop.set", params = { layer = "Box", path = "transform/opacity", value = 50 } },
+  { command = "file.save", params = { path = "<container>/t7.ecproj" } },
+] }
+[[scenario.step]]
+args = ["render-frame", "--json", "--project", "<container>/t7.ecproj", "--time", "0", "--transparent", "--out", "frame.png"]
+[[scenario.step.call]]
+kind = "request"
+method = "open"
+params = { path = "<container>/t7.ecproj" }
+[[scenario.step.call]]
+kind = "frame"
+params = { time = 0, transparent = true }
+format = "rgba8"
+out = "frame.png"
+[[scenario.compare]]
+kind = "pixels"
+actual = "frame.png"
+reference = "frame.png"
+
+[[scenario]]
+id = "T8"
+title = "frame on the GPU against the CPU: within the compositor's GPU tolerance"
+[[scenario.step]]
+args = ["render-frame", "--json", "--time", "2", "--max-side", "960", "--out", "frame.png"]
+[scenario.step.host]
+gpu = true
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [{ command = "file.openDemoProject" }] }
+[[scenario.step.call]]
+kind = "frame"
+params = { time = 2, maxSide = 960 }
+format = "png"
+out = "frame.png"
+# The compositor's own rule for a render on the GPU against the CPU's (crates/gpu/src/tests.rs `check` at
+# the pin): 8-bit output differs by at most one level, bar rounding flips on a decision boundary, which it
+# allows in 0.3 % of the pixels and no further than four levels.
+[[scenario.compare]]
+kind = "pixels"
+actual = "frame.png"
+reference = "frame.png"
+tolerance = 1
+allowed_fraction = 0.003
+cap = 4
 
 [[scenario]]
 id = "T9"
 title = "export H.264, demo, 2 s, half resolution: frame 30 is within D-12 of the oracle's own frame"
+sides = "oracle"
 [[scenario.step]]
 args = ["render", "--out", "export.mp4", "--format", "h264", "--end", "2", "--resolution", "half"]
 [[scenario.step]]
@@ -59,3 +314,147 @@ kind = "frames"
 actual = "export.mp4"
 actual_frame = 30
 reference = "frame30.png"
+
+[[scenario]]
+id = "T18"
+title = "script: the phone build runs no script, so it refuses one before it runs, in the command line's words"
+# `script.run` runs scripts, which the phone's confinement withholds on purpose; both confined doors refuse
+# each call in the same words, where the command line's own `script` is not confined.
+[[scenario.step]]
+args = ["mcp", "--empty", "--automation-read-root", ".", "--automation-write-root", "."]
+stdin = [
+  '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"execute_command","arguments":{"command":"script.run","params":{"code":"app.project.numItems"}}}}',
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"execute_command","arguments":{"command":"script.run","params":{"code":"throw new Error(\"the scenario fails here\")"}}}}',
+]
+[[scenario.step.call]]
+kind = "mcp"
+[[scenario.expect]]
+step = 0
+output = 0
+pointer = "/result/content/0/text"
+equals = "`script.run` is not available while file access is confined (--automation-read-root/--automation-write-root)"
+[[scenario.expect]]
+step = 0
+output = 1
+pointer = "/result/isError"
+equals = true
+[[scenario.same]]
+kind = "output"
+step = 0
+
+[[scenario]]
+id = "T19"
+title = "replay of a repro script: an identical report, passing and failing"
+[[scenario.fixture]]
+from = "fixtures/pass.jsonl"
+to = "pass.jsonl"
+[[scenario.fixture]]
+from = "fixtures/fail.jsonl"
+to = "fail.jsonl"
+[[scenario.step]]
+args = ["replay", "--json", "pass.jsonl"]
+[[scenario.step.call]]
+kind = "request"
+method = "replay"
+files = { script = "pass.jsonl" }
+[[scenario.step]]
+args = ["replay", "--json", "--keep-going", "fail.jsonl"]
+fails = true
+[[scenario.step.call]]
+kind = "request"
+method = "replay"
+params = { keepGoing = true }
+files = { script = "fail.jsonl" }
+[[scenario.expect]]
+step = 0
+pointer = "/ok"
+equals = true
+[[scenario.expect]]
+step = 1
+pointer = "/first_failure/line"
+equals = 3
+[[scenario.same]]
+kind = "output"
+step = 0
+[[scenario.same]]
+kind = "output"
+step = 1
+
+[[scenario]]
+id = "T20"
+title = "mcp: initialize, tools/list (27 tools) and tools/call get_project: identical replies"
+[[scenario.step]]
+args = ["mcp", "--empty", "--automation-read-root", ".", "--automation-write-root", "."]
+stdin = [
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"conformance","version":"1"}}}',
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}',
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}',
+  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_project","arguments":{}}}',
+]
+[[scenario.step.call]]
+kind = "mcp"
+[[scenario.expect]]
+step = 0
+output = 1
+pointer = "/result/tools"
+length = 27
+[[scenario.expect]]
+step = 0
+output = 2
+pointer = "/id"
+equals = 3
+# The renderer's note names the command line's --gpu start flag, which an app has no way to be given.
+[[scenario.same]]
+kind = "output"
+step = 0
+within = [{ pointer = "/result/content/0/text", omit = ["/renderer/why"] }]
+
+[[scenario]]
+id = "T21"
+title = "timings: the same structure, no measurement compared"
+[[scenario.step]]
+args = ["bench", "--n", "2", "--time", "1", "--play", "2"]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [{ command = "file.openDemoProject" }] }
+[[scenario.step.call]]
+kind = "request"
+method = "timings"
+params = { time = 1, runs = 2, play = 2 }
+[[scenario.same]]
+kind = "timings"
+step = 0
+
+[[scenario]]
+id = "T24"
+title = "plug-in policy: a WebAssembly effect loads from the plug-in folder the app names, and with none named plug-ins are off"
+sides = "plugin"
+# These two steps are what every platform answers alike. Where else a module loads from is each platform's
+# own rule (PD13): the desktop and Android load what the confinement lets through, the container included,
+# and iOS only what its bundle's plug-in folder holds; a module outside every root the folders derive is the
+# confinement's refusal, `Io`, on all three.
+[[scenario.fixture]]
+from = "fixtures/probe.wat"
+to = "plug-ins/probe.wasm"
+[[scenario.step]]
+[scenario.step.host]
+plugins = "plug-ins"
+[[scenario.step.call]]
+kind = "request"
+method = "exec"
+params = { command = "effect.plugins.load", params = { path = "<container>/plug-ins/probe.wasm" } }
+# The same module with no plug-in folder named: plug-ins are off, on every platform.
+[[scenario.step]]
+[[scenario.step.call]]
+kind = "request"
+method = "exec"
+params = { command = "effect.plugins.load", params = { path = "<container>/plug-ins/probe.wasm" } }
+[[scenario.expect]]
+step = 0
+pointer = "/loaded/0/name"
+equals = "Gate Probe"
+[[scenario.expect]]
+step = 1
+pointer = "/kind"
+equals = "Unsupported"

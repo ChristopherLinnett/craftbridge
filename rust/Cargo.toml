@@ -42,7 +42,8 @@ quote = "1"
 # The core's write probe of a folder and the scratch folders of its tests;
 # craftbridge-effects-conformance runs each scenario in one.
 tempfile = "3"
-# `image` writes the PNGs craftbridge-effects-conformance's tests compare.
+# `image` writes the PNG a straight-RGBA frame is held in and reads the PNGs a scenario compares in
+# craftbridge-effects-conformance, and writes the PNGs the tests of that crate and craftbridge-effects compare.
 image = { version = "0.25", default-features = false, features = ["png"] }
 # The core creates its wgpu device itself (plan §17, D-7). The version and features are exactly the
 # pinned EffectCraft workspace's, so one wgpu builds both and the device the core makes is of the type
