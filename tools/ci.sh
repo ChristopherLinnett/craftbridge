@@ -149,22 +149,26 @@ stage_conformance() {
 stage_rust_mobile() {
   local target status=0
   # Every target is checked even after one fails, so one run names each target that is broken. Each runs in
-  # a subshell of its own: an Android target's NDK environment (tools/env.sh) must not reach the host builds
-  # of the stages after this one.
+  # a subshell of its own, so what tools/env.sh sets for a phone target reaches none of the stages after
+  # this one, the doctor among them: an Android target's NDK environment would reach their host builds,
+  # and the flags it sets for a device's code (Android's aarch64 target feature, the iOS device's CPU
+  # target) are variables the gate refuses in the environment it starts in.
   for target in $CRAFTBRIDGE_RUST_TARGETS; do
     (rust_mobile_target "$target") || status=1
   done
   return "$status"
 }
-# One phone target's checks. For an Android target the NDK, its compilers and the aarch64 target feature
-# come from tools/env.sh, the one place every Android build and device run takes them from, so a
-# dependency's build script that compiles C for the phone finds the phone's compiler, and the lint reads the
-# code the phone is built with.
+# One phone target's checks, built as the phone's own build is, from tools/env.sh, the one place every
+# build and device run for a phone takes its settings from. For an Android target that is the NDK, its
+# compilers and the aarch64 target feature, so a dependency's build script that compiles C for the phone
+# finds the phone's compiler, and the lint reads the code the phone is built with; for the iOS device it
+# is the CPU target.
 rust_mobile_target() {
   local target="$1" profile status=0
   if craftbridge_is_android_target "$target"; then
     craftbridge_android_env && craftbridge_android_target_env "$target" || return 1
   fi
+  craftbridge_ios_target_env "$target"
   # The default members are the libraries an app links; the host tools never run on a phone. Clippy, not
   # a bare check: the platform modules compile only for the phones, so the never-crash lints and the
   # SAFETY comments are only checked on them here, in the release profile apps link as well as the dev
