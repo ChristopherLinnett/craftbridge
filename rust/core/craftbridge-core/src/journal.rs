@@ -828,7 +828,7 @@ mod tests {
     use crate::cancel::CancelToken;
     use crate::engine::Engine;
     use crate::gpu::GpuChoice;
-    use crate::testing::{Gate, scratch_folders};
+    use crate::testing::Gate;
     use serde_json::json;
     use std::sync::mpsc;
     use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard};
@@ -889,7 +889,7 @@ mod tests {
         fn at(root: TempDir, container: &str) -> std::result::Result<Self, io::Error> {
             let outside = root.path().join("outside");
             fs::create_dir_all(&outside)?;
-            let folders = scratch_folders(root.path().join(container));
+            let folders = Folders::inside(root.path().join(container), "");
             folders.prepare().map_err(|error| io::Error::other(error.to_string()))?;
             Ok(Self { root, folders, outside, _alive: NO_PROCESS_STARTS.read().unwrap_or_else(PoisonError::into_inner) })
         }

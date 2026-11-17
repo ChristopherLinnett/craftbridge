@@ -495,13 +495,17 @@ fn folders_become_the_cores_paths() {
         config: "/app/config".into(),
         cache: "/app/cache".into(),
         models: "/app/models".into(),
+        staged: "/app/staged".into(),
         plugins: None,
         fonts: vec!["/fonts/a".into(), "/fonts/b".into()],
     };
     let core = craftbridge_core::folders::Folders::from(folders);
     assert_eq!(core.container, PathBuf::from("/app"));
     assert_eq!(core.bundle, Some(PathBuf::from("/bundle")));
-    assert_eq!((core.config, core.cache, core.models), (PathBuf::from("/app/config"), PathBuf::from("/app/cache"), PathBuf::from("/app/models")));
+    assert_eq!(
+        (core.config, core.cache, core.models, core.staged),
+        (PathBuf::from("/app/config"), PathBuf::from("/app/cache"), PathBuf::from("/app/models"), PathBuf::from("/app/staged"))
+    );
     assert_eq!(core.plugins, None);
     assert_eq!(core.fonts, [PathBuf::from("/fonts/a"), PathBuf::from("/fonts/b")]);
 }
@@ -523,6 +527,7 @@ fn engine_after_a_killed_export(container: &std::path::Path) -> Arc<Engine> {
         config: container.join("config").display().to_string(),
         cache: container.join("cache").display().to_string(),
         models: container.join("models").display().to_string(),
+        staged: container.join("staged").display().to_string(),
         plugins: None,
         fonts: vec![],
     };

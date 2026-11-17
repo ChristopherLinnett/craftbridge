@@ -17,7 +17,7 @@ One Swift package in `ios/sdk/`, `Package.swift` at its top (PD19), iOS 17 (PD11
 
 **`CraftBridge` (core, hand-written):**
 - `JSONValue` (`Codable`, literals) and `CraftError` (UniFFI's, with `LocalizedError` messages).
-- `Folders.appDefault`: `Application Support/CraftBridge/{config,models}`, `Caches/CraftBridge`, the app's container as the write root and `Bundle.main` as the read-only root; `plugins` only through `Folders.appDefault.allowingPlugins(in: "PlugIns")`, a folder inside the bundle (PD13).
+- `Folders.appDefault`: `Application Support/CraftBridge/{config,models,staged}` — the staged folder beside `config` and `models`, never under `Caches`, which iOS may empty while the app is not running and a saved project must still find the copies it names —, `Caches/CraftBridge`, the app's container as the write root and `Bundle.main` as the read-only root; `plugins` only through `Folders.appDefault.allowingPlugins(in: "PlugIns")`, a folder inside the bundle (PD13).
 - `ProgressListener` adapter from a closure; `ExportJob` with `cancel()` and `async` result; `Task` cancellation sets the `CancelToken`.
 - `PreviewTarget.attach(_ layer: CAMetalLayer)`; `engine.preview(_:into:at:)`.
 - `Frame` → `CVPixelBuffer` (`kCVPixelFormatType_32BGRA`, from `Bgra8Premultiplied`) and `CGImage`.

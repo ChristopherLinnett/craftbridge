@@ -37,6 +37,12 @@ pub struct Folders {
     pub cache: PathBuf,
     /// Where the engine keeps models it has installed; it writes there, so it lies inside the container.
     pub models: PathBuf,
+    /// Where the engine keeps the copies it makes of sources it imports from folders it may not
+    /// write; it writes there, so it lies inside the container. The app names a folder the system
+    /// keeps, never one under the cache, which the system may empty while the app is not running: a
+    /// project saved after such an import names what was copied here, and must find it when it is
+    /// opened again.
+    pub staged: PathBuf,
     /// Where the app keeps its plug-ins, or none while they are switched off (PD13). The engine only
     /// reads it, and on iOS it lies inside the read-only bundle, so it must already be there.
     pub plugins: Option<PathBuf>,
@@ -45,6 +51,22 @@ pub struct Folders {
 }
 
 impl Folders {
+    /// What each working folder is called, in an error about it and in the name [`Folders::inside`]
+    /// gives its folder, in the order [`Folders::working`] lists them.
+    const WORKING: [&str; 4] = ["config", "cache", "models", "staged"];
+
+    /// The folders of an app that keeps every working folder directly inside its container, each at
+    /// `<prefix><name>` for the name [`Folders::working`] calls it by (a prefix of `.` keeps them out
+    /// of a plain listing of the container), with no bundle, no plug-in folder and no extra font
+    /// folder, which a caller that has them sets on the result. A host that runs the engine over one
+    /// folder lays its working folders out through this, so a folder added to the list is laid out
+    /// for every such host.
+    #[must_use]
+    pub fn inside(container: PathBuf, prefix: &str) -> Self {
+        let [config, cache, models, staged] = Self::WORKING.map(|name| container.join(format!("{prefix}{name}")));
+        Self { container, bundle: None, config, cache, models, staged, plugins: None, fonts: Vec::new() }
+    }
+
     /// The confinement these folders make (L5): the container, and the bundle when there is one, to
     /// read; the container alone to write. A pure derivation: it reads nothing from the disk, so it
     /// can be taken before the folders are prepared.
@@ -97,10 +119,15 @@ impl Folders {
         Ok(self.confinement())
     }
 
-    /// The working folders, with what to call each in an error about it: config, cache and models,
-    /// which the engine writes and which lie inside the container, the one write root.
-    fn working(&self) -> [(&'static str, &Path); 3] {
-        [("config", self.config.as_path()), ("cache", self.cache.as_path()), ("models", self.models.as_path())]
+    /// The working folders, with what to call each in an error about it: config, cache, models and
+    /// staged — the ones the engine writes, which lie inside the container, the one write root. This
+    /// is the one list of them: [`Folders::prepare`] creates and checks every folder it names, and
+    /// whatever else deals with the folders the engine writes, a plugin or a test, takes them from
+    /// here, so a folder added to the list is reached by every one of them.
+    #[must_use]
+    pub fn working(&self) -> [(&'static str, &Path); 4] {
+        let [config, cache, models, staged] = Self::WORKING;
+        [(config, self.config.as_path()), (cache, self.cache.as_path()), (models, self.models.as_path()), (staged, self.staged.as_path())]
     }
 
     /// The folders the engine only reads, with what to call each in an error about it.
@@ -263,7 +290,6 @@ fn readable_dir(what: &'static str, path: &Path) -> Result<(), CraftError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::scratch_folders;
     use std::collections::BTreeSet;
     use std::ffi::OsString;
     use tempfile::TempDir;
@@ -283,7 +309,7 @@ mod tests {
     fn sandbox() -> Result<Sandbox, std::io::Error> {
         let root = TempDir::new()?;
         let container = root.path().join("container");
-        Ok(Sandbox { root, folders: scratch_folders(container) })
+        Ok(Sandbox { root, folders: Folders::inside(container, "") })
     }
 
     /// The names a folder holds, so a test can say nothing else was left in it.
@@ -303,7 +329,7 @@ mod tests {
         let confinement = sand.folders.prepare()?;
         assert_eq!(confinement.write_root(), sand.folders.container.as_path());
         assert_eq!(confinement.read_roots(), std::slice::from_ref(&sand.folders.container));
-        for folder in [&sand.folders.container, &sand.folders.config, &sand.folders.cache, &sand.folders.models] {
+        for folder in iter::once(sand.folders.container.as_path()).chain(sand.folders.working().map(|(_, path)| path)) {
             assert!(folder.is_dir(), "the engine start would find {} missing", folder.display());
         }
         Ok(())
@@ -319,7 +345,7 @@ mod tests {
         assert_eq!(fs::read(sand.folders.container.join("project.ecproj"))?, b"kept");
         // The write probes are gone: the container holds what the app put there and the working
         // folders, and each working folder is as empty as `prepare` made it.
-        let expected: BTreeSet<OsString> = ["cache", "config", "models", "project.ecproj"].into_iter().map(OsString::from).collect();
+        let expected: BTreeSet<OsString> = ["cache", "config", "models", "project.ecproj", "staged"].into_iter().map(OsString::from).collect();
         assert_eq!(names(&sand.folders.container)?, expected);
         for folder in sand.folders.working().map(|(_, path)| path) {
             assert_eq!(names(folder)?, BTreeSet::new(), "{} kept a probe", folder.display());
@@ -339,17 +365,23 @@ mod tests {
         Ok(())
     }
 
+    /// Every working folder `inside` lays out sits directly in the container, at the name `working`
+    /// calls it by after the prefix: the two read the one list of names, in the one order.
+    #[test]
+    fn inside_lays_each_working_folder_out_at_the_name_working_calls_it() {
+        let container = PathBuf::from("/sandbox/container");
+        for prefix in ["", "."] {
+            let folders = Folders::inside(container.clone(), prefix);
+            for (what, path) in folders.working() {
+                assert_eq!(path, container.join(format!("{prefix}{what}")), "{what}");
+            }
+            assert_eq!((&folders.container, &folders.bundle, &folders.plugins, folders.fonts.len()), (&container, &None, &None, 0));
+        }
+    }
+
     #[test]
     fn confinement_is_a_plain_derivation_and_needs_no_disk() {
-        let folders = Folders {
-            container: PathBuf::from("/sandbox/container"),
-            bundle: Some(PathBuf::from("/app/App.app")),
-            config: PathBuf::from("/sandbox/container/config"),
-            cache: PathBuf::from("/sandbox/container/cache"),
-            models: PathBuf::from("/sandbox/container/models"),
-            plugins: None,
-            fonts: Vec::new(),
-        };
+        let folders = Folders { bundle: Some(PathBuf::from("/app/App.app")), ..Folders::inside(PathBuf::from("/sandbox/container"), "") };
         let confinement = folders.confinement();
         assert_eq!(confinement.read_roots(), [PathBuf::from("/sandbox/container"), PathBuf::from("/app/App.app")]);
         assert_eq!(confinement.write_root(), PathBuf::from("/sandbox/container").as_path());
@@ -451,15 +483,25 @@ mod tests {
         Ok(())
     }
 
+    /// Each working folder, set in turn outside the container, is refused as the folder it is, and
+    /// nothing is made at it before the refusal: the engine writes only inside its container.
     #[test]
     fn prepare_refuses_a_working_folder_outside_the_container() -> Test {
-        let mut sand = sandbox()?;
-        let elsewhere = sand.root.path().join("elsewhere");
-        sand.folders.cache = elsewhere.clone();
-        let error = sand.folders.prepare().expect_err("the engine writes only inside its container");
-        assert!(matches!(error, CraftError::Io { .. }), "{error:?}");
-        assert!(error.to_string().contains("cache"));
-        assert!(!elsewhere.exists(), "prepare wrote outside the container before refusing");
+        let fields: [(&str, fn(&mut Folders, PathBuf)); 4] = [
+            ("config", |folders, path| folders.config = path),
+            ("cache", |folders, path| folders.cache = path),
+            ("models", |folders, path| folders.models = path),
+            ("staged", |folders, path| folders.staged = path),
+        ];
+        for (what, set) in fields {
+            let mut sand = sandbox()?;
+            let elsewhere = sand.root.path().join(format!("elsewhere-{what}"));
+            set(&mut sand.folders, elsewhere.clone());
+            let error = sand.folders.prepare().expect_err("the engine writes only inside its container");
+            assert!(matches!(error, CraftError::Io { .. }), "{what}: {error:?}");
+            assert!(error.to_string().contains(what), "{what}: {error}");
+            assert!(!elsewhere.exists(), "{what}: prepare wrote outside the container before refusing");
+        }
         Ok(())
     }
 
@@ -492,6 +534,7 @@ mod tests {
         sand.folders.config = real.join("config");
         sand.folders.cache = real.join("cache");
         sand.folders.models = real.join("models");
+        sand.folders.staged = real.join("staged");
         sand.folders.prepare()?;
         assert!(real.join("config").is_dir());
         Ok(())
@@ -564,11 +607,12 @@ mod tests {
     /// parameter naming that folder, before anything is made on the disk.
     #[test]
     fn prepare_refuses_paths_that_cannot_name_a_place() -> Test {
-        let fields: [(&str, fn(&mut Folders, PathBuf)); 7] = [
+        let fields: [(&str, fn(&mut Folders, PathBuf)); 8] = [
             ("container", |folders, path| folders.container = path),
             ("config", |folders, path| folders.config = path),
             ("cache", |folders, path| folders.cache = path),
             ("models", |folders, path| folders.models = path),
+            ("staged", |folders, path| folders.staged = path),
             ("bundle", |folders, path| folders.bundle = Some(path)),
             ("plugins", |folders, path| folders.plugins = Some(path)),
             ("font", |folders, path| folders.fonts = vec![path]),

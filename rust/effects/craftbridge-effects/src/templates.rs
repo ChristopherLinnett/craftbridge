@@ -19,7 +19,7 @@
 //! project is replaced.
 //!
 //! The import extracts a template's media beside the template, so a template whose folder the session
-//! may not write, such as one in the app bundle, is imported from a copy in the container's cache
+//! may not write, such as one in the app bundle, is imported from a copy in the app's staged folder
 //! ([`staged`], through the one staging every such source goes through, [`crate::staging`]). A template
 //! whose folder lies inside the write root is imported where it is.
 //!
@@ -204,7 +204,7 @@ fn read_frame(params: &Value) -> Result<(Call, FrameRequest)> {
 /// as it came. The call is first read whole, as its method reads it, against the template as the call
 /// names it, so a call refused for its shape makes no copy, and a render's output is weighed against
 /// the template as the call named it, before the call names the copy instead.
-pub(crate) fn staged(backend: &Backend, cache: &Path, method: &str, mut params: Value) -> Result<Value> {
+pub(crate) fn staged(backend: &Backend, staged: &Path, method: &str, mut params: Value) -> Result<Value> {
     match method {
         OPEN => drop(read_open(&params)?),
         RENDER => drop(read_render(&params)?),
@@ -212,7 +212,7 @@ pub(crate) fn staged(backend: &Backend, cache: &Path, method: &str, mut params: 
         _ => return Ok(params),
     }
     let Some(template) = params.get(TEMPLATE).and_then(Value::as_str) else { return Ok(params) };
-    if let Some(copy) = staging::stage(backend, cache, template)?
+    if let Some(copy) = staging::stage(backend, staged, template)?
         && let Some(slot) = params.get_mut(TEMPLATE)
     {
         *slot = Value::from(copy);

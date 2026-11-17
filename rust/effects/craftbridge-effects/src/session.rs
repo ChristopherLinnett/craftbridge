@@ -80,15 +80,7 @@ pub(crate) mod tests {
     /// disk, so these need not exist (the tests that drive a session prepare real ones). Shared with the
     /// tests of other modules that build a session the same way.
     pub(crate) fn folders(plugins: Option<std::path::PathBuf>) -> Folders {
-        Folders {
-            container: "/app".into(),
-            bundle: None,
-            config: "/app/config".into(),
-            cache: "/app/cache".into(),
-            models: "/app/models".into(),
-            plugins,
-            fonts: Vec::new(),
-        }
+        Folders { plugins, ..Folders::inside("/app".into(), "") }
     }
 
     /// A headless session built as the app builds it, with `commands` run on it, which a test of a
@@ -113,16 +105,14 @@ pub(crate) mod tests {
     impl Scratch {
         pub(crate) fn new(bundle: bool, plugins: Option<&std::path::Path>) -> Self {
             let dir = tempfile::tempdir().expect("a scratch folder");
-            let container = dir.path().join("container");
-            let mut folders = folders(plugins.map(|named| dir.path().join(named)));
-            folders.bundle = bundle.then(|| dir.path().join("App.app"));
+            let folders = Folders {
+                bundle: bundle.then(|| dir.path().join("App.app")),
+                plugins: plugins.map(|named| dir.path().join(named)),
+                ..Folders::inside(dir.path().join("container"), ".")
+            };
             for folder in folders.bundle.iter().chain(&folders.plugins) {
                 std::fs::create_dir_all(folder).expect("the read-only folder appears");
             }
-            folders.config = container.join(".config");
-            folders.cache = container.join(".cache");
-            folders.models = container.join(".models");
-            folders.container = container;
             Self { dir, folders }
         }
 

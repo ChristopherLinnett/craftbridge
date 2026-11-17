@@ -18,6 +18,7 @@ fn folders(container: &Path) -> Folders {
         config: under("config"),
         cache: under("cache"),
         models: under("models"),
+        staged: under("staged"),
         fonts: Vec::new(),
         bundle: None,
         plugins: None,

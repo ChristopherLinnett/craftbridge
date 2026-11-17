@@ -32,9 +32,10 @@ pub struct EffectCraftApp {
     /// can name in `info.gpu` the failure that ended it (§17). The engine reads the same notice and
     /// calls `drop_gpu` between two calls once it has a report; the app never polls it.
     gpu_failure: Option<GpuFailure>,
-    /// The app's cache folder, inside the container, where a source the session may not write beside
-    /// is copied to be read ([`crate::staging`]).
-    cache: PathBuf,
+    /// The app's staged folder, inside the container, where a source the session may not write beside
+    /// is copied to be read ([`crate::staging`]). Not the cache: a saved project names these copies,
+    /// and the system may empty the cache while the app is not running.
+    staged: PathBuf,
     /// Whether the export being answered chose hardware encoding, which the session's exporter reads.
     hardware: HardwareChoice,
     /// The app's place in the iOS plug-in gate's folder list, held while the app lives (§19).
@@ -67,14 +68,14 @@ impl EffectCraftApp {
         let mut backend = Backend::headless(session::build(platform, folders, &hardware));
         let confinement = EngineConfinement::new(roots.read_roots(), &[roots.write_root().to_path_buf()]).map_err(|error| CraftError::io(error.to_string()))?;
         backend.confine(confinement);
-        Ok(Self { server: McpServer::new(backend), gpu_failure: None, cache: folders.cache.clone(), hardware, _admission: admission })
+        Ok(Self { server: McpServer::new(backend), gpu_failure: None, staged: folders.staged.clone(), hardware, _admission: admission })
     }
 
     /// The parameters of a call this app answers, with a template the session may not write beside
     /// replaced by a copy inside the container ([`templates::staged`]): the one place every call that
     /// names a template passes through, once it is known to answer the method.
     fn staged(&mut self, method: &str, params: Value) -> Result<Value> {
-        templates::staged(self.server.backend(), &self.cache, method, params)
+        templates::staged(self.server.backend(), &self.staged, method, params)
     }
 }
 

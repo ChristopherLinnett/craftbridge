@@ -15,6 +15,10 @@ pub struct Folders {
     pub cache: String,
     /// Where the engine keeps models it has installed, inside the container.
     pub models: String,
+    /// Where the engine keeps the copies it makes of sources it imports from folders it may not
+    /// write, inside the container. A saved project names what was copied here, so this is a folder
+    /// the system keeps, never one under the cache, which the system may empty.
+    pub staged: String,
     /// Where the app keeps its plug-ins, or none while they are switched off.
     pub plugins: Option<String>,
     /// Extra font folders, after the system's own.
@@ -29,6 +33,7 @@ impl From<Folders> for craftbridge_core::folders::Folders {
             config: folders.config.into(),
             cache: folders.cache.into(),
             models: folders.models.into(),
+            staged: folders.staged.into(),
             plugins: folders.plugins.map(Into::into),
             fonts: folders.fonts.into_iter().map(Into::into).collect(),
         }

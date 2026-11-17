@@ -47,15 +47,7 @@ impl Scratch {
 /// The folders an app keeps inside `container`, as every test of the crate lays them out, and so as a
 /// second process started on the same container finds them.
 pub fn folders_in(container: &Path, bundle: Option<PathBuf>, fonts: Vec<PathBuf>) -> Folders {
-    Folders {
-        container: container.to_path_buf(),
-        bundle,
-        config: container.join(".config"),
-        cache: container.join(".cache"),
-        models: container.join(".models"),
-        plugins: None,
-        fonts,
-    }
+    Folders { bundle, fonts, ..Folders::inside(container.to_path_buf(), ".") }
 }
 
 pub fn temporary(what: &str) -> Result<TempDir> {

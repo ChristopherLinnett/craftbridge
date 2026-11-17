@@ -38,6 +38,8 @@ rayon.workspace = true
 # the crate's tests read PNGs with the same `image`.
 image.workspace = true
 symphonia.workspace = true
+# The name of a staged copy, a hash of what it holds that no toolchain changes (src/staging.rs).
+siphasher.workspace = true
 # The plugin hands the core's wgpu device to the compositor and installs its failure callbacks,
 # which speak wgpu's own types (plan §17); the version is the workspace's, shared with the core.
 wgpu.workspace = true
