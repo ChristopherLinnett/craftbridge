@@ -30,4 +30,4 @@ UniFFI 0.32 in proc-macro mode generates the Swift and Kotlin bindings (D-3). It
 
 **Edge cases.** A second distribution later (EffectCraft and FilmCraft in one app) gets one combined crate, `craftbridge-all-ffi`, depending on both app crates, so the app links one Rust runtime (`evidence/05-mobile-platforms.md` Finding 8).
 
-**Tests.** `cargo test -p uniffi-bindgen` generates both bindings in library mode from the host build of the distribution library and checks that every exported type and call is declared in each, under no name Kotlin's own members hold; the generated bindings compile in the gate once the Swift package and the Android build take them in (§22, §23); Swift and Kotlin smoke tests call every boundary function once (QA-2).
+**Tests.** `cargo test -p uniffi-bindgen` generates both bindings in library mode from the host build of the distribution library and checks that every exported type and call is declared in each, under no name Kotlin's own members hold; the generated bindings compile in the gate, in the Swift package and in the Android build (§22, §23); Swift and Kotlin smoke tests call every boundary function once (QA-2).

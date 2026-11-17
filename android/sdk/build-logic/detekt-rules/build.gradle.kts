@@ -47,6 +47,8 @@ tasks.test {
     // The framework is named, not left to kotlin-test's default binding; useTestNG also points
     // kotlin-test's own variant selection at the TestNG binding, so no JUnit arrives.
     useTestNG()
+    // The profiles say which rules run, and a test reads them: a change to one runs the tests again.
+    inputs.dir("profiles")
 }
 
 // The gate's own tooling, resolved for the licence check: `cargo xtask rules` asks Gradle

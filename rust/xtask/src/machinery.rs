@@ -78,7 +78,8 @@ const MACHINERY: &[&str] = &[
     "tools/env.sh",
     "tools/refused-switches.tsv",
     "tools/oracle.sh",
-    // The builds of the native library the Swift and Android stages compile and link against.
+    // The builds of the native library: the XCFramework the Swift stages build and link against, and the
+    // Android libraries the Android stage packages from `jniLibs`.
     "tools/build-xcframework.sh",
     "tools/build-android.sh",
     "tools/hooks/",

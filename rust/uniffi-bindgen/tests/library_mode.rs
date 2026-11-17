@@ -2,9 +2,10 @@
 //! core's and the plug-in's Swift and Kotlin with every exported type and call, under names both
 //! languages can hold.
 //!
-//! The gate compiles the generated Swift in the Swift package (`CraftBridgeFFI`) but no stage compiles the
-//! generated Kotlin until the Android build takes it in, so this reads what the generator wrote for the
-//! declarations it must hold, line by line as UniFFI writes them, with runs of spaces read as one.
+//! The gate compiles the generated Swift in the Swift package (`CraftBridgeFFI`) and the generated Kotlin
+//! in the Android build (`:core`, `:effects`), which shows they compile, not that they declare every
+//! export, so this reads what the generator wrote for the declarations it must hold, line by line as
+//! UniFFI writes them, with runs of spaces read as one.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -98,6 +99,10 @@ fn the_core_s_kotlin_holds_every_export_and_no_name_kotlin_owns() {
     for owned in ["fun `close`(", "val `message`:"] {
         assert!(!kotlin.iter().any(|line| line.contains(owned)), "an export takes a name Kotlin's own `{owned}` holds");
     }
+    // Android Lint refuses `java.lang.ref.Cleaner` (API 33) under the minSdk of 29; the core's `uniffi.toml`
+    // turns the bindings' use of it off, and JNA's own cleaner stands in on every level.
+    assert!(!kotlin.iter().any(|line| line.contains("java.lang.ref.Cleaner")), "the bindings reach for a class the minSdk lacks");
+    assert!(kotlin.iter().any(|line| line.contains("com.sun.jna.internal.Cleaner.getCleaner()")), "the bindings clean up through JNA's cleaner");
     let details = kotlin.iter().filter(|line| line.as_str() == "val `detail`: kotlin.String" || line.as_str() == "val `detail`: kotlin.String,").count();
     assert_eq!(details, TEXT_VARIANTS.len(), "every variant with text carries it as `detail`");
 }

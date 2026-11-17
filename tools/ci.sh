@@ -147,22 +147,36 @@ stage_conformance() {
   "$xtask_run/debug/craftbridge-effects-conformance" --oracle "$oracle"
 }
 stage_rust_mobile() {
-  local target profile status=0
+  local target status=0
+  # Every target is checked even after one fails, so one run names each target that is broken. Each runs in
+  # a subshell of its own: an Android target's NDK environment (tools/env.sh) must not reach the host builds
+  # of the stages after this one.
+  for target in $CRAFTBRIDGE_RUST_TARGETS; do
+    (rust_mobile_target "$target") || status=1
+  done
+  return "$status"
+}
+# One phone target's checks. For an Android target the NDK, its compilers and the aarch64 target feature
+# come from tools/env.sh, the one place every Android build and device run takes them from, so a
+# dependency's build script that compiles C for the phone finds the phone's compiler, and the lint reads the
+# code the phone is built with.
+rust_mobile_target() {
+  local target="$1" profile status=0
+  if craftbridge_is_android_target "$target"; then
+    craftbridge_android_env && craftbridge_android_target_env "$target" || return 1
+  fi
   # The default members are the libraries an app links; the host tools never run on a phone. Clippy, not
   # a bare check: the platform modules compile only for the phones, so the never-crash lints and the
   # SAFETY comments are only checked on them here, in the release profile apps link as well as the dev
   # one, since code under `cfg(not(debug_assertions))` exists only in the first; the lint library's run
   # follows each clippy run for the same reason. Their tests are linted on each target too, at the levels
   # the host's are, in the dev profile they build in: a test that compiles only for a phone (the font tests
-  # the simulator and the emulator run) is read by no other run. Every target is checked even after one
-  # fails, so one run names each target that is broken.
-  for target in $CRAFTBRIDGE_RUST_TARGETS; do
-    for profile in dev release; do
-      compiling clippy --locked --all-features --target "$target" --profile "$profile" --message-format=json -- -D warnings || status=1
-      lint_library --locked --all-features --target "$target" --profile "$profile" --message-format=json || status=1
-    done
-    compiling clippy --locked --all-features --tests --target "$target" --message-format=json -- "${tests_lints[@]}" || status=1
+  # the simulator and the emulator run) is read by no other run.
+  for profile in dev release; do
+    compiling clippy --locked --all-features --target "$target" --profile "$profile" --message-format=json -- -D warnings || status=1
+    lint_library --locked --all-features --target "$target" --profile "$profile" --message-format=json || status=1
   done
+  compiling clippy --locked --all-features --tests --target "$target" --message-format=json -- "${tests_lints[@]}" || status=1
   return "$status"
 }
 # The lint library's dependencies are built and run wherever the gate runs, outside the workspace's graph,
@@ -369,12 +383,7 @@ pinned_toolchain() {
 }
 pinned_toolchain "$CRAFTBRIDGE_ROOT/rust"
 pinned_toolchain "$CRAFTBRIDGE_LINT_LIBRARY"
-refused="$(craftbridge_refused_environment)"
-if [ -n "$refused" ]; then
-  printf '%s\n' "$refused" | sed 's/^/ci: /' >&2
-  echo "ci: the gate runs the pinned toolchain as rust/Cargo.toml and rust/clippy.toml configure it: unset it and run again" >&2
-  exit 1
-fi
+craftbridge_refuse_switches || exit 1
 if pins="$(xtask pins 2>&1)"; then
   craftbridge_load_pins <<<"$pins"
 else

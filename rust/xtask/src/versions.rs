@@ -22,11 +22,11 @@ const WRAPPER_PROPERTIES: &str = "android/sdk/gradle/wrapper/gradle-wrapper.prop
 const GRADLE_RELEASES: &str = "https://services.gradle.org/versions/all";
 
 /// Versions of the catalog that are platform levels rather than releases of a library, so no repository
-/// holds a newer one to name. The machine-installed levels — an SDK, its build tools, a JDK — are the
-/// keys `cargo xtask pins` prints and the doctor checks, listed once in [`crate::pins::CATALOG_PINS`];
-/// these two are levels the build aims at — the oldest Android API it supports, the Java bytecode it
-/// emits — which are choices of the build, not versions that gain newer releases.
-const BUILD_TARGET_LEVELS: [&str; 2] = ["android-minSdk", "java-bytecode"];
+/// holds a newer one to name. The levels the scripts read — an SDK, its build tools and a JDK the machine
+/// installs, and the oldest Android API the native library is built for — are the keys `cargo xtask pins`
+/// prints, listed once in [`crate::pins::CATALOG_PINS`]; this one is a level only the build aims at, the
+/// Java bytecode it emits, which is a choice of the build, not a version that gains newer releases.
+const BUILD_TARGET_LEVELS: [&str; 1] = ["java-bytecode"];
 
 /// Versions of the catalog that no library or plugin of it names, with the artifact that publishes them:
 /// ktlint is run by Spotless from the version alone, so the catalog holds no library for it to read.

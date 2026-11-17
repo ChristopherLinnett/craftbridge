@@ -6,12 +6,14 @@ import dev.detekt.api.RuleInstance
 import dev.detekt.api.RuleSetId
 import dev.detekt.api.SetupContext
 import dev.detekt.api.Severity
+import dev.detekt.core.config.YamlConfig
 import dev.detekt.test.TestConfig
 import dev.detekt.test.lint
 import dev.detekt.test.lintWithContext
 import dev.detekt.test.utils.compileContentForTest
 import dev.detekt.test.utils.createEnvironment
 import java.net.URI
+import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -20,8 +22,8 @@ import kotlin.test.assertTrue
 
 // The rules' own tests: each banned form is shown to fire and each legal form shown to pass, as every
 // rule is proven. `active` comes from the profiles the convention plugin hands detekt; these rules
-// are built straight from a config here. Only FileWideSuppression resolves types, so only its tests
-// compile their snippets.
+// are built straight from a config here. Only FileWideSuppression and ErrorSuppression read the compiler's
+// analysis, so only their tests compile their snippets.
 
 private val active = TestConfig("active" to true)
 
@@ -175,6 +177,75 @@ class FileWideSuppressionTest {
     }
 }
 
+class ErrorSuppressionTest {
+    // The rule asks the compiler's analysis of the file, so it reads each file the way a full detekt run does.
+    private val environment = createEnvironment()
+
+    private fun lint(code: String) = ErrorSuppression(active).lintWithContext(environment, code)
+
+    @Test
+    fun `a suppression of a compiler error is reported for each error, however it is spelled and wherever it sits`() {
+        for (code in listOf(
+            "package p\n\n@Suppress(\"NO_EXPLICIT_VISIBILITY_IN_API_MODE\")\nfun f() = 1\n",
+            "package p\n\n@kotlin.Suppress(\"unused\", \"NO_EXPLICIT_RETURN_TYPE_IN_API_MODE\")\nfun f() = 1\n",
+            "package p\n\nimport kotlin.Suppress as Quiet\n\n@Quiet(\"INVISIBLE_REFERENCE\")\nfun f() = 1\n",
+            "package p\n\nclass C {\n    @Suppress(\"errors\")\n    val v = 1\n}\n",
+            "package p\n\nfun f(): Int {\n    @Suppress(\"UNRESOLVED_REFERENCE\")\n    val v = 1\n    return v\n}\n",
+            "@file:Suppress(\"NO_EXPLICIT_VISIBILITY_IN_API_MODE\")\n\npackage p\n",
+        )) {
+            assertFindings(1, lint(code), code)
+        }
+        val both = "package p\n\n@Suppress(\"NO_EXPLICIT_VISIBILITY_IN_API_MODE\", \"NO_EXPLICIT_RETURN_TYPE_IN_API_MODE\")\nfun f() = 1\n"
+        assertFindings(2, lint(both), both)
+    }
+
+    @Test
+    fun `a suppression of warnings or of other tools' checks passes`() {
+        // Java's annotation suppresses no compiler error at all, which the compilation then reports itself.
+        for (argument in listOf("UNCHECKED_CAST", "unused", "ktlint:standard:max-line-length", "NewApi", "NotNullAssertion")) {
+            for (annotation in listOf("Suppress", "SuppressWarnings")) {
+                val code = "package p\n\n@$annotation(\"$argument\")\nfun f() = 1\n"
+                assertFindings(0, lint(code), code)
+            }
+        }
+        val java = "package p\n\n@SuppressWarnings(\"NO_EXPLICIT_VISIBILITY_IN_API_MODE\")\nfun f() = 1\n"
+        assertFindings(0, lint(java), java)
+    }
+}
+
+class ErrorSuppressionProfileTest {
+    private fun section(profile: Path): Config? =
+        Files
+            .newBufferedReader(profile)
+            .use { YamlConfig.load(it) }
+            .subConfig(CraftbridgeRuleSetProvider.RULE_SET)
+            .takeIf { "ErrorSuppression" in it.subConfigKeys() }
+            ?.subConfig("ErrorSuppression")
+
+    @Test
+    fun `the refusal runs on all written code and on no run of the generated bindings`() {
+        // The convention plugin quiets the compiler's own warning about suppressing an error for every
+        // file, so this rule is the only refusal of one: it must run wherever the bindings do not. A run
+        // takes its profiles in order and the last that names a rule decides it, so written.yml switches
+        // it on and no other profile names it: base.yml, the bindings' whole profile, would switch it on
+        // there, and one read after written.yml, as shipped.yml is, could switch it off for written code.
+        val profiles = Files.list(Path.of("profiles")).use { files -> files.filter { it.toString().endsWith(".yml") }.sorted().toList() }
+        assertTrue(profiles.any { it.fileName.toString() == "written.yml" }, "no written.yml among $profiles")
+        for (profile in profiles) {
+            val switch = section(profile)?.valueOrNull<Any>(Config.ACTIVE_KEY)
+            if (profile.fileName.toString() == "written.yml") {
+                assertEquals(
+                    true,
+                    switch,
+                    "written.yml does not switch ErrorSuppression on, and nothing else refuses a suppressed compiler error",
+                )
+            } else {
+                assertEquals(null, section(profile), "$profile names ErrorSuppression, which written.yml alone decides")
+            }
+        }
+    }
+}
+
 class FileWideSuppressionBackstopTest {
     private fun backstop(
         code: String,
@@ -295,6 +366,7 @@ class CraftbridgeConfigValidatorTest {
                 "ModulePackageMismatch",
                 "FileWideSuppression",
                 "GateRuleSuppression",
+                "ErrorSuppression",
             )
         assertEquals(emptyList(), problems(*all.map { it to mapOf("active" to true) }.toTypedArray()))
         assertEquals(emptyList(), problems("NotNullAssertion" to mapOf("active" to false)))

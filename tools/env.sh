@@ -27,6 +27,7 @@ craftbridge_load_pins() {
     case "$line" in
       rust-target=*) CRAFTBRIDGE_RUST_TARGETS="$CRAFTBRIDGE_RUST_TARGETS ${line#rust-target=}" ;;
       android-compileSdk=*) CRAFTBRIDGE_ANDROID_API="${line#android-compileSdk=}" ;;
+      android-minSdk=*) CRAFTBRIDGE_ANDROID_MIN_SDK="${line#android-minSdk=}" ;;
       android-buildTools=*) CRAFTBRIDGE_ANDROID_BUILD_TOOLS="${line#android-buildTools=}" ;;
       jdk=*) CRAFTBRIDGE_JDK_MAJOR="${line#jdk=}" ;;
     esac
@@ -34,9 +35,10 @@ craftbridge_load_pins() {
   local toolchain="$CRAFTBRIDGE_ROOT/rust/rust-toolchain.toml" catalog="$CRAFTBRIDGE_ROOT/android/sdk/gradle/libs.versions.toml"
   craftbridge_require "Rust targets" "$CRAFTBRIDGE_RUST_TARGETS" "$toolchain"
   craftbridge_require "android-compileSdk" "$CRAFTBRIDGE_ANDROID_API" "$catalog"
+  craftbridge_require "android-minSdk" "$CRAFTBRIDGE_ANDROID_MIN_SDK" "$catalog"
   craftbridge_require "android-buildTools" "$CRAFTBRIDGE_ANDROID_BUILD_TOOLS" "$catalog"
   craftbridge_require "jdk" "$CRAFTBRIDGE_JDK_MAJOR" "$catalog"
-  export CRAFTBRIDGE_RUST_TARGETS CRAFTBRIDGE_ANDROID_API CRAFTBRIDGE_ANDROID_BUILD_TOOLS CRAFTBRIDGE_JDK_MAJOR
+  export CRAFTBRIDGE_RUST_TARGETS CRAFTBRIDGE_ANDROID_API CRAFTBRIDGE_ANDROID_MIN_SDK CRAFTBRIDGE_ANDROID_BUILD_TOOLS CRAFTBRIDGE_JDK_MAJOR
   craftbridge_setup_java
 }
 
@@ -162,6 +164,19 @@ craftbridge_refused_environment() {
   done < <(compgen -e)
   return 0
 }
+# The refusal itself, for a script that builds what it checks: each refused variable on a line of its own
+# under the script's name, and status 1, so `craftbridge_refuse_switches || exit 1` stops it before any
+# build. The gate, the Android build and a device run all build this way; the doctor reports the same lines
+# as gaps.
+craftbridge_refuse_switches() {
+  local refused name
+  name="$(basename "$0" .sh)"
+  refused="$(craftbridge_refused_environment)"
+  [ -n "$refused" ] || return 0
+  printf '%s\n' "$refused" | sed "s/^/$name: /" >&2
+  echo "$name: the gate runs the pinned toolchain as rust/Cargo.toml and rust/clippy.toml configure it: unset it and run again" >&2
+  return 1
+}
 
 # The gate's lint library (AGENTS.md §3), which `cargo dylint` builds with the nightly its own
 # rust-toolchain.toml pins and runs over the workspace, and the cargo-dylint release that runs it. The gate
@@ -243,6 +258,74 @@ export ANDROID_HOME
 # and later align native libraries to 16 KB pages, so the doctor accepts any r28 already installed.
 export CRAFTBRIDGE_NDK_VERSION="28.2.13676358"
 export CRAFTBRIDGE_NDK_MAJOR="${CRAFTBRIDGE_NDK_VERSION%%.*}"
+
+# The installed NDK of the major above, the newest of them: its folder, or nothing and status 1. `-H` follows
+# an ndk/ that is itself a symbolic link; the `|| true` keeps a missing ndk folder from ending a caller that
+# runs under pipefail before it has printed the fix.
+craftbridge_ndk_home() {
+  local ndk
+  ndk="$(find -H "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -name "$CRAFTBRIDGE_NDK_MAJOR.*" 2>/dev/null | sort | tail -n 1 || true)"
+  [ -n "$ndk" ] && printf '%s\n' "$ndk"
+}
+
+# Whether a Rust target runs on Android, and the toolchain file's targets that do, one per line.
+craftbridge_is_android_target() {
+  case "$1" in *-linux-android) return 0 ;; *) return 1 ;; esac
+}
+craftbridge_android_targets() {
+  local target
+  for target in $CRAFTBRIDGE_RUST_TARGETS; do
+    if craftbridge_is_android_target "$target"; then printf '%s\n' "$target"; fi
+  done
+}
+
+# What building for an Android target takes, written once for every run that compiles or runs one: the
+# gate's rust_mobile stage, tools/build-android.sh and a test run on a device or an emulator. The NDK is the
+# installed one of the pinned major; the platform level is the module's minSdk, below which the NDK's own
+# libraries (the media and image reader calls) lack symbols the library links. The aarch64 library carries
+# the `fp16` target feature, Rust's name for LLVM's `fullfp16`, which gemm-f16's half-precision assembly
+# assembles only with; rustc passes LLVM's own spelling through only as an unknown feature it warns may be
+# unsound. A target-specific flag, never `target-cpu=native`, which is the host's, and none for the other
+# target, whose code takes no such feature. Must run in the shell that starts cargo.
+craftbridge_android_env() {
+  local ndk
+  if ! ndk="$(craftbridge_ndk_home)"; then
+    echo "$(basename "$0" .sh): no Android NDK r$CRAFTBRIDGE_NDK_MAJOR under $ANDROID_HOME/ndk: run tools/doctor.sh for the fix" >&2
+    return 1
+  fi
+  if ! command -v cargo-ndk >/dev/null 2>&1; then
+    echo "$(basename "$0" .sh): no cargo-ndk: run tools/doctor.sh for the fix" >&2
+    return 1
+  fi
+  export ANDROID_NDK_HOME="$ndk" CARGO_NDK_PLATFORM="$CRAFTBRIDGE_ANDROID_MIN_SDK"
+  export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS="-C target-feature=+fp16"
+}
+# cargo-ndk, the official tool, names the NDK's compilers and archiver for a target, and only it links: the
+# linker it names is cargo-ndk itself, which links with the NDK when `cargo ndk` started the build and not
+# otherwise. So a run that links goes through `cargo ndk` (tools/build-android.sh, and a test run below),
+# and a check that reads cargo's own messages, which `cargo ndk` would read in its place, takes what
+# `cargo ndk-env` prints for each target it checks, which it uses for the compilers alone:
+# `craftbridge_android_target_env <triple>`, after `craftbridge_android_env`, gives the build scripts that
+# compile C for the phone the phone's compiler.
+# cargo-ndk runs as a cargo command through the guarded cargo, as every other does.
+craftbridge_android_target_env() {
+  local exports
+  exports="$(craftbridge_cargo ndk-env -t "$1")" || return 1
+  eval "$exports"
+}
+# A test run on a device or an emulator, `craftbridge_android_test <triple> <cargo test arguments…>`:
+# cargo-ndk links each test binary with the NDK, and its runner pushes it to the device adb names
+# (ANDROID_SERIAL picks one of several), runs it there and removes it. The run's status is cargo's. It
+# tests what ships, so it is refused the switches the gate refuses, and it runs in a subshell: the
+# Android environment it sets includes a variable the gate refuses in the shell it starts in, which must
+# not stay behind in the caller's.
+craftbridge_android_test() (
+  target="$1"
+  shift
+  craftbridge_refuse_switches || exit 1
+  craftbridge_android_env || exit 1
+  craftbridge_cargo ndk -t "$target" test --locked "$@"
+)
 
 # Gradle runs on the catalog's JDK, the release AGP is tested with here — the `jdk` pin craftbridge_load_pins
 # read. JAVA_HOME wins when it is that major; else macOS's registry, else Homebrew's keg (keg-only, so the

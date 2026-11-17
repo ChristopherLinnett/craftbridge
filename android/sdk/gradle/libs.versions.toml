@@ -19,6 +19,10 @@ ktlint = "1.8.0"
 # against, which the 1.x line (Kotlin 2.0) cannot, and so resolves nothing from it. The 2.0 line ships
 # as pre-releases.
 detekt = "2.0.0-alpha.6"
+# The library the generated bindings load the native library with.
+jna = "5.18.1"
+# The coroutines the generated bindings' async calls suspend on.
+kotlinx-coroutines = "1.10.2"
 
 [plugins]
 android-library = { id = "com.android.library", version.ref = "agp" }
@@ -43,3 +47,9 @@ detekt-api = { module = "dev.detekt:detekt-api", version.ref = "detekt" }
 detekt-core = { module = "dev.detekt:detekt-core", version.ref = "detekt" }
 detekt-test = { module = "dev.detekt:detekt-test", version.ref = "detekt" }
 kotlin-test-testng = { module = "org.jetbrains.kotlin:kotlin-test-testng", version.ref = "kotlin" }
+# What the generated bindings call into: UniFFI's Kotlin reaches the native library through JNA, which
+# ships as an AAR for Android (the convention plugin hands that one out). JNA is Apache-2.0 or LGPL; the
+# repository uses it under Apache-2.0 (AGENTS.md §8).
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+# UniFFI's async functions are `suspend` functions of this library, in the bindings' public API.
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }

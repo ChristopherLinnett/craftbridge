@@ -248,16 +248,14 @@ if [ -n "$node_major" ] && [ "$node_major" -ge 20 ] && has npx; then ok "Node.js
 # checks for, from the dependencies as plan/package-lock.json pins them (tools/env.sh says why).
 if craftbridge_plan_dependencies; then ok "the plan kit's dependencies, as plan/package-lock.json pins them"; else gap "the plan kit's dependencies, as plan/package-lock.json pins them" "(cd plan && npm ci)"; fi
 
+# The NDK and cargo-ndk: tools/build-android.sh builds the native library with them, and the gate's
+# rust_mobile stage points the C compiler of the phone builds at the NDK through cargo-ndk (tools/env.sh).
+if [ -d "$ANDROID_HOME/platforms" ]; then
+  if ndk="$(craftbridge_ndk_home)"; then ok "Android NDK $(basename "$ndk")"; else gap "Android NDK r$CRAFTBRIDGE_NDK_MAJOR" "$(sdk_fix "ndk;$CRAFTBRIDGE_NDK_VERSION") (NDK r$CRAFTBRIDGE_NDK_MAJOR aligns native libraries to 16 KB pages)"; fi
+fi
+if has cargo-ndk; then ok "cargo-ndk $(cargo ndk --version | cut -d' ' -f2)"; else gap "cargo-ndk" "cargo install --locked cargo-ndk"; fi
+
 if [ "$mode" = full ]; then
-  # The mobile library builds. No gate stage compiles native code for Android yet (rust_mobile builds no
-  # C), so the NDK is a need of the library builds alone. `-H` follows an ndk/ that is itself a symbolic
-  # link; `|| true`: with no ndk folder find fails, and under pipefail that would end the doctor before
-  # it printed the fix.
-  if [ -d "$ANDROID_HOME/platforms" ]; then
-    ndk="$(find -H "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -name "$CRAFTBRIDGE_NDK_MAJOR.*" 2>/dev/null | sort | tail -n 1 || true)"
-    if [ -n "$ndk" ]; then ok "Android NDK $(basename "$ndk")"; else gap "Android NDK r$CRAFTBRIDGE_NDK_MAJOR" "$(sdk_fix "ndk;$CRAFTBRIDGE_NDK_VERSION") (NDK r$CRAFTBRIDGE_NDK_MAJOR aligns native libraries to 16 KB pages)"; fi
-  fi
-  if has cargo-ndk; then ok "cargo-ndk $(cargo ndk --version | cut -d' ' -f2)"; else gap "cargo-ndk" "cargo install --locked cargo-ndk"; fi
   if [ -d "$CRAFTBRIDGE_ROOT/rust/uniffi-bindgen" ]; then
     ok "uniffi-bindgen (rust/uniffi-bindgen, at the library's UniFFI version)"
   else

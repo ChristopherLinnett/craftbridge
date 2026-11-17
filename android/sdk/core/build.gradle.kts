@@ -7,3 +7,10 @@ plugins {
 android {
     namespace = "io.github.christopherlinnett.craftbridge.core"
 }
+
+dependencies {
+    // The generated bindings extend JNA's types in their public declarations, so an app compiles
+    // against it too.
+    api(libs.jna)
+    api(libs.kotlinx.coroutines.core)
+}

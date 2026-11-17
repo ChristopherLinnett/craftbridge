@@ -9,6 +9,9 @@
 # needs for the types two crates share.
 
 [bindings.kotlin]
+# Android lint refuses `java.lang.ref.Cleaner`, which the default bindings reach for on any device that has it
+# (API 33, above the minSdk of 29); the cleaner JNA brings itself runs on every level.
+disable_java_cleaner = true
 package_name = "io.github.christopherlinnett.craftbridge.ffi.core"
 
 # Each `CraftError` variant's text crosses as `detail` in both languages. Kotlin's generated exception

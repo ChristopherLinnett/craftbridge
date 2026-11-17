@@ -26,6 +26,7 @@ class CraftbridgeRuleSetProvider : RuleSetProvider {
                 ::ModulePackageMismatch,
                 ::FileWideSuppression,
                 ::GateRuleSuppression,
+                ::ErrorSuppression,
             ),
         )
 

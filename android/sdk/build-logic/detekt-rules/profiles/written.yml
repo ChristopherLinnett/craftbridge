@@ -1,11 +1,14 @@
 # The rules every source set a module writes by hand is held to, its tests included, on top of
-# base.yml: the JNI confinement of AGENTS.md §4, and the two refusals of §10 — no suppression over a
-# whole file, and none on an item for a rule the gate enforces. The generated bindings are the
-# generator's code, checked through the generator (§6), so they are given base.yml alone.
+# base.yml: the JNI confinement of AGENTS.md §4, and the refusals of §10 — no suppression over a
+# whole file, none on an item for a rule the gate enforces, and none of a compiler error. The generated
+# bindings are the generator's code, checked through the generator (§6), so they are given base.yml alone,
+# and theirs is the one folder that may suppress the errors explicit API mode reports.
 craftbridge:
   ExternalOutsidePlatformFolder:
     active: true
   FileWideSuppression:
     active: true
   GateRuleSuppression:
+    active: true
+  ErrorSuppression:
     active: true

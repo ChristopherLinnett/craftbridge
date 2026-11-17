@@ -56,14 +56,6 @@ impl Linked {
     }
 }
 
-/// What one library-mode run wrote, in a scratch folder that is gone when `keep` has read it.
-fn with_run<T>(keep: impl FnOnce(&Path) -> Result<T, String>) -> Result<T, String> {
-    let scratch = crate::scratch::create("swift-bindings")?;
-    let kept = crate::bindings::run(LANGUAGE, &scratch).and_then(|()| keep(&scratch));
-    let _ = fs::remove_dir_all(&scratch);
-    kept
-}
-
 /// The files the run wrote with `extension`, as paths from `written`.
 fn files_with_extension(written: &Path, extension: &str) -> Result<Vec<PathBuf>, String> {
     Ok(crate::bindings::files_under(written)?.into_iter().filter(|file| file.extension().is_some_and(|found| found == extension)).collect())
@@ -91,7 +83,7 @@ fn without_swiftlint_commands(text: &str) -> String {
 /// it. The bindgen writes each crate's headers and module map beside its Swift; no target compiles those, so
 /// they are left to [`write_headers`].
 pub(crate) fn generate(out_dir: &Path) -> Result<(), String> {
-    with_run(|written| {
+    crate::bindings::with_run(LANGUAGE, |written| {
         let swift = files_with_extension(written, "swift")?;
         for file in &swift {
             let path = written.join(file);
@@ -107,7 +99,7 @@ pub(crate) fn generate(out_dir: &Path) -> Result<(), String> {
 /// module map holding each crate's module and, in a submodule of each, the declarations that link what that
 /// folder's static library needs. Every folder comes from one run, since only the links differ between them.
 pub(crate) fn write_headers(folders: &[(&Path, &[Linked])]) -> Result<(), String> {
-    with_run(|written| {
+    crate::bindings::with_run(LANGUAGE, |written| {
         let headers = files_with_extension(written, "h")?;
         let mut maps = Vec::new();
         for map in files_with_extension(written, "modulemap")? {

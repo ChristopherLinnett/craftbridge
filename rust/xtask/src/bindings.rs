@@ -2,11 +2,12 @@
 //!
 //! The bindings are generated code (plan §20), written from the library an app links, by the workspace's
 //! own `uniffi-bindgen` in library mode, which reads the metadata that library embeds. Every generator
-//! registered with `cargo xtask generate` that writes bindings goes through [`run`]: it builds the
+//! registered with `cargo xtask generate` that writes bindings goes through [`with_run`]: it builds the
 //! distribution library and the bindgen for the host (once for the whole process, however many generators
-//! run), runs the bindgen for one language into a folder, and prepends the `@generated` marker UniFFI does
-//! not write. Nothing else in xtask knows how the bindgen is run; what a language adds is the generators of
-//! its own folders, which keep what they own of what the run wrote.
+//! run), runs the bindgen for one language into a scratch folder, and prepends the `@generated` marker
+//! UniFFI does not write. Nothing else in xtask knows how the bindgen is run; what a language adds is the
+//! generators of its own folders (`crate::swift_bindings`, `crate::kotlin_bindings`), which keep what they
+//! own of what the run wrote.
 //!
 //! xtask may not depend on a host tool, so it asks cargo for the two files and runs them, as it runs the
 //! codegen (`crate::effects_api`).
@@ -85,7 +86,7 @@ pub(crate) fn files_under(folder: &Path) -> Result<Vec<PathBuf>, String> {
 
 /// Run the bindgen for `language` over the host build of the distribution library, into `out_dir`, and give
 /// every file it wrote the header of [`header`].
-pub(crate) fn run(language: &str, out_dir: &Path) -> Result<(), String> {
+fn run(language: &str, out_dir: &Path) -> Result<(), String> {
     let built = host_build()?;
     // The bindgen asks cargo about the library's crates, which it finds from the folder it runs in.
     let output = Command::new(&built.bindgen)
@@ -105,6 +106,15 @@ pub(crate) fn run(language: &str, out_dir: &Path) -> Result<(), String> {
         std::fs::write(&file, format!("{}{text}", header(language))).map_err(|error| format!("{}: {error}", file.display()))?;
     }
     Ok(())
+}
+
+/// What one run for `language` wrote, in a scratch folder that is gone when `keep` has read it: what each
+/// language's generators take of a run and write where its build compiles it.
+pub(crate) fn with_run<T>(language: &str, keep: impl FnOnce(&Path) -> Result<T, String>) -> Result<T, String> {
+    let scratch = crate::scratch::create(&format!("{language}-bindings"))?;
+    let kept = run(language, &scratch).and_then(|()| keep(&scratch));
+    let _ = std::fs::remove_dir_all(&scratch);
+    kept
 }
 
 #[cfg(test)]
