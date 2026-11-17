@@ -45,6 +45,11 @@ fn started(scratch: &Scratch) -> Result<EffectCraftApp, String> {
     Ok(app)
 }
 
+/// One engine command through the app's `exec`, its refusal worded with the command's name.
+fn exec(app: &mut EffectCraftApp, command: &str, params: Value) -> Result<Value, String> {
+    app.request("exec", json!({"command": command, "params": params})).map_err(|e| format!("{command}: {e}"))
+}
+
 fn export(app: &mut EffectCraftApp, request: Value) -> Result<Value, CraftError> {
     app.request_with_progress("export", request, &mut |_, _, _| true, &mut |_| Ok(()))
 }
@@ -310,4 +315,65 @@ fn a_movie_with_sound_has_the_sound_and_the_pictures_of_the_software_export() {
     assert!(lowest_psnr(&software, &hardware).unwrap().1 >= D12_DB);
     let (a, b) = (effectcraft_media::probe(software.display().to_string()).unwrap(), effectcraft_media::probe(hardware.display().to_string()).unwrap());
     assert!((a.duration.seconds() - b.duration.seconds()).abs() < 0.05, "{} against {}", a.duration.seconds(), b.duration.seconds());
+}
+
+/// A template of a solid's colour, made inside the container with the app's own commands: a 256 x 144
+/// composition of one second, big enough for the hardware encoder to take.
+fn a_template(scratch: &Scratch) -> Result<PathBuf, String> {
+    let template = scratch.path().join("solid.ectemplate");
+    let mut app = scratch.app().map_err(|e| e.to_string())?;
+    let mut exec = |command: &str, params: Value| exec(&mut app, command, params);
+    exec("comp.new", json!({"name": "Solid", "width": 256, "height": 144, "duration": 1.0, "frameRate": 30}))?;
+    exec("layer.newSolid", json!({"comp": 1, "name": "Bg", "color": "#223344"}))?;
+    exec("effect.apply", json!({"layers": ["Bg"], "effect": "fill"}))?;
+    exec("essential.addProperty", json!({"comp": 1, "layer": "Bg", "path": "effects/#1/color", "name": "Colour"}))?;
+    exec("essential.exportTemplate", json!({"comp": 1, "path": template.display().to_string()}))?;
+    Ok(template)
+}
+
+/// `template.render` of the template, writing `output` as `request` says.
+fn render_template(app: &mut EffectCraftApp, template: &Path, request: Value) -> Result<Value, CraftError> {
+    let params = json!({"template": template.display().to_string(), "values": {"Colour": "#aa3300"}, "output": request});
+    app.request_with_progress("template.render", params, &mut |_, _, _| true, &mut |_| Ok(()))
+}
+
+/// A template render's `output` is an export's request, so its choice of hardware is read the same way:
+/// the movie is the hardware encoder's exactly when `output` sets `hardware` and the device has the
+/// encoder, and the render after it, which does not set it, is the software one.
+#[test]
+fn a_template_render_whose_output_sets_hardware_is_encoded_in_hardware() {
+    let scratch = Scratch::new().unwrap();
+    let template = a_template(&scratch).unwrap();
+    let mut app = scratch.app().unwrap();
+    let paths = ["a.mp4", "b.mp4", "c.mp4"].map(|name| scratch.path().join(name));
+    let [software, hardware, after] = &paths;
+    let request = |output: &Path| json!({"format": "h264", "output": output.display().to_string(), "end": 0.5});
+    render_template(&mut app, &template, request(software)).unwrap();
+    render_template(&mut app, &template, with(request(hardware), "hardware", json!(true))).unwrap();
+    render_template(&mut app, &template, request(after)).unwrap();
+    let read = |path: &Path| std::fs::read(path).unwrap();
+    assert_eq!(read(software), read(after), "a render that did not set hardware after one that did is the software render");
+    assert_eq!(read(software) != read(hardware), has_hardware(VideoCodec::H264), "the movie came from the hardware encoder exactly when the device has one");
+    assert!(lowest_psnr(software, hardware).unwrap().1 >= D12_DB);
+}
+
+/// The choice is the `output`'s, not the call's: a `hardware` beside `output` is no field of the call.
+#[test]
+fn a_template_render_reads_its_hardware_choice_from_output_alone() {
+    let scratch = Scratch::new().unwrap();
+    let template = a_template(&scratch).unwrap();
+    let mut app = scratch.app().unwrap();
+    let params =
+        json!({"template": template.display().to_string(), "hardware": true, "output": {"output": scratch.path().join("x.mp4").display().to_string()}});
+    let refused = app.request_with_progress("template.render", params, &mut |_, _, _| true, &mut |_| Ok(())).unwrap_err();
+    assert_eq!(refused.to_string(), "`template.render`: unknown parameter(s) `hardware`");
+}
+
+#[test]
+fn a_template_render_whose_hardware_is_not_a_boolean_is_refused() {
+    let scratch = Scratch::new().unwrap();
+    let template = a_template(&scratch).unwrap();
+    let mut app = scratch.app().unwrap();
+    let request = json!({"output": scratch.path().join("x.mp4").display().to_string(), "hardware": "yes"});
+    assert_eq!(render_template(&mut app, &template, request).unwrap_err().to_string(), "`export`: `hardware` must be a bool");
 }

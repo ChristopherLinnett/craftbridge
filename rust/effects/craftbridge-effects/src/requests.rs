@@ -230,10 +230,12 @@ impl RenderRequest {
         Ok(obj)
     }
 
-    /// Whether a call of `method` with `params` is an `export` that chooses hardware encoding. A call whose
-    /// parameters do not read chooses nothing, and the render runner refuses it in its own words.
-    pub(crate) fn chooses_hardware(method: &str, params: &Value) -> bool {
-        method == EXPORT && Self::from_params(params).is_ok_and(|request| request.hardware)
+    /// Whether the render request `request` chooses hardware encoding, for every method that renders
+    /// one: each names where its request sits in its own parameters, and this reads it. A request that
+    /// does not read chooses nothing, and the method that renders it refuses it, in the request's own
+    /// words, before anything renders.
+    pub(crate) fn chooses_hardware(request: &Value) -> bool {
+        Self::from_params(request).is_ok_and(|request| request.hardware)
     }
 
     /// Read the parameters of an `export` call. Absent parameters are an empty request, which
@@ -690,15 +692,14 @@ mod tests {
     }
 
     #[test]
-    fn a_call_chooses_hardware_only_when_it_says_true_and_reads() {
-        assert!(RenderRequest::chooses_hardware(EXPORT, &json!({"output": "/c/x.mp4", "hardware": true})));
-        assert!(!RenderRequest::chooses_hardware(EXPORT, &json!({"output": "/c/x.mp4", "hardware": false})));
-        assert!(!RenderRequest::chooses_hardware(EXPORT, &json!({"output": "/c/x.mp4"})));
-        assert!(!RenderRequest::chooses_hardware(EXPORT, &json!({"output": "/c/x.mp4", "hardware": "yes"})), "a value that does not read chooses nothing");
-        assert!(!RenderRequest::chooses_hardware(EXPORT, &json!({"output": "/c/x.mp4", "hardware": true, "widht": 1})), "nor does a call that is refused");
-        assert!(!RenderRequest::chooses_hardware(EXPORT, &json!({"queue": true, "hardware": true})), "the project's own queue is no request's export");
-        assert!(!RenderRequest::chooses_hardware(EXPORT, &Value::Null));
-        assert!(!RenderRequest::chooses_hardware("render", &json!({"output": "/c/x.mp4", "hardware": true})), "only an export chooses");
+    fn a_request_chooses_hardware_only_when_it_says_true_and_reads() {
+        assert!(RenderRequest::chooses_hardware(&json!({"output": "/c/x.mp4", "hardware": true})));
+        assert!(!RenderRequest::chooses_hardware(&json!({"output": "/c/x.mp4", "hardware": false})));
+        assert!(!RenderRequest::chooses_hardware(&json!({"output": "/c/x.mp4"})));
+        assert!(!RenderRequest::chooses_hardware(&json!({"output": "/c/x.mp4", "hardware": "yes"})), "a value that does not read chooses nothing");
+        assert!(!RenderRequest::chooses_hardware(&json!({"output": "/c/x.mp4", "hardware": true, "widht": 1})), "nor does a call that is refused");
+        assert!(!RenderRequest::chooses_hardware(&json!({"queue": true, "hardware": true})), "the project's own queue renders no request");
+        assert!(!RenderRequest::chooses_hardware(&Value::Null));
     }
 
     /// A frame number is seconds at the comp's own rate, and at 30 frames a second where the comp
