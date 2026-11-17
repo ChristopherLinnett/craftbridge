@@ -38,8 +38,8 @@ const FILL: &str = "contentFill.generate";
 const FILL_FRAMES: u64 = 60;
 
 /// One export, template render or fill: the method that answers it, whether the demo project is opened
-/// first, the commands that set the project up, the request, and the file names that show it has begun
-/// writing and the number of files it writes when it is left to finish.
+/// first, the commands that set the project up, the request, the starts of the file names that show it
+/// has begun writing, any one of them, and the number of files it writes when it is left to finish.
 struct Case {
     name: &'static str,
     /// The call with progress the case makes: `export`, `template.render` or `contentFill.generate`.
@@ -48,7 +48,7 @@ struct Case {
     demo: bool,
     setup: Vec<(&'static str, Value)>,
     request: Value,
-    begun: String,
+    begun: &'static [&'static str],
     finished: usize,
 }
 
@@ -72,7 +72,7 @@ fn cases(dir: &Path) -> Vec<Case> {
             demo: true,
             setup: vec![],
             request: with(json!({"output": at("single.mp4"), "format": "h264"})),
-            begun: "single".into(),
+            begun: &["single"],
             finished: 1,
         },
         Case {
@@ -81,7 +81,7 @@ fn cases(dir: &Path) -> Vec<Case> {
             demo: true,
             setup: vec![],
             request: with(json!({"output": at("seq.png"), "format": "png"})),
-            begun: "seq_".into(),
+            begun: &["seq_"],
             finished: 120,
         },
         Case {
@@ -93,7 +93,7 @@ fn cases(dir: &Path) -> Vec<Case> {
                 ("prefs.set", json!({"key": "export.segmentSequenceFiles", "value": 10})),
             ],
             request: with(json!({"output": at("part.png"), "format": "png"})),
-            begun: "part_".into(),
+            begun: &["part_"],
             finished: 120,
         },
         Case {
@@ -105,7 +105,7 @@ fn cases(dir: &Path) -> Vec<Case> {
                 ("renderQueue.add", json!({"format": "png", "output": at("second.png"), "end": 4, "resolution": "quarter"})),
             ],
             request: json!({"queue": true}),
-            begun: "second_".into(),
+            begun: &["second_"],
             finished: 121,
         },
         Case {
@@ -114,7 +114,7 @@ fn cases(dir: &Path) -> Vec<Case> {
             demo: false,
             setup: vec![],
             request: json!({"template": at(template::FILE), "values": {"Name": "Sam", "Photo": at(template::REPLACEMENT)}, "output": {"output": at("card.png"), "format": "png"}}),
-            begun: "card_".into(),
+            begun: &["card_"],
             finished: template::FRAMES,
         },
         Case {
@@ -127,9 +127,10 @@ fn cases(dir: &Path) -> Vec<Case> {
                 ("layer.addMask", json!({"rect": [30.0, 20.0, 20.0, 18.0], "mode": "subtract"})),
             ],
             request: json!({"layer": 1, "outputDir": at("made/fill")}),
-            // The first file of any name: a fill writes nothing but the frames it listed, so a file of
-            // another name, which would show before the frame it is written for, is where the kill lands.
-            begun: String::new(),
+            // The first frame, or the engine's temporary for one should a frame ever be written through
+            // the session's own atomic write. Never the first file of any name: the fill's scratch file
+            // is made with a name and unlinked at once on macOS, so a kill there lands before any frame.
+            begun: &["fill_", ".effectcraft-"],
             finished: FILL_FRAMES as usize,
         },
     ]
@@ -223,7 +224,7 @@ fn a_killed_render_leaves_no_partial_file_after_a_restart() {
         // Declared after `scratch`, so a failing test kills the child before the scratch folder goes.
         let mut child = spawn_child(&case_json(scratch.path(), &case)).expect("the child starts");
         let begun = Instant::now();
-        while !written(&scratch, &before).expect("the container reads").iter().any(|name| name.starts_with(&case.begun)) {
+        while !written(&scratch, &before).expect("the container reads").iter().any(|name| case.begun.iter().any(|start| name.starts_with(start))) {
             assert!(child.0.try_wait().expect("the child can be asked").is_none(), "{}: the child ended before it wrote a file", case.name);
             assert!(begun.elapsed() < PATIENCE, "{}: no file appeared", case.name);
             std::thread::sleep(Duration::from_millis(2));
