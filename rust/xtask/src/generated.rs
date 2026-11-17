@@ -174,16 +174,31 @@ fn head_lines(path: &Path) -> (Vec<String>, bool) {
     (text.lines().take(HEADER_LINES).map(|line| scan::without_bom(line).to_string()).collect(), binary)
 }
 
-/// Is any directory component a generated directory?
-pub(crate) fn in_generated(components: &[String]) -> bool {
-    components.iter().any(|component| component == "generated" || component == "Generated")
+/// Is `name` a generated directory's (AGENTS §6)? The registry asks it of a generator's output and this
+/// rule of every file, so the two can never disagree about where generated files lie.
+pub(crate) fn is_generated_dir(name: &str) -> bool {
+    name == "generated" || name == "Generated"
 }
 
-/// The outermost generated directory holding a file, relative to the root: what a message names when no
-/// generator owns it.
-fn outermost_generated_dir(tree: &str, file: &FoundFile) -> String {
-    let depth = file.components.iter().position(|component| component == "generated" || component == "Generated").unwrap_or(0);
-    std::iter::once(tree).chain(file.components.iter().take(depth + 1).map(String::as_str)).collect::<Vec<_>>().join("/")
+/// Is any directory component a generated directory?
+pub(crate) fn in_generated(components: &[String]) -> bool {
+    components.iter().any(|component| is_generated_dir(component))
+}
+
+/// What a message names when no generator owns a file, relative to the root: the outermost folder holding
+/// it, from its generated directory down, in which no generator's output lies, or the file itself when
+/// one lies in each. A generated directory several generators share is written, so naming it would send
+/// a reader to the wrong folder.
+fn unowned_place(tree: &str, file: &FoundFile, outputs: &[&str]) -> String {
+    let depth = file.components.iter().position(|component| is_generated_dir(component)).unwrap_or(0);
+    let mut folder = String::from(tree);
+    for (index, component) in file.components.iter().enumerate() {
+        folder = format!("{folder}/{component}");
+        if index >= depth && !outputs.iter().any(|output| Path::new(output).starts_with(&folder)) {
+            return folder;
+        }
+    }
+    format!("{tree}/{}", file.relative)
 }
 
 /// Reduce a file to what this rule reads.
@@ -215,7 +230,7 @@ fn check_against(root: &Path, outputs: &[&str]) -> Result<Vec<String>, String> {
             errors.extend(check_head(&head_of(root, &file.path, in_generated(&file.components))));
             let path = format!("{tree}/{}", file.relative);
             if in_generated(&file.components) && !outputs.iter().any(|output| path.starts_with(&format!("{}/", output.trim_end_matches('/')))) {
-                unowned.insert(outermost_generated_dir(tree, &file));
+                unowned.insert(unowned_place(tree, &file, outputs));
             }
         }
     }
@@ -414,6 +429,18 @@ mod tests {
         assert!(errors[0].starts_with("rust/core/x/src/generated: no generator"), "{errors:?}");
         assert!(check_against(&scratch.0, &["rust/core/x/src/generated"]).unwrap().is_empty());
         assert_eq!(check_against(&scratch.0, &["rust/core/x/src/generated/deeper"]).unwrap().len(), 1, "a.rs lies outside that output");
+    }
+
+    #[test]
+    fn a_file_beside_a_generator_s_folder_is_named_by_the_place_no_generator_writes() {
+        let scratch = Scratch::new("generated-shared");
+        let facade = "android/sdk/effects/src/generated/kotlin/io/x/effects";
+        scratch.write(&format!("{facade}/LayerCommands.kt"), format!("// {MARKER}\n"));
+        scratch.write("android/sdk/effects/src/generated/kotlin/io/x/Notes.kt", format!("// {MARKER}\n"));
+        scratch.write("android/sdk/effects/src/generated/kotlin/io/x/ffi/effects/Bindings.kt", format!("// {MARKER}\n"));
+        let errors = check_against(&scratch.0, &[facade]).unwrap();
+        let places: Vec<&str> = errors.iter().filter_map(|error| error.split_once(": no generator").map(|(place, _)| place)).collect();
+        assert_eq!(places, ["android/sdk/effects/src/generated/kotlin/io/x/Notes.kt", "android/sdk/effects/src/generated/kotlin/io/x/ffi"], "{errors:?}");
     }
 
     #[test]

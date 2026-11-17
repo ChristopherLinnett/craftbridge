@@ -21,4 +21,4 @@ Two Android library modules in the Gradle build at `android/sdk/` (PD16, PD19), 
 
 **Publishing.** `maven-publish` to `https://maven.pkg.github.com/ChristopherLinnett/craftbridge` with the ChristopherLinnett token (PD3); release builds only, at the version `rust/Cargo.toml` gives (§26, G2, D-27).
 
-**Tests.** `./gradlew :effects:connectedAndroidTest` on the emulator in the gate; on the two acceptance Android phones (QA-3).
+**Tests.** Each module's unit tests on the host (`testDebugUnitTest`, on TestNG), and `./gradlew :effects:connectedAndroidTest` on the emulator, in the gate; on the two acceptance Android phones (QA-3).

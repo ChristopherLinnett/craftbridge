@@ -15,20 +15,22 @@
 //!   `json` changes the parameter's type).
 //! - An enum key that lost a word: the app passes it. So too when a key's whole word list appears or
 //!   goes while its type stays: that is a shape the rules do not read, and doubtful changes break.
-//! - Keys of one command in another order, or a new key before one the command had: the facade keeps the
-//!   `params` text's order for its parameters, Swift takes arguments only in their declared order, and a
-//!   Kotlin call that passes them by position hands each to whatever key now holds its place, silently
-//!   when the types agree. A new key after all of the command's keys takes no place of theirs.
+//! - Keys of one command in another order: the facade keeps the `params` text's order for its
+//!   parameters, and Swift takes arguments only in their declared order. A new key, wherever it stands,
+//!   is judged on its own (above): a Swift call leaves out a defaulted parameter wherever it stands, and
+//!   the Kotlin facade takes every argument by name, so no call hands a value to a key that took another's
+//!   place.
 //! - A tool an app can call that became `bridgeOnly`, or whose input schema changed other than by a new
 //!   optional property, an optional property that was required, or a description: the app's input is no
 //!   longer one the tool takes. A tool that was `bridgeOnly` is none an app can call: CraftBridge runs the
 //!   engine headless, which hides and refuses every such tool, so nothing that becomes of it breaks an app.
 //!
-//! Everything else is compatible and still listed: a new command, a new optional key after the others, a
+//! Everything else is compatible and still listed: a new command, a new optional key wherever it stands, a
 //! new enum word, a key that became optional, a new tool, a changed label, `journal` flag, `params` text or
 //! description — a changed `params` text is not listed beside a command whose keys changed, since it is the
 //! very text those changes came from. A new enum word stays compatible only while the facades give an enum
-//! key a type no Swift `switch` or Kotlin `when` covers exhaustively.
+//! key a type no Swift `switch` or Kotlin `when` covers exhaustively, and a new optional key before another
+//! only while every Kotlin call names its arguments.
 
 use crate::model::{Command, Key, Surface, Tool};
 use serde_json::{Map, Value};
@@ -186,14 +188,15 @@ fn compare_key(subject: &str, old: &Key, new: &Key, changes: &mut Vec<Change>) {
     }
 }
 
-/// The old and the new order of a command's keys, when a call that passes them by position would now hand
-/// a value to another key: the keys the command keeps are in another order, or a new key comes before one
-/// of them. A key that is gone is judged on its own, and a new key after all of them takes no place.
+/// The old and the new order of a command's keys, when the keys the command keeps are in another order
+/// among themselves: a Swift call passes its arguments in the order the parameters are declared. A key
+/// that is gone or new is judged on its own, wherever it stood or stands.
 fn reordered(old: &[Key], new: &[Key]) -> Option<String> {
     let (was, is) = (names_of(old), names_of(new));
-    let kept: Vec<&str> = was.iter().copied().filter(|name| is.contains(name)).collect();
+    let kept_then: Vec<&str> = was.iter().copied().filter(|name| is.contains(name)).collect();
+    let kept_now: Vec<&str> = is.iter().copied().filter(|name| was.contains(name)).collect();
     let list = |names: &[&str]| names.iter().map(|name| escaped(name)).collect::<Vec<_>>().join(",");
-    (!is.starts_with(&kept)).then(|| format!("key order {} -> {}", list(&was), list(&is)))
+    (kept_then != kept_now).then(|| format!("key order {} -> {}", list(&was), list(&is)))
 }
 
 fn names_of(keys: &[Key]) -> Vec<&str> {
@@ -482,16 +485,23 @@ mod tests {
     }
 
     #[test]
-    fn keys_in_another_order_or_a_new_key_before_one_the_command_had_break() {
+    fn keys_in_another_order_break_and_a_new_optional_key_anywhere_does_not() {
         assert_eq!(only(&one_command(|c| c.keys.swap(0, 1))), ("a.b", Verb::Changed, "key order one,two,mode -> two,one,mode", true));
-        let first = one_command(|c| c.keys.insert(0, Key::raw("new", false, "bool", None)));
+        // Every call names its arguments, so a new optional key takes no other's place wherever it goes:
+        // first, between two, or after all of them.
+        for at in [0, 2, 3] {
+            let added = one_command(|c| c.keys.insert(at, Key::raw("new", false, "bool", None)));
+            assert_eq!(only(&added), ("a.b:new", Verb::Added, "", false), "a new key at {at}");
+        }
+        // The keys the command keeps are weighed among themselves, a new key between them or not.
+        let both = one_command(|c| {
+            c.keys.swap(0, 1);
+            c.keys.insert(1, Key::raw("new", false, "bool", None));
+        });
         assert_eq!(
-            first.iter().map(|change| (change.subject.as_str(), change.detail.as_str(), change.breaking)).collect::<Vec<_>>(),
-            [("a.b", "key order one,two,mode -> new,one,two,mode", true), ("a.b:new", "", false)],
-            "a key put first takes the place a positional call gives the first key"
+            both.iter().map(|change| (change.subject.as_str(), change.detail.as_str(), change.breaking)).collect::<Vec<_>>(),
+            [("a.b", "key order one,two,mode -> two,new,one,mode", true), ("a.b:new", "", false)]
         );
-        assert!(is_breaking(&one_command(|c| c.keys.insert(2, Key::raw("new", false, "bool", None)))), "and one put between two of them");
-        assert!(!is_breaking(&one_command(|c| c.keys.push(Key::raw("new", false, "bool", None)))), "a key after all of them takes no place of theirs");
         assert!(one_command(|c| drop(c.keys.remove(0))).iter().all(|change| change.kind == Kind::Key), "a key that is gone is judged on its own");
     }
 

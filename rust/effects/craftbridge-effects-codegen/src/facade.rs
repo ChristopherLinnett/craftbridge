@@ -34,6 +34,34 @@ pub(crate) const FROM_WORD_DOC: &str = "The value of a word, one listed here or 
 /// What a namespace's type is named: its path in upper camel case and this, `LayerMaskCommands`.
 const TYPE_SUFFIX: &str = "Commands";
 
+/// `text` between the quotes of a string literal: a backslash and a double quote always take a
+/// backslash, every letter in `extra` takes one as well, and every control letter goes through
+/// `control`, which spells it the way its language reads it. The registry writes the text between the
+/// quotes — a command id, a key, an enum word — none of which may end the literal early.
+pub(crate) fn string_literal(text: &str, extra: &str, control: impl Fn(char) -> String) -> String {
+    text.chars()
+        .map(|letter| match letter {
+            '\\' => "\\\\".to_string(),
+            '"' => "\\\"".to_string(),
+            letter if extra.contains(letter) => format!("\\{letter}"),
+            letter if letter.is_control() => control(letter),
+            letter => letter.to_string(),
+        })
+        .collect()
+}
+
+/// The first lines of every facade file: the `@generated` notice the gate's `generated` stage knows a
+/// generated file by, naming the subcommand that wrote it (`command`, which each emitter's module owns as
+/// the one name `run` answers it to), then where to make a change instead.
+pub(crate) fn header(command: &str) -> String {
+    format!("{}// Change the generator, which reads EffectCraft's command registry at the pinned revision.\n", crate::generated_notice(command))
+}
+
+/// The member every namespace's type of either facade keeps its engine by. A namespace below another is
+/// handed out by a property of its parent's type, so one named this would be a second declaration of the
+/// name there: [`crate::swift::check`] and [`crate::kotlin::check`] both refuse it.
+pub(crate) const ENGINE: &str = "engine";
+
 /// The one thing that differs by language in naming: how a name that the language reserves is written.
 pub(crate) trait Dialect {
     /// `name` as an identifier of the language.
@@ -145,7 +173,15 @@ fn namespace_of(path: &[&str]) -> Result<Namespace, String> {
     // `view3d9patch` and not a second name starting with a digit.
     let name =
         path.iter().try_fold(String::new(), |holder, segment| member_name(segment, &holder)).map_err(|error| format!("namespace `{joined}`: {error}"))?;
-    Ok(Namespace { type_name: type_name(path)?, name, parent, doc: format!("The `{joined}` commands."), path: joined, methods: Vec::new(), enums: Vec::new() })
+    Ok(Namespace {
+        type_name: type_name(path)?,
+        name,
+        parent,
+        doc: format!("The `{}` commands.", one_line(&joined)),
+        path: joined,
+        methods: Vec::new(),
+        enums: Vec::new(),
+    })
 }
 
 fn method_of(command: &Command, last: &str, namespace: &str) -> Result<Method, String> {
@@ -177,7 +213,7 @@ fn param_of(command: &str, method: &str, key: &crate::model::Key) -> Result<Para
     // back from that one spelling, and a file that spells it wrong is refused here by name, not guessed.
     let key_type = KeyType::named(key_type, values.as_deref()).map_err(|why| format!("command `{command}` key `{key_name}`: {why}"))?;
     let enum_name = matches!(key_type, KeyType::Enum(_)).then(|| format!("{}{}", upper_initial(method), upper_initial(&name)));
-    let doc = format!("The key `{key_name}`: {}", one_line(doc));
+    let doc = format!("The key `{}`: {}", one_line(key_name), one_line(doc));
     Ok(Param { key: key_name.clone(), name, required: *required, key_type, enum_name, doc })
 }
 
@@ -191,7 +227,7 @@ fn enums_of(methods: &[Method]) -> Result<Vec<EnumType>, String> {
                 .iter()
                 .map(|value| {
                     member_name(value, &param.name)
-                        .map(|case| EnumCase { name: case, value: value.clone(), doc: format!("The value `{value}`.") })
+                        .map(|case| EnumCase { name: case, value: value.clone(), doc: format!("The value `{}`.", one_line(value)) })
                         .map_err(|error| format!("command `{}` key `{}`: {error}", method.id, param.key))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -199,7 +235,7 @@ fn enums_of(methods: &[Method]) -> Result<Vec<EnumType>, String> {
             if let Some(case) = cases.iter().find(|case| !seen.insert(case.name.as_str())) {
                 return Err(format!("command `{}` key `{}`: two values are named `{}`", method.id, param.key, case.name));
             }
-            let doc = format!("The values the engine accepts for the key `{}` of `{}`.", param.key, method.id);
+            let doc = format!("The values the engine accepts for the key `{}` of `{}`.", one_line(&param.key), one_line(&method.id));
             enums.push(EnumType { name: name.clone(), id: method.id.clone(), key: param.key.clone(), doc, cases });
         }
     }
@@ -272,7 +308,10 @@ fn starts_with_digit(name: &str) -> bool {
     name.starts_with(|letter: char| letter.is_ascii_digit())
 }
 
-/// Text on one line: runs of white space, line breaks included, become one space.
+/// Text on one line: runs of white space, line breaks included, become one space. Every piece of registry
+/// text a documentation sentence carries goes through it — an id, a key, a word as well as a label or a
+/// description — since a Swift doc comment is one `///` line, which a line break would end, leaving the
+/// rest of the sentence as code.
 pub(crate) fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -303,10 +342,137 @@ fn lower_initial(part: &str) -> String {
     part.chars().enumerate().map(|(index, letter)| if index < lowered { letter.to_ascii_lowercase() } else { letter }).collect()
 }
 
+/// The type a key is passed as, in whichever language asks. Every word here names a type the transport
+/// or the bindings already name alike in Swift and in Kotlin — `Double`, `String`, `Vec2`, `Vec3`,
+/// `CraftColor`, `ItemReference`, `JSONValue` — and an enum key takes its enum type's own name, which
+/// is also the same in both. Only the boolean is spelled per language, so that word alone is the
+/// argument; a facade for a third language adds its word here rather than copying this table.
+pub(crate) fn type_name(param: &Param, bool_name: &str) -> String {
+    match &param.key_type {
+        KeyType::Bool => bool_name.to_string(),
+        KeyType::Number => "Double".to_string(),
+        KeyType::Str => "String".to_string(),
+        KeyType::Enum(_) => param.enum_name.clone().unwrap_or_else(|| "String".to_string()),
+        KeyType::Vec2 => "Vec2".to_string(),
+        KeyType::Vec3 => "Vec3".to_string(),
+        KeyType::Color => "CraftColor".to_string(),
+        KeyType::Ref => "ItemReference".to_string(),
+        KeyType::Json => "JSONValue".to_string(),
+    }
+}
+
+/// The text of the emitted file the test asks for, chosen the way that test matches names. Both
+/// emitters' tests look up a file by name and hand back its text; only the name match differs, so that
+/// difference alone is the argument.
+#[cfg(test)]
+pub(crate) fn text_in(mut emitted: impl Iterator<Item = (String, String)>, name: &str, keeps: impl Fn(&str, &str) -> bool) -> String {
+    emitted.find(|(file, _)| keeps(file, name)).map(|(_, text)| text).unwrap_or_default()
+}
+
+/// Test-only: the plan's refusal of a command set, read through one emitter's own checks.
+#[cfg(test)]
+pub(crate) fn refusal(check: fn(&[Namespace]) -> Result<(), String>, commands: &[Command]) -> String {
+    check(&plan(commands).unwrap()).err().unwrap_or_default()
+}
+
+/// Test-only: a command set planned and rendered by one emitter, in one step.
+#[cfg(test)]
+pub(crate) fn plan_emitted(render: fn(&[Namespace]) -> Vec<(String, String)>, commands: &[Command]) -> Vec<(String, String)> {
+    render(&plan(commands).unwrap())
+}
+
+/// Test-only: a facade refuses an enum key whose type name would take a name the facade itself writes
+/// by hand, and the names it weighs (`named_types`) hold every type its table (`type_name`) can hand
+/// back. The refused names and the refusals come from this module's planning, so the proof runs once
+/// and each emitter's test calls it through its own checks, then adds the names only its own language
+/// writes.
+#[cfg(test)]
+pub(crate) fn assert_facade_names_are_refused(check: fn(&[Namespace]) -> Result<(), String>, named_types: &[&str], type_name: fn(&Param) -> String) {
+    use crate::model::Key;
+    for key_type in [KeyType::Bool, KeyType::Number, KeyType::Str, KeyType::Vec2, KeyType::Vec3, KeyType::Color, KeyType::Ref, KeyType::Json] {
+        let param = plan(&[Command::of("a.b", "B", vec![Key::of("k", false, key_type)])])
+            .unwrap()
+            .pop()
+            .and_then(|namespace| namespace.methods.into_iter().next())
+            .and_then(|method| method.params.into_iter().next())
+            .unwrap();
+        assert!(named_types.contains(&type_name(&param).as_str()), "{} is named by the facade but not weighed", type_name(&param));
+    }
+    let kind = KeyType::Enum(vec!["layer".to_string(), "comp".to_string()]);
+    let error = refusal(check, &[Command::of("effect.item", "Item", vec![Key::of("reference", false, kind.clone())])]);
+    assert!(error.contains("command `effect.item` key `reference`") && error.contains("`ItemReference`"), "{error}");
+    let error = refusal(check, &[Command::of("view.effects", "E", vec![Key::of("engine", false, kind.clone())])]);
+    assert!(error.contains("`EffectsEngine`"), "{error}");
+    let error = refusal(check, &[Command::of("a.jSON", "J", vec![Key::of("value", false, kind.clone())])]);
+    assert!(error.contains("`JSONValue`"), "{error}");
+    let error = refusal(check, &[Command::of("a.craft", "C", vec![Key::of("color", false, kind)])]);
+    assert!(error.contains("`CraftColor`"), "{error}");
+}
+
+/// Test-only: the pin's promise proved against a renderer: one file per namespace, one call per
+/// command (`call_marker` is the language's spelling of a method), and each command id written on
+/// exactly one id line, which both layouts indent alike. The rendered files come back for a test to
+/// weigh whatever else its language bans.
+#[cfg(test)]
+pub(crate) fn assert_pin_emitted_once(render: fn(&[Namespace]) -> Vec<(String, String)>, call_marker: &str) -> Vec<(String, String)> {
+    let commands = crate::surface::commands();
+    let namespaces = plan(&commands).unwrap();
+    let emitted = render(&namespaces);
+    assert_eq!(emitted.len(), namespaces.len());
+    let methods: usize = emitted.iter().map(|(_, text)| text.matches(call_marker).count()).sum();
+    assert_eq!(methods, commands.len());
+    for command in &commands {
+        let needle = format!("            \"{}\",\n", command.id);
+        assert_eq!(emitted.iter().map(|(_, text)| text.matches(&needle).count()).sum::<usize>(), 1, "{}", command.id);
+    }
+    emitted
+}
+
+/// Test-only: a command whose id, key and word each carry a line break where the registry might write
+/// one, for the emitters' tests that a documentation sentence stays one line.
+#[cfg(test)]
+pub(crate) fn broken_lines() -> Vec<Command> {
+    use crate::model::Key;
+    let mut command =
+        Command::of("view\nleft.show\rall", "Show\nAll", vec![Key::of("k\ny", false, KeyType::Enum(vec!["on".to_string(), "of\rf".to_string()]))]);
+    command.params = "{k\ny?:\ron|of\rf}".to_string();
+    vec![command]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::Key;
+
+    #[test]
+    fn no_documentation_sentence_holds_a_line_break_from_the_registry() {
+        let namespaces = plan(&broken_lines()).unwrap();
+        let mut sentences: Vec<&str> = Vec::new();
+        for namespace in &namespaces {
+            sentences.push(&namespace.doc);
+            for method in &namespace.methods {
+                sentences.extend([method.summary.as_str(), method.detail.as_str()]);
+                sentences.extend(method.params.iter().map(|param| param.doc.as_str()));
+            }
+            for each in &namespace.enums {
+                sentences.push(&each.doc);
+                sentences.extend(each.cases.iter().map(|case| case.doc.as_str()));
+            }
+        }
+        assert_eq!(sentences.len(), 7, "every kind of sentence is read: {sentences:?}");
+        for sentence in sentences {
+            assert!(!sentence.contains(['\n', '\r']), "{sentence:?}");
+        }
+    }
+
+    #[test]
+    fn a_facade_file_opens_with_the_generated_notice_naming_its_command() {
+        let header = header("kotlin");
+        assert!(header.starts_with(&crate::generated_notice("kotlin")), "{header}");
+        let lines: Vec<&str> = header.lines().collect();
+        assert_eq!(lines.len(), 2, "{header}");
+        assert!(header.ends_with(".\n"), "{header}");
+    }
 
     fn key(name: &str, key_type: KeyType) -> Key {
         Key::of(name, false, key_type)

@@ -36,7 +36,8 @@ spotless-gradle-plugin = { module = "com.diffplug.spotless:spotless-plugin-gradl
 # fixtures they test with. The rules' tests run on TestNG: kotlin-test binds to JUnit 4 by default,
 # whose EPL-1.0 is on no branch of the allowlist (rust/deny.toml), and the licence check reads the
 # rules' own test classpaths as closely as a module's. kotlin-test-testng binds the same kotlin.test
-# assertions to Apache-2.0 TestNG, which is what useTestNG() in detekt-rules runs.
+# assertions to Apache-2.0 TestNG, which is what useTestNG() runs, in detekt-rules and, through the
+# convention plugin, in every module's unit tests.
 detekt-cli = { module = "dev.detekt:detekt-cli", version.ref = "detekt" }
 detekt-api = { module = "dev.detekt:detekt-api", version.ref = "detekt" }
 detekt-core = { module = "dev.detekt:detekt-core", version.ref = "detekt" }

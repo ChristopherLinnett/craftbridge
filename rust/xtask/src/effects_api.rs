@@ -1,5 +1,6 @@
-//! The generators behind `generated/api-surface.json`, the Swift facade and the plugin's version constants,
-//! and the comparison of two surfaces the upstream update makes: the codegen binary, built and run by cargo.
+//! The generators behind `generated/api-surface.json`, the Swift and Kotlin facades and the plugin's
+//! version constants, and the comparison of two surfaces the upstream update makes: the codegen binary,
+//! built and run by cargo.
 //!
 //! The codegen links the pinned EffectCraft and reads its command registry at run time, and xtask may not
 //! depend on a host tool, so xtask asks cargo for the binary and runs it. The pin the surface records is
@@ -17,6 +18,11 @@ pub(crate) const OUTPUT_DIR: &str = "rust/effects/craftbridge-effects-codegen/ge
 
 /// Where the Swift facade lives: the generated folder of the plugin's Swift target.
 pub(crate) const SWIFT_OUTPUT_DIR: &str = "ios/sdk/Sources/CraftBridgeEffects/Generated";
+
+/// Where the Kotlin facade lives: the folder of the package it declares, inside the generated Kotlin source
+/// folder of the plugin's Android module. It owns that folder alone, so the UniFFI bindings generator can
+/// own the module's `ffi` package folder beside it.
+pub(crate) const KOTLIN_OUTPUT_DIR: &str = "android/sdk/effects/src/generated/kotlin/io/github/christopherlinnett/craftbridge/effects";
 
 /// Where the plugin's version constants live: the generated folder of the plugin's own source.
 pub(crate) const VERSION_OUTPUT_DIR: &str = "rust/effects/craftbridge-effects/src/generated";
@@ -44,6 +50,11 @@ fn pinned_commit(root: &Path) -> Result<String, String> {
 /// Write the Swift facade into `out_dir`.
 pub(crate) fn generate_swift(out_dir: &Path) -> Result<(), String> {
     run_codegen(&["swift"], out_dir)
+}
+
+/// Write the Kotlin facade into `out_dir`.
+pub(crate) fn generate_kotlin(out_dir: &Path) -> Result<(), String> {
+    run_codegen(&["kotlin"], out_dir)
 }
 
 /// Build the codegen and run it with `args` and the output folder.
@@ -174,5 +185,14 @@ mod tests {
     #[test]
     fn the_surface_lives_in_the_codegens_own_generated_folder() {
         assert_eq!(OUTPUT_DIR, format!("rust/effects/{CODEGEN}/generated"));
+    }
+
+    #[test]
+    fn the_facades_live_in_their_modules_generated_folders() {
+        assert!(SWIFT_OUTPUT_DIR.ends_with("/Generated") && SWIFT_OUTPUT_DIR.starts_with("ios/sdk/"), "{SWIFT_OUTPUT_DIR}");
+        assert!(
+            KOTLIN_OUTPUT_DIR.starts_with("android/sdk/effects/src/generated/kotlin/") && KOTLIN_OUTPUT_DIR.ends_with("/craftbridge/effects"),
+            "{KOTLIN_OUTPUT_DIR}"
+        );
     }
 }

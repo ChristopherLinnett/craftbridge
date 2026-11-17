@@ -64,11 +64,13 @@ class QualityConventionPlugin : Plugin<Project> {
                         exclude(buildLogicOutputs)
                     }
                 } else {
-                    // Every source set; generated bindings live in src/generated and are never
-                    // formatted by hand.
+                    // Every source set. Generated Kotlin is formatted like written Kotlin, and fails
+                    // the same way if it is not — the generator is held to the style, never the other
+                    // way round. Only the bindings, which their tool lays out in its own shape, sit
+                    // outside: detekt splits the generated folder at the same line (GENERATED_BINDINGS).
                     fileTree("src") {
                         include("**/*.kt")
-                        exclude("generated/**")
+                        exclude("${GENERATED_KOTLIN.removePrefix("src/")}/$GENERATED_BINDINGS/**")
                     }
                 }
             val writtenGradle =
