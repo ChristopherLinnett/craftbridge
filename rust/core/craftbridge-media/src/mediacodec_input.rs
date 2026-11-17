@@ -4,10 +4,11 @@
 //!
 //! Safe code, so every target tests it; the platform module only makes the calls.
 
-use filmcraft_codecs::hw::NalStreamInfo;
+use filmcraft_codecs::hw::{NalStreamInfo, StreamInfo};
+use filmcraft_isobmff::SampleEntry;
 
 use crate::biplanar::{Crop, Depth, Plane, Strided};
-use crate::layout::{Codec, Layout};
+use crate::layout::{self, Codec, Layout};
 
 /// What every NAL unit of an Annex B byte stream starts with.
 const START_CODE: [u8; 4] = [0, 0, 0, 1];
@@ -15,21 +16,21 @@ const START_CODE: [u8; 4] = [0, 0, 0, 1];
 /// MediaCodec's names for the codecs this module takes.
 pub(crate) const H264_MIME: &str = "video/avc";
 pub(crate) const HEVC_MIME: &str = "video/hevc";
+pub(crate) const AV1_MIME: &str = "video/av01";
 
 /// Every MIME type a decoder is taken for, which is what [`crate::register`] asks the device about.
-#[cfg(target_os = "android")]
-pub(crate) const BACKEND_MIMES: [&str; 2] = [H264_MIME, HEVC_MIME];
+#[cfg(any(target_os = "android", test))]
+pub(crate) const BACKEND_MIMES: [&str; 3] = [H264_MIME, HEVC_MIME, AV1_MIME];
 
 /// The MIME type MediaCodec names the decoder of `layout`'s stream by, or why the Android decoder does not
 /// take it. Only 8-bit pictures reach `YUV_420_888`, the format the decoder's output is read in: a 10-bit
-/// picture would lose its low bits on the way, so it is left to the software decoder, which keeps them. AV1
-/// is left to it too: its samples are OBUs, and the Android decoder feeds MediaCodec NAL units alone.
+/// picture would lose its low bits on the way, so it is left to the software decoder, which keeps them.
 pub(crate) fn mime(layout: &Layout) -> Result<&'static str, String> {
     match (layout.codec, layout.depth) {
-        (Codec::Av1, _) => Err("AV1".into()),
         (_, Depth::Ten) => Err("10-bit video".into()),
         (Codec::H264, Depth::Eight) => Ok(H264_MIME),
         (Codec::Hevc, Depth::Eight) => Ok(HEVC_MIME),
+        (Codec::Av1, Depth::Eight) => Ok(AV1_MIME),
     }
 }
 
@@ -94,10 +95,25 @@ pub(crate) fn is_software_codec(name: &str) -> bool {
     name.starts_with("c2.android.") || name.starts_with("OMX.google.")
 }
 
-/// The stream's parameter sets as the codec-specific data MediaCodec starts a decoder with: every set in
-/// record order (H.264 SPS then PPS; HEVC VPS, SPS, PPS), each after a start code.
-pub(crate) fn codec_specific_data(info: &NalStreamInfo) -> Vec<u8> {
-    info.parameter_sets.iter().flat_map(|set| START_CODE.iter().chain(set)).copied().collect()
+/// The stream's codec-specific data (`csd-0`), which MediaCodec starts a decoder with: for H.264 and HEVC
+/// every parameter set in record order (H.264 SPS then PPS; HEVC VPS, SPS, PPS), each after a start code; for
+/// AV1 the `av1C` record itself, which is what Android's table of codec-specific data names.
+pub(crate) fn codec_specific_data(entry: &SampleEntry, stream: &StreamInfo) -> Result<Vec<u8>, &'static str> {
+    match stream {
+        StreamInfo::Nal(info) => Ok(info.parameter_sets.iter().flat_map(|set| START_CODE.iter().chain(set)).copied().collect()),
+        StreamInfo::Frame(_) => layout::av1c_record(entry),
+    }
+}
+
+/// A sample as MediaCodec is fed it: H.264 and HEVC as Annex B ([`annex_b`]); AV1 as it is, since its
+/// samples are OBU temporal units, which is the form the Android decoder reads. An error for a sample with
+/// nothing in it.
+pub(crate) fn input(stream: &StreamInfo, sample: &[u8]) -> Result<Vec<u8>, &'static str> {
+    match stream {
+        StreamInfo::Nal(info) => annex_b(info, sample),
+        StreamInfo::Frame(_) if sample.is_empty() => Err("the sample is empty"),
+        StreamInfo::Frame(_) => Ok(sample.to_vec()),
+    }
 }
 
 /// A length-prefixed sample as an Annex B byte stream. An error when the sample does not hold whole NAL
@@ -113,14 +129,18 @@ pub(crate) fn annex_b(info: &NalStreamInfo, sample: &[u8]) -> Result<Vec<u8>, &'
 
 #[cfg(test)]
 mod tests {
-    use filmcraft_codecs::hw::{FrameCodec, FrameStreamInfo, NalCodec, StreamInfo};
+    use filmcraft_codecs::hw::{FrameCodec, FrameStreamInfo, NalCodec};
     use filmcraft_color::ColorInfo;
 
     use super::*;
-    use crate::fixtures::{avc_entry, hevc_entry, pps, sps};
+    use crate::fixtures::{av1_entry, av1_samples, avc_entry, hevc_entry, pps, sps};
 
     fn nal() -> NalStreamInfo {
         NalStreamInfo::from_entry(&avc_entry()).unwrap().unwrap()
+    }
+
+    fn av1() -> StreamInfo {
+        FrameStreamInfo::from_entry(&av1_entry()).unwrap().unwrap().into()
     }
 
     fn layout(change: impl FnOnce(&mut NalStreamInfo)) -> Layout {
@@ -130,14 +150,17 @@ mod tests {
     }
 
     #[test]
-    fn h264_and_8_bit_hevc_are_named_by_the_mime_types_mediacodec_knows_them_by() {
-        // MediaCodec's own words for the two.
+    fn each_codec_taken_is_named_by_the_mime_type_mediacodec_knows_it_by() {
+        // MediaCodec's own words for each.
         assert_eq!(mime(&layout(|_| {})), Ok("video/avc"));
         assert_eq!(mime(&layout(|info| info.codec = NalCodec::Hevc)), Ok("video/hevc"));
+        assert_eq!(mime(&Layout::for_stream(&av1()).unwrap()), Ok("video/av01"));
+        let taken = [layout(|_| {}), layout(|info| info.codec = NalCodec::Hevc), Layout::for_stream(&av1()).unwrap()];
+        assert_eq!(taken.iter().map(|layout| mime(layout).unwrap()).collect::<Vec<_>>(), BACKEND_MIMES, "the device is asked about every MIME type taken");
     }
 
     #[test]
-    fn ten_bit_pictures_and_av1_are_left_to_the_software_decoder() {
+    fn ten_bit_pictures_are_left_to_the_software_decoder() {
         let ten = layout(|info| {
             info.bit_depth_luma = 10;
             info.bit_depth_chroma = 10;
@@ -149,9 +172,9 @@ mod tests {
             info.bit_depth_chroma = 10;
         });
         assert_eq!(mime(&ten_hevc), Err("10-bit video".to_string()), "10-bit HEVC");
-        let mut av1 = FrameStreamInfo::for_tests(FrameCodec::Av1, 0, 8, (1, 1), (640, 360));
-        av1.color = Some(ColorInfo::REC709);
-        assert_eq!(mime(&Layout::for_stream(&StreamInfo::Frame(av1)).unwrap()), Err("AV1".to_string()), "AV1");
+        let mut ten_av1 = FrameStreamInfo::for_tests(FrameCodec::Av1, 0, 10, (1, 1), (640, 360));
+        ten_av1.color = Some(ColorInfo::REC709);
+        assert_eq!(mime(&Layout::for_stream(&StreamInfo::Frame(ten_av1)).unwrap()), Err("10-bit video".to_string()), "10-bit AV1");
     }
 
     #[test]
@@ -204,7 +227,16 @@ mod tests {
 
     #[test]
     fn the_platforms_own_software_codecs_are_not_hardware_and_every_other_name_is() {
-        for name in ["c2.android.avc.decoder", "c2.android.hevc.decoder", "OMX.google.h264.decoder", "OMX.google.hevc.decoder"] {
+        // The platform's own decoders by the names the emulators carry them under, AV1's two among them (API 34
+        // has the first, API 37 both).
+        for name in [
+            "c2.android.avc.decoder",
+            "c2.android.hevc.decoder",
+            "c2.android.av1.decoder",
+            "c2.android.av1-dav1d.decoder",
+            "OMX.google.h264.decoder",
+            "OMX.google.hevc.decoder",
+        ] {
             assert!(is_software_codec(name), "{name}");
         }
         for name in ["c2.goldfish.h264.decoder", "c2.qti.avc.decoder", "OMX.qcom.video.decoder.avc", "c2.exynos.h264.decoder", "c2.android", "OMX.google"] {
@@ -214,14 +246,39 @@ mod tests {
 
     #[test]
     fn every_parameter_set_follows_a_start_code_in_record_order() {
-        let data = codec_specific_data(&nal());
+        let entry = avc_entry();
+        let stream = StreamInfo::Nal(nal());
+        let data = codec_specific_data(&entry, &stream).unwrap();
         let expected: Vec<u8> = [&[0, 0, 0, 1][..], &sps(), &[0, 0, 0, 1], &pps()].concat();
         assert_eq!(data, expected);
         // An HEVC stream's VPS too, which some decoders do without and others need.
         let hevc = NalStreamInfo::from_entry(&hevc_entry()).unwrap().unwrap();
         assert_eq!(hevc.parameter_sets.iter().map(|set| (set[0] >> 1) & 0x3f).collect::<Vec<_>>(), [32, 33, 34], "the record's VPS, SPS and PPS");
         let expected: Vec<u8> = hevc.parameter_sets.iter().flat_map(|set| [&[0, 0, 0, 1][..], set].concat()).collect();
-        assert_eq!(codec_specific_data(&hevc), expected);
+        assert_eq!(codec_specific_data(&hevc_entry(), &StreamInfo::Nal(hevc)), Ok(expected));
+    }
+
+    #[test]
+    fn an_av1_streams_codec_specific_data_is_its_av1c_record_and_its_samples_are_fed_as_they_are() {
+        let entry = av1_entry();
+        let record = codec_specific_data(&entry, &av1()).unwrap();
+        // Pinned here because the emulator's AV1 decoder reads no codec-specific data (it decodes from the key
+        // frame's own sequence header), so only a phone's hardware decoder reads these bytes. The record's
+        // marker and version byte, then its profile and level, then the sequence header OBU.
+        assert_eq!(record[..4], [0x81, 0x00, 0x0C, 0x00]);
+        assert_eq!(record[4..], [0x0A, 0x0A, 0x00, 0x00, 0x00, 0x02, 0xAF, 0xF7, 0x9B, 0x5F, 0x30, 0x08]);
+        assert_eq!(codec_specific_data(&avc_entry(), &av1()), Err("the sample entry has no av1C"), "an entry with no record");
+        for (_, sample) in av1_samples() {
+            assert_eq!(input(&av1(), &sample), Ok(sample.clone()), "no start codes and no length prefixes");
+        }
+        assert_eq!(input(&av1(), &[]), Err("the sample is empty"));
+    }
+
+    #[test]
+    fn an_h264_or_hevc_sample_is_fed_as_annex_b() {
+        let sample = [&[0, 0, 0, 2][..], &[0x65, 0x88]].concat();
+        assert_eq!(input(&StreamInfo::Nal(nal()), &sample), Ok(vec![0, 0, 0, 1, 0x65, 0x88]));
+        assert_eq!(input(&StreamInfo::Nal(nal()), &[0, 0, 0, 2, 0x65]), Err("the sample is not whole NAL units"));
     }
 
     #[test]

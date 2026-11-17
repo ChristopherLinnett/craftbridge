@@ -1,5 +1,5 @@
 //! The Android hardware video decoder: MediaCodec decoding `avcC` (H.264) and, where the device decodes it,
-//! `hvcC` (HEVC) streams into an `AImageReader` of `YUV_420_888` images.
+//! `hvcC` (HEVC) and `av1C` (AV1) streams into an `AImageReader` of `YUV_420_888` images.
 //!
 //! Decoding to an image reader, rather than to the buffers MediaCodec hands out, is what keeps vendor-tiled
 //! and other private output formats away from CraftBridge: the platform converts every picture into the one
@@ -12,15 +12,16 @@
 //! becomes the decoder's error, which [`crate::Fallback`] answers by switching to the software decoder.
 //!
 //! The official NDK bindings (`ndk`) make every call; the only `unsafe` here is the claim that the codec and
-//! the reader may move between threads. Which streams the device takes, the Annex B bytes it is fed and the
-//! planes' conversion into FilmCraft's frame layout are safe code every target tests
+//! the reader may move between threads. Which streams the device takes, the codec-specific data and samples
+//! it is fed and the planes' conversion into FilmCraft's frame layout are safe code every target tests
 //! ([`crate::mediacodec_input`], [`crate::biplanar`]).
 
 use std::time::{Duration, Instant};
 
-use filmcraft_codecs::hw::{NalStreamInfo, StreamInfo};
+use filmcraft_codecs::hw::StreamInfo;
 use filmcraft_codecs::{CodecError, DecodedFrame, Result};
 use filmcraft_frame::VideoFrame;
+use filmcraft_isobmff::SampleEntry;
 use ndk::media::image_reader::{AcquireResult, Image, ImageFormat, ImageReader};
 use ndk::media::media_codec::{DequeuedInputBufferResult, DequeuedOutputBufferInfoResult, MediaCodec, MediaCodecDirection};
 use ndk::media::media_format::MediaFormat;
@@ -76,8 +77,8 @@ pub(crate) fn has_hardware_decoder(mime: &str) -> bool {
     hardware_codec(mime).is_ok()
 }
 
-/// Whether this device has a hardware decoder for H.264 or HEVC, which is what [`crate::register`] reports as
-/// its backend.
+/// Whether this device has a hardware decoder for a type this decoder takes ([`BACKEND_MIMES`]), which is what
+/// [`crate::register`] reports as its backend.
 pub(crate) fn available() -> bool {
     BACKEND_MIMES.into_iter().any(has_hardware_decoder)
 }
@@ -208,7 +209,7 @@ fn read_picture(image: &Image, layout: &Layout) -> std::result::Result<VideoFram
 /// What a MediaCodec decoder feeds [`crate::order::Sequence`]: the codec, made again after a seek.
 pub(crate) struct RawCodec {
     layout: Layout,
-    info: NalStreamInfo,
+    stream: StreamInfo,
     mime: &'static str,
     make: MakeCodec,
     /// The codec-specific data a codec starts with.
@@ -231,7 +232,7 @@ impl RawCodec {
 
 impl RawDecoder<DecodedFrame> for RawCodec {
     fn feed(&mut self, sample: &[u8], pts: i64) -> std::result::Result<Vec<(i64, DecodedFrame)>, Failure> {
-        let data = mediacodec_input::annex_b(&self.info, sample)?;
+        let data = mediacodec_input::input(&self.stream, sample)?;
         let time = mediacodec_input::codec_time(pts)?;
         let layout = self.layout.clone();
         let pipeline = self.pipeline()?;
@@ -273,27 +274,24 @@ fn decoded(pictures: Vec<(i64, VideoFrame)>) -> Vec<(i64, DecodedFrame)> {
     pictures.into_iter().map(|(pts, frame)| (pts, DecodedFrame { pts, frame, draft: false })).collect()
 }
 
-/// The MediaCodec decoder of one `avcC` or `hvcC` stream.
+/// The MediaCodec decoder of one `avcC`, `hvcC` or `av1C` stream.
 pub(crate) type McDecoder = HardwareDecoder<RawCodec>;
 
-/// A decoder for the stream whose parsed record is `stream`. It starts a codec now, so a stream or device
+/// A decoder for the stream `entry` describes, whose parsed record is `stream`. It starts a codec now, so a stream or device
 /// without a hardware decoder for it is refused here.
-pub(crate) fn decoder(stream: &StreamInfo) -> Result<McDecoder> {
-    decoder_with(stream, hardware_codec)
+pub(crate) fn decoder(entry: &SampleEntry, stream: &StreamInfo) -> Result<McDecoder> {
+    decoder_with(entry, stream, hardware_codec)
 }
 
 /// [`decoder`], with the codec each decoding run gets made by `make`.
-fn decoder_with(stream: &StreamInfo, make: MakeCodec) -> Result<McDecoder> {
+fn decoder_with(entry: &SampleEntry, stream: &StreamInfo, make: MakeCodec) -> Result<McDecoder> {
     let layout = Layout::for_stream(stream).map_err(CodecError::Unsupported)?;
     let mime = mediacodec_input::mime(&layout).map_err(CodecError::Unsupported)?;
-    let StreamInfo::Nal(info) = stream else {
-        return Err(CodecError::Unsupported("MediaCodec takes H.264 and HEVC".into()));
-    };
-    let config = mediacodec_input::codec_specific_data(info);
+    let config = mediacodec_input::codec_specific_data(entry, stream).map_err(|error| CodecError::Unsupported(error.into()))?;
     let pipeline = make(mime).and_then(|codec| Pipeline::start(codec, mime, &layout, &config)).map_err(CodecError::Unsupported)?;
     let codec = layout.codec;
     // MediaCodec outputs pictures in presentation order itself, so the reorder buffer holds none back.
-    let raw = RawCodec { layout, info: info.clone(), mime, make, config, pipeline: Some(pipeline) };
+    let raw = RawCodec { layout, stream: stream.clone(), mime, make, config, pipeline: Some(pipeline) };
     Ok(HardwareDecoder::new(raw, stream.clone(), 0, BACKEND, codec))
 }
 
@@ -303,12 +301,11 @@ fn decoder_with(stream: &StreamInfo, make: MakeCodec) -> Result<McDecoder> {
 mod tests {
     use filmcraft_codecs::hw::NalCodec;
     use filmcraft_codecs::{VideoDecoder, software_video_decoder};
-    use filmcraft_isobmff::SampleEntry;
 
     use super::*;
     use crate::fallback::stream_info;
-    use crate::fixtures::{decoded, hevc_entry, hevc_samples, pictures, reordered_entry, reordered_samples, tiny_entry, tiny_samples};
-    use crate::mediacodec_input::{H264_MIME, HEVC_MIME};
+    use crate::fixtures::{av1_entry, av1_samples, decoded, hevc_entry, hevc_samples, pictures, reordered_entry, reordered_samples, tiny_entry, tiny_samples};
+    use crate::mediacodec_input::{AV1_MIME, H264_MIME, HEVC_MIME};
 
     fn stream(entry: &SampleEntry) -> StreamInfo {
         stream_info(entry).unwrap().unwrap()
@@ -317,7 +314,7 @@ mod tests {
     /// The device's decoder for `entry`'s stream; `None` where the device has no hardware decoder for its codec,
     /// which is the decline the factory turns into the software decoder.
     fn device_decoder(entry: &SampleEntry, mime: &str) -> Option<McDecoder> {
-        let decoder = decoder(&stream(entry));
+        let decoder = decoder(entry, &stream(entry));
         assert_eq!(decoder.is_ok(), has_hardware_decoder(mime), "a decoder starts exactly where the device has a hardware one for {mime}");
         decoder.ok()
     }
@@ -410,6 +407,29 @@ mod tests {
         assert_eq!(decoded(&mut decoder, &hevc_samples()), decoded(software(&entry).as_mut(), &hevc_samples()));
     }
 
+    #[test]
+    fn the_device_decodes_av1_only_where_it_has_a_hardware_decoder_for_it() {
+        let entry = av1_entry();
+        let Some(mut decoder) = device_decoder(&entry, AV1_MIME) else { return };
+        assert_eq!(decoder.name(), "MediaCodec AV1");
+        assert_eq!(decoded(&mut decoder, &av1_samples()), decoded(software(&entry).as_mut(), &av1_samples()));
+    }
+
+    #[test]
+    fn an_av1_stream_fed_as_the_hardware_decoder_is_fed_decodes_to_the_pictures_the_software_decoder_gives() {
+        // Where the device's AV1 decoder is software the factory declines the stream, so its own decoder takes
+        // it with the same `av1C` as `csd-0`, the same temporal units and the same image reader.
+        let entry = av1_entry();
+        let decoder = decoder_with(&entry, &stream(&entry), any_codec);
+        assert_eq!(decoder.is_ok(), MediaCodec::from_decoder_type(AV1_MIME).is_some(), "a decoder starts wherever the device decodes AV1");
+        let Ok(mut decoder) = decoder else { return };
+        assert_eq!(decoder.name(), "MediaCodec AV1");
+        let wanted = decoded(software(&entry).as_mut(), &av1_samples());
+        assert_eq!(decoded(&mut decoder, &av1_samples()), wanted);
+        assert_eq!(decoded(&mut decoder, &av1_samples()), wanted, "after the end of the stream");
+        assert!(matches!(decoder.decode(&[], 0), Err(CodecError::Decode(_))), "an empty sample");
+    }
+
     /// The device's own decoder for `mime`, a software one included.
     fn any_codec(mime: &str) -> std::result::Result<MediaCodec, Failure> {
         MediaCodec::from_decoder_type(mime).ok_or_else(|| format!("this device has no decoder for {mime}"))
@@ -420,7 +440,7 @@ mod tests {
         // An emulator has no hardware HEVC decoder, so its own decoder, software or not, takes the stream with
         // the same codec-specific data, the same Annex B samples and the same image reader.
         let entry = hevc_entry();
-        let decoder = decoder_with(&stream(&entry), any_codec);
+        let decoder = decoder_with(&entry, &stream(&entry), any_codec);
         assert_eq!(decoder.is_ok(), MediaCodec::from_decoder_type("video/hevc").is_some(), "a decoder starts wherever the device decodes HEVC");
         let Ok(mut decoder) = decoder else { return };
         assert_eq!(decoder.name(), "MediaCodec HEVC");
@@ -433,6 +453,6 @@ mod tests {
         let StreamInfo::Nal(info) = &mut ten_bit else { panic!("an avcC stream") };
         assert_eq!(info.codec, NalCodec::H264);
         (info.bit_depth_luma, info.bit_depth_chroma) = (10, 10);
-        assert!(matches!(decoder(&ten_bit), Err(CodecError::Unsupported(_))), "10-bit video");
+        assert!(matches!(decoder(&tiny_entry(), &ten_bit), Err(CodecError::Unsupported(_))), "10-bit video");
     }
 }

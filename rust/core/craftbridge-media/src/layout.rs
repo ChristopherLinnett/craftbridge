@@ -12,6 +12,7 @@ use filmcraft_color::ColorInfo;
 #[cfg(any(target_os = "ios", test))]
 use filmcraft_color::Range;
 use filmcraft_frame::{PixelData, VideoFrame};
+use filmcraft_isobmff::{CodecConfig, SampleEntry};
 
 use crate::biplanar::{Crop, Depth};
 
@@ -205,6 +206,15 @@ impl Layout {
             pts: Default::default(),
         }
     }
+}
+
+/// The `av1C` record of an AV1 sample entry, which both hardware decoders hand the platform: CoreMedia as an
+/// extension atom, MediaCodec as `csd-0`.
+pub(crate) fn av1c_record(entry: &SampleEntry) -> Result<Vec<u8>, &'static str> {
+    let CodecConfig::Av1(config) = &entry.codec else {
+        return Err("the sample entry has no av1C");
+    };
+    Ok(config.to_bytes())
 }
 
 fn depth_of(luma: u32, chroma: u32) -> Result<Depth, String> {

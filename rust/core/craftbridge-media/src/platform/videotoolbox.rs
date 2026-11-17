@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use filmcraft_codecs::hw::{NalCodec, NalStreamInfo, StreamInfo};
 use filmcraft_codecs::{CodecError, DecodedFrame, Result};
 use filmcraft_frame::VideoFrame;
-use filmcraft_isobmff::{CodecConfig, SampleEntry};
+use filmcraft_isobmff::SampleEntry;
 use objc2_core_foundation::{CFBoolean, CFData, CFDictionary, CFNumber, CFRetained, CFString, CFType};
 use objc2_core_media::{
     CMBlockBuffer, CMFormatDescription, CMSampleBuffer, CMSampleTimingInfo, CMTime, CMTimeFlags, CMVideoFormatDescriptionCreate,
@@ -44,7 +44,7 @@ use objc2_video_toolbox::{
 };
 
 use crate::biplanar::{self, Plane};
-use crate::layout::{Codec, Layout};
+use crate::layout::{self, Codec, Layout};
 use crate::order::{HardwareDecoder, RawDecoder};
 
 /// A failed call, with what failed.
@@ -122,11 +122,8 @@ fn from_parameter_sets(info: &NalStreamInfo) -> std::result::Result<(*const CMFo
 /// An AV1 format description: the codec, the picture's size and the sample entry's `av1C` record as the
 /// sample description extension atom CoreMedia reads it from.
 fn from_av1c(entry: &SampleEntry, layout: &Layout) -> std::result::Result<(*const CMFormatDescription, i32), Failure> {
-    let CodecConfig::Av1(config) = &entry.codec else {
-        return Err("the sample entry has no av1C".into());
-    };
+    let record = CFData::from_bytes(&layout::av1c_record(entry)?);
     let (width, height) = layout.size_i32().ok_or("the picture is too large")?;
-    let record = CFData::from_bytes(&config.to_bytes());
     let atom = CFString::from_static_str("av1C");
     let atoms = CFDictionary::<CFString, CFData>::from_slices(&[&atom], &[&record]);
     // SAFETY: reading a framework constant, which is never written.
