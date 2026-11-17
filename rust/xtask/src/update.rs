@@ -1002,11 +1002,6 @@ depends = [{ item = "queue", at = [{ file = "crates/engine/src/render_queue.rs" 
     /// anything.
     #[test]
     fn the_script_misused_exits_64() {
-        let script = crate::repo_root().join("tools/update-upstream.sh");
-        for args in [&[][..], &["10376058", "again"][..]] {
-            let output = std::process::Command::new("bash").arg(&script).args(args).output().unwrap();
-            assert_eq!(output.status.code(), Some(64), "{args:?}: {}", String::from_utf8_lossy(&output.stderr));
-            assert!(String::from_utf8_lossy(&output.stderr).contains("usage: tools/update-upstream.sh"));
-        }
+        crate::assert_script_refuses("update-upstream.sh", &[&[], &["10376058", "again"]], "usage: tools/update-upstream.sh");
     }
 }

@@ -10,7 +10,9 @@
 //!
 //! `swift package describe` answers what the dump cannot, SwiftPM having resolved each target: the folder
 //! it sits in, which rule 1's layout holds to `Sources/<name>` for every regular target, and the files it
-//! compiles, which every check must be able to read.
+//! compiles, which every check must be able to read ([`resolved_errors`]). SwiftPM describes no package whose
+//! binary target is missing, and the native library that target links is the gate's longest build, so the
+//! rules read the manifest alone and the Swift lint, which reads the package resolved anyway, asks those.
 
 use std::path::Path;
 use std::process::Command;
@@ -48,7 +50,8 @@ fn asked_names(dependencies: &serde_json::Value) -> Vec<String> {
     asked
 }
 
-const FILE: &str = "ios/sdk/Package.swift";
+/// The Swift package's manifest, as the repository names it.
+pub(crate) const FILE: &str = "ios/sdk/Package.swift";
 
 /// Local packages, named the way SwiftPM itself names them in the dump: `.package(path:)` is a
 /// `fileSystem` dependency, and a `file://` git URL is a `sourceControl` whose location is `local`.
@@ -114,18 +117,55 @@ pub(crate) fn package_errors(package: &serde_json::Value) -> Vec<String> {
     errors
 }
 
-/// Run the check on the repository's Swift package: the direction of its targets' dependencies, where its
-/// shipping targets sit, and what SwiftPM builds that no check sees. A tree without one (a scratch tree)
-/// has nothing to ask.
+/// Run the check on the repository's Swift package: the direction of its targets' dependencies, as the
+/// manifest declares them. A tree without one (a scratch tree) has nothing to ask.
 pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
-    let sdk = root.join("ios").join("sdk");
-    let mut errors = dump_package(&sdk, FILE)?.map(|package| package_errors(&package)).unwrap_or_default();
-    if let Some(targets) = describe_package(&sdk, FILE)? {
-        let read = crate::scan::walk(&sdk, "")?.into_iter().map(|file| file.relative).collect();
-        errors.extend(placement_errors(&targets));
-        errors.extend(target_errors(&targets, &read));
-    }
+    Ok(dump_package(&root.join("ios").join("sdk"), FILE)?.map(|package| package_errors(&package)).unwrap_or_default())
+}
+
+/// What SwiftPM resolved for the package in `sdk`, as [`describe_package`] reads `targets`: where its
+/// shipping targets sit, and what SwiftPM builds that no check sees.
+pub(crate) fn resolved_errors(sdk: &Path, targets: &[SwiftTarget]) -> Result<Vec<String>, String> {
+    let read = crate::scan::walk(sdk, "")?.into_iter().map(|file| file.relative).collect();
+    let mut errors = placement_errors(targets);
+    errors.extend(target_errors(targets, &read));
     Ok(errors)
+}
+
+/// The iOS version a dumped package's `platforms` name, which every build of the package and of the native
+/// library it links targets.
+pub(crate) fn ios_version(package: &serde_json::Value) -> Result<String, String> {
+    package
+        .get("platforms")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|platform| platform.get("platformName").and_then(serde_json::Value::as_str) == Some("ios"))
+        .and_then(|platform| platform.get("version").and_then(serde_json::Value::as_str))
+        .map(str::to_string)
+        .ok_or_else(|| format!("{FILE}: names no iOS version to build for"))
+}
+
+/// The folder, relative to the package, of a dumped package's one binary target built from a path: what the
+/// target links, and so where the build of the native library puts it. That build replaces the folder
+/// whole, so a path that is not an XCFramework inside the package is refused rather than cleared.
+pub(crate) fn binary_target_path(package: &serde_json::Value) -> Result<String, String> {
+    let paths: Vec<&str> = package
+        .get("targets")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|target| target.get("type").and_then(serde_json::Value::as_str) == Some("binary"))
+        .filter_map(|target| target.get("path").and_then(serde_json::Value::as_str))
+        .collect();
+    let [path] = paths.as_slice() else {
+        return Err(format!("{FILE}: holds {} binary targets built from a path, where the native library is one", paths.len()));
+    };
+    let inside = Path::new(path).components().all(|part| matches!(part, std::path::Component::Normal(_)));
+    if !inside || !path.ends_with(".xcframework") {
+        return Err(format!("{FILE}: the binary target's path `{path}` is no XCFramework inside the package, the one folder its build may replace"));
+    }
+    Ok((*path).to_string())
 }
 
 /// A regular target — the core's or a plugin's, the code that ships — sits at `Sources/<name>`, where
@@ -454,6 +494,47 @@ mod tests {
     }
 
     #[test]
+    fn the_ios_version_and_the_binary_targets_folder_are_the_manifests() {
+        let dumped = |targets: &str| package(targets);
+        let mut planned = dumped(
+            r#"[{"name":"CraftBridgeFFIBinary","type":"binary","path":"Frameworks/CraftBridgeEffectsFFI.xcframework"},
+                {"name":"CraftBridgeFFI","type":"regular","path":null}]"#,
+        );
+        assert_eq!(binary_target_path(&planned).unwrap(), "Frameworks/CraftBridgeEffectsFFI.xcframework");
+        assert_eq!(ios_version(&planned).unwrap_err(), "ios/sdk/Package.swift: names no iOS version to build for");
+        planned["platforms"] = serde_json::json!([{"platformName": "macos", "version": "14.0"}, {"platformName": "ios", "version": "17.0"}]);
+        assert_eq!(ios_version(&planned).unwrap(), "17.0");
+        let none = dumped(r#"[{"name":"A","type":"regular","path":null},{"name":"B","type":"binary","url":"https://x/b.zip","checksum":"0"}]"#);
+        assert_eq!(binary_target_path(&none).unwrap_err(), "ios/sdk/Package.swift: holds 0 binary targets built from a path, where the native library is one");
+        let two = dumped(r#"[{"name":"B","type":"binary","path":"Frameworks/B.xcframework"},{"name":"C","type":"binary","path":"Frameworks/C.xcframework"}]"#);
+        assert!(binary_target_path(&two).unwrap_err().contains("holds 2 binary targets"));
+        for outside in ["../Frameworks/B.xcframework", "/tmp/B.xcframework", "Frameworks/../../B.xcframework", "Frameworks", "Frameworks/./B.xcframework/.."] {
+            let path = dumped(&format!(r#"[{{"name":"B","type":"binary","path":"{outside}"}}]"#));
+            assert_eq!(
+                binary_target_path(&path).unwrap_err(),
+                format!(
+                    "ios/sdk/Package.swift: the binary target's path `{outside}` is no XCFramework inside the package, the one folder its build may replace"
+                )
+            );
+        }
+    }
+
+    /// The rules read the package without its binary target built: SwiftPM describes no such package, so a
+    /// check of the rules' that asked it would fail on every checkout the native library is not built in.
+    #[test]
+    fn the_rules_read_a_package_whose_binary_target_is_not_built() {
+        let scratch = scratch_package(
+            ".binaryTarget(name: \"CraftBridgeFFIBinary\", path: \"Frameworks/CraftBridgeEffectsFFI.xcframework\"), .target(name: \"CraftBridge\", dependencies: [\"CraftBridgeFFIBinary\"]), .target(name: \"CraftBridgeEffects\", dependencies: [\"CraftBridge\", \"CraftBridgeEffectsFilm\"]), .target(name: \"CraftBridgeEffectsFilm\")",
+        );
+        scratch.write("ios/sdk/Sources/CraftBridgeEffectsFilm/F.swift", "public let film = 1\n");
+        let sdk = scratch.0.join("ios/sdk");
+        assert!(describe_package(&sdk, FILE).unwrap_err().contains("does not contain binary artifact"), "SwiftPM describes no package missing its binary");
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("plugin target `CraftBridgeEffects` depends on `CraftBridgeEffectsFilm`"), "{errors:?}");
+    }
+
+    #[test]
     fn a_published_package_dependency_stays_legal() {
         let legal = dependencies(
             r#"{"sourceControl": [{"identity": "uniffi", "location": {"remote": ["https://github.com/mozilla/uniffi.git"]}, "requirement": {"branch": ["main"]}}]}"#,
@@ -498,25 +579,32 @@ mod tests {
         scratch
     }
 
-    /// The acceptance shape, asked of the real tool through the check that dumps and describes the package:
-    /// a plugin moved to `Plugins/` by `path:`, and every target moved with no `path:` at all by renaming
-    /// `Sources/` to a folder SwiftPM also searches. The default layout passes.
+    /// What the Swift lint reports of a package SwiftPM resolved, in `root`'s `ios/sdk`.
+    fn resolved(root: &Path) -> Vec<String> {
+        let sdk = root.join("ios/sdk");
+        resolved_errors(&sdk, &describe_package(&sdk, FILE).unwrap().unwrap()).unwrap()
+    }
+
+    /// The acceptance shape, asked of the real tool through the check that describes the package: a plugin
+    /// moved to `Plugins/` by `path:`, and every target moved with no `path:` at all by renaming `Sources/` to
+    /// a folder SwiftPM also searches. The default layout passes.
     #[test]
     fn a_target_moved_out_of_sources_fails_the_check_that_asks_swiftpm() {
         let targets = ".target(name: \"CraftBridge\"), .target(name: \"CraftBridgeEffects\", dependencies: [\"CraftBridge\"])";
         let scratch = scratch_package(targets);
         let sdk = scratch.0.join("ios/sdk");
-        assert!(check(&scratch.0).unwrap().is_empty(), "the default layout");
+        assert!(resolved(&scratch.0).is_empty(), "the default layout");
+        assert!(check(&scratch.0).unwrap().is_empty(), "the rules read the manifest");
 
         let moved = scratch_package(&targets.replace("[\"CraftBridge\"])", "[\"CraftBridge\"], path: \"Plugins/CraftBridgeEffects\")"));
         std::fs::create_dir_all(moved.0.join("ios/sdk/Plugins")).unwrap();
         std::fs::rename(moved.0.join("ios/sdk/Sources/CraftBridgeEffects"), moved.0.join("ios/sdk/Plugins/CraftBridgeEffects")).unwrap();
-        let errors = check(&moved.0).unwrap();
+        let errors = resolved(&moved.0);
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].starts_with("ios/sdk/Package.swift: target `CraftBridgeEffects` sits in `Plugins/CraftBridgeEffects`"), "{errors:?}");
 
         std::fs::rename(sdk.join("Sources"), sdk.join("src")).unwrap();
-        let errors = check(&scratch.0).unwrap();
+        let errors = resolved(&scratch.0);
         assert_eq!(errors.len(), 2, "{errors:?}");
         for name in ["CraftBridge", "CraftBridgeEffects"] {
             assert!(errors.iter().any(|e| e.starts_with(&format!("ios/sdk/Package.swift: target `{name}` sits in `src/{name}`"))), "{errors:?}");

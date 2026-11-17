@@ -5,6 +5,12 @@
 # Swift keeps UniFFI's own `module_name`, the crate's name, as the core's settings explain: it names
 # the files this crate's Swift is written to, and the two crates' files share the one `CraftBridgeFFI`
 # module without sharing a name that would overwrite.
+#
+# No Swift setting names the system frameworks the static library calls into. A static library carries
+# no link flags, so an app links them only through the XCFramework's module map, and `cargo xtask
+# xcframework` writes its `link` declarations from rustc's own answer for each library it builds
+# (`--print native-static-libs`): a list here would be a second, hand-kept copy of that answer, which
+# UniFFI's `link_frameworks` could not complete anyway, since it names frameworks and not libraries.
 
 [bindings.kotlin]
 package_name = "io.github.christopherlinnett.craftbridge.ffi.effects"

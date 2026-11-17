@@ -2,9 +2,9 @@
 //! core's and the plug-in's Swift and Kotlin with every exported type and call, under names both
 //! languages can hold.
 //!
-//! No gate stage compiles generated bindings until the Swift package and the Android build take them
-//! in, so this reads what the generator wrote for the declarations it must hold, line by line as
-//! UniFFI writes them, with runs of spaces read as one.
+//! The gate compiles the generated Swift in the Swift package (`CraftBridgeFFI`) but no stage compiles the
+//! generated Kotlin until the Android build takes it in, so this reads what the generator wrote for the
+//! declarations it must hold, line by line as UniFFI writes them, with runs of spaces read as one.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

@@ -54,6 +54,14 @@
 //! Test code is SwiftPM's answer — the files `swift package describe` puts in a test target — and a Platform
 //! folder is a component of the path the repository names the file by: neither is a pattern over an absolute
 //! path, which the folders a checkout happens to sit in could match.
+//!
+//! UniFFI's Swift bindings are read like every other file, bar the rules its fixed templates cannot meet
+//! ([`BINDINGS_EXEMPTIONS`]), from which their folder alone is exempt.
+//!
+//! The same reading of the package answers what the rules cannot ask without the native library built,
+//! SwiftPM describing no package whose binary target is missing: where each regular target sits, and that
+//! every target compiles only files the checks read and is built by the package scheme
+//! (`crate::direction::resolved_errors`).
 
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -101,7 +109,31 @@ const BANNED_CALLS: &[(&str, &str)] = &[
 const C_SYMBOL_BINDINGS: &[&str] = &["@_silgen_name", "@_cdecl", "@c", "@_extern"];
 
 /// What SwiftLint looks for in a comment to read a command (`// swiftlint:disable all`, `:next`, `:this`).
-const SWIFTLINT_COMMAND: &str = "swiftlint:";
+pub(crate) const SWIFTLINT_COMMAND: &str = "swiftlint:";
+
+/// How the postfix-`!` rule names itself in its findings and in [`BINDINGS_EXEMPTIONS`].
+const POSTFIX_BANG: &str = "postfix !";
+
+/// The rules of this stage UniFFI's Swift cannot meet, each by the name its findings go by — SwiftLint's
+/// rule id, a banned call's name, [`POSTFIX_BANG`] — with what in UniFFI's fixed templates breaks it. The
+/// folder its Swift is generated into ([`crate::swift_bindings::holds`]) alone is exempt from them. Every
+/// other rule holds there — the pointer confinement, which its `Platform/` folder meets, every other banned
+/// call, the test frameworks, the directives and the `swiftlint:` commands, which the generator removes —
+/// and every rule holds everywhere else, the command facade's generated Swift included.
+const BINDINGS_EXEMPTIONS: &[(&str, &str)] = &[
+    ("missing_docs", "UniFFI makes public the converters it writes for every type (`FfiConverter…`, `lift`, `lower`) and documents none of them"),
+    (
+        "fatalError",
+        "UniFFI stops the process when the library's contract version or checksums differ from the Swift's, and in the converters and calls it writes for what the library never sends",
+    ),
+    (POSTFIX_BANG, "UniFFI force-unwraps the data of every buffer it reads"),
+];
+
+/// Whether `file`, as the repository names it, is exempt from `rule`: the bindings' folder from
+/// [`BINDINGS_EXEMPTIONS`], nothing else from anything.
+fn exempt(file: &str, rule: &str) -> bool {
+    crate::swift_bindings::holds(file) && BINDINGS_EXEMPTIONS.iter().any(|(exempted, _)| *exempted == rule)
+}
 
 /// The LSP symbol kinds of a declaration that holds others: module, namespace (an extension), package,
 /// class (an actor too), enum, interface (a protocol), object and struct.
@@ -195,32 +227,48 @@ fn merged_use(uses: &[Use]) -> Use {
     }
 }
 
+/// The repository's resolved path, the package as SwiftPM describes it, and what that description breaks.
+fn described(root: &Path) -> Result<(PathBuf, Vec<crate::direction::SwiftTarget>, Vec<String>), String> {
+    let canonical = std::fs::canonicalize(root).map_err(|error| format!("cannot resolve the repository's path: {error}"))?;
+    let package = canonical.join(PACKAGE);
+    let targets = crate::direction::describe_package(&package, MANIFEST)?.unwrap_or_default();
+    let resolved = crate::direction::resolved_errors(&package, &targets)?;
+    Ok((canonical, targets, resolved))
+}
+
 pub(crate) fn run(root: &Path) -> ExitCode {
-    match check(root) {
+    let (canonical, targets, resolved) = match described(root) {
+        Ok(described) => described,
+        Err(failure) => return crate::report::failed("swift-lint", failure),
+    };
+    // What SwiftPM resolved — which only a package whose binary target is built can answer, so it is judged
+    // here rather than by the rules, which read the manifest alone — is printed before the analysis runs: a
+    // package the analysis cannot read, such as one with a target no build prepares, still has it judged.
+    for line in &resolved {
+        println!("{line}");
+    }
+    match check(root, &canonical, &targets) {
         Ok(lines) => {
             for line in &lines {
                 println!("{line}");
             }
-            if lines.is_empty() { ExitCode::SUCCESS } else { ExitCode::from(1) }
+            if lines.is_empty() && resolved.is_empty() { ExitCode::SUCCESS } else { ExitCode::from(1) }
         }
-        Err(failure) => {
-            eprintln!("cargo xtask swift-lint: {failure}");
-            ExitCode::from(1)
-        }
+        Err(failure) => crate::report::failed("swift-lint", failure),
     }
 }
 
-fn check(root: &Path) -> Result<Vec<String>, String> {
+/// Read every listed Swift file as the stage's rules say, `canonical` the repository's resolved path and
+/// `targets` the package as SwiftPM describes it.
+fn check(root: &Path, canonical: &Path, targets: &[crate::direction::SwiftTarget]) -> Result<Vec<String>, String> {
     let files = crate::files::listed(root, "swift")?;
     if files.is_empty() {
         return Err("no Swift files for the linter to read".to_string());
     }
-    let canonical = std::fs::canonicalize(root).map_err(|error| format!("cannot resolve the repository's path: {error}"))?;
-    let mut findings = run_swiftlint(root, &canonical, &files)?;
+    let mut findings = run_swiftlint(root, canonical, &files)?;
     let package = canonical.join(PACKAGE);
-    let targets = crate::direction::describe_package(&package, MANIFEST)?.unwrap_or_default();
     let compiled: BTreeSet<String> = targets.iter().flat_map(|target| target.sources.iter()).map(|source| format!("{PACKAGE}/{source}")).collect();
-    let tests: BTreeSet<String> = crate::direction::test_sources(&targets).into_iter().map(|source| format!("{PACKAGE}/{source}")).collect();
+    let tests: BTreeSet<String> = crate::direction::test_sources(targets).into_iter().map(|source| format!("{PACKAGE}/{source}")).collect();
     // A binary target is a module too, but one built from no source of ours, so nothing says what it declares.
     let modules: BTreeSet<String> = targets.iter().filter(|target| !target.sources.is_empty()).map(|target| target.name.clone()).collect();
     let mut texts = Vec::new();
@@ -234,7 +282,7 @@ fn check(root: &Path) -> Result<Vec<String>, String> {
     // merge of all builds' answers, not any one build's, is what a use passes or fails on.
     let mut banned: BTreeMap<(String, usize, usize), (String, Vec<Referral>)> = BTreeMap::new();
     let mut pointers: BTreeMap<(String, usize, usize), (String, Vec<Use>)> = BTreeMap::new();
-    for build in Build::all(&canonical, &package)? {
+    for build in Build::all(canonical, &package)? {
         prepare_for_index(&package, &build)?;
         let mut server = LanguageServer::start(&package, build)?;
         server.modules.clone_from(&modules);
@@ -267,7 +315,9 @@ fn check(root: &Path) -> Result<Vec<String>, String> {
             findings.extend(ignore_directives(file, &document));
             findings.extend(test_framework_uses(file, &document, tests.contains(*file)));
             if !tests.contains(*file) {
-                findings.extend(postfix_bangs(file, &document));
+                if !exempt(file, POSTFIX_BANG) {
+                    findings.extend(postfix_bangs(file, &document));
+                }
                 for (line, column, name, referral) in server.banned_uses(uri, &document) {
                     banned.entry((file.to_string(), line, column)).or_insert_with(|| (name.clone(), Vec::new())).1.push(referral);
                 }
@@ -283,7 +333,7 @@ fn check(root: &Path) -> Result<Vec<String>, String> {
         server.shutdown();
     }
     for ((file, line, column), (name, referrals)) in &banned {
-        if merged_referral(referrals) != Referral::Ours {
+        if merged_referral(referrals) != Referral::Ours && !exempt(file, name) {
             let why = BANNED_CALLS.iter().find(|(banned, _)| *banned == name).map(|(_, why)| *why).unwrap_or_default();
             findings.push((file.clone(), *line, *column, format!("{name}: {why}")));
         }
@@ -328,17 +378,26 @@ fn run_swiftlint(root: &Path, canonical: &Path, files: &[String]) -> Result<Vec<
     }
     let report: Value = serde_json::from_slice(&output.stdout).map_err(|error| format!("swiftlint's JSON is not readable here: {error}"))?;
     let entries = report.as_array().ok_or("swiftlint's JSON is not a list of violations")?;
-    // A violation this check cannot read is refused rather than dropped: dropping it would pass it.
-    entries.iter().map(|entry| violation(entry, canonical).ok_or_else(|| format!("swiftlint reported a violation this check cannot read: {entry}"))).collect()
+    let mut findings = Vec::new();
+    for entry in entries {
+        // A violation this check cannot read is refused rather than dropped: dropping it would pass it.
+        let (finding, rule) = violation(entry, canonical).ok_or_else(|| format!("swiftlint reported a violation this check cannot read: {entry}"))?;
+        if !exempt(&finding.0, rule) {
+            findings.push(finding);
+        }
+    }
+    Ok(findings)
 }
 
-/// One violation of SwiftLint's JSON reporter as a finding. The reporter prints canonical absolute paths;
-/// the gate prints paths as the repository names them. A violation of a whole line has no column.
-fn violation(entry: &Value, canonical: &Path) -> Option<Finding> {
+/// One violation of SwiftLint's JSON reporter as a finding, with the id of the rule it breaks. The reporter
+/// prints canonical absolute paths; the gate prints paths as the repository names them. A violation of a
+/// whole line has no column.
+fn violation<'a>(entry: &'a Value, canonical: &Path) -> Option<(Finding, &'a str)> {
     let reported = entry.get("file")?.as_str()?;
     let file = Path::new(reported).strip_prefix(canonical).map(|relative| relative.display().to_string()).unwrap_or_else(|_| reported.to_string());
-    let message = format!("{}: {} ({})", entry.get("severity")?.as_str()?, entry.get("reason")?.as_str()?, entry.get("rule_id")?.as_str()?);
-    Some((file, entry.get("line")?.as_u64()? as usize, entry.get("character").and_then(Value::as_u64).unwrap_or(1) as usize, message))
+    let rule = entry.get("rule_id")?.as_str()?;
+    let message = format!("{}: {} ({rule})", entry.get("severity")?.as_str()?, entry.get("reason")?.as_str()?);
+    Some(((file, entry.get("line")?.as_u64()? as usize, entry.get("character").and_then(Value::as_u64).unwrap_or(1) as usize, message), rule))
 }
 
 /// Every SwiftLint command in a file. SwiftLint reads one from any line comment holding `swiftlint:` and
@@ -473,7 +532,7 @@ fn postfix_bangs(file: &str, document: &Document) -> Vec<Finding> {
                     file.to_string(),
                     line + 1,
                     column(text, at),
-                    "postfix !: a force unwrap or an implicitly unwrapped optional, a crash on nil".to_string(),
+                    format!("{POSTFIX_BANG}: a force unwrap or an implicitly unwrapped optional, a crash on nil"),
                 ));
             }
         }
@@ -719,15 +778,7 @@ impl Build {
     /// the package's own minimum iOS version.
     fn all(root: &Path, package: &Path) -> Result<Vec<Build>, String> {
         let manifest = crate::direction::dump_package(package, MANIFEST)?.ok_or_else(|| format!("{MANIFEST}: no package for the analysis to read"))?;
-        let version = manifest
-            .get("platforms")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .find(|platform| platform.get("platformName").and_then(Value::as_str) == Some("ios"))
-            .and_then(|platform| platform.get("version").and_then(Value::as_str))
-            .ok_or_else(|| format!("{MANIFEST}: names no iOS version for the analysis to build against"))?
-            .to_string();
+        let version = crate::direction::ios_version(&manifest)?;
         let mut builds = Vec::new();
         for slice in crate::pins::apple_slices(root)? {
             let sdk = xcrun_sdk(slice.sdk)?;
@@ -1568,6 +1619,25 @@ mod tests {
         assert!(lines.iter().any(|(line, m)| *line == 11 && m.contains("an #if block")), "{lines:?}");
         assert!(lines.iter().any(|(line, m)| *line == 11 && m.contains("its reason on the comment line below")), "{lines:?}");
         assert_eq!(found.len(), 7, "{lines:?}");
+    }
+
+    #[test]
+    fn only_the_bindings_folder_is_exempt_and_only_from_the_rules_its_templates_break() {
+        let bindings = "ios/sdk/Sources/CraftBridgeFFI/Platform/Generated/craftbridge_core_ffi.swift";
+        for rule in ["missing_docs", "fatalError", POSTFIX_BANG] {
+            assert!(exempt(bindings, rule), "{rule}");
+            for written in [
+                "ios/sdk/Sources/CraftBridgeFFI/Platform/Written.swift",
+                "ios/sdk/Sources/CraftBridgeEffects/Generated/LayerCommands.swift",
+                "ios/sdk/Sources/CraftBridge/CraftBridge.swift",
+            ] {
+                assert!(!exempt(written, rule), "{written}: {rule}");
+            }
+        }
+        for (name, _) in BANNED_CALLS.iter().filter(|(name, _)| *name != "fatalError") {
+            assert!(!exempt(bindings, name), "{name} still holds in the bindings");
+        }
+        assert!(!exempt(bindings, "unsafeBitCast") && !exempt(bindings, "XCTest"));
     }
 
     #[test]

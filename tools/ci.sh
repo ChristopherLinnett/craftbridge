@@ -173,6 +173,20 @@ stage_rust_deny() {
   craftbridge_cargo deny --manifest-path "$CRAFTBRIDGE_LINT_LIBRARY/Cargo.toml" --locked check licenses bans sources || status=1
   return "$status"
 }
+# The Swift package's binary target is the XCFramework tools/build-xcframework.sh builds and nobody
+# commits, and SwiftPM neither builds nor describes a package whose binary is missing, so the two stages
+# that compile the package's Swift — its builds and the lint, which builds it for the language server —
+# build it first, once per run; the script joins it again only when what it holds changed. The rules read
+# the package through its manifest alone, which needs no binary. --keep-bindings: the `generated` stage must
+# see a hand edit to the committed Swift bindings, which a regeneration here would write over before that
+# stage looked.
+xcframework_built=no
+xcframework() {
+  if [ "$xcframework_built" = no ]; then
+    tools/build-xcframework.sh --keep-bindings >&2 || return 1
+    xcframework_built=yes
+  fi
+}
 stage_rules() { xtask rules; }
 stage_generated() { xtask generate --check; }
 # The plan's views, weighed by their bytes rather than their times: the kit's own builders rebuild them
@@ -192,19 +206,20 @@ stage_plan_views() {
   fi
   xtask plan-views --check
 }
-stage_swift_format() {
-  # Generated Swift included: it ships as written Swift does, so it meets the same rules.
-  listed swift || return 1
-  xcrun swift-format lint --strict --configuration ios/sdk/.swift-format "${files[@]}"
-}
+# swift-format over every Swift file the rules' walk lists, generated Swift included: it ships as written
+# Swift does, so it meets the same rules, bar those UniFFI's fixed templates cannot meet, which the folder
+# its bindings are generated into alone is exempt from (rust/xtask/src/swift_format.rs).
+stage_swift_format() { xtask swift-format; }
 stage_swift_lint() {
   # SwiftLint's missing_docs over ios/sdk/.swiftlint.yml, and the Swift never-crash bans, the pointer
   # confinement and the tool directives (AGENTS.md §3, §4, §10) read through the compiler's language
   # server with SwiftPM's settings for every build the package ships — Debug and Release for each Apple
   # slice rust/rust-toolchain.toml lists (rust/xtask/src/swift_lint.rs) — so each `#if` branch a shipping
-  # build compiles is read resolved. After the build: a file that does not compile is cheaper to name
-  # through the compiler than through the analyser.
-  xtask swift-lint
+  # build compiles is read resolved; UniFFI's generated bindings alone are exempt from the rules their fixed
+  # templates cannot meet, named there. The same resolved package answers what the rules cannot ask without
+  # the binary built: where each target sits and what it compiles. After the build: a file that does not
+  # compile is cheaper to name through the compiler than through the analyser.
+  xcframework && xtask swift-lint
 }
 stage_swift_build() {
   # Every build the Swift package ships, in the list `cargo xtask swift-builds` prints from the same table
@@ -212,12 +227,15 @@ stage_swift_build() {
   # names, once for slices that share a destination, so a slice added there is built with no other edit,
   # and there is no second list of slices to keep in step. A branch that compiles only in one
   # configuration or only off the simulator — `#if !DEBUG`, `#if !targetEnvironment(simulator)` —
-  # compiles in one of these builds.
+  # compiles in one of these builds. Each is built for the architectures of the slices the toolchain
+  # names for its destination (ARCHS), not every architecture a generic destination offers: the native
+  # library holds the slices it is built for, and a test target links it.
   # DIAGNOSE_MISSING_TARGET_DEPENDENCIES=YES_ERROR makes an import the package does not declare an
   # error. Without it a module an earlier build left in the derived data satisfies the import with only
   # a warning, so `CraftBridge` could import a plugin against AGENTS.md §2 and still build.
   # build-for-testing builds the test targets too, which the package scheme builds only for testing.
-  local builds configuration destination status=0
+  local builds configuration destination architectures status=0
+  xcframework || return 1
   builds="$(mktemp)"
   if ! xtask swift-builds >"$builds"; then
     rm -f "$builds"
@@ -228,9 +246,9 @@ stage_swift_build() {
     rm -f "$builds"
     return 1
   fi
-  while IFS=$'\t' read -r configuration destination; do
+  while IFS=$'\t' read -r configuration destination architectures; do
     (cd ios/sdk && xcodebuild -scheme CraftBridge-Package -destination "$destination" -configuration "$configuration" -derivedDataPath .build/xcode -quiet build build-for-testing \
-      DIAGNOSE_MISSING_TARGET_DEPENDENCIES=YES_ERROR) || status=1
+      DIAGNOSE_MISSING_TARGET_DEPENDENCIES=YES_ERROR ARCHS="$architectures") || status=1
   done <"$builds"
   rm -f "$builds"
   return "$status"

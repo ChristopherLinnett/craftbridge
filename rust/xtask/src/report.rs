@@ -15,6 +15,13 @@ pub(crate) fn error_line(check: &str, message: impl AsRef<str>) -> String {
     format!("rules: {check}: {}", message.as_ref())
 }
 
+/// The exit of a command that could not do its work, with why on its standard error, so every command
+/// says it alike: `cargo xtask <command>: <failure>`.
+pub(crate) fn failed(command: &str, failure: impl std::fmt::Display) -> std::process::ExitCode {
+    eprintln!("cargo xtask {command}: {failure}");
+    std::process::ExitCode::from(1)
+}
+
 /// Path as the repository expects to see it in a message: relative to the root, `/` separated, so a
 /// report from another machine's checkout points at the same file. A tool may hand back the root's
 /// resolved path (Cargo does, for a checkout reached through a symbolic link such as macOS's `/var`), so
