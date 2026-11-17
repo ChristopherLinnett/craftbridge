@@ -3,18 +3,32 @@
 # CraftBridge code written against EffectCraft's public interfaces for something a phone needs done
 # differently; it never holds a copy of EffectCraft code.
 #
-# The point of the list is the update loop (plan §24 step 4): when tools/update-upstream.sh moves the
+# The point of the list is the update loop (plan §24 step 3): when tools/update-upstream.sh moves the
 # pin, the revision diff is read against these entries, and every adaptation whose items the diff
 # touches is rechecked before the pin is accepted. An adaptation leaves this file the moment EffectCraft
 # offers a public interface that does its job (§7: upstream wins), and an entry is updated in the same
 # change that alters what it relies on.
 #
-# File and line references name the revision the pin carries (see [workspace.dependencies] in
-# rust/Cargo.toml); item names are EffectCraft's, spelled as its sources spell them. An entry whose files
-# are another pinned repository's, FilmCraft's at the revision EffectCraft builds it at, names it in
-# `repository`; one without the key relies on EffectCraft's own files. `implements`
-# names the plan task that lands each adaptation's code (plan §15); entries are written here before
-# their code exists so the first pin's updates already recheck what the first release will carry.
+# Each `depends` entry is one item the adaptation relies on, in a table of its own: `item` says what it
+# is, by the name EffectCraft's sources give it or, where it has none, in words; `at` lists every place
+# it occupies at the revision the pin carries (see [workspace.dependencies] in rust/Cargo.toml), each a
+# `file` (a path inside the repository the entry's `repository` names) with its `lines` — single lines or
+# `first-last` ranges — or without them for the whole file. One claim over many sites stays one item
+# with many places. The update script reads files and lines as data, and never looks an item up by its
+# name: a revision diff that touches a listed line, or any line of a file listed whole, names the
+# adaptation; one that only adds or removes lines above a listed line moves it, and the script gives the
+# line it moved to, for the list to be refreshed with the recheck. An entry whose files are another
+# pinned repository's, FilmCraft's at the revision EffectCraft builds it at, names it in `repository`;
+# one without the key relies on EffectCraft's own files. A place in the shared Craft libraries says so with
+# `repository = "storytold/craft-libs"` of its own: EffectCraft and FilmCraft each build the libraries at
+# a revision of their own, so the place is read at the revision its entry's app builds them at, which the
+# update takes from Cargo's resolved graph before and after the pin. Each `id` is AD followed by a
+# number greater than the last entry's, and no id is taken twice, so two changes that each add an
+# adaptation cannot both keep the one next id: the reader refuses the later, naming both entries. A gap
+# is allowed, since an adaptation leaves the list when upstream does its job and its id is never reused.
+# `implements` names the plan task that lands each adaptation's code (plan §15); entries are written
+# here before their code exists so the first pin's updates already recheck what the first release will
+# carry.
 #
 # Nothing in this file is generated: it is the list AGENTS.md §7 makes hand-written, by the change
 # that adds or alters each adaptation.
@@ -27,10 +41,10 @@ implements = "FX-1a"
 summary = "Builds CraftBridge's own Session from EffectCraft's public fields: models and plug-ins folders from the app's Folders, EffectCraft's MediaPool, an importer over effectcraft_media::probe, CraftBridge's exporter (AD7), effectcraft_expr's expressions and syntax check, the plug-in loader and previewer when the app names a plug-in folder and the platform carries WebAssembly, no helper hooks, and a plain note that the session renders on the CPU; then effectcraft_script::install."
 replaces = "effectcraft_host::session(), which takes its folders from EFFECTCRAFT_CONFIG_DIR or the desktop conventions and starts external helpers — folders and helpers a phone has neither of (crates/host/src/lib.rs:96-147)."
 depends = [
-  "Session (crates/engine/src/lib.rs:104-269)",
-  "effectcraft_media::probe (crates/media/src/probe.rs:17)",
-  "effectcraft_script::install (crates/script/src/lib.rs:78)",
-  "the headless renderer note the command line sets (apps/effectcraft-cli/src/main.rs:492)",
+  { item = "Session", at = [{ file = "crates/engine/src/lib.rs", lines = ["104-269"] }] },
+  { item = "effectcraft_media::probe", at = [{ file = "crates/media/src/probe.rs", lines = ["17"] }] },
+  { item = "effectcraft_script::install", at = [{ file = "crates/script/src/lib.rs", lines = ["78"] }] },
+  { item = "the headless renderer note the command line sets", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["492"] }] },
 ]
 
 [[adaptation]]
@@ -41,12 +55,14 @@ implements = "FX-3"
 summary = "At engine start, registers the phone's font folders through effectcraft_text::fonts::add_source with a DirectorySource: on iOS the parent folders of the font files CoreText reports, never a hard-coded /System/Library/Fonts; on Android /system/fonts. Every face stays registered for drawing and fallback; craftbridge-effects filters the font list of every response that comes back through it carrying text.fonts' output to the faces CoreText offers matched by (file, PostScript name) plus the bundled ones; code inside EffectCraft's own dispatch sees the full registry."
 replaces = "DirectorySource::system(), which knows only the macOS, Windows and Unix desktop folders (crates/text/src/fonts.rs:79-101)."
 depends = [
-  "FontSource, DirectorySource (crates/text/src/fonts.rs:67-76)",
-  "add_source (crates/text/src/fonts.rs:396-412)",
-  "add_font_data (crates/text/src/fonts.rs:414-422)",
-  "text.fonts (crates/engine/src/cmd/text_edit.rs:880-903)",
-  "effectcraft_text::families (crates/text/src/fonts.rs:556)",
-  "the {steps, results} of engine.batch and file.runScript and the command-list format the latter reads (crates/engine/src/cmd/batch.rs:66-119, crates/engine/src/cmd/file_more.rs:516-556)",
+  { item = "FontSource", at = [{ file = "crates/text/src/fonts.rs", lines = ["67-70"] }] },
+  { item = "DirectorySource", at = [{ file = "crates/text/src/fonts.rs", lines = ["72-76"] }] },
+  { item = "add_source", at = [{ file = "crates/text/src/fonts.rs", lines = ["396-412"] }] },
+  { item = "add_font_data", at = [{ file = "crates/text/src/fonts.rs", lines = ["414-422"] }] },
+  { item = "text.fonts", at = [{ file = "crates/engine/src/cmd/text_edit.rs", lines = ["880-903"] }] },
+  { item = "effectcraft_text::families", at = [{ file = "crates/text/src/fonts.rs", lines = ["556"] }] },
+  { item = "the {steps, results} of engine.batch and file.runScript", at = [{ file = "crates/engine/src/cmd/batch.rs", lines = ["66-119"] }, { file = "crates/engine/src/cmd/file_more.rs", lines = ["516-556"] }] },
+  { item = "the command-list format file.runScript reads", at = [{ file = "crates/engine/src/cmd/file_more.rs", lines = ["516-556"] }] },
 ]
 
 [[adaptation]]
@@ -57,12 +73,24 @@ implements = "FX-1a (the failed-item report of exec and run), FX-1c"
 summary = "RenderRequest — one field per render flag of EffectCraft's CLI, mapped to the render-queue parameters with the CLI's names, defaults and errors — and the render runner: unqueue the project's other items, add this one, render without waiting, poll at each progress report (every PROGRESS_INTERVAL, the CLI's 100 ms), report progress, stop on cancel and wait for the render to wind down, report failed items. The runner answers the core's request_with_progress for `export`. FX-1a lands the failed-item report itself, in src/methods.rs: exec and run answer a renderQueue.render that succeeds with failed items as a failure, in the CLI's joined `comp: reason` words."
 replaces = "the CLI's flag handling and its queue-and-wait loop, which live in its binary (apps/effectcraft-cli/src/main.rs:886-1034, and the failed-item report :860-870)."
 depends = [
-  "the renderQueue.add, renderQueue.setRender and renderQueue.render commands (crates/engine/src/cmd/render_queue.rs:548, :595, :707) and their specs, renderQueue.add's parameters among them (:1060-1064, :1069, :1110)",
-  "Session::is_rendering, render_progress, start_render, stop_render and poll_render (crates/engine/src/render_queue.rs:540, :545, :590, :692, :723), JobState (:123), RenderJob::wait (:231) and the public Session::render_job (crates/engine/src/lib.rs:144)",
-  "the item status `{format} export is not available` of a format the exporter does not write, and start_render's refusal when no queued item can render, which names none refused for its format (crates/engine/src/render_queue.rs:566, :625-630)",
-  "Backend::session, the headless session behind the backend (crates/automation/src/backend.rs:61)",
-  "RenderQueueItem with is_queued, RenderStatus with label, and OutputFormat::from_name (crates/project/src/render_queue.rs:1477, :1637, :1450, :1463, :632), and Project::item (crates/project/src/item.rs:225)",
-  "the exporter's cancel contract: a cancelled export removes the files it opened for that output and returns the error `cancelled` (crates/engine/src/render_queue.rs:103-106, :119)",
+  { item = "the renderQueue.add command and its spec, whose parameters the render request is mapped to", at = [{ file = "crates/engine/src/cmd/render_queue.rs", lines = ["548", "1060-1064"] }] },
+  { item = "the renderQueue.setRender command and its spec", at = [{ file = "crates/engine/src/cmd/render_queue.rs", lines = ["595", "1069"] }] },
+  { item = "the renderQueue.render command and its spec", at = [{ file = "crates/engine/src/cmd/render_queue.rs", lines = ["707", "1110"] }] },
+  { item = "Session::is_rendering", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["540"] }] },
+  { item = "Session::render_progress", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["545"] }] },
+  { item = "Session::start_render", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["590"] }] },
+  { item = "Session::stop_render", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["692"] }] },
+  { item = "Session::poll_render", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["723"] }] },
+  { item = "JobState", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["123"] }] },
+  { item = "RenderJob::wait", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["231"] }] },
+  { item = "the public Session::render_job", at = [{ file = "crates/engine/src/lib.rs", lines = ["144"] }] },
+  { item = "the item status `{format} export is not available` of a format the exporter does not write, and start_render's refusal when no queued item can render, which names none refused for its format", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["566", "625-630"] }] },
+  { item = "Backend::session, the headless session behind the backend", at = [{ file = "crates/automation/src/backend.rs", lines = ["61"] }] },
+  { item = "RenderQueueItem with is_queued", at = [{ file = "crates/project/src/render_queue.rs", lines = ["1477", "1637"] }] },
+  { item = "RenderStatus with label", at = [{ file = "crates/project/src/render_queue.rs", lines = ["1450", "1463"] }] },
+  { item = "OutputFormat::from_name", at = [{ file = "crates/project/src/render_queue.rs", lines = ["632"] }] },
+  { item = "Project::item", at = [{ file = "crates/project/src/item.rs", lines = ["225"] }] },
+  { item = "the exporter's cancel contract: a cancelled export removes the files it opened for that output and returns the error `cancelled`", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["103-106", "119"] }] },
 ]
 
 [[adaptation]]
@@ -73,12 +101,12 @@ implements = "FX-1e"
 summary = "FrameRequest: comp, time or frame, maximum side or scale, transparency, resolved the way render-frame resolves them (a comp id read from digits, `-` or nothing as the active comp, a frame number divided by the comp's frame rate or 30, the active comp's current time by default whichever comp is named, a scale rounded to at least one pixel of the longest side, a maximum side cut by a saturating cast), then rendered as PNG through Backend::render_with, the path render-frame writes its file from, or as raw pixels through Session::render_rgba8_alpha, which that PNG is made from, into the core's FrameBytes. A missing comp is refused in render-frame's words whatever the format: the raw formats ask Backend::render_with for them. A request naming both time and frame, or both maximum side and scale, is refused: render-frame's usage gives each pair as alternatives, where its code lets --frame and --scale win."
 replaces = "the CLI's render-frame flag handling (apps/effectcraft-cli/src/main.rs:789-821), its reading of a comp reference (`reference`, :293-298, followed in src/reference.rs by the methods whose commands read their comp through it; render and bench hand theirs to the engine as given, :906-907, :1072-1073) and its usage line for render-frame (:114)."
 depends = [
-  "Session::render_rgba8_alpha (crates/engine/src/session/render.rs:132-143)",
-  "Backend::render_with and the Frame it answers, whose PNG encode_png makes from render_rgba8_alpha's pixels (crates/automation/src/backend.rs:122-124, :136-149, crates/automation/src/lib.rs:53-74)",
-  "the headless branch of Backend::render_output, whose resolution of the comp and of the default time the raw path follows through Backend::session, Session::resolve_comp and Session::time (crates/automation/src/backend.rs:136-149, :61-66, crates/engine/src/session/comps.rs:109, :303)",
-  "no_comp, the words render_output refuses a missing comp with, as BadArgs, before it renders anything; the raw formats ask render_with for them and the plugin maps them to NotFound (crates/automation/src/backend.rs:142, :181-185)",
-  "the comp.info figures `frameRate`, `width` and `height` (crates/engine/src/cmd/query.rs:80-91), which the CLI and the plugin read through the get_comp tool (crates/automation/src/tools.rs:283-285)",
-  "effectcraft_time::Tick::from_seconds_f64 (crates/time/src/lib.rs:31)",
+  { item = "Session::render_rgba8_alpha", at = [{ file = "crates/engine/src/session/render.rs", lines = ["132-143"] }] },
+  { item = "Backend::render_with and the Frame it answers, whose PNG encode_png makes from render_rgba8_alpha's pixels", at = [{ file = "crates/automation/src/backend.rs", lines = ["24-30", "122-124", "136-149"] }, { file = "crates/automation/src/lib.rs", lines = ["53-74"] }] },
+  { item = "the headless branch of Backend::render_output, whose resolution of the comp and of the default time the raw path follows through Backend::session, Session::resolve_comp and Session::time", at = [{ file = "crates/automation/src/backend.rs", lines = ["61-66", "136-149"] }, { file = "crates/engine/src/session/comps.rs", lines = ["109", "303"] }] },
+  { item = "no_comp, the words render_output refuses a missing comp with, as BadArgs, before it renders anything; the raw formats ask render_with for them and the plugin maps them to NotFound", at = [{ file = "crates/automation/src/backend.rs", lines = ["142", "181-186"] }] },
+  { item = "the comp.info figures `frameRate`, `width` and `height`, which the CLI and the plugin read through the get_comp tool", at = [{ file = "crates/engine/src/cmd/query.rs", lines = ["80-91"] }, { file = "crates/automation/src/tools.rs", lines = ["284-286"] }] },
+  { item = "effectcraft_time::Tick::from_seconds_f64", at = [{ file = "crates/time/src/lib.rs", lines = ["31"] }] },
 ]
 
 [[adaptation]]
@@ -89,7 +117,8 @@ implements = "FX-1f"
 summary = "Templates: open an .ectemplate, apply values, render a frame or an export, and surface missing-font warnings."
 replaces = "the CLI's --template handling (apps/effectcraft-cli/src/template.rs)."
 depends = [
-  "the essential and templates commands (crates/engine/src/cmd/essential.rs, crates/engine/src/home/templates.rs)",
+  { item = "the essential commands", at = [{ file = "crates/engine/src/cmd/essential.rs" }] },
+  { item = "the templates commands", at = [{ file = "crates/engine/src/home/templates.rs" }] },
 ]
 
 [[adaptation]]
@@ -100,10 +129,18 @@ implements = "FX-1d"
 summary = "Render timings per layer and effect, CPU against GPU, in the shape of the CLI's bench: the frame's wall and CPU time over several runs without the layer cache with each layer's and effect's minimum, playback frames without and with the layer cache and its counts, and with an attached accelerator the CPU against the GPU for the comp at full and half size through the Accelerator trait, at the frame the CLI's bench --gpu picks (the CLI's display-path and transfer columns need its own GPU type and are left out); its medians are the CLI's, the upper of two middle values, and its CPU time is the process's, read from the clock the CLI reads. A caller's scale is at most Full, so no call allocates a frame larger than the comp's own."
 replaces = "the CLI's bench (apps/effectcraft-cli/src/main.rs:1265-1350, :1507-1616)."
 depends = [
-  "effectcraft_render::Renderer, LayerCache and LayerTiming (crates/render/src/lib.rs:66, crates/render/src/cache.rs:39, crates/render/src/opts.rs:92)",
-  "effectcraft_render::Accelerator, Backend and AutoPick::WARMUP (crates/render/src/accel.rs:12, :62, crates/render/src/auto.rs:95)",
-  "the CLI's bench, bench_play and bench_gpu, whose rows and columns the document follows, the frame bench_gpu times, and its median, minimum and CPU clock (apps/effectcraft-cli/src/main.rs:1059-1085, :1250-1262, :1265-1350, :1507-1616)",
-  "Session::resolve_comp and the comp's frame rate and duration, which pick the comp and the frames timed (crates/engine/src/session/comps.rs:303, crates/project/src/comp.rs:84-85)",
+  { item = "effectcraft_render::Renderer", at = [{ file = "crates/render/src/lib.rs", lines = ["66"] }] },
+  { item = "LayerCache", at = [{ file = "crates/render/src/cache.rs", lines = ["39"] }] },
+  { item = "LayerTiming", at = [{ file = "crates/render/src/opts.rs", lines = ["92"] }] },
+  { item = "effectcraft_render::Accelerator", at = [{ file = "crates/render/src/accel.rs", lines = ["62"] }] },
+  { item = "effectcraft_render::Backend", at = [{ file = "crates/render/src/accel.rs", lines = ["12"] }] },
+  { item = "AutoPick::WARMUP", at = [{ file = "crates/render/src/auto.rs", lines = ["95"] }] },
+  { item = "the CLI's bench command, whose options choose the project, the comp, the frame, the scale and the number of runs and which hands the run to bench, bench_play or bench_gpu", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1059-1085"] }] },
+  { item = "the CLI's median, minimum and CPU clock", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1250-1262"] }] },
+  { item = "the CLI's render_timed, bench and bench_play, whose rows and columns the document follows", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1265-1350"] }] },
+  { item = "the CLI's bench_gpu, whose rows and columns the document follows and which picks the frame it times", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["1507-1616"] }] },
+  { item = "Session::resolve_comp", at = [{ file = "crates/engine/src/session/comps.rs", lines = ["303"] }] },
+  { item = "the comp's frame rate and duration, which pick the frames timed", at = [{ file = "crates/project/src/comp.rs", lines = ["84-85"] }] },
 ]
 
 [[adaptation]]
@@ -114,9 +151,10 @@ implements = "FX-1a (the seam), FX-1g, MED-3"
 summary = "CraftBridge's exporter, set as Session.exporter: hands each job to EffectCraft's FileExporter inside a thread pool sized from half the memory the phone reports available at 16 bytes a pixel, between one and the core count; from wave 6 it also encodes H.264 and HEVC in hardware through craftbridge-media (plan §18). FX-1a lands the seam only — Session.exporter is set from one function that hands out EffectCraft's own FileExporter today and the pool when FX-1g writes src/exporter.rs."
 replaces = "FileExporter alone, whose free-memory figure is empty on iOS and Android because sysinfo::memory() has no branch for either (crates/host/src/lib.rs:91-94, crates/engine/src/system/sysinfo.rs:142-168), which leaves frames in flight bounded only by the thread count (crates/export/src/pipeline.rs:140-149, :171-176)."
 depends = [
-  "Exporter, ExportJob (crates/engine/src/render_queue.rs:93-113, :22-46)",
-  "FileExporter (crates/host/src/lib.rs:25-89)",
-  "the export frame loop's thread count (crates/export/src/pipeline.rs:140-149)",
+  { item = "Exporter", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["93-113"] }] },
+  { item = "ExportJob", at = [{ file = "crates/engine/src/render_queue.rs", lines = ["22-46"] }] },
+  { item = "FileExporter", at = [{ file = "crates/host/src/lib.rs", lines = ["25-89"] }] },
+  { item = "the export frame loop's thread count", at = [{ file = "crates/export/src/pipeline.rs", lines = ["140-149"] }] },
 ]
 
 [[adaptation]]
@@ -128,21 +166,63 @@ implements = "MED-1a, MED-1b, MED-2a"
 summary = "Registers CraftBridge's hardware decoder factory in FilmCraft's decoder registry, which EffectCraft opens every movie through, sets FilmCraft's hardware-decoding switch and names the backend for FilmCraft's diagnostics. The factory declines a stream the platform has no hardware decoder for, or cannot start one for, which hands it to FilmCraft's software decoders, and never answers a start's error, which would leave the movie with no decoder; it counts a decline where FilmCraft's own factories count one, only when a decoder cannot start; a decoder it returns is wrapped in Fallback (src/fallback.rs), which follows HybridDecoder's behaviour in CraftBridge's own code: on an error, or a sample whose in-band parameters differ from the sample entry's, it switches to FilmCraft's software decoder for the stream and replays the samples since the last restart sample FilmCraft's stream parsers find (the one before it after an HEVC CRA), within HybridDecoder's bounds, decoding on past a replayed sample the software decoder rejects; it leaves out the pictures the caller already has, puts the ones the hardware decoder still held in presentation order, keeps no sample it returns an error for while it stays on hardware, since FilmCraft's decode loop feeds that sample again, and answers random-access and disposable samples from the stream as the software decoder does. On iOS the hardware decoder is VideoToolbox's (src/platform/videotoolbox.rs), following FilmCraft's macOS VtDecoder in CraftBridge's own code: it declines the streams VtDecoder declines and those other than 4:2:0, starts a session per decoding run, leaves out the RASL pictures of a run started at an HEVC CRA or BLA, puts the pictures in presentation order with the stream's reorder depth, and reads each one out of its biplanar surface into exactly the frame the software decoder returns for the stream; it also takes AV1 where the device decodes it. On Android the hardware decoder is MediaCodec's (src/platform/mediacodec.rs, through the official NDK bindings), decoding H.264 and 8-bit HEVC into an AImageReader of YUV_420_888 images, so no vendor-tiled output format reaches CraftBridge (D-15): it takes only the device's own hardware decoder for the stream's MIME type, never the platform's software codecs (those named c2.android.* or OMX.google.*), declines AV1 and 10-bit pictures, feeds each sample as Annex B with the record's parameter sets as the codec-specific data and its presentation time moved above zero in its order, since MediaCodec takes times as unsigned numbers (src/mediacodec_input.rs), starts a codec per decoding run, leaves out the same RASL pictures, takes the pictures MediaCodec outputs, which are already in presentation order, drains those it still holds at the end of the stream, and reads each image's planes into exactly the frame the software decoder returns for the stream."
 replaces = "filmcraft_platform::register(), which registers no decoder on iOS and Android (crates/platform/src/lib.rs:70-139), and its HybridDecoder (crates/platform/src/hybrid.rs), which craftbridge-media does not use: filmcraft-platform always depends on filmcraft-export, which brings its H.264 and FLAC encoders and FilmCraft's compositor, text, caption and audio crates, none of which a decoder needs, into the phone build: 9 more crates in craftbridge-effects-ffi's graph and 25 in the core's own, measured at d5ead4ba. Also its VtDecoder (crates/platform/src/videotoolbox.rs), which it builds for macOS only (crates/platform/Cargo.toml:35, src/lib.rs:49-51). Move onto HybridDecoder if filmcraft-platform gates those dependencies behind a feature the phone build can leave off, and onto VtDecoder on iOS once it also builds it there."
 depends = [
-  "register_video_decoder, video_decoder_registered, software_video_decoder (crates/codecs/src/lib.rs:99, :107, :124)",
-  "make_video_decoder, which opens a stream with the first factory that answers, an error included (crates/codecs/src/lib.rs:112-120)",
-  "CodecError and its Cancelled, Result (crates/codecs/src/lib.rs:55-67)",
-  "VideoDecoder, VideoDecoderFactory, DecodedFrame (crates/codecs/src/video.rs:19, :182, :9)",
-  "hw::set_hardware_decoding, hw::hardware_decoding, hw::set_hw_backend, hw::note_hw_frames, hw::note_hw_session, hw::note_hw_declined, hw::note_hw_fallback (crates/codecs/src/hw.rs:25, :30, :38, :78, :83, :88, :93)",
-  "hw::StreamInfo with is_irap, keeps_previous_restart, parameters_changed, is_random_access and is_disposable (crates/codecs/src/hw.rs:141, :160, :168, :177, :192, :200)",
-  "hw::NalStreamInfo::from_entry, hw::FrameStreamInfo::from_entry (crates/codecs/src/hw.rs:235, crates/codecs/src/hw_frame.rs:141)",
-  "SampleEntry, filmcraft-isobmff's re-export of craft_media::isobmff (crates/isobmff/src/lib.rs:7), and its CodecConfig::Av1 and Av1Config::to_bytes, which the AV1 format description is made from (craft-libs crates/media/src/isobmff/codec.rs:167, :466-483, at f0ad6c1, the craft-media filmcraft-isobmff resolves)",
-  "the layout of the frames the software decoders return, which the VideoToolbox and MediaCodec decoders reproduce: VideoFrame, PixelData::Yuv8 and Yuv16, Chroma (crates/frame/src/lib.rs:21-25, :46-67), ColorInfo and Range (crates/color/src/lib.rs:92-106), planes cut to the picture's size with 10-bit samples in the low bits, the stream's own colour and pixel aspect and a zero presentation time (crates/codecs/src/video.rs:304-323, :408-437, :676-702), the colour and pixel aspect the software and hardware decoders share (crates/codecs/src/video.rs:142-166, crates/codecs/src/hw_frame.rs:119-137), and pool::take_u8 and take_u16, which hand out the planes' buffers (crates/frame/src/pool.rs:95-103)",
-  "hw::NalStreamInfo's length_size, its parameter sets in record order (H.264 SPS then PPS; HEVC VPS, SPS, PPS) and nals, which splits a length-prefixed sample into its NAL units, so the Android decoder feeds MediaCodec the stream's own units (crates/codecs/src/hw.rs:111-116, :333-348)",
-  "hw::NalCodec, hw::NalStreamInfo's fields and nal_types, hw::FrameCodec and hw::FrameStreamInfo's fields, which say what a hardware decoder is set up from and which pictures a run leaves out (crates/codecs/src/hw.rs:97-136, :328, crates/codecs/src/hw_frame.rs:13-18, :32-53)",
-  "filmcraft_platform::videotoolbox::VtDecoder, FilmCraft's macOS VideoToolbox decoder, whose behaviour the iOS decoder follows: the surface formats and reorder bound (crates/platform/src/videotoolbox.rs:41-60), the streams it declines (:260-286), the copy out of a biplanar surface with its crop (:197-258), the hardware query and the session started up front (:416-424, :446-473), the reorder buffer (:485-498), and the RASL pictures a run started at a CRA or BLA leaves out, with a session per run (:518-549, :562-569)",
-  "FilmCraft's own hardware factories' decline rule, which the factory follows: with the switch off, or a configuration record that does not parse, they answer None uncounted, and a decoder that cannot start answers None and counts the decline (crates/platform/src/lib.rs:196-209, :215-228, :234-247, :252-268). hw::HwStats's doc also lists the switch being Off among the counted declines (crates/codecs/src/hw.rs:55-56); no factory has counted it since the first, and note_hw_declined counts a stream a factory is responsible for (:87-88), so CraftBridge follows the code",
-  "the GOP decode loop, which moves past a sample only once it decoded and feeds it again after an error (crates/codecs/src/gop.rs:778-779)",
-  "HybridDecoder's replay bounds and replay-output cap, restart points, fallback, replay and merge (crates/platform/src/hybrid.rs:19-21, :24-26, :70-94, :105-113, :124-190, :200-202)",
+  { item = "register_video_decoder", at = [{ file = "crates/codecs/src/lib.rs", lines = ["99"] }] },
+  { item = "video_decoder_registered", at = [{ file = "crates/codecs/src/lib.rs", lines = ["107"] }] },
+  { item = "software_video_decoder", at = [{ file = "crates/codecs/src/lib.rs", lines = ["124"] }] },
+  { item = "make_video_decoder, which opens a stream with the first factory that answers, an error included", at = [{ file = "crates/codecs/src/lib.rs", lines = ["112-120"] }] },
+  { item = "CodecError and its Cancelled", at = [{ file = "crates/codecs/src/lib.rs", lines = ["55-65"] }] },
+  { item = "Result", at = [{ file = "crates/codecs/src/lib.rs", lines = ["67"] }] },
+  { item = "VideoDecoder", at = [{ file = "crates/codecs/src/video.rs", lines = ["19"] }] },
+  { item = "VideoDecoderFactory", at = [{ file = "crates/codecs/src/video.rs", lines = ["182"] }] },
+  { item = "DecodedFrame", at = [{ file = "crates/codecs/src/video.rs", lines = ["9"] }] },
+  { item = "hw::set_hardware_decoding", at = [{ file = "crates/codecs/src/hw.rs", lines = ["25"] }] },
+  { item = "hw::hardware_decoding", at = [{ file = "crates/codecs/src/hw.rs", lines = ["30"] }] },
+  { item = "hw::set_hw_backend", at = [{ file = "crates/codecs/src/hw.rs", lines = ["38"] }] },
+  { item = "hw::note_hw_frames", at = [{ file = "crates/codecs/src/hw.rs", lines = ["78"] }] },
+  { item = "hw::note_hw_session", at = [{ file = "crates/codecs/src/hw.rs", lines = ["83"] }] },
+  { item = "hw::note_hw_declined", at = [{ file = "crates/codecs/src/hw.rs", lines = ["88"] }] },
+  { item = "hw::note_hw_fallback", at = [{ file = "crates/codecs/src/hw.rs", lines = ["93"] }] },
+  { item = "hw::StreamInfo", at = [{ file = "crates/codecs/src/hw.rs", lines = ["141"] }] },
+  { item = "hw::StreamInfo::is_irap", at = [{ file = "crates/codecs/src/hw.rs", lines = ["160"] }] },
+  { item = "hw::StreamInfo::keeps_previous_restart", at = [{ file = "crates/codecs/src/hw.rs", lines = ["168"] }] },
+  { item = "hw::StreamInfo::parameters_changed", at = [{ file = "crates/codecs/src/hw.rs", lines = ["177"] }] },
+  { item = "hw::StreamInfo::is_random_access", at = [{ file = "crates/codecs/src/hw.rs", lines = ["192"] }] },
+  { item = "hw::StreamInfo::is_disposable", at = [{ file = "crates/codecs/src/hw.rs", lines = ["200"] }] },
+  { item = "hw::NalStreamInfo::from_entry", at = [{ file = "crates/codecs/src/hw.rs", lines = ["235"] }] },
+  { item = "hw::FrameStreamInfo::from_entry", at = [{ file = "crates/codecs/src/hw_frame.rs", lines = ["141"] }] },
+  { item = "SampleEntry, filmcraft-isobmff's re-export of craft_media::isobmff", at = [{ file = "crates/isobmff/src/lib.rs", lines = ["7"] }] },
+  { item = "CodecConfig::Av1, of the craft-media filmcraft-isobmff resolves, which the AV1 format description is made from", at = [{ repository = "storytold/craft-libs", file = "crates/media/src/isobmff/codec.rs", lines = ["167"] }] },
+  { item = "Av1Config::to_bytes, which writes the AV1 configuration record the format description carries", at = [{ repository = "storytold/craft-libs", file = "crates/media/src/isobmff/codec.rs", lines = ["466-483"] }] },
+  { item = "Chroma, which the VideoToolbox and MediaCodec decoders reproduce in the frames they return", at = [{ file = "crates/frame/src/lib.rs", lines = ["21-25"] }] },
+  { item = "PixelData with its Yuv8 and Yuv16, which the VideoToolbox and MediaCodec decoders reproduce in the frames they return", at = [{ file = "crates/frame/src/lib.rs", lines = ["46-55"] }] },
+  { item = "VideoFrame, which the VideoToolbox and MediaCodec decoders reproduce in the frames they return", at = [{ file = "crates/frame/src/lib.rs", lines = ["57-67"] }] },
+  { item = "Range, which the VideoToolbox and MediaCodec decoders reproduce in the frames they return", at = [{ file = "crates/color/src/lib.rs", lines = ["92-97"] }] },
+  { item = "ColorInfo, which the VideoToolbox and MediaCodec decoders reproduce in the frames they return", at = [{ file = "crates/color/src/lib.rs", lines = ["99-106"] }] },
+  { item = "the software decoders' planes, cut to the picture's size with 10-bit samples in the low bits, the stream's own colour and pixel aspect and a zero presentation time, which the VideoToolbox and MediaCodec decoders reproduce", at = [{ file = "crates/codecs/src/video.rs", lines = ["304-323", "408-437", "676-702"] }] },
+  { item = "the colour and pixel aspect the software and hardware decoders share", at = [{ file = "crates/codecs/src/video.rs", lines = ["142-166"] }, { file = "crates/codecs/src/hw_frame.rs", lines = ["119-137"] }] },
+  { item = "pool::take_u8, which hands out the planes' buffers", at = [{ file = "crates/frame/src/pool.rs", lines = ["95-98"] }] },
+  { item = "pool::take_u16, which hands out the planes' buffers", at = [{ file = "crates/frame/src/pool.rs", lines = ["100-103"] }] },
+  { item = "hw::NalStreamInfo's length_size and its parameter sets in record order (H.264 SPS then PPS; HEVC VPS, SPS, PPS), which the Android decoder feeds MediaCodec as the stream's own units", at = [{ file = "crates/codecs/src/hw.rs", lines = ["111-116"] }] },
+  { item = "hw::NalStreamInfo::nals, which splits a length-prefixed sample into its NAL units, so the Android decoder feeds MediaCodec the stream's own units", at = [{ file = "crates/codecs/src/hw.rs", lines = ["333-348"] }] },
+  { item = "hw::NalCodec, which says what a hardware decoder is set up from", at = [{ file = "crates/codecs/src/hw.rs", lines = ["97-102"] }] },
+  { item = "hw::NalStreamInfo's fields, which say what a hardware decoder is set up from", at = [{ file = "crates/codecs/src/hw.rs", lines = ["104-136"] }] },
+  { item = "hw::NalStreamInfo::nal_types, which says which pictures a run leaves out", at = [{ file = "crates/codecs/src/hw.rs", lines = ["328"] }] },
+  { item = "hw::FrameCodec, which says what a hardware decoder is set up from", at = [{ file = "crates/codecs/src/hw_frame.rs", lines = ["13-18"] }] },
+  { item = "hw::FrameStreamInfo's fields, which say what a hardware decoder is set up from", at = [{ file = "crates/codecs/src/hw_frame.rs", lines = ["32-53"] }] },
+  { item = "filmcraft_platform::videotoolbox::VtDecoder, FilmCraft's macOS VideoToolbox decoder, whose behaviour the iOS decoder follows: the surface formats and the reorder bound", at = [{ file = "crates/platform/src/videotoolbox.rs", lines = ["41-60"] }] },
+  { item = "filmcraft_platform::videotoolbox::VtDecoder, FilmCraft's macOS VideoToolbox decoder, whose behaviour the iOS decoder follows: the streams it declines", at = [{ file = "crates/platform/src/videotoolbox.rs", lines = ["260-286"] }] },
+  { item = "filmcraft_platform::videotoolbox::VtDecoder, FilmCraft's macOS VideoToolbox decoder, whose behaviour the iOS decoder follows: the copy out of a biplanar surface with its crop", at = [{ file = "crates/platform/src/videotoolbox.rs", lines = ["197-258"] }] },
+  { item = "filmcraft_platform::videotoolbox::VtDecoder, FilmCraft's macOS VideoToolbox decoder, whose behaviour the iOS decoder follows: the hardware query and the session started up front", at = [{ file = "crates/platform/src/videotoolbox.rs", lines = ["416-424", "446-473"] }] },
+  { item = "filmcraft_platform::videotoolbox::VtDecoder, FilmCraft's macOS VideoToolbox decoder, whose behaviour the iOS decoder follows: the reorder buffer", at = [{ file = "crates/platform/src/videotoolbox.rs", lines = ["485-498"] }] },
+  { item = "filmcraft_platform::videotoolbox::VtDecoder, FilmCraft's macOS VideoToolbox decoder, whose behaviour the iOS decoder follows: the RASL pictures a run started at a CRA or BLA leaves out, with a session per run", at = [{ file = "crates/platform/src/videotoolbox.rs", lines = ["518-549", "562-569"] }] },
+  { item = "FilmCraft's own hardware factories' decline rule, which the factory follows: with the switch off, or a configuration record that does not parse, they answer None uncounted, and a decoder that cannot start answers None and counts the decline", at = [{ file = "crates/platform/src/lib.rs", lines = ["196-209", "215-228", "234-247", "252-268"] }] },
+  { item = "hw::HwStats's doc, which lists the switch being Off among the counted declines; no factory has counted it since the first, and note_hw_declined counts a stream a factory is responsible for, so CraftBridge follows the code", at = [{ file = "crates/codecs/src/hw.rs", lines = ["55-56", "87-88"] }] },
+  { item = "the GOP decode loop, which moves past a sample only once it decoded and feeds it again after an error", at = [{ file = "crates/codecs/src/gop.rs", lines = ["778-779"] }] },
+  { item = "HybridDecoder's replay bounds", at = [{ file = "crates/platform/src/hybrid.rs", lines = ["19-21"] }] },
+  { item = "HybridDecoder's replay-output cap", at = [{ file = "crates/platform/src/hybrid.rs", lines = ["24-26", "105-113"] }] },
+  { item = "HybridDecoder's restart points", at = [{ file = "crates/platform/src/hybrid.rs", lines = ["70-94"] }] },
+  { item = "HybridDecoder's fallback, on an error or a change of in-band parameters, and its replay of the log", at = [{ file = "crates/platform/src/hybrid.rs", lines = ["144-190", "200-202"] }] },
+  { item = "HybridDecoder's merge", at = [{ file = "crates/platform/src/hybrid.rs", lines = ["124-142"] }] },
 ]
 
 [[adaptation]]
@@ -153,12 +233,19 @@ implements = "FX-1a, FX-1d"
 summary = "Confinement that is never optional: the Backend is built headless on the AD1 session and confined before its first command — read roots the container and, when the app names one, the bundle; write root the container alone — so every path the engine reads, writes or renders must pass EffectCraft's own confinement check, and no caller of the library can leave the app's folders open. The app answers through effectcraft_automation::McpServer over this backend. Commands that run past Backend::exec do not pass its checks, so replay reads its script's lines first and checks each with Confinement::check_command as the one step of an engine.batch, the confinement's own check of a command that runs later than its check, refusing the whole script before any line runs, and with it a command whose destination only a live lookup can tell."
 replaces = "the CLI's opt-in --automation-read-root/--automation-write-root flags, which only its mcp subcommand wires up and which a library session has no command line to be given (apps/effectcraft-cli/src/main.rs:827-831)."
 depends = [
-  "Backend::headless and Backend::confine (crates/automation/src/backend.rs:33, :45)",
-  "confine::Confinement::new and the checks Backend::exec makes with it before each command, check_command and check_lookup (crates/automation/src/confine.rs:177, :284, :392)",
-  "McpServer::new and McpServer::backend (crates/automation/src/server.rs:32, :58)",
-  "replay::run, which runs each line on the session with Session::execute and no check, the format it reads and its limits on size and lines, which it parses with a parser it keeps private, and the start line, which opens its project (crates/engine/src/replay.rs:1-27, :40, :42, :217-325, :402-421, :504-551, crates/engine/src/session/dispatch.rs:9-44)",
-  "the confinement's check of each step of an engine.batch before the batch runs, and its refusal of a step whose destination only a live lookup can tell (crates/automation/src/confine.rs:297-318)",
-  "RUNS_SCRIPTS and the confinement's refusal of every command that runs a script, which a script run on the session would bypass: its app.run reaches any command by id past Backend::exec (crates/engine/src/cmd/scripts.rs:34-35, crates/engine/src/session/dispatch.rs:54-63, crates/script/src/prelude.js:2076)",
+  { item = "Backend::headless", at = [{ file = "crates/automation/src/backend.rs", lines = ["33"] }] },
+  { item = "Backend::confine", at = [{ file = "crates/automation/src/backend.rs", lines = ["45"] }] },
+  { item = "confine::Confinement::new", at = [{ file = "crates/automation/src/confine.rs", lines = ["177"] }] },
+  { item = "check_command, which Backend::exec runs with the confinement before each command", at = [{ file = "crates/automation/src/confine.rs", lines = ["284"] }] },
+  { item = "check_lookup, which Backend::exec runs with the confinement before each command", at = [{ file = "crates/automation/src/confine.rs", lines = ["392"] }] },
+  { item = "McpServer::new", at = [{ file = "crates/automation/src/server.rs", lines = ["32"] }] },
+  { item = "McpServer::backend", at = [{ file = "crates/automation/src/server.rs", lines = ["58"] }] },
+  { item = "replay::run, which runs each line on the session with Session::execute and no check of the command", at = [{ file = "crates/engine/src/replay.rs", lines = ["504-551"] }, { file = "crates/engine/src/session/dispatch.rs", lines = ["9-44"] }] },
+  { item = "the format replay reads, which it parses with a parser it keeps private", at = [{ file = "crates/engine/src/replay.rs", lines = ["1-27", "217-325"] }] },
+  { item = "replay's limits on the size and the lines of a script", at = [{ file = "crates/engine/src/replay.rs", lines = ["40", "42"] }] },
+  { item = "the start line of a replay script, which opens its project", at = [{ file = "crates/engine/src/replay.rs", lines = ["402-421"] }] },
+  { item = "the confinement's check of each step of an engine.batch before the batch runs, and its refusal of a step whose destination only a live lookup can tell", at = [{ file = "crates/automation/src/confine.rs", lines = ["297-318"] }] },
+  { item = "RUNS_SCRIPTS and the confinement's refusal of every command that runs a script, which a script run on the session would bypass: its app.run reaches any command by id past Backend::exec", at = [{ file = "crates/engine/src/cmd/scripts.rs", lines = ["34-35"] }, { file = "crates/engine/src/session/dispatch.rs", lines = ["54-63"] }, { file = "crates/script/src/prelude.js", lines = ["2076"] }] },
 ]
 
 [[adaptation]]
@@ -169,18 +256,80 @@ implements = "FX-1a, FX-1b (the disk's refusals)"
 summary = "The answer table: info beside get_project's document, commands as list_commands, exec as one command's result and run as the list of {command, result}, each in the command line's shapes; every automation and engine error is mapped onto one CraftError row — a command or setting the confinement withholds and a capability the build lacks answer Unsupported; a file access outside the confinement, a write with nowhere inside it to go, and a file the engine reports it cannot read or write answer Io; an unknown command, an unknown parameter and a parameter the confinement cannot check answer InvalidParams; a missing comp, item, layer or property answers NotFound, in each of the engine's phrasings; everything else answers CommandFailed, a refusal one command passes on from another it ran as the failure of the command that was run; and every failed step of a run names its step, in CommandFailed's step and in the words of every other row, as the CLI's run words it."
 replaces = "the CLI's info, exec and run printing (apps/effectcraft-cli/src/main.rs:630-745); a library has no process to print, so the plugin re-speaks those documents and errors through CraftError."
 depends = [
-  "effectcraft_automation::Error and what each variant displays (crates/automation/src/lib.rs:33)",
-  "EngineError and what each variant displays (crates/engine/src/error.rs:2)",
-  "ProjectError (crates/project/src/settings.rs:83)",
-  "check_params (crates/engine/src/cmd/schema.rs:107), command_specs and find_command (crates/engine/src/cmd.rs:175, :281)",
-  "tools::run and Reply (crates/automation/src/tools.rs:111, :11)",
-  "the refusals the confinement answers in, from Confinement::check, check_command and check_lookup (crates/automation/src/confine.rs:190-423)",
-  "every sentence of the engine's that ends `not available in this build`, as a refusal, as a command's own and as why a command is disabled (crates/engine/src/cmd/effect.rs:39, :91, :223, :236, crates/engine/src/cmd/file_more.rs:606, :1080, crates/engine/src/cmd/proxy.rs:44, crates/engine/src/cmd/relink.rs:84, crates/engine/src/cmd/panels_cmds.rs:33, :58, crates/engine/src/cmd/render_queue.rs:34, :846, crates/engine/src/cmd/file.rs:321, crates/engine/src/cmd/timeline.rs:121, :123, crates/engine/src/footage/footage_reload.rs:258, crates/engine/src/footage/sequence.rs:270, crates/engine/src/render_queue.rs:597, crates/engine/src/background/offload.rs:476, crates/engine/src/system/library.rs:459, :760, :871, :926, crates/engine/src/scriptui.rs:749, :811, crates/engine/src/session/dispatch.rs:21), and the two that end `{format} export is not available`, a command's refusal and a render item's status (crates/engine/src/cmd/render_queue.rs:848, crates/engine/src/render_queue.rs:566)",
-  "the sentence the engine fails in when the disk will not read or write a file, `cannot read {file}: {why}` or `cannot write {file}: {why}`, as an EngineError::Other, which answers Io (crates/engine/src/analysis/models.rs:622, crates/engine/src/cmd/aep.rs:31, :130, crates/engine/src/cmd/animation.rs:133, crates/engine/src/cmd/app_more.rs:172, :376, crates/engine/src/cmd/create.rs:103, :227, :261, crates/engine/src/cmd/essential.rs:914, :979, crates/engine/src/cmd/file.rs:19, :45, :97, crates/engine/src/cmd/file_more.rs:504, :519, crates/engine/src/cmd/import_project.rs:23, crates/engine/src/cmd/keys_more.rs:210, crates/engine/src/cmd/lottie.rs:32, crates/engine/src/cmd/scripts.rs:234, crates/engine/src/cmd/settings.rs:207, crates/engine/src/cmd/timeline.rs:38, crates/engine/src/cmd/timeline/staging.rs:48, :53, crates/engine/src/cmd/view.rs:97, crates/engine/src/cmd/viewer_cmds.rs:433, crates/engine/src/home/templates.rs:557, :571, :576, :631, :775, crates/engine/src/output_guard.rs:547, crates/engine/src/replay.rs:155), told from a file that read but holds no project (crates/engine/src/cmd/file.rs:50) and from the parameter refusals worded alike, which are BadParams (crates/engine/src/cmd/edit.rs:656)",
-  "the disk refusals the engine words some other way, which stay CommandFailed because nothing but their words could tell them from a command's own failure: those it raises as BadParams — camera.exportBlender's write, file.watchFolder's and file.watchFolder.poll's listing, the model install's write and effect.plugins.load's folder listing (crates/engine/src/cmd/blender.rs:132, crates/engine/src/cmd/watch_folder.rs:124, :132, crates/engine/src/analysis/models.rs:633, crates/engine/src/cmd/effect.rs:102) — and the EngineError::Other sentences that open with another verb, `cannot create`, `cannot inspect`, `cannot publish`, `cannot delete`, `cannot remove`, `cannot save` and `cannot install` (crates/engine/src/cmd/file_more.rs:438, crates/engine/src/cmd/timeline/staging.rs:54, :83, crates/engine/src/home/templates.rs:592, crates/engine/src/analysis/models.rs:685, crates/engine/src/replay.rs:160, crates/engine/src/cmd/scripts.rs:84, :238), which a wider match on `cannot` cannot take in, since the engine opens its refusals of what a file holds the same way (`cannot import`, `cannot export`, crates/engine/src/cmd/aep.rs:47, :57, :128)",
-  "the sentences a missing comp, layer, item or property is refused in — the missing thing alone or followed by the reference it names: `no layer 9` as a command's own refusal and as a plain one, `no such layer`, `no such item`, `no item `name``, `no property `path`` — told from the sentences that open alike about something else, `no layers`, `no layer uses motion blur`, `no compatible unlocked property` (crates/engine/src/cmd/params.rs:138, :160, crates/engine/src/cmd/rig3d.rs:70, crates/engine/src/cmd/footage_panel.rs:151, crates/engine/src/cmd/layer/timing.rs:220)",
-  "engine.batch, which answers a failed step as its own failure rather than passing the step's on (crates/engine/src/cmd/batch.rs:114)",
-  "APP_VERSION, which the codegen writes into the generated ENGINE_VERSION that info reports, as the command line reports its own version, the workspace version both share (crates/project/src/settings.rs:13)",
+  { item = "effectcraft_automation::Error and what each variant displays", at = [{ file = "crates/automation/src/lib.rs", lines = ["33"] }] },
+  { item = "EngineError and what each variant displays", at = [{ file = "crates/engine/src/error.rs", lines = ["2"] }] },
+  { item = "ProjectError", at = [{ file = "crates/project/src/settings.rs", lines = ["83"] }] },
+  { item = "check_params", at = [{ file = "crates/engine/src/cmd/schema.rs", lines = ["107"] }] },
+  { item = "command_specs", at = [{ file = "crates/engine/src/cmd.rs", lines = ["175"] }] },
+  { item = "find_command, find's re-export", at = [{ file = "crates/engine/src/cmd.rs", lines = ["281"] }] },
+  { item = "tools::run", at = [{ file = "crates/automation/src/tools.rs", lines = ["111"] }] },
+  { item = "Reply", at = [{ file = "crates/automation/src/tools.rs", lines = ["11"] }] },
+  { item = "the refusals the confinement answers in, from Confinement::check, check_command and check_lookup", at = [{ file = "crates/automation/src/confine.rs", lines = ["190-423"] }] },
+  { item = "every sentence of the engine's that ends `not available in this build`, as a refusal, as a command's own and as why a command is disabled", at = [
+    { file = "crates/engine/src/cmd/effect.rs", lines = ["39", "91", "223", "236"] },
+    { file = "crates/engine/src/cmd/file_more.rs", lines = ["606", "1080"] },
+    { file = "crates/engine/src/cmd/proxy.rs", lines = ["44"] },
+    { file = "crates/engine/src/cmd/relink.rs", lines = ["84"] },
+    { file = "crates/engine/src/cmd/panels_cmds.rs", lines = ["33", "58"] },
+    { file = "crates/engine/src/cmd/render_queue.rs", lines = ["34", "846"] },
+    { file = "crates/engine/src/cmd/file.rs", lines = ["321"] },
+    { file = "crates/engine/src/cmd/timeline.rs", lines = ["121", "123"] },
+    { file = "crates/engine/src/footage/footage_reload.rs", lines = ["258"] },
+    { file = "crates/engine/src/footage/sequence.rs", lines = ["270"] },
+    { file = "crates/engine/src/render_queue.rs", lines = ["597"] },
+    { file = "crates/engine/src/background/offload.rs", lines = ["476"] },
+    { file = "crates/engine/src/system/library.rs", lines = ["459", "760", "871", "926"] },
+    { file = "crates/engine/src/scriptui.rs", lines = ["749", "811"] },
+    { file = "crates/engine/src/session/dispatch.rs", lines = ["21"] },
+  ] },
+  { item = "the two sentences that end `{format} export is not available`, a command's refusal and a render item's status", at = [{ file = "crates/engine/src/cmd/render_queue.rs", lines = ["848"] }, { file = "crates/engine/src/render_queue.rs", lines = ["566"] }] },
+  { item = "the sentence the engine fails in when the disk will not read or write a file, `cannot read {file}: {why}` or `cannot write {file}: {why}`, as an EngineError::Other, which answers Io", at = [
+    { file = "crates/engine/src/analysis/models.rs", lines = ["622"] },
+    { file = "crates/engine/src/cmd/aep.rs", lines = ["31", "130"] },
+    { file = "crates/engine/src/cmd/animation.rs", lines = ["133"] },
+    { file = "crates/engine/src/cmd/app_more.rs", lines = ["172", "376"] },
+    { file = "crates/engine/src/cmd/create.rs", lines = ["103", "227", "261"] },
+    { file = "crates/engine/src/cmd/essential.rs", lines = ["914", "979"] },
+    { file = "crates/engine/src/cmd/file.rs", lines = ["19", "45", "97"] },
+    { file = "crates/engine/src/cmd/file_more.rs", lines = ["504", "519"] },
+    { file = "crates/engine/src/cmd/import_project.rs", lines = ["23"] },
+    { file = "crates/engine/src/cmd/keys_more.rs", lines = ["210"] },
+    { file = "crates/engine/src/cmd/lottie.rs", lines = ["32"] },
+    { file = "crates/engine/src/cmd/scripts.rs", lines = ["234"] },
+    { file = "crates/engine/src/cmd/settings.rs", lines = ["207"] },
+    { file = "crates/engine/src/cmd/timeline.rs", lines = ["38"] },
+    { file = "crates/engine/src/cmd/timeline/staging.rs", lines = ["48", "53"] },
+    { file = "crates/engine/src/cmd/view.rs", lines = ["97"] },
+    { file = "crates/engine/src/cmd/viewer_cmds.rs", lines = ["433"] },
+    { file = "crates/engine/src/home/templates.rs", lines = ["557", "571", "576", "631", "775"] },
+    { file = "crates/engine/src/output_guard.rs", lines = ["547"] },
+    { file = "crates/engine/src/replay.rs", lines = ["155"] },
+  ] },
+  { item = "the refusal of a file that reads but holds no project, `{path} is not a project EffectCraft can open`, which the disk sentence is told from", at = [{ file = "crates/engine/src/cmd/file.rs", lines = ["50"] }] },
+  { item = "the parameter refusals worded like the disk sentence, which are BadParams and the disk sentence is told from", at = [{ file = "crates/engine/src/cmd/edit.rs", lines = ["656"] }] },
+  { item = "the disk refusals the engine raises as BadParams, which stay CommandFailed because nothing but their words could tell them from a command's own failure: camera.exportBlender's write, file.watchFolder's and file.watchFolder.poll's listing, the model install's write and effect.plugins.load's folder listing", at = [
+    { file = "crates/engine/src/cmd/blender.rs", lines = ["132"] },
+    { file = "crates/engine/src/cmd/watch_folder.rs", lines = ["124", "132"] },
+    { file = "crates/engine/src/analysis/models.rs", lines = ["633"] },
+    { file = "crates/engine/src/cmd/effect.rs", lines = ["102"] },
+  ] },
+  { item = "the EngineError::Other disk sentences that open with another verb, `cannot create`, `cannot inspect`, `cannot publish`, `cannot delete`, `cannot remove`, `cannot save` and `cannot install`, which stay CommandFailed", at = [
+    { file = "crates/engine/src/cmd/file_more.rs", lines = ["438"] },
+    { file = "crates/engine/src/cmd/timeline/staging.rs", lines = ["54", "83"] },
+    { file = "crates/engine/src/home/templates.rs", lines = ["592"] },
+    { file = "crates/engine/src/analysis/models.rs", lines = ["685"] },
+    { file = "crates/engine/src/replay.rs", lines = ["160"] },
+    { file = "crates/engine/src/cmd/scripts.rs", lines = ["84", "238"] },
+  ] },
+  { item = "the engine's refusals of what a file holds, which open the same way, `cannot import` and `cannot export`, so a wider match on `cannot` cannot take the disk sentences in", at = [{ file = "crates/engine/src/cmd/aep.rs", lines = ["47", "57", "128"] }] },
+  { item = "the sentences a missing comp, layer, item or property is refused in — the missing thing alone or followed by the reference it names: `no layer 9` as a command's own refusal and as a plain one, `no such layer`, `no such item`, `no item `name``, `no property `path`` — told from the sentences that open alike about something else, `no layers`, `no layer uses motion blur`, `no compatible unlocked property`", at = [
+    { file = "crates/engine/src/cmd/params.rs", lines = ["138", "160"] },
+    { file = "crates/engine/src/cmd/rig3d.rs", lines = ["70"] },
+    { file = "crates/engine/src/cmd/footage_panel.rs", lines = ["151"] },
+    { file = "crates/engine/src/cmd/layer/timing.rs", lines = ["220"] },
+  ] },
+  { item = "engine.batch, which answers a failed step as its own failure rather than passing the step's on", at = [{ file = "crates/engine/src/cmd/batch.rs", lines = ["114"] }] },
+  { item = "APP_VERSION, which the codegen writes into the generated ENGINE_VERSION that info reports, as the command line reports its own version, the workspace version both share", at = [{ file = "crates/project/src/settings.rs", lines = ["13"] }] },
 ]
 
 [[adaptation]]
@@ -191,13 +340,20 @@ implements = "FX-1a, FX-1d"
 summary = "The model downloads start no process: the engine fetches the official weights by starting the system's curl, which is why its own specs mark roto.model.download and face.model.download desktop-only; the phone has no curl to start and the session starts no process, so every way a call reaches either id answers Unsupported before the engine sees the call — as its own command, as one step of a run, as a line of a replay script, as a tool call of the MCP server (execute_command, command_run, command_batch and batch, read as the server reads them), and as a step of an engine.batch, whose step ids the plugin reads as the engine reads them (command, else id, never a $N), one level deep because the engine runs no steps of a batch inside a batch; installing weights from a file inside the container — roto.model.install and face.model.install, which the confinement already routes as file reads — stays open as the phone's way to get weights."
 replaces = "nothing in the command line: the CLI runs both downloads with the system's curl, which it has; the refusal is the phone's own, taken in the shape of the confinement's per-command refusal."
 depends = [
-  "download, its curl spawn and the two command specs the engine marks desktop-only (crates/engine/src/analysis/models.rs:639, :655, :714-718, :743-747)",
-  "the batch step's id read — command, else id — the $N substitution applied only to parameters, and the refusal of a batch inside a batch before any of its steps run (crates/engine/src/cmd/batch.rs:14, :77-85)",
-  "the per-command refusal of the confinement, whose wording this mirrors (crates/automation/src/confine.rs:285-286)",
-  "file.runScript, which runs the steps of a command script it reads from a file itself and which the confinement withholds as a command that runs scripts, so those steps never reach the engine (crates/engine/src/cmd/file_more.rs:515-549, crates/engine/src/cmd/scripts.rs:34-35)",
-  "the download's only callers being its two command specs: no other command runs it (crates/engine/src/analysis/models.rs:720, :749)",
-  "the MCP tools that run a command by id and how each reads its command, params and steps (crates/automation/src/tools.rs:154-174, :202-206, :496-503, :954-967, :1012-1034), the arguments check tools::find and ToolDef::unknown_arg make before the server runs a tool (crates/automation/src/tools.rs:55-62, :97, crates/automation/src/server.rs:184-191), how the server reads a message, a notification and a batch (crates/automation/src/server.rs:63-89), and its result marking for a client that negotiates per request (crates/automation/src/server.rs:281-304)",
-  "script.run, which reaches the download through app.run with no check of the command, so the script method is not answered (crates/script/src/runtime.rs:128-155, crates/engine/src/analysis/models.rs:655)",
+  { item = "download", at = [{ file = "crates/engine/src/analysis/models.rs", lines = ["639"] }] },
+  { item = "download's curl spawn", at = [{ file = "crates/engine/src/analysis/models.rs", lines = ["655"] }] },
+  { item = "the two command specs the engine marks desktop-only", at = [{ file = "crates/engine/src/analysis/models.rs", lines = ["714-718", "743-747"] }] },
+  { item = "the batch step's id read: command, else id", at = [{ file = "crates/engine/src/cmd/batch.rs", lines = ["77-81"] }] },
+  { item = "the $N substitution, applied only to parameters", at = [{ file = "crates/engine/src/cmd/batch.rs", lines = ["85"] }] },
+  { item = "the refusal of a batch inside a batch before any of its steps run", at = [{ file = "crates/engine/src/cmd/batch.rs", lines = ["14", "82-84"] }] },
+  { item = "the per-command refusal of the confinement, whose wording this mirrors", at = [{ file = "crates/automation/src/confine.rs", lines = ["285-286"] }] },
+  { item = "file.runScript, which runs the steps of a command script it reads from a file itself and which the confinement withholds as a command that runs scripts, so those steps never reach the engine", at = [{ file = "crates/engine/src/cmd/file_more.rs", lines = ["515-549"] }, { file = "crates/engine/src/cmd/scripts.rs", lines = ["34-35"] }] },
+  { item = "the download's only callers being its two command specs: no other command runs it", at = [{ file = "crates/engine/src/analysis/models.rs", lines = ["720", "749"] }] },
+  { item = "the MCP tools that run a command by id and how each reads its command, params and steps", at = [{ file = "crates/automation/src/tools.rs", lines = ["154-174", "202-206", "496-503", "954-967", "1012-1034"] }] },
+  { item = "the arguments check tools::find and ToolDef::unknown_arg make before the server runs a tool", at = [{ file = "crates/automation/src/tools.rs", lines = ["55-62", "97"] }, { file = "crates/automation/src/server.rs", lines = ["184-191"] }] },
+  { item = "how the server reads a message, a notification and a batch", at = [{ file = "crates/automation/src/server.rs", lines = ["63-89"] }] },
+  { item = "the server's result marking for a client that negotiates per request", at = [{ file = "crates/automation/src/server.rs", lines = ["281-304"] }] },
+  { item = "script.run, which reaches the download through app.run with no check of the command, so the script method is not answered", at = [{ file = "crates/script/src/runtime.rs", lines = ["128-155"] }, { file = "crates/engine/src/analysis/models.rs", lines = ["655"] }] },
 ]
 
 [[adaptation]]
@@ -208,12 +364,12 @@ implements = "CORE-2a"
 summary = "The core makes the GPU device itself: the backend is picked per platform — Metal on iOS, Vulkan on Android, the host's on the desktop, GL never — and the requested limits are wgpu's defaults clamped to the adapter's, with max_texture_dimension_2d capped at 16384 and max_buffer_size taken from the adapter, as the compositor takes those two; the device answers (adapter, device, queue) for Gpu::new, and with no device it answers why in words info.gpu can report while every render runs on the CPU."
 replaces = "GpuContext::request()'s own instance and limits (crates/gpu/src/context.rs:1403-1444): it takes any backend, or the ones WGPU_BACKEND names — the emulator's best adapter was its GL translator, with no compute shaders — and asks wgpu::Limits::default() for every limit but those two, which the iOS Simulator's Metal device refused against its 15 inter-stage shader variables (plan/evidence/03-device-feasibility.md Findings 6 and 7, decision D-7). The compositor's own interface stays: the device enters Gpu::new the way the desktop app's does."
 depends = [
-  "Gpu::new, which takes a device the caller made (crates/gpu/src/lib.rs:162-166)",
-  "the adapter limits and the two required limits of GpuContext::request (crates/gpu/src/context.rs:1430-1435)",
-  "device_descriptor, whose memory hints the core's own descriptor mirrors (crates/gpu/src/context.rs:816-818)",
-  "the device name GpuContext::new gives, adapter and backend, which info.gpu spells alike (crates/gpu/src/context.rs:866)",
-  "the words GpuContext::request reports no adapter in, which the core's reason follows (crates/gpu/src/context.rs:1426)",
-  "the power preference GpuContext::request asks when WGPU_POWER_PREF is unset, which the core asks (crates/gpu/src/context.rs:340-347)",
+  { item = "Gpu::new, which takes a device the caller made", at = [{ file = "crates/gpu/src/lib.rs", lines = ["162-166"] }] },
+  { item = "the adapter limits and the two required limits of GpuContext::request", at = [{ file = "crates/gpu/src/context.rs", lines = ["1430-1435"] }] },
+  { item = "device_descriptor, whose memory hints the core's own descriptor mirrors", at = [{ file = "crates/gpu/src/context.rs", lines = ["816-818"] }] },
+  { item = "the device name GpuContext::new gives, adapter and backend, which info.gpu spells alike", at = [{ file = "crates/gpu/src/context.rs", lines = ["866"] }] },
+  { item = "the words GpuContext::request reports no adapter in, which the core's reason follows", at = [{ file = "crates/gpu/src/context.rs", lines = ["1426"] }] },
+  { item = "the power preference GpuContext::request asks when WGPU_POWER_PREF is unset, which the core asks", at = [{ file = "crates/gpu/src/context.rs", lines = ["340-347"] }] },
 ]
 
 [[adaptation]]
@@ -224,12 +380,28 @@ implements = "FX-1b"
 summary = "props, get and set answer through the tools the command line's commands of those names call — get_layer, get_property and set_property — with the arguments the command line builds from its own: a comp or layer is an id, an id written as digits, or a name or #n, and `-`, an empty string or nothing is the active comp; a time is a decimal; set's value is the JSON its text parses to, so it arrives as the JSON it is. props's depth follows the tool, which reads a depth only from a whole number: it goes over as the whole number it is, as the command line's mcp door hands it over, and any other number is refused, because the command line's props --depth parses its text as a decimal and so limits nothing. open, save, saveAs and new answer as the commands the command line's --project, --save, --save-as and --empty run, file.open, file.save, file.saveAs and file.newProject, through the door every command goes through (AD10), each with the command's own result; a path is checked by the confinement (AD9) and by nothing of CraftBridge's, and a missing `path` is the engine's own refusal. A tool's refusal of a command it ran is told by its words, not by re-checking the caller's arguments against that command, which the tool built the parameters of."
 replaces = "the command line's props, get and set subcommands and its --project, --save, --save-as and --empty options, which read their parameters from text and print what the tools and commands answer (apps/effectcraft-cli/src/main.rs:456-507, :746-788); a library has no text to read and nothing to print."
 depends = [
-  "the tools get_layer, get_property and set_property, with the arguments they read — layer, comp, depth, time, flat, path, value, expression — their refusals of a missing layer or path and of neither value nor expression, flat's list of leaf properties, and get_layer's depth, a whole number (crates/automation/src/tools.rs:288-358, :633-677, :641)",
-  "the argument reads every tool makes, which drop an argument given as null and refuse a missing one as `missing `name`` (crates/automation/src/tools.rs:143-160)",
-  "the commands the tools run: layer.tree, which reads its depth only from a whole number, prop.get, prop.set, prop.addKey and prop.setExpression (crates/engine/src/cmd/query.rs:157-168, :216, crates/engine/src/cmd/prop.rs:1421-1432)",
-  "file.open, file.save, file.saveAs and file.newProject, their results `{path, savedBy, repaired}`, `{path, bytes}`, and null or `{template}` when the settings open a template, and their refusals `missing `path`` and `no path: use file.saveAs {path}`, the disk's `cannot read`/`cannot write` (AD10) and `… is not a project EffectCraft can open` (crates/engine/src/cmd/file.rs:15-31, :43-113, :790-794)",
-  "the confinement's check of a path, which refuses a relative path and `..` and resolves every link that exists before it compares the path with the roots (crates/automation/src/confine.rs:190-206, :656-666), and the session's file write, which writes beside the file and renames over it, so a link inside the container to a file not there yet is replaced inside the container, never followed out of it (crates/engine/src/services.rs:99-101, crates/engine/src/settings/config.rs:196-236)",
-  "the command line's reading of a comp or layer reference, a JSON-or-text value and a decimal option, its props, which passes --depth as that decimal, and its backend, which opens --project with file.open and saves with file.save and file.saveAs (apps/effectcraft-cli/src/main.rs:287-303, :456-507, :746-750)",
+  { item = "the get_layer tool, the arguments it reads and its refusal of a missing layer, and its spec, whose depth is a whole number", at = [{ file = "crates/automation/src/tools.rs", lines = ["313-322", "633-648"] }] },
+  { item = "flat's list of leaf properties, which get_layer answers through flatten", at = [{ file = "crates/automation/src/tools.rs", lines = ["288-311"] }] },
+  { item = "the get_property tool, the arguments it reads and its refusals of a missing layer or path", at = [{ file = "crates/automation/src/tools.rs", lines = ["324-327", "649-660"] }] },
+  { item = "the set_property tool, the arguments it reads and its refusal of neither value nor expression", at = [{ file = "crates/automation/src/tools.rs", lines = ["329-358", "661-677"] }] },
+  { item = "the argument reads every tool makes, which drop an argument given as null and refuse a missing one as `missing `name``", at = [{ file = "crates/automation/src/tools.rs", lines = ["143-160"] }] },
+  { item = "layer.tree, which reads its depth only from a whole number", at = [{ file = "crates/engine/src/cmd/query.rs", lines = ["157-168", "216"] }] },
+  { item = "prop.get", at = [{ file = "crates/engine/src/cmd/prop.rs", lines = ["1421"] }] },
+  { item = "prop.set", at = [{ file = "crates/engine/src/cmd/prop.rs", lines = ["1422-1430"] }] },
+  { item = "prop.addKey", at = [{ file = "crates/engine/src/cmd/prop.rs", lines = ["1432"] }] },
+  { item = "prop.setExpression", at = [{ file = "crates/engine/src/cmd/prop.rs", lines = ["1443-1451"] }] },
+  { item = "file.newProject and its result, null or `{template}` when the settings open a template", at = [{ file = "crates/engine/src/cmd/file.rs", lines = ["15-31", "790"] }] },
+  { item = "file.open, its result `{path, savedBy, repaired}` and its refusals `missing `path`` and `{path} is not a project EffectCraft can open`", at = [{ file = "crates/engine/src/cmd/file.rs", lines = ["43-84", "792"] }] },
+  { item = "file_text and save_to, which file.save and file.saveAs write through, and their result `{path, bytes}`", at = [{ file = "crates/engine/src/cmd/file.rs", lines = ["86-103"] }] },
+  { item = "file.save and its refusal `no path: use file.saveAs {path}`", at = [{ file = "crates/engine/src/cmd/file.rs", lines = ["105-108", "793"] }] },
+  { item = "file.saveAs and its refusal `missing `path``", at = [{ file = "crates/engine/src/cmd/file.rs", lines = ["110-113", "794"] }] },
+  { item = "the confinement's check of a path, which refuses a relative path and `..` and resolves every link that exists before it compares the path with the roots", at = [{ file = "crates/automation/src/confine.rs", lines = ["190-206", "656-666"] }] },
+  { item = "the session's file write, which writes beside the file and renames over it, so a link inside the container to a file not there yet is replaced inside the container, never followed out of it", at = [{ file = "crates/engine/src/services.rs", lines = ["99-101"] }, { file = "crates/engine/src/settings/config.rs", lines = ["196-236"] }] },
+  { item = "the command line's reading of a decimal option", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["287-290"] }] },
+  { item = "the command line's reading of a comp or layer reference", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["292-298"] }] },
+  { item = "the command line's reading of a JSON-or-text value", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["300-303"] }] },
+  { item = "the command line's props, which passes --depth as that decimal", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["746-750"] }] },
+  { item = "the command line's backend, which opens --project with file.open and saves with file.save and file.saveAs", at = [{ file = "apps/effectcraft-cli/src/main.rs", lines = ["456-507"] }] },
 ]
 
 [[adaptation]]
@@ -240,6 +412,6 @@ implements = "CORE-2b"
 summary = "The core presents the preview itself: it configures the app's surface from the core's device (Bgra8Unorm on iOS, Rgba8Unorm on Android, never sRGB, Fifo with one frame in flight as the desktop window keeps it, and PostMultiplied alpha where offered, else Opaque, else Inherit, the one mode an Android surface offers, each checked against what the surface reports) and the blit pass in src/blit.rs draws the display frame into it aspect-fit between opaque black bars, un-premultiplying it for a PostMultiplied surface and writing alpha 1 for the others; a resize configures the surface again, an outdated surface is configured again and a lost one answers the Gpu error, as does any error the device reports while a frame is acquired, drawn or shown, and none of these stops the session."
 replaces = "the desktop app's own display: the window surface's configuration, eframe's LOW_LATENCY (apps/effectcraft/src/main.rs:475-482), and the viewers registering the compositor's display texture with egui-wgpu to draw it (crates/ui-egui/src/panels/viewer/frame.rs:176-193, crates/ui-egui/src/panels/viewers.rs:202-215), neither of which a phone has."
 depends = [
-  "Gpu::render_display and DisplayFrame: a premultiplied Rgba8Unorm texture with a full mip chain (crates/gpu/src/lib.rs:138-147, :224-236)",
-  "the desktop window's frame latency, LOW_LATENCY's one frame in flight and the reasons given for it, which the preview surface follows (apps/effectcraft/src/main.rs:475-482)",
+  { item = "Gpu::render_display and DisplayFrame: a premultiplied Rgba8Unorm texture with a full mip chain", at = [{ file = "crates/gpu/src/lib.rs", lines = ["138-147", "224-236"] }] },
+  { item = "the desktop window's frame latency, LOW_LATENCY's one frame in flight and the reasons given for it, which the preview surface follows", at = [{ file = "apps/effectcraft/src/main.rs", lines = ["475-482"] }] },
 ]

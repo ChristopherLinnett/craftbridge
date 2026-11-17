@@ -8,13 +8,13 @@ rust-version.workspace = true
 repository.workspace = true
 publish.workspace = true
 
-# serde_json reads `cargo metadata`; toml reads the manifests and the licence files; toml_edit writes the
-# upstream tables of rust/Cargo.toml as Cargo's own TOML layer, keeping everything else in the file
-# byte for byte; unicode-normalization answers whether a path is in NFC, which std cannot; syn reads Rust
-# sources as the language does, with proc-macro2's tokens and quote's printing of its tree back into them,
-# so the unsafe and lint-attribute checks never scan Rust as text. No other crates: the checks stay small enough
-# that std covers walking, and a lint gate that needs its own dependencies to build is a gate that cannot
-# run when they break.
+# roxmltree reads the XML of the Maven repositories' version lists; serde_json reads `cargo metadata`;
+# toml reads the manifests and the licence files; toml_edit writes the upstream tables of rust/Cargo.toml
+# as Cargo's own TOML layer, keeping everything else in the file byte for byte; unicode-normalization
+# answers whether a path is in NFC, which std cannot; syn reads Rust sources as the language does, with
+# proc-macro2's tokens and quote's printing of its tree back into them, so the unsafe and lint-attribute
+# checks never scan Rust as text. No other crates: the checks stay small enough that std covers walking,
+# and a lint gate that needs its own dependencies to build is a gate that cannot run when they break.
 [dependencies]
 proc-macro2.workspace = true
 quote.workspace = true
@@ -22,6 +22,7 @@ serde_json.workspace = true
 syn.workspace = true
 toml.workspace = true
 toml_edit.workspace = true
+roxmltree.workspace = true
 unicode-normalization.workspace = true
 
 [lints]

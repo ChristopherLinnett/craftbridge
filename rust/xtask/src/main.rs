@@ -13,6 +13,7 @@
 //! Checks run even when an earlier one fails: one run reports everything that is broken, because a
 //! half-fixed change still gates.
 
+mod adaptations;
 mod attributes;
 mod buildfiles;
 mod compiled;
@@ -42,7 +43,9 @@ mod scratch;
 mod sources;
 mod swift_lint;
 mod unsafe_check;
+mod update;
 mod upstream;
+mod versions;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -59,13 +62,18 @@ fn repo_root() -> PathBuf {
 
 fn main() -> ExitCode {
     // `args_os`, never `args`: one argument that is not valid Unicode panics the UTF-8 iterator
-    // mid-iteration (AGENTS.md §3). The `_os` items are collected into `String`s, and a non-Unicode
-    // one ends the run with a line naming it, not with a panic.
-    let args: Vec<String> = match std::env::args_os().skip(1).map(std::ffi::OsString::into_string).collect::<Result<Vec<_>, _>>() {
+    // mid-iteration (AGENTS.md §3).
+    dispatch(std::env::args_os().skip(1))
+}
+
+/// Run the command `arguments` name. They are collected into `String`s, and a non-Unicode one ends the
+/// run with a line naming it, not with a panic.
+fn dispatch(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
+    let args: Vec<String> = match arguments.map(std::ffi::OsString::into_string).collect::<Result<Vec<_>, _>>() {
         Ok(args) => args,
         Err(argument) => {
             eprintln!("xtask: argument `{}` is not valid Unicode; nothing ran", argument.to_string_lossy());
-            return ExitCode::from(2);
+            return ExitCode::from(MISUSE);
         }
     };
     let root = repo_root();
@@ -79,17 +87,21 @@ fn main() -> ExitCode {
         ["files", kind] => files::run(&root, kind),
         ["compiled"] => compiled::run(&root),
         ["dylint", arguments @ ..] => lints::run_dylint(&root, arguments),
-        ["upstream", "pin", rev] => upstream::run(&root, rev),
+        ["upstream", "update", rev] => update::run(&root, rev),
         ["upstream", "source"] => upstream::run_source(&root),
         ["swift-lint"] => swift_lint::run(&root),
         ["pins"] => pins::run(&root),
         ["swift-builds"] => pins::builds(&root),
         _ => {
             usage();
-            ExitCode::from(2)
+            ExitCode::from(MISUSE)
         }
     }
 }
+
+/// The exit of a misused command, sysexits' `EX_USAGE`: 1 is a check or step that failed, and 2 is the
+/// upstream update's breaking API change, so a misuse must be neither.
+const MISUSE: u8 = 64;
 
 fn usage() {
     eprintln!("usage: cargo xtask rules");
@@ -97,7 +109,7 @@ fn usage() {
     eprintln!("       cargo xtask plan-views --check");
     eprintln!("       cargo xtask skipped-tasks <gradle log>");
     eprintln!("       cargo xtask files <swift|shell|duplicates>");
-    eprintln!("       cargo xtask upstream pin <rev>   (through tools/update-upstream.sh: <rev> is a commit of official EffectCraft main)");
+    eprintln!("       cargo xtask upstream update <rev>   (through tools/update-upstream.sh: plan \u{a7}24 to <rev>, a commit of official EffectCraft main)");
     eprintln!("       cargo xtask upstream source   (the official URL and the full commit the pin names on official main, for tools/oracle.sh)");
     eprintln!("       cargo <check|clippy|test> --message-format=json … | cargo xtask compiled");
     eprintln!("       cargo xtask dylint <cargo-dylint arguments…>   (cargo dylint, taking turns on the lock every lint library run shares)");
@@ -176,5 +188,22 @@ mod rules {
             let (failed, lines) = outcome(Path::new("."), &checks[2..]);
             assert!(!failed && lines == ["rules: third: ok"]);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsString;
+    use std::process::ExitCode;
+
+    /// A misused command exits 64, never 2, which the upstream update keeps for a breaking API change:
+    /// an argument that is not Unicode, which `tools/update-upstream.sh` passes through, and a command
+    /// missing a word.
+    #[test]
+    fn a_misused_command_exits_64() {
+        use std::os::unix::ffi::OsStringExt;
+        let not_unicode = OsString::from_vec(vec![0xff]);
+        assert_eq!(super::dispatch([OsString::from("upstream"), OsString::from("update"), not_unicode].into_iter()), ExitCode::from(64));
+        assert_eq!(super::dispatch([OsString::from("upstream"), OsString::from("update")].into_iter()), ExitCode::from(64));
     }
 }

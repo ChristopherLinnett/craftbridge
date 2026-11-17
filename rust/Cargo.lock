@@ -4456,6 +4456,7 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
+ "roxmltree",
  "serde_json",
  "syn 2.0.119",
  "toml",
