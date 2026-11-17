@@ -1,17 +1,31 @@
 #!/usr/bin/env bash
-# The one way the EffectCraft pin moves (AGENTS.md §7, plan §24 steps 1 and 2).
+# The one way the EffectCraft pin moves, and the whole upstream update after it (AGENTS.md §7, plan §24).
 #
 #   tools/update-upstream.sh <rev>
 #
 # <rev> is the id of a commit on official storytold/effectcraft main, in full or abbreviated. The script
-# hands it to `cargo xtask upstream pin` (rust/xtask/src/upstream.rs), which does every step in one
-# place: it fetches official main into the machine's read-only cache of the official repository when the
-# cache does not reach <rev> yet, refuses a <rev> that is a branch, a tag or any name that moves, or a
-# commit official main does not reach, then writes the EffectCraft and FilmCraft pins, the [patch]
-# tables and [profile.release] of rust/Cargo.toml from that revision's own manifest — copied, never
-# retyped — seeds rust/Cargo.lock from that revision's own lock, and lets Cargo resolve CraftBridge's own
-# crates on top (D-21). FilmCraft is pinned to the revision EffectCraft itself names (plan §24), never to
-# one of CraftBridge's choosing.
+# hands it to `cargo xtask upstream update` (rust/xtask/src/update.rs). Its steps 1 and 2, in
+# rust/xtask/src/upstream.rs, fetch official main into the machine's read-only cache of the official
+# repository when the cache does not reach <rev> yet, refuse a <rev> that is a branch, a tag or any name
+# that moves, or a commit official main does not reach, then write the EffectCraft and FilmCraft pins,
+# the [patch] tables and [profile.release] of rust/Cargo.toml from that revision's own manifest — copied,
+# never retyped — seed rust/Cargo.lock from that revision's own lock, and let Cargo resolve CraftBridge's
+# own crates on top (D-21). FilmCraft is pinned to the revision EffectCraft itself names (plan §24),
+# never to one of CraftBridge's choosing.
+#
+# Steps 3 to 7 follow in the same run (rust/xtask/src/update.rs), each named by what a person does with
+# its result: 3, the adaptations of tools/adaptations.toml whose upstream items the revision change
+# touched, listed with their diffs to be rechecked, and the listed lines that only moved, with the lines
+# they moved to; 4, the API surface and the facades regenerated and diffed against the surface the tree
+# held; 5, the gate, tools/ci.sh, whose conformance stage compares the new revision's command line with
+# the corpus; 6, the record appended to docs/upstream-updates.md, whose recheck lines the person
+# completes; 7, every version of android/sdk/gradle/libs.versions.toml and of the Gradle wrapper that has
+# a newer release, for a change of its own. A run on the revision the tree already holds stops after
+# step 2: it fetches only what the cache lacks, and looks up no release.
+#
+# Exit codes: 0 for an update that stands, up to date, clean or with adaptations to recheck; 2 for a
+# breaking API change, which makes the next release a major version; 1 for a failed gate, which the
+# run's output names, and for a step that could not finish; 64 for a misused script.
 #
 # Running the script again on the revision the tree already holds writes nothing, so it changes nothing
 # byte for byte; on a machine without the cache, that run is how the cache gets the pin. The `upstream`
@@ -40,7 +54,7 @@ cd "$CRAFTBRIDGE_ROOT"
 
 if [ "$#" -ne 1 ]; then
   echo "usage: tools/update-upstream.sh <effectcraft-rev> — the id of the official storytold/effectcraft commit to build against" >&2
-  exit 2
+  exit 64
 fi
 
 # The writer of the tables builds from the workspace's own lock, `--locked`, so the build itself never
@@ -49,5 +63,6 @@ fi
 # shared binary this script is starting (tools/env.sh).
 xtask_run="$(mktemp -d "${TMPDIR:-/tmp}/craftbridge-upstream.XXXXXX")"
 trap 'rm -rf "$xtask_run"' EXIT
-craftbridge_xtask_build "$xtask_run"
-"$xtask_run/debug/xtask" upstream pin "$1"
+# A writer that does not build is a step that could not finish, never Cargo's own exit code.
+craftbridge_xtask_build "$xtask_run" || exit 1
+"$xtask_run/debug/xtask" upstream update "$1"

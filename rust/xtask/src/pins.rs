@@ -27,8 +27,10 @@ pub(crate) const TOOLCHAIN: &str = "rust/rust-toolchain.toml";
 /// machine has installed.
 pub(crate) const CATALOG: &str = "android/sdk/gradle/libs.versions.toml";
 
-/// The catalog keys the doctor's checks read, and the gate beside them.
-const CATALOG_PINS: [&str; 3] = ["android-compileSdk", "android-buildTools", "jdk"];
+/// The catalog keys the doctor's checks read, and the gate beside them: the levels of the platform the
+/// machine installs, which the update loop's newer-release step also leaves alone, there being no
+/// repository of newer ones (`rust/xtask/src/versions.rs`).
+pub(crate) const CATALOG_PINS: [&str; 3] = ["android-compileSdk", "android-buildTools", "jdk"];
 
 /// The configurations the Swift package ships as: the Debug a developer builds, and the Release a library
 /// is shipped in. An `#if !DEBUG` compiles code no Debug build sees, so both ship.

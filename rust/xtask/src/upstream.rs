@@ -547,9 +547,9 @@ struct Switch {
     why: String,
 }
 
-/// The one table of refused switches, read from the repository. The table is the gate's own data, like
-/// `tools/adaptations.toml`: no official tool reads it, so these few lines are its whole reader, and
-/// `tools/env.sh` reads the same file for the environment side. A broken line fails rather than skips,
+/// The one table of refused switches, read from the repository. The table is the gate's own data: no
+/// official tool reads it, so these few lines are its whole reader, and `tools/env.sh` reads the same file
+/// for the environment side. A broken line fails rather than skips,
 /// because a skipped line would let through the very switch it was written to refuse; and a variable is
 /// written in the one form both readers match alike — capitals, digits and underscores, with at most one
 /// `*` — since a shell glob reads `?` and `[` where this reader reads them as letters.
@@ -828,7 +828,7 @@ fn commit_id(rev: &str) -> Result<(), String> {
 /// official repository alone. The rule reads upstream's own manifest and lock from it, so a cache that
 /// fetched from a fork would hold the workspace to a fork's tables; and it is where an official revision
 /// is told from any other commit.
-struct Cache(PathBuf);
+pub(crate) struct Cache(PathBuf);
 
 impl Cache {
     /// The cache `tools/env.sh` names, as it stands.
@@ -839,11 +839,15 @@ impl Cache {
     /// The cache at `dir`, refused unless it is a bare clone of the official repository: the URL its
     /// fetches really use, after any `url.<base>.insteadOf` rewrite in its own configuration, must be the
     /// official one.
-    fn at(dir: PathBuf) -> Result<Self, String> {
+    pub(crate) fn at(dir: PathBuf) -> Result<Self, String> {
+        Self::at_repository(dir, app_url(effectcraft_app()?))
+    }
+
+    /// The cache at `dir`, held to the same rule for the official repository at `official`.
+    fn at_repository(dir: PathBuf, official: String) -> Result<Self, String> {
         if !dir.join("objects").is_dir() {
             return Err(format!("there is no upstream cache at {}", dir.display()));
         }
-        let official = app_url(effectcraft_app()?);
         let cache = Self(dir);
         let origin = cache.git(&["ls-remote", "--get-url", "origin"]).unwrap_or_default();
         if origin != official {
@@ -859,15 +863,34 @@ impl Cache {
     /// The cache `tools/env.sh` names, made first when this machine has none: an empty bare clone
     /// fetching from the official repository. A folder that is there already and is no cache is left
     /// alone and refused.
-    fn create() -> Result<Self, String> {
-        let dir = cache_dir()?;
+    pub(crate) fn create() -> Result<Self, String> {
+        Self::create_at(cache_dir()?, app_url(effectcraft_app()?))
+    }
+
+    /// The cache of FilmCraft beside EffectCraft's, made first when this machine has none: the update
+    /// reads FilmCraft's own files at the revisions EffectCraft names.
+    pub(crate) fn create_film() -> Result<Self, String> {
+        let app = film_app()?;
+        let effectcraft = cache_dir()?;
+        let dir = effectcraft.with_file_name(app.crates.trim_end_matches('-'));
+        Self::create_at(dir, app_url(app))
+    }
+
+    /// The cache of the Craft libraries beside EffectCraft's, made first when this machine has none: the
+    /// update reads a library's own files at the revisions an app's crates build it at.
+    pub(crate) fn create_libraries() -> Result<Self, String> {
+        let name = layers::CRAFT_LIBRARY_REPOSITORY.rsplit('/').next().unwrap_or(layers::CRAFT_LIBRARY_REPOSITORY);
+        Self::create_at(cache_dir()?.with_file_name(name), library_url())
+    }
+
+    fn create_at(dir: PathBuf, official: String) -> Result<Self, String> {
         let empty = std::fs::read_dir(&dir).map(|mut entries| entries.next().is_none()).unwrap_or(true);
         if !dir.join("objects").is_dir() && empty {
             std::fs::create_dir_all(&dir).map_err(|error| format!("cannot create the upstream cache at {}: {error}", dir.display()))?;
             crate::git::run(Self::command(&dir), &["init", "--quiet", "--bare"])?;
-            crate::git::run(Self::command(&dir), &["--git-dir=.", "remote", "add", "origin", &app_url(effectcraft_app()?)])?;
+            crate::git::run(Self::command(&dir), &["--git-dir=.", "remote", "add", "origin", &official])?;
         }
-        Self::at(dir)
+        Self::at_repository(dir, official)
     }
 
     /// Git started on the cache with the cache's own configuration the only one it reads. A
@@ -885,7 +908,7 @@ impl Cache {
 
     /// A git command on the cache itself: `--git-dir` names it, so a folder set inside some other
     /// repository is never taken for that repository.
-    fn git(&self, args: &[&str]) -> Result<String, String> {
+    pub(crate) fn git(&self, args: &[&str]) -> Result<String, String> {
         let mut all = vec!["--git-dir=."];
         all.extend_from_slice(args);
         crate::git::run(Self::command(&self.0), &all).map(|out| String::from_utf8_lossy(&out).trim().to_string())
@@ -920,6 +943,18 @@ impl Cache {
         Ok(full)
     }
 
+    /// The full commit of the official revision `rev`, after fetching official main into the cache when it
+    /// does not reach `rev` yet.
+    pub(crate) fn official_commit_fetching(&self, rev: &str) -> Result<String, String> {
+        match self.official_commit(rev) {
+            Ok(full) => Ok(full),
+            Err(_) => {
+                self.fetch_main()?;
+                self.official_commit(rev)
+            }
+        }
+    }
+
     /// One file of `commit`.
     fn file(&self, commit: &str, name: &str) -> Result<String, String> {
         self.git(&["show", &format!("{commit}:{name}")])
@@ -939,29 +974,29 @@ fn rev_text(ours: &str, full: &str, requested: &str, cache: &Cache) -> String {
     }
 }
 
-/// `cargo xtask upstream pin <rev>`: fetch official main into the cache when it does not reach `rev`
-/// yet, then write the pins, `[patch]`, `[profile.release]` and the starting lock for that revision and
-/// let Cargo resolve the workspace on top of that lock (plan \u{a7}24 steps 1 and 2). When the tree already
-/// holds exactly what the revision writes, nothing is written: the lock then stays as Cargo left it,
-/// rather than having CraftBridge's own crates resolved again against whatever the registry offers on
-/// the day, so a second run on the same revision changes nothing.
+/// Steps 1 and 2 of plan \u{a7}24, which `cargo xtask upstream update` takes first: fetch official main
+/// into the cache when it does not reach `rev` yet, then write the pins, `[patch]`, `[profile.release]`
+/// and the starting lock for that revision and let Cargo resolve the workspace on top of that lock. When
+/// the tree already holds exactly what the revision writes, nothing is written: the lock then stays as
+/// Cargo left it, rather than having CraftBridge's own crates resolved again against whatever the
+/// registry offers on the day, so a second run on the same revision changes nothing.
 pub(crate) fn pin(root: &Path, rev: &str) -> Result<String, String> {
     // Before the cache is touched: a name that is no commit id neither makes a cache nor fetches.
     commit_id(rev)?;
     let cache = Cache::create()?;
-    let full = match cache.official_commit(rev) {
-        Ok(full) => full,
-        Err(_) => {
-            cache.fetch_main()?;
-            cache.official_commit(rev)?
-        }
-    };
-    let upstream_manifest = cache.file(&full, "Cargo.toml")?;
-    let upstream_lock = cache.file(&full, "Cargo.lock")?;
+    let full = cache.official_commit_fetching(rev)?;
+    pin_from(root, &cache, rev, &full)
+}
+
+/// What [`pin`] writes for the official commit `full`, which `rev` names, read from `cache`: apart from the
+/// making and fetching of the machine's cache, so a test gives it a scratch one and reaches no network.
+fn pin_from(root: &Path, cache: &Cache, rev: &str, full: &str) -> Result<String, String> {
+    let upstream_manifest = cache.file(full, "Cargo.toml")?;
+    let upstream_lock = cache.file(full, "Cargo.lock")?;
     let filmcraft_rev = upstream_filmcraft_rev(&upstream_manifest)?;
     let manifest_path = root.join("rust/Cargo.toml");
     let ours = std::fs::read_to_string(&manifest_path).map_err(|error| format!("cannot read rust/Cargo.toml: {error}"))?;
-    let spelling = rev_text(&ours, &full, rev, &cache);
+    let spelling = rev_text(&ours, full, rev, cache);
     let written = regenerate(&ours, &upstream_manifest, &spelling, &filmcraft_rev)?;
     if written == ours {
         return Ok(format!("rust/Cargo.toml already holds effectcraft {spelling} ({full}), filmcraft {filmcraft_rev} and their tables: nothing written"));
@@ -981,18 +1016,11 @@ pub(crate) fn pin(root: &Path, rev: &str) -> Result<String, String> {
     Ok(format!("pinned effectcraft {spelling} ({full}), filmcraft {filmcraft_rev}; rust/Cargo.lock started from upstream's and resolved"))
 }
 
-/// `cargo xtask upstream pin <rev>` as a command.
-pub(crate) fn run(root: &Path, rev: &str) -> std::process::ExitCode {
-    match pin(root, rev) {
-        Ok(done) => {
-            println!("upstream: {done}");
-            std::process::ExitCode::SUCCESS
-        }
-        Err(error) => {
-            eprintln!("upstream: {error}");
-            std::process::ExitCode::FAILURE
-        }
-    }
+/// A bare scratch repository fetching from official EffectCraft, holding nothing yet: the cache a test
+/// builds an upstream's revisions in.
+#[cfg(test)]
+pub(crate) fn official_scratch(tag: &str) -> crate::scratch::Scratch {
+    crate::git::bare_scratch(tag, &app_url(effectcraft_app().unwrap()))
 }
 
 /// The cache `tools/env.sh` names, or the failure that names its fix: the update script fetches the pinned
@@ -1173,6 +1201,30 @@ mod tests {
         );
     }
 
+    /// The dry run of E12: taking the revision the tree already holds again, by the abbreviated id the
+    /// manifest spells it with or in full, writes nothing, the lock included. The cache is a scratch one,
+    /// so the test needs neither the machine's cache nor the network.
+    #[test]
+    fn taking_the_revision_the_tree_holds_again_writes_nothing() {
+        let upstream = upstream_manifest("d5ead4ba", "e7c3dda");
+        let scratch = official_scratch("upstream-dry-run");
+        let full = crate::git::commit_files(&scratch.0, None, "pinned", &[("Cargo.toml", &upstream), ("Cargo.lock", "# upstream's lock\n")]);
+        point_main_at(&scratch, &full);
+        let cache = Cache::at(scratch.0.clone()).unwrap();
+        let abbreviated = full.get(..8).unwrap();
+        let manifest = regenerate(&workspace_manifest(abbreviated, "d5ead4ba"), &upstream, abbreviated, "d5ead4ba").unwrap();
+        let lock = "# the lock as Cargo resolved it\n";
+        let tree = Scratch::new("upstream-dry-run-tree");
+        tree.write("rust/Cargo.toml", &manifest);
+        tree.write("rust/Cargo.lock", lock);
+        for rev in [abbreviated, full.as_str()] {
+            let said = pin_from(&tree.0, &cache, rev, &full).unwrap();
+            assert!(said.contains("nothing written"), "{rev}: {said}");
+            assert_eq!(std::fs::read_to_string(tree.0.join("rust/Cargo.toml")).unwrap(), manifest, "{rev}");
+            assert_eq!(std::fs::read_to_string(tree.0.join("rust/Cargo.lock")).unwrap(), lock, "{rev}");
+        }
+    }
+
     #[test]
     fn a_hand_written_patch_entry_or_profile_key_is_a_finding() {
         let ours = workspace_manifest("10376058", "d5ead4ba");
@@ -1315,9 +1367,7 @@ mod tests {
 
     /// A bare scratch cache that fetches from the official URL, with one commit, which main points at.
     fn official_scratch_cache(tag: &str) -> (Scratch, String) {
-        let scratch = Scratch::new(tag);
-        crate::git::output(&scratch.0, &["init", "--quiet", "--bare"]).unwrap();
-        crate::git::output(&scratch.0, &["--git-dir=.", "remote", "add", "origin", "https://github.com/storytold/effectcraft"]).unwrap();
+        let scratch = official_scratch(tag);
         let first = commit(&scratch, None, "one");
         point_main_at(&scratch, &first);
         (scratch, first)
@@ -1327,14 +1377,9 @@ mod tests {
         crate::git::output(&cache.0, &["--git-dir=.", "update-ref", "refs/heads/main", commit]).unwrap();
     }
 
-    /// One commit on the scratch repository, made the way git's plumbing makes one in a bare repository.
+    /// One commit of the empty tree on the scratch repository.
     fn commit(cache: &Scratch, parent: Option<&str>, message: &str) -> String {
-        let tree = String::from_utf8(crate::git::output(&cache.0, &["--git-dir=.", "mktree"]).unwrap()).unwrap();
-        let mut args = vec!["--git-dir=.", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit-tree", tree.trim(), "-m", message];
-        if let Some(parent) = parent {
-            args.extend(["-p", parent]);
-        }
-        String::from_utf8(crate::git::output(&cache.0, &args).unwrap()).unwrap().trim().to_string()
+        crate::git::commit_files(&cache.0, parent, message, &[])
     }
 
     /// An official revision is a commit official main reaches, named by its id: an unmerged commit the

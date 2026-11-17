@@ -1,5 +1,5 @@
-//! The generators behind `generated/api-surface.json`, the Swift facade and the plugin's version constants:
-//! the codegen binary, built and run by cargo.
+//! The generators behind `generated/api-surface.json`, the Swift facade and the plugin's version constants,
+//! and the comparison of two surfaces the upstream update makes: the codegen binary, built and run by cargo.
 //!
 //! The codegen links the pinned EffectCraft and reads its command registry at run time, and xtask may not
 //! depend on a host tool, so xtask asks cargo for the binary and runs it. The pin the surface records is
@@ -53,6 +53,40 @@ fn run_codegen(args: &[&str], out_dir: &Path) -> Result<(), String> {
     if output.status.success() { Ok(()) } else { Err(format!("{CODEGEN} exited with {}: {}", output.status, String::from_utf8_lossy(&output.stderr).trim())) }
 }
 
+/// The surface file inside [`OUTPUT_DIR`].
+pub(crate) const SURFACE_FILE: &str = "rust/effects/craftbridge-effects-codegen/generated/api-surface.json";
+
+/// What the codegen's `diff` found between two surfaces.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SurfaceDiff {
+    /// An app written against the old surface can fail to build or run against the new one.
+    pub(crate) breaking: bool,
+    /// The codegen's listing of the commands, keys and tools added, removed and changed.
+    pub(crate) report: String,
+}
+
+/// The codegen's exit code for a breaking change (`craftbridge-effects-codegen diff`): 0 is a compatible
+/// difference, and any other code is the tool failing.
+const BREAKING: i32 = 2;
+
+/// Read the codegen's judgement of `diff <old> <new>` from how it ended.
+fn judged(code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> Result<SurfaceDiff, String> {
+    let report = String::from_utf8_lossy(stdout).trim_end().to_string();
+    match code {
+        Some(0) => Ok(SurfaceDiff { breaking: false, report }),
+        Some(BREAKING) => Ok(SurfaceDiff { breaking: true, report }),
+        other => Err(format!("{CODEGEN} diff ended with {other:?}: {}", String::from_utf8_lossy(stderr).trim())),
+    }
+}
+
+/// Run the codegen's `diff`, built from the workspace at `root`, on two surface files: what changed, and
+/// whether it breaks an app.
+pub(crate) fn diff(root: &Path, old: &Path, new: &Path) -> Result<SurfaceDiff, String> {
+    let binary = build_codegen(&root.join("rust"))?;
+    let output = Command::new(&binary).arg("diff").arg(old).arg(new).output().map_err(|error| format!("cannot run {}: {error}", binary.display()))?;
+    judged(output.status.code(), &output.stdout, &output.stderr)
+}
+
 /// Build the codegen and return the path of its binary, as Cargo reports it: Cargo, not a guess at its
 /// target folder, says where the build wrote it.
 fn build_codegen(rust_dir: &Path) -> Result<PathBuf, String> {
@@ -80,6 +114,36 @@ fn executable_of(artifacts: &[crate::compiled::Artifact]) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_diff_is_breaking_only_when_the_codegen_says_so() {
+        assert_eq!(judged(Some(0), b"+ command a\n", b"").map(|found| found.breaking), Ok(false));
+        let breaking = judged(Some(2), b"- command a\n", b"").unwrap();
+        assert!(breaking.breaking && breaking.report == "- command a");
+        assert!(judged(Some(1), b"", b"no such file").is_err_and(|error| error.contains("no such file")), "a tool that failed judged nothing");
+        assert!(judged(None, b"", b"").is_err(), "nor one a signal ended");
+    }
+
+    #[test]
+    fn the_surface_file_is_where_the_generator_writes_it() {
+        assert_eq!(SURFACE_FILE, format!("{OUTPUT_DIR}/api-surface.json"));
+    }
+
+    #[test]
+    fn a_surface_that_lost_a_command_is_a_breaking_change_to_the_real_codegen() {
+        let root = crate::repo_root();
+        let surface: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(root.join(SURFACE_FILE)).unwrap()).unwrap();
+        let mut smaller = surface.clone();
+        let commands = smaller.get_mut("commands").and_then(serde_json::Value::as_array_mut).expect("the surface lists its commands");
+        commands.pop().expect("the surface holds a command to remove");
+        let scratch = crate::scratch::Scratch::new("surface-diff");
+        scratch.write("old.json", serde_json::to_string(&surface).unwrap());
+        scratch.write("new.json", serde_json::to_string(&smaller).unwrap());
+        let found = diff(&root, &scratch.0.join("old.json"), &scratch.0.join("new.json")).unwrap();
+        assert!(found.breaking, "a removed command breaks an app: {}", found.report);
+        let same = diff(&root, &scratch.0.join("old.json"), &scratch.0.join("old.json")).unwrap();
+        assert!(!same.breaking && same.report.contains("0 added, 0 removed, 0 changed"), "{}", same.report);
+    }
 
     #[test]
     fn the_binary_is_the_codegens_own_executable() {

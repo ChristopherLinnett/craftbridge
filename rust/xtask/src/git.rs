@@ -81,6 +81,41 @@ pub(crate) fn is_checkout(root: &Path) -> bool {
     root.join(".git").exists()
 }
 
+/// A bare scratch repository whose `origin` is `url`, holding nothing yet: the upstream cache a test
+/// builds its revisions in.
+#[cfg(test)]
+pub(crate) fn bare_scratch(tag: &str, url: &str) -> crate::scratch::Scratch {
+    let repository = crate::scratch::Scratch::new(tag);
+    output(&repository.0, &["init", "--quiet", "--bare"]).unwrap();
+    output(&repository.0, &["--git-dir=.", "remote", "add", "origin", url]).unwrap();
+    repository
+}
+
+/// A commit in the bare repository at `repository` holding exactly `files`, each a path and its text, made
+/// with git's plumbing from an index of its own, since a bare repository has no work tree to add from;
+/// with no files it holds the empty tree.
+#[cfg(test)]
+pub(crate) fn commit_files(repository: &Path, parent: Option<&str>, message: &str, files: &[(&str, &str)]) -> String {
+    let blobs = crate::scratch::Scratch::new("git-commit");
+    let with_index = || {
+        let mut git = command(repository);
+        git.env("GIT_INDEX_FILE", blobs.0.join("index"));
+        git
+    };
+    for (number, (name, text)) in files.iter().enumerate() {
+        let blob = blobs.0.join(format!("blob-{number}"));
+        std::fs::write(&blob, text).unwrap();
+        let hash = String::from_utf8(output(repository, &["--git-dir=.", "hash-object", "-w", &blob.to_string_lossy()]).unwrap()).unwrap();
+        run(with_index(), &["--git-dir=.", "update-index", "--add", "--cacheinfo", &format!("100644,{},{name}", hash.trim())]).unwrap();
+    }
+    let tree = String::from_utf8(run(with_index(), &["--git-dir=.", "write-tree"]).unwrap()).unwrap();
+    let mut args = vec!["--git-dir=.", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit-tree", tree.trim(), "-m", message];
+    if let Some(parent) = parent {
+        args.extend(["-p", parent]);
+    }
+    String::from_utf8(output(repository, &args).unwrap()).unwrap().trim().to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
