@@ -7,13 +7,18 @@
 //! a tool call that reaches one is answered as a failed tool call, in the words every other path
 //! refuses it in, and the server never sees it.
 //! The tools also run their commands past `methods::execute`, so each reply to a tool call that
-//! runs a command passes through the font listing filter (AD2) before it is written.
+//! runs a command passes through the font listing filter (AD2) before it is written, and a tool call
+//! that reaches a command writing beside its source is handed the copy to read first (AD22), its
+//! arguments written again where the tool reads them.
+
+use std::borrow::Cow;
 
 use effectcraft_automation::server::call_result;
 use effectcraft_automation::{Error, McpServer, tools};
 use serde_json::{Map, Value};
 
 use crate::fonts::{TEXT_FONTS, filtered};
+use crate::imports;
 use crate::methods::{empty_params, object, withheld};
 
 /// The tools that run a command by its id, and so can reach a withheld command or a font listing, by
@@ -32,10 +37,25 @@ type Filter = fn(&str, &Value, Value) -> Value;
 
 /// The commands one tool call runs, as the server's own tools read them.
 struct Commands {
-    /// Whether the answer holds one row per step (`command_batch`), not one answer to one command.
-    rows: bool,
+    /// Where the tool reads its commands' parameters from, which also says whether its answer holds
+    /// one row per step.
+    shape: Shape,
     /// Each step in order; `None` for one the server refuses before it runs it.
     steps: Vec<Option<Step>>,
+}
+
+/// Where a tool reads the parameters of the commands it runs.
+#[derive(Clone, Copy)]
+enum Shape {
+    /// One command, whose parameters are the tool's `params`.
+    One,
+    /// An `engine.batch` the tool hands the engine whole, whose steps are the tool's `steps`.
+    Batch,
+    /// Steps the tool runs one by one (`command_batch`), each with the `params` of its own entry of the
+    /// tool's `steps`; the answer holds one row per step.
+    Rows,
+    /// The font listing, whose one command the tool builds from arguments of its own.
+    Fonts,
 }
 
 /// Answer one line as the server does, with the one difference that a message reaching a withheld
@@ -63,8 +83,61 @@ fn handle(server: &mut McpServer, message: &Value, filter: Filter) -> Option<Val
         }
         _ => match withheld_in(message) {
             Some(words) => refusal(message, words),
-            None => server.handle(message).map(|reply| listed(message, reply, filter)),
+            None => handle_staged(server, message, filter),
         },
+    }
+}
+
+/// Answer a message the door lets through, its commands first handed the copy of each file they
+/// would write beside where the session may not write ([`imports::staged`]): a copy that cannot be
+/// made is a failed tool call in the disk's words, and what the door leaves for after the call is
+/// done once the server has answered.
+fn handle_staged(server: &mut McpServer, message: &Value, filter: Filter) -> Option<Value> {
+    let Some(mut commands) = commands_in(message) else { return server.handle(message).map(|reply| listed(message, reply, filter)) };
+    let mut calls: Vec<(&str, &mut Value)> = commands.steps.iter_mut().flatten().map(|(command, params)| (command.as_str(), params)).collect();
+    let staged = match imports::staged(server.backend(), &mut calls) {
+        Ok(staged) => staged,
+        Err(error) => return refusal(message, error.to_string()),
+    };
+    let message = if staged.rewritten() {
+        let mut rewritten = message.clone();
+        rewrite(&mut rewritten, &commands);
+        Cow::Owned(rewritten)
+    } else {
+        Cow::Borrowed(message)
+    };
+    let reply = server.handle(&message).map(|reply| listed(&message, reply, filter));
+    staged.finish(server.backend());
+    reply
+}
+
+/// Write each command's parameters, as `commands` holds them now, where the tool reads them in
+/// `message`: a value the tools take as JSON or as text holding it is written as JSON, which the
+/// tools read alike (`json_of`).
+fn rewrite(message: &mut Value, commands: &Commands) {
+    let Some(arguments) = message.pointer_mut("/params/arguments").and_then(Value::as_object_mut) else { return };
+    let first = commands.steps.first().and_then(Option::as_ref).map(|(_, params)| params);
+    match commands.shape {
+        Shape::One => {
+            if let Some(params) = first {
+                arguments.insert("params".to_string(), params.clone());
+            }
+        }
+        Shape::Batch => {
+            if let Some(steps) = first.and_then(|params| params.get("steps")) {
+                arguments.insert("steps".to_string(), steps.clone());
+            }
+        }
+        Shape::Rows => {
+            let Some(Value::Array(mut steps)) = arguments.get("steps").and_then(json_of) else { return };
+            for (step, given) in steps.iter_mut().zip(&commands.steps) {
+                if let (Some(step), Some((_, params))) = (step.as_object_mut(), given) {
+                    step.insert("params".to_string(), params.clone());
+                }
+            }
+            arguments.insert("steps".to_string(), Value::Array(steps));
+        }
+        Shape::Fonts => {}
     }
 }
 
@@ -89,19 +162,19 @@ fn commands_in(message: &Value) -> Option<Commands> {
     }
     if name == LIST_FONTS {
         let given = LIST_FONTS_ARGS.iter().filter_map(|key| Some((key.to_string(), args.get(key).filter(|value| !value.is_null())?.clone())));
-        return Some(Commands { rows: false, steps: vec![Some((TEXT_FONTS.to_string(), Value::Object(given.collect::<Map<_, _>>())))] });
+        return Some(Commands { shape: Shape::Fonts, steps: vec![Some((TEXT_FONTS.to_string(), Value::Object(given.collect::<Map<_, _>>())))] });
     }
     if ONE_COMMAND.contains(&name) {
-        return Some(Commands { rows: false, steps: vec![step_of(args)] });
+        return Some(Commands { shape: Shape::One, steps: vec![step_of(args)] });
     }
     if !COMMAND_LISTS.contains(&name) {
         return None;
     }
     let steps = json_of(args.get("steps")?)?;
     if name == "batch" {
-        return Some(Commands { rows: false, steps: vec![Some(("engine.batch".to_string(), object([("steps", steps)])))] });
+        return Some(Commands { shape: Shape::Batch, steps: vec![Some(("engine.batch".to_string(), object([("steps", steps)])))] });
     }
-    Some(Commands { rows: true, steps: steps.as_array()?.iter().map(step_of).collect() })
+    Some(Commands { shape: Shape::Rows, steps: steps.as_array()?.iter().map(step_of).collect() })
 }
 
 /// The words of the refusal of the first command a `tools/call` request reaches that the door
@@ -140,7 +213,7 @@ fn listed(message: &Value, mut reply: Value, filter: Filter) -> Value {
     let Some(commands) = commands_in(message) else { return reply };
     let Some(text) = reply.pointer_mut("/result/content/0/text") else { return reply };
     let Some(mut answer) = text.as_str().and_then(|written| serde_json::from_str::<Value>(written).ok()) else { return reply };
-    if commands.rows {
+    if matches!(commands.shape, Shape::Rows) {
         let rows = answer.get_mut("results").and_then(Value::as_array_mut).into_iter().flatten();
         for (row, step) in rows.zip(&commands.steps) {
             let Some((command, params)) = step else { continue };

@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use crate::hardware::HardwareChoice;
 use crate::requests::RenderRequest;
 use crate::runner::{self, ListOutputs, Progress};
+use crate::staging;
 use crate::{files, fill, info, mcp, methods, orphans, plugins, properties, replay, session, templates, timings};
 
 /// A hosted EffectCraft session: the MCP server built at construction, which owns the headless
@@ -136,6 +137,7 @@ impl CraftApp for EffectCraftApp {
     fn request(&mut self, method: &str, params: Value) -> Result<Value> {
         match METHODS.iter().find(|(name, _)| *name == method) {
             Some((_, answer)) => {
+                let _staged = staging::scope(&self.staged);
                 let params = self.staged(method, params)?;
                 answer(self.server.backend(), &params)
             }
@@ -156,6 +158,7 @@ impl CraftApp for EffectCraftApp {
     ) -> Result<Value> {
         match PROGRESS_METHODS.iter().find(|(name, ..)| *name == method) {
             Some((_, answer, request_of)) => {
+                let _staged = staging::scope(&self.staged);
                 let params = self.staged(method, params)?;
                 let _chosen = self.hardware.scope(request_of(&params).is_some_and(RenderRequest::chooses_hardware));
                 answer(self.server.backend(), &params, on_progress, list_outputs)
@@ -169,6 +172,7 @@ impl CraftApp for EffectCraftApp {
     /// `render-frame --template` renders it. It has no row in [`METHODS`], so `request` keeps refusing
     /// the name.
     fn frame(&mut self, params: Value, format: PixelFormat) -> Result<FrameBytes> {
+        let _staged = staging::scope(&self.staged);
         let params = self.staged(templates::FRAME, params)?;
         templates::frame(self.server.backend(), &params, format)
     }
@@ -177,6 +181,7 @@ impl CraftApp for EffectCraftApp {
     /// session every method reaches. It is not a row of [`METHODS`]: a line is not a method call, so
     /// `request` keeps refusing the name `mcp`.
     fn mcp(&mut self, line: &str) -> Option<String> {
+        let _staged = staging::scope(&self.staged);
         mcp::answer(&mut self.server, line)
     }
 

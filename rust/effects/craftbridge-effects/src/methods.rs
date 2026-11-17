@@ -77,16 +77,24 @@ struct Call<'a> {
 
 /// The door every command of `exec` and every step of `run` passes on its way to the session, the
 /// render runner's own included: refuse here, before the engine sees the call, what [`refuse_process`]
-/// withholds, then run the command, map its failure and pass a font listing through the platform's
-/// face list. That filter sits on the value returned here, so `exec`, every `run` step and the file
-/// methods answer through it, and nothing built over them can answer untrimmed. A render or a fill is
+/// withholds, hand a command that writes beside its source a copy of it to read ([`crate::imports`]),
+/// then run the command, map its failure and pass a font listing through the platform's face list.
+/// That filter sits on the value returned here, so `exec`, every `run` step and the file methods
+/// answer through it, and nothing built over them can answer untrimmed. A render or a fill is
 /// started only by its runner, through [`execute_listed`], once it has listed. A render's failed
 /// items are not read here: a render started without waiting answers while its other items still
 /// render, so the runner reads every item once the render has ended.
 pub(crate) fn execute(backend: &mut Backend, command: &str, params: Value, step: Option<u32>) -> Result<Value> {
-    let params = if params.is_null() { empty_params() } else { params };
+    let mut params = if params.is_null() { empty_params() } else { params };
     refuse_process(command, &params, step)?;
-    exec_on_engine(backend, command, &params, step).map(|value| crate::fonts::filtered(command, &params, value))
+    // A copy that cannot be made is a refusal of the disk, worded as every other row's is in a step.
+    let staged = crate::imports::staged(backend, &mut [(command, &mut params)]).map_err(|error| match error {
+        CraftError::Io { message } => CraftError::io(said(command, message, step)),
+        other => other,
+    })?;
+    let answered = exec_on_engine(backend, command, &params, step);
+    staged.finish(backend);
+    answered.map(|value| crate::fonts::filtered(command, &params, value))
 }
 
 /// The runners' one way to start a command the door withholds ([`RENDER`] for the render runner,
@@ -204,9 +212,10 @@ fn starts_a_process(withheld: &str) -> String {
 /// the engine substitutes only in the parameters (:85) — with each step's own `params`, and only one
 /// level deep, because a `batch` inside a batch runs no steps at all: the engine refuses the nested
 /// one before it runs (`NOT_IN_BATCH`, `crates/engine/src/cmd/batch.rs`:14,:82). It is the one reader
-/// of the commands a call reaches, for every rule the door holds them to, and each rule is asked of
+/// of the commands a call reaches, for every rule the door holds them to, the copies it hands the
+/// commands that write beside their source among them ([`crate::imports`]), and each rule is asked of
 /// every command it yields: a step a rule lets through must never stand in for the batch's later steps.
-fn reached<'a>(command: &'a str, params: &'a Value) -> impl Iterator<Item = (&'a str, &'a Value)> {
+pub(crate) fn reached<'a>(command: &'a str, params: &'a Value) -> impl Iterator<Item = (&'a str, &'a Value)> {
     let steps = params.get("steps").and_then(Value::as_array).filter(|_| command == "engine.batch");
     std::iter::once((command, params)).chain(steps.into_iter().flatten().filter_map(|step| {
         let inner = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str)?;
