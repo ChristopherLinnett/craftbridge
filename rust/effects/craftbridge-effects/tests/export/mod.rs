@@ -15,11 +15,16 @@ mod kill;
 use super::common::Scratch;
 use super::{cli, cli_run, scrub, scrubbed, steps_document};
 use craftbridge_core::{CancelToken, CraftError, Engine, GpuChoice};
+use craftbridge_effects::RenderRequest;
 use effectcraft_engine::project::render_queue::OutputFormat;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+/// The refusal of a render request that sets both `queue` and `hardware`, for an `export` and for a
+/// template's `output` alike.
+pub(super) const QUEUED_HARDWARE: &str = "`export`: `queue` cannot be set with `hardware`: a queued render encodes through the render queue and its own encoders, never the device's hardware encoder";
 
 /// One flag of the command line's `render` and the request field that stands for it.
 type Flag = (&'static str, &'static str, Value);
@@ -82,6 +87,14 @@ pub(super) fn same_files(plugin: &Path, command_line: &Path) -> Result<usize, St
         }
     }
     Ok(ours.len())
+}
+
+/// `request` with `hardware` set.
+fn with_hardware(mut request: Value) -> Value {
+    if let Value::Object(fields) = &mut request {
+        fields.insert("hardware".to_string(), Value::Bool(true));
+    }
+    request
 }
 
 fn start_engine(scratch: &Scratch) -> Result<Engine, String> {
@@ -354,6 +367,46 @@ fn a_cancelled_export_answers_cancelled_and_leaves_no_output() {
     // The session is free again: nothing is left rendering behind the cancel.
     let again = export(&engine, slow("after.mp4", "h264"), &CancelToken::new(), None);
     assert!(again.answer.is_ok(), "{:?}", again.answer);
+    engine.close().expect("the engine closes");
+}
+
+/// A queued render encodes through the render queue's own encoders, so `hardware` beside `queue` is
+/// refused before anything renders: the project and the container are as they were. Each field alone is
+/// no such refusal.
+#[test]
+fn a_queued_export_that_asks_for_hardware_is_refused_before_anything_renders() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let engine = start_engine(&scratch).expect("the engine starts");
+    // The demo project's own queue is empty, so a render of it would leave nothing to see: a ticked item
+    // in it makes a render that ran before the refusal show in the queue and in the container.
+    let queued = scratch.path().join("queued.mp4");
+    let item = RenderRequest::from_params(&request_of(&small(), &queued))
+        .and_then(|request| request.to_queue_params())
+        .expect("the item reads")
+        .expect("it adds an item");
+    engine.request("run", json!({"steps": steps_document(&[("renderQueue.add".to_string(), item)])})).expect("the item is queued");
+    let state = || {
+        (
+            engine.request("exec", json!({"command": "renderQueue.list"})).expect("the queue lists"),
+            entries_under(scratch.path(), &[]).expect("the container lists"),
+        )
+    };
+    let before = state();
+    let output = scratch.path().join("x.mp4").display().to_string();
+    for request in [json!({"queue": true, "hardware": true}), json!({"output": output, "format": "h264", "queue": true, "hardware": true})] {
+        let refused = export(&engine, request.clone(), &CancelToken::new(), None);
+        assert_eq!(refused.answer.expect_err("refused").to_string(), QUEUED_HARDWARE, "{request}");
+        assert!(refused.reports.is_empty(), "nothing rendered for {request}");
+        assert_eq!(state(), before, "{request}: the project and the container are as they were");
+    }
+    for request in [json!({"queue": true}), json!({"queue": true, "hardware": false})] {
+        let answer = export(&engine, request.clone(), &CancelToken::new(), None).answer;
+        assert_ne!(answer.err().map(|error| error.to_string()).as_deref(), Some(QUEUED_HARDWARE), "{request}: a queue alone is no such refusal");
+    }
+    assert!(queued.is_file(), "a queue alone renders the project's own queue");
+    let small = request_of(&small(), &scratch.path().join("y.mp4"));
+    let answer = export(&engine, with_hardware(small), &CancelToken::new(), None).answer;
+    assert_ne!(answer.err().map(|error| error.to_string()).as_deref(), Some(QUEUED_HARDWARE), "hardware alone is no such refusal");
     engine.close().expect("the engine closes");
 }
 
