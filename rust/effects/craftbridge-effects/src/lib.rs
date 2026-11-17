@@ -27,7 +27,9 @@
 //! (AD5).
 //!
 //! At engine start the plugin registers the phone's font folders with EffectCraft and takes the
-//! font listing every app-facing call answers from the platform's own answer (AD2).
+//! font listing every app-facing call answers from the platform's own answer (AD2), and takes back
+//! the temporary files a killed write left in the engine's folders, which no journal could list
+//! (AD21).
 
 mod app;
 mod exporter;
@@ -42,6 +44,7 @@ mod generated {
 mod info;
 mod mcp;
 mod methods;
+mod orphans;
 mod outputs;
 mod plugins;
 mod properties;

@@ -26,8 +26,10 @@ craftbridge-process = { path = "craftbridge-process" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The process's CPU time, which `timings` reports beside wall time as the command line's `bench` does,
-# read from the system clock through the crate the core's `tempfile` already brings into every build.
-rustix = { version = "1", features = ["time"] }
+# read from the system clock through the crate the core's `tempfile` already brings into every build;
+# and whether the system has a process of an id, which the engine start asks before it takes a killed
+# write's temporary file named for its writer (AD21).
+rustix = { version = "1", features = ["time", "process"] }
 toml = "0.9"
 toml_edit = "0.25"
 # The XML a Maven repository publishes its versions in.

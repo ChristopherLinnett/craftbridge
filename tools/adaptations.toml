@@ -601,3 +601,15 @@ depends = [
   { item = "Confinement::check_command, which checks a command it does not list as a reader or writer only for the absolute paths it is given, as reads", at = [{ file = "crates/automation/src/confine.rs", lines = ["319-324", "360-366"] }] },
   { item = "ConfinedServices, whose writes pass to the session's own services unchecked", at = [{ file = "crates/automation/src/confine.rs", lines = ["572-574", "581-583"] }] },
 ]
+
+[[adaptation]]
+id = "AD21"
+crate = "craftbridge-effects"
+file = "src/orphans.rs"
+implements = "FX-1l"
+summary = "The engine start's sweep of the temporary files a killed write left: every file the session's file services write is written by a temporary file made beside the name it is renamed over and published by that rename, and a hard kill between the two leaves the temporary alone — a file no journal could list, because its name is drawn as the write starts, later than any listing of it could be (D-17). The sweep, run once at the construction every engine of this app starts through, walks the core's one list of the engine's folders into their subfolders and removes every file whose name is EffectCraft's own spelling whole — `.effectcraft-`, the writing process's id, `-`, the write's own number, `.tmp`, each number as the type printing it spells it — carrying an id no process has now, which the system answers through `kill` with no signal, failing with ESRCH only then: a process that has the id, this one or another engine's on the same folders such as an app extension's, could be mid-write in exactly such a file, and an id the system has since given a new process keeps its leftover for a later start. A regular file only: a folder or a symbolic link of that name is no write's leftover, and the walk follows no link, so nothing outside the engine's folders is touched through one; a folder added to the core's list is swept with no second list anywhere. A file or folder the disk will not give up is left for the next start: like the journal's own dealing beside it, the sweep never fails the start."
+replaces = "nothing upstream: EffectCraft cleans up the temporary of a write that fails on its own path (atomic_write_with removes it when the write or the rename fails), and its desktop hosts run where a hard kill is rare and keep no sweep; a phone is killed often, and this is the phone's own."
+depends = [
+  { item = "the temporary every atomic write is published through, which names the writing process: `.effectcraft-<pid>-<n>.tmp`, printed from this process's id and a process-wide counter starting at 0, created exclusively beside the file being written so nothing already at the name is opened or followed, and removed when the write or the rename fails — so only a hard kill leaves one", at = [{ file = "crates/engine/src/settings/config.rs", lines = ["196-236"] }] },
+  { item = "the session's file services write through it: `FsServices::write_file` is an `atomic_write`", at = [{ file = "crates/engine/src/services.rs", lines = ["99-101"] }] },
+]
