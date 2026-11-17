@@ -211,54 +211,53 @@ fn helper_needing_command_answers_unsupported_and_starts_nothing() {
     assert_eq!(plug_ins.get("wasm"), Some(&json!(false)), "the engine sees no plug-in loader without a plug-in folder: {plug_ins}");
 }
 
+/// Every way a call reaches one command the plug-in withholds — on its own, as a step of `run`, and
+/// as a step of an engine batch in both the spellings with which a batch step names its command,
+/// alone and as a step of `run` — answers the §14 `Unsupported` row in `words`, before the engine
+/// sees the call, so nothing runs. The answer says what was not refused.
+fn assert_withheld_every_way(app: &mut EffectCraftApp, command: &str, params: &Value, words: &str) -> Result<(), String> {
+    let refusal = |app: &mut EffectCraftApp, method: &str, params: Value| match request(app, method, params) {
+        Err(CraftError::Unsupported { message }) => Ok(message),
+        other => Err(format!("`{command}` through `{method}` must be `Unsupported`, got {other:?}")),
+    };
+    let message = refusal(app, "exec", json!({"command": command, "params": params.clone()}))?;
+    if message != words {
+        return Err(format!("the refusal names the command and why: {message}"));
+    }
+    let stepped = json!({"steps": [{"command": "comp.new", "params": {"name": "A"}}, {"command": command, "params": params.clone()}]});
+    let message = refusal(app, "run", stepped)?;
+    if !(message.starts_with(&format!("{command}: `{command}` is not available")) && message.ends_with("(step 1)")) {
+        return Err(format!("the failed step is named and numbered: {message}"));
+    }
+    // A step of an engine batch: the engine runs its steps itself, so the id reaches nothing.
+    for step in [json!({"command": command}), json!({"id": command})] {
+        let batched = json!({"command": "engine.batch", "params": {"steps": [json!({"command": "comp.new", "params": {"name": "B"}}), step]}});
+        let message = refusal(app, "exec", batched.clone())?;
+        if !message.starts_with(&format!("`{command}` is not available")) {
+            return Err(format!("the refusal names the withheld step: {message}"));
+        }
+        // The batch as a step of `run`: the step is named by its own command, as every row is.
+        let message = refusal(app, "run", json!({"steps": [batched]}))?;
+        if !(message.starts_with(&format!("engine.batch: `{command}` is not available")) && message.ends_with("(step 0)")) {
+            return Err(format!("the failed step is named by its command and numbered: {message}"));
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn model_downloads_answer_unsupported_and_start_no_process() {
     // The second promise of "no process can start": the model downloads are the commands that fetch
     // something outside the app by starting the system `curl` — the engine's own specs mark both
     // "desktop; uses the system curl". Every way a call reaches one is refused with the §14
-    // `Unsupported` row: on its own, as a step of `run`, and as a step of an engine batch, in both
-    // the spellings with which a batch step names its command. Nothing runs either way: the refusal
-    // is the plug-in's, before the engine sees the call.
+    // `Unsupported` row. Nothing runs either way: the refusal is the plug-in's, before the engine
+    // sees the call.
     let scratch = Scratch::new().expect("a scratch folder");
     let mut app = scratch.app().expect("the app starts from prepared folders");
     let weights = json!({"id": "classical"});
     for command in ["roto.model.download", "face.model.download"] {
-        match (request(&mut app, "exec", json!({"command": command, "params": weights.clone()}))).expect_err("the download was meant to be refused") {
-            CraftError::Unsupported { message } => assert_eq!(
-                message,
-                format!("`{command}` is not available in this build: it downloads by starting the system `curl`, and this build starts no process"),
-                "the refusal names the command and what it would start"
-            ),
-            other => panic!("a model download must be `Unsupported`, got {other:?}"),
-        }
-        let stepped = json!({"steps": [{"command": "comp.new", "params": {"name": "A"}}, {"command": command, "params": weights.clone()}]});
-        match (request(&mut app, "run", stepped)).expect_err("the step was meant to be refused") {
-            CraftError::Unsupported { message } => {
-                assert!(
-                    message.starts_with(&format!("{command}: `{command}` is not available")) && message.ends_with("(step 1)"),
-                    "the failed step is named and numbered: {message}"
-                )
-            }
-            other => panic!("a model download as a step of `run` must be `Unsupported`, got {other:?}"),
-        }
-        // A step of an engine batch: the engine runs its steps itself, so the id reaches nothing.
-        for step in [json!({"command": command}), json!({"id": command})] {
-            let batched = json!({"command": "engine.batch", "params": {"steps": [json!({"command": "comp.new", "params": {"name": "B"}}), step]}});
-            match (request(&mut app, "exec", batched.clone())).expect_err("the batch step was meant to be refused") {
-                CraftError::Unsupported { message } => {
-                    assert!(message.starts_with(&format!("`{command}` is not available")), "the refusal names the withheld step: {message}")
-                }
-                other => panic!("a model download as a batch step must be `Unsupported`, got {other:?}"),
-            }
-            // The batch as a step of `run`: the step is named by its own command, as every row is.
-            match (request(&mut app, "run", json!({"steps": [batched]}))).expect_err("the batch step was meant to be refused") {
-                CraftError::Unsupported { message } => assert!(
-                    message.starts_with(&format!("engine.batch: `{command}` is not available")) && message.ends_with("(step 0)"),
-                    "the failed step is named by its command and numbered: {message}"
-                ),
-                other => panic!("a model download in a batch step of `run` must be `Unsupported`, got {other:?}"),
-            }
-        }
+        let words = format!("`{command}` is not available in this build: it downloads by starting the system `curl`, and this build starts no process");
+        assert_withheld_every_way(&mut app, command, &weights, &words).expect("every way a call reaches the download is refused");
         // The one other command that runs the steps a call names, a command script read from a file
         // in the container: the engine runs its steps itself, so it is the confinement that withholds
         // the whole script before any step is read.
@@ -277,6 +276,119 @@ fn model_downloads_answer_unsupported_and_start_no_process() {
     std::fs::write(&module, b"not weights").expect("a file to name");
     let error = (request(&mut app, "exec", json!({"command": "roto.model.install", "params": {"path": module}}))).expect_err("the file is no weights");
     assert!(!matches!(error, CraftError::Unsupported { .. }), "installing weights from a file inside the container is not withheld: {error:?}");
+}
+
+/// The project both timeline-export rules are checked on: one composition holding one text layer,
+/// which is a layer a rendering Export Timeline would pre-render to a movie.
+fn text_layer_project() -> craftbridge_core::Result<(Scratch, EffectCraftApp)> {
+    let scratch = Scratch::new()?;
+    let mut app = scratch.app()?;
+    for (command, params) in [
+        ("comp.new", json!({"name": "Card", "width": 32, "height": 24, "duration": 0.5, "frameRate": 10})),
+        ("layer.newText", json!({"comp": 1, "text": "Hi"})),
+    ] {
+        request(&mut app, "exec", json!({"command": command, "params": params})).map_err(|error| CraftError::internal(format!("{command}: {error}")))?;
+    }
+    Ok((scratch, app))
+}
+
+#[test]
+fn a_render_nothing_has_listed_is_refused_however_a_call_reaches_it() {
+    // The pending-export journal learns a render's files only from `export`, which lists them before
+    // the render starts; a render started any other way would leave files a restart cannot delete.
+    // The commands that have the exporter write one are withheld on every way a call reaches them,
+    // each with parameters it would render with, and `export` is the way that renders.
+    let (scratch, mut app) = text_layer_project().expect("a project with one text layer");
+    let at = |name: &str| scratch.path().join(name).display().to_string();
+    // A queued item: what a render the runner has not listed would render.
+    request(&mut app, "exec", json!({"command": "renderQueue.add", "params": {"comp": 1, "format": "h264", "output": at("queued.mp4")}}))
+        .expect("an item queues");
+    let before = std::fs::read_dir(scratch.path()).expect("the container reads").count();
+    for (command, params) in [
+        ("renderQueue.render", json!({})),
+        ("file.watchFolder", json!({"folder": scratch.path()})),
+        ("file.watchFolder.poll", json!({"folder": scratch.path()})),
+        ("render.saveCurrentPreview", json!({"comp": 1, "path": at("preview.mp4")})),
+        ("file.exportTimeline", json!({"comp": 1, "path": at("cut.xml")})),
+    ] {
+        let words = format!(
+            "`{command}` is not available in this build: it starts a render whose files the pending-export journal cannot list, and `export` lists them"
+        );
+        assert_withheld_every_way(&mut app, command, &params, &words).expect("every way a call reaches the render is refused");
+        // Behind a step the door reads past, an Export Timeline that renders nothing, the batch is
+        // still refused for this later step, and the quiet step does not run either.
+        let quiet = json!({"command": "file.exportTimeline", "params": {"comp": 1, "path": at("quiet.xml"), "prerender": "none"}});
+        let batched = json!({"command": "engine.batch", "params": {"steps": [quiet, {"command": command, "params": params}]}});
+        match request(&mut app, "exec", batched) {
+            Err(CraftError::Unsupported { message }) => assert_eq!(message, words, "the later step is the one refused"),
+            other => panic!("`{command}` after a quiet step must be `Unsupported`, got {other:?}"),
+        }
+    }
+    // Withheld before the engine saw it: nothing rendered or was written.
+    let queue = request(&mut app, "exec", json!({"command": "renderQueue.list"})).expect("the queue lists");
+    assert_eq!(queue["items"][0]["status"], json!("Queued"), "{queue}");
+    assert_eq!(queue["rendering"], json!(false), "{queue}");
+    assert_eq!(std::fs::read_dir(scratch.path()).expect("the container reads").count(), before, "a withheld render wrote nothing");
+}
+
+/// The door's one exception, pinned from both sides. An Export Timeline whose own `prerender` reads
+/// as the mode that renders nothing answers in every way a call reaches it — on its own, as a step
+/// of `run`, and as a step of an engine batch by either spelling — and pre-renders nothing, exactly
+/// as the pin reads the parameter: the bool `false`, and `none`, `off`, `false` and `no` however
+/// normalized. Every Export Timeline that can render — no `prerender`, a rendering spelling, a
+/// `prerender` an `engine.batch` only fills in as it runs — is refused before the engine sees the
+/// call, and nothing renders: no movie appears beside the export folder.
+#[test]
+fn a_timeline_export_that_renders_nothing_answers_and_every_other_timeline_export_is_refused() {
+    let (scratch, mut app) = text_layer_project().expect("a project with one text layer");
+    let at = |name: &str| scratch.path().join(name).display().to_string();
+    let pre_rendered = |answer: &Value| match answer.get("prerendered").and_then(Value::as_array) {
+        Some(list) => !list.is_empty(),
+        None => panic!("the answer says nothing about pre-renders: {answer}"),
+    };
+    for (index, spelling) in [json!("none"), json!("NONE"), json!(" Off "), json!("no"), json!("false"), json!(false)].into_iter().enumerate() {
+        let call = |name: &str| json!({"comp": 1, "path": at(name), "prerender": spelling});
+        // On its own: answered, and its answer says nothing was pre-rendered.
+        let answer = request(&mut app, "exec", json!({"command": "file.exportTimeline", "params": call(&format!("own-{index}.xml"))}))
+            .expect("a call that renders nothing is answered");
+        assert!(!pre_rendered(&answer), "nothing was pre-rendered: {answer}");
+        // As a step of `run`, and as a step of an engine batch in both spellings.
+        let stepped = request(&mut app, "run", json!({"steps": [{"command": "file.exportTimeline", "params": call(&format!("run-{index}.xml"))}]}))
+            .expect("a step that renders nothing is answered");
+        assert!(!pre_rendered(&stepped[0]["result"]), "the step rendered: {stepped}");
+        for spelling_of in ["command", "id"] {
+            let step = json!({spelling_of: "file.exportTimeline", "params": call(&format!("batch-{spelling_of}-{index}.xml"))});
+            let answer = request(&mut app, "exec", json!({"command": "engine.batch", "params": {"steps": [step]}}))
+                .expect("a batch step that renders nothing is answered");
+            assert!(!pre_rendered(&answer["results"][0]), "the batch step rendered: {answer}");
+        }
+    }
+    for file in std::fs::read_dir(scratch.path()).expect("the container reads") {
+        let path = file.expect("an entry reads").path();
+        assert_ne!(path.extension().unwrap_or_default(), "mov", "a no-render Export Timeline left a movie: {}", path.display());
+    }
+    // Every other Export Timeline can render — this project holds a layer no timeline file can
+    // carry — so the door refuses it on every way a call reaches it, and a `$N` is not written
+    // until the batch runs it, which is after the door has read.
+    let words =
+        "`file.exportTimeline` is not available in this build: it starts a render whose files the pending-export journal cannot list, and `export` lists them";
+    for extra in [json!({}), json!({"prerender": "all"}), json!({"prerender": "unsupported"}), json!({"prerender": true}), json!({"prerender": 5})] {
+        let mut params = json!({"comp": 1, "path": at("may-render.xml")});
+        params.as_object_mut().expect("an object of parameters").extend(extra.as_object().expect("more parameters").clone());
+        assert_withheld_every_way(&mut app, "file.exportTimeline", &params, words).expect("a call that may render is refused every way");
+    }
+    match request(
+        &mut app,
+        "exec",
+        json!({"command": "engine.batch", "params": {"steps": [
+            {"command": "comp.new", "params": {"name": "Later"}},
+            {"command": "file.exportTimeline", "params": {"comp": 1, "path": at("filled.xml"), "prerender": "$0.prerender"}},
+        ]}}),
+    ) {
+        Err(CraftError::Unsupported { message }) => assert!(message.starts_with("`file.exportTimeline` is not available"), "{message}"),
+        other => panic!("a `prerender` a batch fills in as it runs is not the door's to read, got {other:?}"),
+    }
+    assert!(!std::path::Path::new(&at("filled.xml")).exists(), "the refused batch step ran nothing");
 }
 
 #[test]

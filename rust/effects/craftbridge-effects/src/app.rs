@@ -12,7 +12,7 @@ use effectcraft_automation::{Backend, McpServer};
 use serde_json::Value;
 use std::path::PathBuf;
 
-use crate::runner::{self, Progress};
+use crate::runner::{self, ListOutputs, Progress};
 use crate::{files, info, mcp, methods, plugins, properties, replay, requests, session, timings};
 
 /// A hosted EffectCraft session: the MCP server built at construction, which owns the headless
@@ -93,9 +93,9 @@ const METHODS: [(&str, Method); 13] = [
     ("timings", timings::timings),
 ];
 
-/// One method that runs long enough to report progress: the backend, the parameters, and the listener
-/// that answers `false` to stop it.
-type ProgressMethod = for<'a> fn(&mut Backend, &Value, Progress<'a>) -> Result<Value>;
+/// One method that runs long enough to report progress: the backend, the parameters, the listener
+/// that answers `false` to stop it, and the lister of the files it may write.
+type ProgressMethod = for<'a> fn(&mut Backend, &Value, Progress<'a>, ListOutputs<'a>) -> Result<Value>;
 
 /// The methods `request_with_progress` answers, by name, the one list of them as [`METHODS`] is of
 /// `request`'s: the dispatch reads it and so does its refusal.
@@ -123,21 +123,18 @@ impl CraftApp for EffectCraftApp {
 
     /// Answer one method of the plan's §14 table that reports progress through the function
     /// [`PROGRESS_METHODS`] names for it. Every other name answers `Unsupported`, as the core's
-    /// default for an app with no such call does, naming the methods this call does answer.
-    ///
-    /// `list_outputs` is taken and not yet called: the files a render writes depend on the export
-    /// settings each queued item resolves, and that listing is the runner's own piece of work, so
-    /// until it exists a killed export leaves its partial files for the journal to know nothing of.
+    /// default for an app with no such call does, naming the methods this call does answer. The
+    /// method lists the files it may write through `list_outputs` before it writes any.
     fn request_with_progress(
         &mut self,
         method: &str,
         params: Value,
         on_progress: &mut dyn FnMut(u64, u64, Option<f64>) -> bool,
-        _list_outputs: &mut dyn FnMut(&[PathBuf]) -> Result<()>,
+        list_outputs: &mut dyn FnMut(&[PathBuf]) -> Result<()>,
     ) -> Result<Value> {
         self.settle_gpu_failure();
         match PROGRESS_METHODS.iter().find(|(name, _)| *name == method) {
-            Some((_, answer)) => answer(self.server.backend(), &params, on_progress),
+            Some((_, answer)) => answer(self.server.backend(), &params, on_progress, list_outputs),
             None => Err(CraftError::unsupported(not_answered(method, "request_with_progress", PROGRESS_METHODS.iter().map(|(name, _)| *name)))),
         }
     }

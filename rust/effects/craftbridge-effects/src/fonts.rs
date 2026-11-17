@@ -95,7 +95,7 @@ fn grown(known: Option<FaceList>, later: Option<FaceList>) -> Option<FaceList> {
 
 /// Trim one successful command's answer to what an app may see, when that command is a font
 /// listing, a `text.fonts` step of an `engine.batch`, or one of a `file.runScript`. It answers in
-/// `methods::run_command`, the entry `exec` and every `run` step pass; a path that hands the engine's
+/// `methods::execute`, the entry `exec` and every `run` step pass; a path that hands the engine's
 /// answers to the app past that entry — the `mcp` line, whose tools run their commands on the backend
 /// directly — must answer its listings through this function too, or the app sees faces the phone
 /// hides. The render runner's calls through `methods::execute` answer no listing.

@@ -12,7 +12,7 @@ mod export;
 mod scratch;
 
 use common::{EVERY_FORMAT, Scratch};
-use craftbridge_core::{CraftApp, CraftError, FrameBytes, PixelFormat};
+use craftbridge_core::{CancelToken, CraftApp, CraftError, Engine, FrameBytes, PixelFormat};
 use craftbridge_effects::EffectCraftApp;
 use serde_json::{Value, json};
 use std::io::Write;
@@ -396,14 +396,16 @@ fn a_failed_step_answers_in_the_commands_words() {
     assert_eq!(error.to_string(), command_line, "the failed step is not in the command line's words");
 }
 
-/// A render whose one item fails: the queue renders a comp to an output that is a folder, which
-/// the exporter cannot open as a file. `output` is filled in per side.
-fn failing_render_steps(output: &Path) -> Vec<(String, Value)> {
-    vec![
+/// A render whose items each fail: the queue renders a comp to outputs that are folders, which the
+/// exporter cannot open as files, so the failure joins one `comp: reason` per item. The outputs are
+/// filled in per side.
+fn failing_render_steps(outputs: &[PathBuf]) -> Vec<(String, Value)> {
+    let mut steps = vec![
         ("comp.new".to_string(), json!({"name": "R", "width": 64, "height": 64, "duration": 0.1, "frameRate": 10})),
         ("layer.newSolid".to_string(), json!({"comp": 1, "name": "Bg"})),
-        ("renderQueue.add".to_string(), json!({"comp": 1, "output": output.display().to_string()})),
-    ]
+    ];
+    steps.extend(outputs.iter().map(|output| ("renderQueue.add".to_string(), json!({"comp": 1, "output": output.display().to_string()}))));
+    steps
 }
 
 /// Make the folder a failing render writes to, for one side.
@@ -414,38 +416,26 @@ fn folder_in_the_way(output: &Path) -> std::result::Result<(), String> {
 #[test]
 fn a_render_with_a_failed_item_fails_as_the_command_line_fails_it() {
     let scratch = Scratch::new().expect("a scratch folder");
-    let (cli_output, plugin_output) = (scratch.root().join("out.mov"), scratch.path().join("out.mov"));
-    folder_in_the_way(&cli_output).expect("the command line's render is blocked");
-    folder_in_the_way(&plugin_output).expect("the plugin's render is blocked");
-    let render = ("renderQueue.render".to_string(), json!({}));
+    let names = ["out.mov", "two.mov"];
+    let (cli_outputs, plugin_outputs): (Vec<PathBuf>, Vec<PathBuf>) = names.iter().map(|name| (scratch.root().join(name), scratch.path().join(name))).unzip();
+    for output in cli_outputs.iter().chain(&plugin_outputs) {
+        folder_in_the_way(output).expect("the render is blocked");
+    }
 
-    // Under `run`: the render's step fails, in the command line's words, with its step.
-    let mut cli_steps = failing_render_steps(&cli_output);
-    cli_steps.push(render.clone());
-    let command_line = cli_run(scratch.root(), &cli_steps).expect("the command line ran").failure().expect("the command line reported the failure");
-    let mut app = scratch.app().expect("the app starts from prepared folders");
-    let mut plugin_steps = failing_render_steps(&plugin_output);
-    plugin_steps.push(render);
-    let error = app.request("run", json!({"steps": steps_document(&plugin_steps)})).expect_err("the failed item fails the run");
-    assert!(matches!(error, CraftError::CommandFailed { step: Some(3), .. }), "a failed render item is `CommandFailed` at its step, got {error:?}");
-    assert_eq!(
-        scrubbed(&error.to_string(), &[scratch.path()]),
-        scrubbed(&command_line, &[scratch.root()]),
-        "the failed render is not in the command line's words"
-    );
-
-    // Under `exec`: the same render of a saved queue fails as the command line's `exec` fails it.
+    // The command line renders a saved queue with `exec`; the plugin renders the same queue through
+    // `export`, the one way it starts a render, and fails it in the same words.
     let queued = scratch.root().join("queued.ecproj");
-    let mut save = failing_render_steps(&cli_output);
+    let mut save = failing_render_steps(&cli_outputs);
     save.push(("file.saveAs".to_string(), json!({"path": queued.display().to_string()})));
     cli_run(scratch.root(), &save).expect("the command line ran").doc().expect("the command line saved its queue");
     let command_line = cli(scratch.root(), &["exec", "--json", "--project", &queued.display().to_string(), "renderQueue.render"])
         .expect("the command line ran")
         .failure()
         .expect("the command line reported the failure");
-    let mut app = scratch.app().expect("the app starts from prepared folders");
-    app.request("run", json!({"steps": steps_document(&failing_render_steps(&plugin_output))})).expect("the plugin's queue is set up");
-    match app.request("exec", json!({"command": "renderQueue.render"})).expect_err("the failed item fails the render") {
+    assert_eq!(command_line.matches("; ").count(), 1, "each item's failure is named, joined once: {command_line}");
+    let engine = Engine::start(scratch.app().expect("the app starts from prepared folders")).expect("the engine starts");
+    engine.request("run", json!({"steps": steps_document(&failing_render_steps(&plugin_outputs))})).expect("the plugin's queue is set up");
+    match engine.request_with_progress("export", json!({"queue": true}), |_, _, _| {}, &CancelToken::new()).expect_err("the failed item fails the render") {
         CraftError::CommandFailed { command, message, step } => {
             assert_eq!((command.as_str(), step), ("renderQueue.render", None));
             assert_eq!(
@@ -456,6 +446,7 @@ fn a_render_with_a_failed_item_fails_as_the_command_line_fails_it() {
         }
         other => panic!("a failed render item is `CommandFailed`, got {other:?}"),
     }
+    engine.close().expect("the engine closes");
 }
 
 /// One confined refusal in parity: the same command, with the same parameters, goes to the command

@@ -25,16 +25,7 @@ impl Scratch {
     /// prepared, as an app's are.
     pub fn build(bundle: Option<PathBuf>, fonts: Vec<PathBuf>) -> Result<Self> {
         let dir = temporary("a scratch folder")?;
-        let container = dir.path().join("container");
-        let folders = Folders {
-            container: container.clone(),
-            bundle,
-            config: container.join(".config"),
-            cache: container.join(".cache"),
-            models: container.join(".models"),
-            plugins: None,
-            fonts,
-        };
+        let folders = folders_in(&dir.path().join("container"), bundle, fonts);
         folders.prepare()?;
         Ok(Self { dir, folders })
     }
@@ -50,6 +41,20 @@ impl Scratch {
 
     pub fn app(&self) -> Result<EffectCraftApp> {
         EffectCraftApp::new(&self.folders)
+    }
+}
+
+/// The folders an app keeps inside `container`, as every test of the crate lays them out, and so as a
+/// second process started on the same container finds them.
+pub fn folders_in(container: &Path, bundle: Option<PathBuf>, fonts: Vec<PathBuf>) -> Folders {
+    Folders {
+        container: container.to_path_buf(),
+        bundle,
+        config: container.join(".config"),
+        cache: container.join(".cache"),
+        models: container.join(".models"),
+        plugins: None,
+        fonts,
     }
 }
 

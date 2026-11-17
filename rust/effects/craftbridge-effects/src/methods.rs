@@ -28,13 +28,12 @@ pub(crate) fn commands(backend: &mut Backend, params: &Value) -> Result<Value> {
     tool_json(backend, "list_commands", &arguments)
 }
 
-/// `exec`: run one command and answer its result, reporting a render whose items failed as the
-/// command line reports them.
+/// `exec`: run one command through the door and answer its result.
 pub(crate) fn exec(backend: &mut Backend, params: &Value) -> Result<Value> {
     let obj = object_params(params, "exec")?;
     reject_unknown(&obj, "exec", &["command", "params"])?;
     let command = string_param(&obj, "command", "exec")?.ok_or_else(|| CraftError::invalid_params("`exec`: needs a `command`"))?;
-    run_command(backend, command, step_params(&obj), None)
+    execute(backend, command, step_params(&obj), None)
 }
 
 /// `run`: run the steps in order and answer `[{command, result}]`, failing at the first step that
@@ -58,7 +57,7 @@ pub(crate) fn run(backend: &mut Backend, params: &Value) -> Result<Value> {
     }
     let mut results = Vec::with_capacity(parsed.len());
     for (index, (command, step_params)) in parsed.into_iter().enumerate() {
-        let result = run_command(backend, &command, step_params, u32::try_from(index).ok())?;
+        let result = execute(backend, &command, step_params, u32::try_from(index).ok())?;
         results.push(object([("command", Value::String(command)), ("result", result)]));
     }
     Ok(Value::Array(results))
@@ -76,28 +75,29 @@ struct Call<'a> {
     tool: bool,
 }
 
-/// The one entry every command of `exec` and every step of `run` passes on its way to the session:
-/// the door, then the report of a render whose items failed. `step` names the step of a `run` for
-/// the rows that carry one.
-pub(crate) fn run_command(backend: &mut Backend, command: &str, params: Value, step: Option<u32>) -> Result<Value> {
-    let value = execute(backend, command, params.clone(), step)?;
-    match failed_render(command, &value) {
-        Some(failure) => Err(CraftError::command_failed(command, failure, step)),
-        // A font listing answers through the platform's face list at this one entry, so `exec` and
-        // every `run` step, and anything built over them, cannot answer untrimmed.
-        None => Ok(crate::fonts::filtered(command, &params, value)),
-    }
-}
-
-/// The door every command goes through, the render runner's own included: refuse here, before the
-/// engine sees the call, the commands that would start a process — a phone starts none — and then
-/// run the command and map its failure. A render's failed items are not read here: a render started
-/// without waiting answers while its other items still render, so the render runner reads every
-/// item once the render has ended.
+/// The door every command of `exec` and every step of `run` passes on its way to the session, the
+/// render runner's own included: refuse here, before the engine sees the call, what [`refuse_process`]
+/// withholds, then run the command, map its failure and pass a font listing through the platform's
+/// face list. That filter sits on the value returned here, so `exec`, every `run` step and the file
+/// methods answer through it, and nothing built over them can answer untrimmed. A render is started
+/// only by the render runner, through [`execute_listed_render`], once it has listed. A render's failed
+/// items are not read here: a render started without waiting answers while its other items still
+/// render, so the runner reads every item once the render has ended.
 pub(crate) fn execute(backend: &mut Backend, command: &str, params: Value, step: Option<u32>) -> Result<Value> {
     let params = if params.is_null() { empty_params() } else { params };
     refuse_process(command, &params, step)?;
-    backend.exec(command, params.clone()).map_err(|error| map_error(error, &Call { command, params: &params, step, tool: false }))
+    exec_on_engine(backend, command, &params, step).map(|value| crate::fonts::filtered(command, &params, value))
+}
+
+/// The render runner's one way to start a render: the engine's command past the door's refusal of a
+/// render, because the runner has handed the journal every file the render may write first.
+pub(crate) fn execute_listed_render(backend: &mut Backend, params: Value) -> Result<Value> {
+    exec_on_engine(backend, RENDER, &params, None)
+}
+
+/// Run one command on the engine and map its failure.
+fn exec_on_engine(backend: &mut Backend, command: &str, params: &Value, step: Option<u32>) -> Result<Value> {
+    backend.exec(command, params.clone()).map_err(|error| map_error(error, &Call { command, params, step, tool: false }))
 }
 
 /// The model downloads fetch their weights by starting the system's `curl`
@@ -111,13 +111,20 @@ const NO_PROCESS: [&str; 2] = ["roto.model.download", "face.model.download"];
 
 /// The door itself, which every path that hands a command to the engine passes before the engine
 /// sees it — `exec`, each step of `run`, each line of a `replay` and each tool call of `mcp`: a call
-/// that reaches a model download, by whichever way, is refused as `Unsupported`, and a step of `run`
-/// puts the step's command and index around the words, as it does every other row's.
+/// that reaches a model download or a render nothing has listed, by whichever way, is refused as
+/// `Unsupported`, and a step of `run` puts the step's command and index around the words, as it does
+/// every other row's.
 pub(crate) fn refuse_process(command: &str, params: &Value, step: Option<u32>) -> Result<()> {
-    match wants_a_process(command, params) {
-        Some(withheld) => Err(CraftError::unsupported(said(command, starts_a_process(withheld), step))),
+    match withheld(command, params) {
+        Some(words) => Err(CraftError::unsupported(said(command, words, step))),
         None => Ok(()),
     }
+}
+
+/// The words of the refusal of the first command one call reaches that the door withholds, if any:
+/// the one reader every path asks, so each answers a withheld command in the same words.
+pub(crate) fn withheld(command: &str, params: &Value) -> Option<String> {
+    wants_a_process(command, params).map(starts_a_process).or_else(|| unlisted_render(command, params).map(starts_an_unlisted_render))
 }
 
 /// What the confinement refuses of a command that is to run later, asked without running it, for
@@ -137,57 +144,91 @@ pub(crate) fn check_unrun(backend: &Backend, command: &str, params: &Value) -> R
     }
 }
 
+/// The command that starts a render, and names a render's failures.
+pub(crate) const RENDER: &str = "renderQueue.render";
+
+/// Every command that has the session's exporter write a render: those that start a render of the
+/// queue — [`RENDER`] (`crates/engine/src/cmd/render_queue.rs`:718) and the watch folder's two, which
+/// render the projects they find (`crates/engine/src/cmd/watch_folder.rs`:74, :138-155), as
+/// `start_render` has no other caller — and the two that hand the exporter a job of their own: Save
+/// Current Preview, which renders the work area straight to a movie (`crates/engine/src/cmd/render_queue.rs`:842-874), and
+/// Export Timeline, which by default renders each layer a timeline cannot hold to a ProRes movie in a
+/// staging folder of a random name (`crates/engine/src/cmd/timeline.rs`:113-155, :157-215,
+/// `crates/engine/src/cmd/timeline/staging.rs`:17-36). `Exporter::export` has no other caller. The
+/// pending-export journal learns a render's files only from the render runner, which lists them
+/// before the render starts, so a call that reaches one of these any other way would write files no
+/// restart could delete, and the door refuses it. Export Timeline is the one of these the call
+/// itself can answer for: refused whole unless its own `prerender` reads as the mode that renders
+/// nothing ([`writes_no_render`]), because whether any other Export Timeline pre-renders turns on
+/// the project's layers, and what an `engine.batch` fills in from earlier steps as it runs is not
+/// written until after the door has read the call.
+const UNLISTED_RENDERS: [&str; 5] = [RENDER, "file.watchFolder", "file.watchFolder.poll", "render.saveCurrentPreview", "file.exportTimeline"];
+
+/// The refusal of a command that starts a render nothing has listed, worded as [`starts_a_process`] is,
+/// and naming the method that lists.
+fn starts_an_unlisted_render(withheld: &str) -> String {
+    format!("`{withheld}` is not available in this build: it starts a render whose files the pending-export journal cannot list, and `export` lists them")
+}
+
 /// The refusal of a withheld command, worded as the confinement words its own (`` `id` is not
 /// available …``) in the engine's voice for a capability this build was put together without, so it
 /// reads like every other refusal of its row; a step of `run` puts the step's command and index
 /// around it, as it does every other row's words.
-pub(crate) fn starts_a_process(withheld: &str) -> String {
+fn starts_a_process(withheld: &str) -> String {
     format!("`{withheld}` is not available in this build: it downloads by starting the system `curl`, and this build starts no process")
 }
 
-/// Which model download, if any, one call reaches. The command itself may be one; an `engine.batch`
-/// reaches one through its steps, whose ids the plug-in must read here because the engine runs them
-/// itself and never brings them back through this door. It reads them as the engine does — `command`,
-/// else `id` (`crates/engine/src/cmd/batch.rs`:77-81), and never as a `$N`, which the engine
-/// substitutes only in the parameters (:85) — and only one level deep, because a `batch` inside a
-/// batch runs no steps at all: the engine refuses the nested one before it runs (`NOT_IN_BATCH`,
-/// `crates/engine/src/cmd/batch.rs`:14,:82).
-pub(crate) fn wants_a_process<'a>(command: &'a str, params: &'a Value) -> Option<&'a str> {
-    if NO_PROCESS.contains(&command) {
-        return Some(command);
-    }
-    if command != "engine.batch" {
-        return None;
-    }
-    params
-        .get("steps")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|step| step.get("command").or_else(|| step.get("id")).and_then(Value::as_str))
-        .find(|inner| NO_PROCESS.contains(inner))
+/// Every command one call reaches, each with the parameters it is reached with: the command itself,
+/// then, for an `engine.batch`, each of its steps, whose ids the plug-in must read here because the
+/// engine runs them itself and never brings them back through this door. It reads them as the engine
+/// does — `command`, else `id` (`crates/engine/src/cmd/batch.rs`:77-81), and never as a `$N`, which
+/// the engine substitutes only in the parameters (:85) — with each step's own `params`, and only one
+/// level deep, because a `batch` inside a batch runs no steps at all: the engine refuses the nested
+/// one before it runs (`NOT_IN_BATCH`, `crates/engine/src/cmd/batch.rs`:14,:82). It is the one reader
+/// of the commands a call reaches, for every rule the door holds them to, and each rule is asked of
+/// every command it yields: a step a rule lets through must never stand in for the batch's later steps.
+fn reached<'a>(command: &'a str, params: &'a Value) -> impl Iterator<Item = (&'a str, &'a Value)> {
+    let steps = params.get("steps").and_then(Value::as_array).filter(|_| command == "engine.batch");
+    std::iter::once((command, params)).chain(steps.into_iter().flatten().filter_map(|step| {
+        let inner = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str)?;
+        Some((inner, step.get("params").unwrap_or(&Value::Null)))
+    }))
 }
 
-/// A `renderQueue.render` that succeeded but carries failed items is a failure, in the command
-/// line's own words: every `compName: reason` joined, so the app sees which item broke the render,
-/// with the command line's `?` for an item that names no comp and `failed` for a reason that is no
-/// sentence, so no failed item is ever dropped from the report.
-fn failed_render(command: &str, result: &Value) -> Option<String> {
-    if command != "renderQueue.render" {
-        return None;
+/// The model download, if any, that one call reaches.
+fn wants_a_process<'a>(command: &'a str, params: &'a Value) -> Option<&'a str> {
+    reached(command, params).map(|(reached, _)| reached).find(|reached| NO_PROCESS.contains(reached))
+}
+
+/// The render nothing has listed, if any, that one call reaches: the first command it reaches that is
+/// one of [`UNLISTED_RENDERS`] and is not read, by its own parameters, to write none.
+fn unlisted_render<'a>(command: &'a str, params: &'a Value) -> Option<&'a str> {
+    reached(command, params).find(|(reached, given)| UNLISTED_RENDERS.contains(reached) && !writes_no_render(reached, given)).map(|(reached, _)| reached)
+}
+
+/// The one withheld render a call can be read to start nothing: Export Timeline's `prerender`
+/// parameter, which at the pin reads as the mode that renders nothing when it is the bool `false`
+/// (`crates/engine/src/cmd/timeline.rs`:169-174; absent, `true` or any other kind reads as
+/// `Unsupported`, the rendering default) or a spelling `PrerenderMode::parse` maps there —
+/// `none`, `off`, `false` or `no`, after lower-casing and dropping spaces, underscores and hyphens
+/// (`crates/interchange/src/export.rs`:32-40). In that mode no layer plans as a pre-render
+/// (`crates/interchange/src/export.rs`:192-197 answers `Plan::Render` under no mode but `All` and
+/// `Unsupported`), and only a plan of `Render` has Export Timeline's work call the exporter
+/// (`crates/engine/src/cmd/timeline.rs`:232-249), so such a call renders nothing: it writes the one
+/// file its own `path` names, where a call that does render also fills staging folders no listing
+/// could name. The door may read the parameter as the engine will only where nothing changes it
+/// between the two readings: `exec`'s and `run`'s parameters pass to the engine untouched, and a
+/// literal in a batch step is what that step runs with; a `$N` is filled in as the batch runs, after
+/// the door has read, so no reading of it is the door's, and it is refused. The spellings are read
+/// from the pin, not invented here: a pin that parses `prerender` differently moves this reading.
+fn writes_no_render(withheld: &str, given: &Value) -> bool {
+    match (withheld, given.get("prerender")) {
+        ("file.exportTimeline", Some(Value::Bool(false))) => true,
+        ("file.exportTimeline", Some(Value::String(spelling))) => {
+            matches!(spelling.to_ascii_lowercase().replace([' ', '_', '-'], "").as_str(), "none" | "off" | "false" | "no")
+        }
+        _ => false,
     }
-    let failed: Vec<String> = result
-        .get("items")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|item| {
-            let reason = item.get("status")?.get("Failed")?;
-            let comp = item.get("compName").and_then(Value::as_str).unwrap_or("?");
-            Some(format!("{comp}: {}", reason.as_str().unwrap_or("failed")))
-        })
-        .collect();
-    (!failed.is_empty()).then(|| failed.join("; "))
 }
 
 /// Run one EffectCraft automation tool and answer its document. Every §14 row whose result is a
@@ -397,22 +438,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// The command line's own words for each shape of failed item (`apps/effectcraft-cli/src/main.rs`
-    /// `failed_render`): a missing comp name reads `?`, a reason that is no sentence reads `failed`,
-    /// and an item that did not fail is left out.
-    #[test]
-    fn a_failed_render_names_every_failed_item_as_the_command_line_does() {
-        let result = json!({"items": [
-            {"compName": "Card", "status": {"Failed": "i/o: Is a directory"}},
-            {"compName": "Done", "status": "Done"},
-            {"status": {"Failed": "no output"}},
-            {"compName": "Odd", "status": {"Failed": 7}},
-        ]});
-        assert_eq!(failed_render("renderQueue.render", &result).as_deref(), Some("Card: i/o: Is a directory; ?: no output; Odd: failed"));
-        assert_eq!(failed_render("renderQueue.render", &json!({"items": [{"compName": "Done", "status": "Done"}]})), None);
-        assert_eq!(failed_render("comp.new", &result), None, "only a render reports its items");
-    }
-
     /// The engine's own sentences, as its commands word them: each that names a missing comp, layer,
     /// item or property, and each that opens with the same words about something else.
     #[test]
@@ -491,6 +516,81 @@ mod tests {
         assert!(matches!(map_engine(not_a_project, &call("file.open", &params)), CraftError::CommandFailed { .. }), "a file that read is no disk refusal");
         let svg = EngineError::BadParams { cmd: "edit.pasteSvg".into(), msg: "cannot read the SVG: unexpected end".into() };
         assert!(matches!(map_engine(svg, &call("edit.pasteSvg", &params)), CraftError::CommandFailed { .. }), "a parameter refused is no disk refusal");
+    }
+
+    /// Every command that has the exporter write a render is withheld however a call reaches it — the
+    /// queue's own, the watch folder's two, Save Current Preview and Export Timeline — and no other
+    /// command is.
+    #[test]
+    fn every_command_that_starts_a_render_is_withheld_on_every_way_a_call_reaches_it() {
+        for render in UNLISTED_RENDERS {
+            assert_eq!(unlisted_render(render, &json!({})), Some(render), "{render} as its own command");
+            assert_eq!(
+                unlisted_render("engine.batch", &json!({"steps": [{"command": "comp.new"}, {"command": render}]})),
+                Some(render),
+                "{render} as a step of a batch"
+            );
+            assert_eq!(unlisted_render("engine.batch", &json!({"steps": [{"id": render}]})), Some(render), "{render} by `id` in a batch");
+            assert_eq!(
+                unlisted_render("engine.batch", &json!({"steps": [{"command": "engine.batch", "params": {"steps": [{"command": render}]}}]})),
+                None,
+                "a batch inside a batch runs no steps"
+            );
+        }
+        assert_eq!(UNLISTED_RENDERS, ["renderQueue.render", "file.watchFolder", "file.watchFolder.poll", "render.saveCurrentPreview", "file.exportTimeline"]);
+        // Pre-render and Create Proxy only queue an item, which `export` lists when it renders it.
+        for other in ["renderQueue.add", "renderQueue.setRender", "renderQueue.stop", "renderQueue.list", "render.preRender", "file.createProxy", "file.save"] {
+            assert_eq!(unlisted_render(other, &json!({})), None, "{other} starts no render");
+        }
+        assert_eq!(unlisted_render("comp.new", &json!({"name": "renderQueue.render"})), None, "a command only names a render when it runs one");
+    }
+
+    /// Only Export Timeline's own no-render spellings are read past the refusal, exactly as the pin
+    /// parses them: the bool `false`, and `none`, `off`, `false` and `no` however the engine's
+    /// normalization folds them. Absent, a rendering spelling, and anything an `engine.batch` fills
+    /// in later all stay refused; no other withheld command reads a parameter at all.
+    #[test]
+    fn only_an_export_timeline_that_says_it_renders_nothing_is_read_past_the_refusal() {
+        for say in ["none", "None", " OFF ", "no", "false", "FaLsE", "-off-", "_n_o_"] {
+            assert!(writes_no_render("file.exportTimeline", &json!({"prerender": say})), "`{say}` reads as none");
+        }
+        assert!(writes_no_render("file.exportTimeline", &json!({"prerender": false})), "the bool `false` reads as none");
+        for say in ["", "all", "unsupported", "auto", "yes", "true", "nonelayer", "nope", "$0.prerender"] {
+            assert!(!writes_no_render("file.exportTimeline", &json!({"prerender": say})), "`{say}` may render");
+        }
+        for say in [Value::Null, json!(true), json!(0), json!([])] {
+            assert!(!writes_no_render("file.exportTimeline", &json!({"prerender": say})), "{say} may render or is refused by the engine");
+        }
+        assert!(!writes_no_render("file.exportTimeline", &json!({})), "absent `prerender` is the rendering default");
+        for withheld in UNLISTED_RENDERS {
+            if withheld != "file.exportTimeline" {
+                assert!(!writes_no_render(withheld, &json!({"prerender": "none"})), "`{withheld}` renders whatever a `prerender` says");
+            }
+        }
+    }
+
+    /// The door asks its rule of every command a call reaches, each with its own parameters, so an
+    /// Export Timeline it reads past never lets a later step of the batch through, whichever render
+    /// that step starts, and a step is read by its own `prerender`, never by the batch's.
+    #[test]
+    fn a_step_read_past_the_refusal_hides_no_later_step() {
+        let quiet = json!({"command": "file.exportTimeline", "params": {"prerender": "none"}});
+        for render in UNLISTED_RENDERS {
+            assert_eq!(unlisted_render("engine.batch", &json!({"steps": [quiet, {"command": render}]})), Some(render), "{render} after a quiet step");
+            assert_eq!(unlisted_render("engine.batch", &json!({"steps": [quiet, {"id": render}]})), Some(render), "{render} by `id` after a quiet step");
+        }
+        assert_eq!(unlisted_render("engine.batch", &json!({"steps": [quiet, quiet]})), None, "quiet steps alone pass");
+        assert_eq!(unlisted_render("file.exportTimeline", &json!({"prerender": "off"})), None, "a quiet call passes");
+        assert_eq!(
+            unlisted_render("engine.batch", &json!({"prerender": "none", "steps": [{"command": "file.exportTimeline"}]})),
+            Some("file.exportTimeline"),
+            "a step is read by its own parameters"
+        );
+        assert_eq!(
+            wants_a_process("engine.batch", &json!({"steps": [quiet, {"command": "comp.new"}, {"id": "roto.model.download"}]})),
+            Some("roto.model.download"),
+            "every step is read for a download too"
+        );
     }
 
     /// Both model downloads are withheld however a call reaches them and nothing else is: a step's

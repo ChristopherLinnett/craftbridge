@@ -7,7 +7,8 @@
 //! app names a plug-in folder (PD13) — and runs it headless, confined before its first command to
 //! the container as the write root with the container and bundle as read roots (L5, AD9). No helper
 //! hooks exist: a helper is a separate process, and a phone starts none, so the commands that need
-//! one answer `Unsupported`, as do the model downloads, which would start the system `curl` (AD11).
+//! one answer `Unsupported`, as do the model downloads, which would start the system `curl` (AD11), and the renders no one has
+//! listed the files of for the pending-export journal (AD3, §19).
 //!
 //! Every call reaches the session through the MCP server built at construction, so the `mcp` call's
 //! line transport and the method table act on one session. The methods the plugin answers are the
@@ -36,6 +37,7 @@ mod generated {
 mod info;
 mod mcp;
 mod methods;
+mod outputs;
 mod plugins;
 mod properties;
 mod reference;
