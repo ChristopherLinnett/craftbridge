@@ -1466,6 +1466,34 @@ impl Engine {
 <td><code>Gpu::render_display</code> and its <code>DisplayFrame</code>: premultiplied <code>Rgba8Unorm</code> with a full mip chain (<code>effectcraft: crates/<wbr>gpu/<wbr>src/<wbr>lib.rs:138-147</code>, <code>:224-236</code>); the window&#39;s one frame in flight and the reasons given for it, which the preview surface follows (<code>effectcraft: apps/<wbr>effectcraft/<wbr>src/<wbr>main.rs:475-482</code>)</td>
 <td>CORE-2b</td>
 </tr>
+<tr>
+<td>AD15</td>
+<td><code>craftbridge-core</code>&#39;s device carries its failure notice (§17): the first device-lost or uncaptured-error report latches with its words and every later report changes nothing, one handle shared by every holder of the device and safe from wgpu&#39;s own callback threads, read to drop the GPU on the first failure</td>
+<td>the desktop app&#39;s failure bridge, which latches the first failure inside its egui front end (<code>effectcraft: crates/<wbr>ui-egui/<wbr>src/<wbr>gpu_failure.rs:25-89</code>), which a phone&#39;s SDK has no front end to host</td>
+<td>the shared-device contract that the owner of a borrowed device forwards failures to the compositor (<code>effectcraft: crates/<wbr>gpu/<wbr>src/<wbr>context.rs:826-830</code>, <code>:1070-1078</code>)</td>
+<td class="rid">FX-2</td>
+</tr>
+<tr>
+<td>AD16</td>
+<td>The GPU hand-over (§17, §19 step 5): <code>attach_gpu</code> gives the core&#39;s device to <code>Gpu::new(adapter, device, queue)</code> and sets <code>Session.accel</code>, clearing the CPU note, or takes a <code>CpuOnly</code> answer as the note; both wgpu failure callbacks call one failure path, in the words EffectCraft gives each (<code>GPU device lost (&lt;reason&gt;): &lt;message&gt;</code>, <code>uncaptured GPU error: &lt;error&gt;</code>), which reports to the core&#39;s notice and to the compositor&#39;s shared-device notifier; the first failure drops the GPU before the next request and leaves <code>GPU preview retired: &lt;reason&gt;</code> in <code>info.gpu</code></td>
+<td>the desktop app wiring its window device&#39;s callbacks into its bridge and forwarding to the notifier (<code>effectcraft: apps/<wbr>effectcraft/<wbr>src/<wbr>main.rs:307-329</code>, <code>effectcraft: crates/<wbr>ui-egui/<wbr>src/<wbr>app/<wbr>gpu.rs:44-70</code>), and the CLI&#39;s <code>--gpu</code> start, which builds a device of its own (<code>effectcraft: apps/<wbr>effectcraft-cli/<wbr>src/<wbr>main.rs:488-493</code>)</td>
+<td><code>Gpu::new</code>, <code>Gpu::context</code> (<code>effectcraft: crates/<wbr>gpu/<wbr>src/<wbr>lib.rs:162-166</code>, <code>:216</code>), <code>GpuContext::device_failure_notifier</code> (<code>effectcraft: crates/<wbr>gpu/<wbr>src/<wbr>context.rs:1070-1078</code>), the compositor&#39;s own handler installer and its words (<code>effectcraft: crates/<wbr>gpu/<wbr>src/<wbr>readback.rs:348-362</code>), <code>Session.accel</code> and <code>accel_note</code> (<code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>lib.rs:129</code>, <code>:132</code>), the desktop app&#39;s note for a retired device (<code>effectcraft: crates/<wbr>ui-egui/<wbr>src/<wbr>app/<wbr>gpu.rs:69-70</code>)</td>
+<td class="rid">FX-2</td>
+</tr>
+<tr>
+<td>AD17</td>
+<td>The plug-in loader per platform (PD13): no plug-in folder, no hooks on any platform; Android and the desktop take EffectCraft&#39;s own loader behind the confinement; iOS takes <code>bundle_loader</code>, which loads only a module that resolves inside the plug-in folder an app named in its bundle and refuses every other source in the engine&#39;s <code>not available in this build</code> sentence, on the <code>Unsupported</code> row</td>
+<td>the CLI&#39;s session, which takes EffectCraft&#39;s loader for every file it may read (<code>effectcraft: crates/<wbr>host/<wbr>src/<wbr>lib.rs:106</code>), its confinement leaving <code>effect.plugins.load</code> open</td>
+<td><code>effectcraft_plugin::loader</code>, <code>preview</code>, <code>wasm_available</code> (<code>effectcraft: crates/<wbr>plugin/<wbr>src/<wbr>lib.rs:41</code>, <code>:61</code>, <code>:77</code>), the session&#39;s plug-in fields and <code>PluginLoader</code> (<code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>lib.rs:207-215</code>, <code>:294</code>), <code>effect.plugins.load</code>&#39;s refusals and the source it hands the loader (<code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>cmd/<wbr>effect.rs:39</code>, <code>:56-66</code>), the confinement&#39;s checks of that command and of the session&#39;s reads (<code>effectcraft: crates/<wbr>automation/<wbr>src/<wbr>confine.rs:101</code>, <code>:190-206</code>, <code>:568-571</code>), the Plug-in Library&#39;s commands the confinement withholds (<code>effectcraft: crates/<wbr>automation/<wbr>src/<wbr>confine.rs:69-75</code>)</td>
+<td class="rid">FX-2</td>
+</tr>
+<tr>
+<td>AD18</td>
+<td>Android&#39;s boa gets <code>jsvalue-enum</code> through a target-specific dependency of <code>craftbridge-effects</code> (D-8), on the workspace&#39;s boa entry, which keeps EffectCraft&#39;s default features off, so Cargo unifies the layout over every boa in the Android graph and adds nothing else</td>
+<td>nothing in the CLI: the panic is Android&#39;s (<code>evidence/<wbr>03-device-feasibility.md</code> Finding 9), and EffectCraft asks nothing of boa&#39;s layout</td>
+<td>the boa entries Cargo unifies over (<code>effectcraft: Cargo.toml:68</code>, <code>crates/<wbr>script/<wbr>Cargo.toml:20</code>, <code>crates/<wbr>expr/<wbr>Cargo.toml:20</code>)</td>
+<td class="rid">FX-2</td>
+</tr>
 </tbody></table>
 </div><p><strong>States.</strong></p>
 <ul>
@@ -1707,7 +1735,7 @@ impl Engine {
 <tbody><tr>
 <td><code>Cargo.toml</code></td>
 <td>NEW</td>
-<td><code>effectcraft-engine</code>, <code>-host</code>, <code>-automation</code>, <code>-gpu</code>, <code>-render</code>, <code>-text</code>, <code>-media</code>, <code>-expr</code>, <code>-script</code> and <code>-plugin</code> from the workspace pins; <code>[target.'cfg(target_os = &quot;android&quot;)'.dependencies] boa_engine = { version = &quot;0.22&quot;, features = [&quot;jsvalue-enum&quot;] }</code> (D-8)</td>
+<td><code>effectcraft-engine</code>, <code>-host</code>, <code>-automation</code>, <code>-gpu</code>, <code>-render</code>, <code>-text</code>, <code>-media</code>, <code>-expr</code>, <code>-script</code> and <code>-plugin</code> from the workspace pins; <code>[target.'cfg(target_os = &quot;android&quot;)'.dependencies] boa_engine = { workspace = true, features = [&quot;jsvalue-enum&quot;] }</code>, the workspace&#39;s entry being EffectCraft&#39;s own <code>{ version = &quot;0.22&quot;, default-features = false }</code>, so Android&#39;s boa adds the layout and nothing else (D-8)</td>
 </tr>
 <tr>
 <td><code>src/<wbr>app.rs</code></td>
@@ -1778,7 +1806,7 @@ impl Engine {
 </div><p><strong>Construction.</strong></p>
 <ol>
 <li>CraftBridge builds the session (AD1): <code>Session { models_dir, plugins_dir, footage: MediaPool::new(), importer, exporter, expr, expr_check, plugin_loader, plugin_previewer, ..Default::default() }</code> with the app&#39;s folders, CraftBridge&#39;s exporter (AD7) and no helper hooks, then <code>effectcraft_script::install</code>, then the phone&#39;s fonts (AD2).</li>
-<li><strong>Plug-ins (PD13):</strong> with <code>Folders.plugins = None</code>, <code>session.plugin_loader</code> and <code>session.plugin_previewer</code> are <code>None</code> (fields at <code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>lib.rs:207-215</code>), so no WebAssembly plug-in loads. On Android the loader is <code>effectcraft_plugin::loader</code> (<code>crates/<wbr>plugin/<wbr>src/<wbr>lib.rs:61</code>). On iOS it is <code>plugins::bundle_loader</code>, a function with the same <code>PluginLoader</code> signature (<code>crates/<wbr>engine/<wbr>src/<wbr>lib.rs:294</code>; the bundle path sits in a process-wide <code>OnceLock</code> set at start, because the signature is a plain function pointer) that refuses any <code>source</code> outside the bundle&#39;s plug-ins folder with <code>Unsupported</code> and otherwise calls <code>effectcraft_plugin::loader</code>, so a script or command cannot load a plug-in from the container (T24).</li>
+<li><strong>Plug-ins (PD13):</strong> with <code>Folders.plugins = None</code>, <code>session.plugin_loader</code> and <code>session.plugin_previewer</code> are <code>None</code> (fields at <code>effectcraft: crates/<wbr>engine/<wbr>src/<wbr>lib.rs:207-215</code>), so no WebAssembly plug-in loads. On Android the loader is <code>effectcraft_plugin::loader</code> (<code>crates/<wbr>plugin/<wbr>src/<wbr>lib.rs:61</code>). On iOS it is <code>plugins::bundle_loader</code>, a function with the same <code>PluginLoader</code> signature (<code>crates/<wbr>engine/<wbr>src/<wbr>lib.rs:294</code>; the plug-in folder each iOS engine names inside its bundle is added, resolved, to a process-wide list at start and taken out again when the app is dropped, because the signature is a plain function pointer, and a folder outside the bundle is never added) that refuses any <code>source</code> that does not resolve inside such a folder with <code>Unsupported</code> and otherwise calls <code>effectcraft_plugin::loader</code>, so a script or command cannot load a plug-in from the container (T24).</li>
 <li><code>Backend::headless(session)</code> then <code>Backend::confine(Confinement::new(read: [container, bundle], write: [container]))</code> (L5, AD9).</li>
 <li><code>McpServer::new(backend)</code>.</li>
 <li><code>attach_gpu</code> builds <code>Gpu::new(adapter, device, queue)</code> from the core&#39;s device and sets <code>session.accel</code> (§17).</li>

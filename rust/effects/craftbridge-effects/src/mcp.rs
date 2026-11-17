@@ -195,7 +195,7 @@ mod tests {
     /// An app's MCP server, built as the app builds it, on folders that need not exist.
     fn server() -> McpServer {
         let folders = crate::session::tests::folders(None);
-        McpServer::new(Backend::headless(crate::session::build(&folders)))
+        McpServer::new(Backend::headless(crate::session::build(craftbridge_core::Platform::current(), &folders)))
     }
 
     /// The listing the server answers a line with, read from the reply at `pointer`.

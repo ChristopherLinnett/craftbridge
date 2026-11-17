@@ -43,6 +43,8 @@ mod replay;
 mod requests;
 mod runner;
 mod session;
+#[cfg(test)]
+mod test_plugin;
 mod timings;
 
 pub use app::EffectCraftApp;

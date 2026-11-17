@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use craftbridge_core::Platform;
 use craftbridge_core::folders::Folders;
 use effectcraft_engine::project::Footage;
 use effectcraft_engine::{Importer, Session};
@@ -34,9 +35,11 @@ fn exporter() -> Arc<PooledExporter> {
 }
 
 /// Build the session (plan §19, steps 1 and 2): every field from public inputs, the plug-in hooks from the
-/// PD13 switch, no helper hooks, and then EffectCraft's own scripting install.
-pub(crate) fn build(folders: &Folders) -> Session {
-    let hooks = plugins::hooks(folders);
+/// PD13 switch for `platform`, no helper hooks, and then EffectCraft's own scripting install. The
+/// platform is a parameter so a test can build the iOS session's shape on the host and pin its
+/// policy there, while the gate's phone builds prove the code compiles for the phones.
+pub(crate) fn build(platform: Platform, folders: &Folders) -> Session {
+    let hooks = plugins::hooks_for(platform, folders);
     let mut session = Session {
         models_dir: Some(folders.models.clone()),
         exporter: Some(exporter()),
@@ -84,36 +87,74 @@ pub(crate) mod tests {
         }
     }
 
+    /// An app's folders on disk, in a scratch folder of their own: the container with its working
+    /// folders, a bundle beside it when asked for, and the plug-in folder the app names, given
+    /// relative to the scratch folder, made. Each test makes its own, so nothing one test puts in
+    /// a folder sits in another test's.
+    pub(crate) struct Scratch {
+        dir: tempfile::TempDir,
+        pub(crate) folders: Folders,
+    }
+
+    impl Scratch {
+        pub(crate) fn new(bundle: bool, plugins: Option<&std::path::Path>) -> Self {
+            let dir = tempfile::tempdir().expect("a scratch folder");
+            let container = dir.path().join("container");
+            let mut folders = folders(plugins.map(|named| dir.path().join(named)));
+            folders.bundle = bundle.then(|| dir.path().join("App.app"));
+            for folder in folders.bundle.iter().chain(&folders.plugins) {
+                std::fs::create_dir_all(folder).expect("the read-only folder appears");
+            }
+            folders.config = container.join(".config");
+            folders.cache = container.join(".cache");
+            folders.models = container.join(".models");
+            folders.container = container;
+            Self { dir, folders }
+        }
+
+        /// The folder the scratch sits in, where each test puts what it names.
+        pub(crate) fn root(&self) -> &std::path::Path {
+            self.dir.path()
+        }
+
+        /// The app as it is built for `platform`, through the one construction
+        /// `EffectCraftApp::new` makes for its own: so every call goes through the app's own door,
+        /// its own confinement and its own admission of the plug-in folder.
+        pub(crate) fn app(&self, platform: Platform) -> crate::EffectCraftApp {
+            crate::EffectCraftApp::for_platform(platform, &self.folders).expect("the app starts from prepared folders")
+        }
+    }
+
     #[test]
     fn the_session_exports_through_craftbridges_exporter() {
         // The exporter is the same on every desktop as EffectCraft's own and differs from it only on a
         // phone, so what a host test can pin is the type the seam hands out.
         let _: Arc<PooledExporter> = exporter();
-        assert!(build(&folders(None)).exporter.is_some());
+        assert!(build(Platform::current(), &folders(None)).exporter.is_some());
     }
 
     #[test]
     fn the_session_carries_no_helper_hooks() {
         // The acceptance: no helper process can start, because the hooks that start one are not there.
-        let session = build(&folders(None));
+        let session = build(Platform::current(), &folders(None));
         assert!(session.helpers.is_none(), "a phone's session must hold no helper hooks at all");
     }
 
     #[test]
     fn the_session_runs_scripting() {
-        let session = build(&folders(None));
+        let session = build(Platform::current(), &folders(None));
         assert!(session.script.is_some(), "scripts run on both platforms (PD13)");
     }
 
     #[test]
     fn the_session_keeps_its_models_in_the_apps_folder() {
-        let session = build(&folders(None));
+        let session = build(Platform::current(), &folders(None));
         assert_eq!(session.models_dir.as_deref(), Some(std::path::Path::new("/app/models")));
     }
 
     #[test]
     fn plug_ins_are_off_without_a_folder() {
-        let session = build(&folders(None));
+        let session = build(Platform::current(), &folders(None));
         assert!(session.plugin_loader.is_none());
         assert!(session.plugin_previewer.is_none());
         assert!(session.plugins_dir.is_none());
@@ -122,7 +163,7 @@ pub(crate) mod tests {
     #[test]
     fn plug_ins_are_on_with_a_folder() {
         let plugins = std::path::PathBuf::from("/app/plug-ins");
-        let session = build(&folders(Some(plugins.clone())));
+        let session = build(Platform::current(), &folders(Some(plugins.clone())));
         // The engine answers with EffectCraft's own runtime gate on top of the app's switch.
         assert_eq!(session.plugin_loader.is_some(), effectcraft_plugin::wasm_available());
         assert_eq!(session.plugin_previewer.is_some(), effectcraft_plugin::wasm_available());

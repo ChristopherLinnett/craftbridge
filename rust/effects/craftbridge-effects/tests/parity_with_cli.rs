@@ -458,20 +458,29 @@ fn a_render_with_a_failed_item_fails_as_the_command_line_fails_it() {
     }
 }
 
+/// One confined refusal in parity: the same command, with the same parameters, goes to the command
+/// line's confined `mcp` and to the plugin's `exec`, and the pair comes back as the command line's
+/// words (folders already rewritten to the marker) and the plugin's whole error, which the test
+/// matches on for the row it expects.
+fn confined_refusal_pair(scratch: &Scratch, command: &str, params: &Value) -> std::result::Result<(Value, CraftError), String> {
+    let command_line = cli_mcp_confined(scratch.root(), None, tools_call("execute_command", &json!({"command": command, "params": params})))?;
+    let command_line = match command_line {
+        Value::String(message) => scrubbed(&message, &[scratch.root()]),
+        other => return Err(format!("the confined command line answered {other} where it should have refused")),
+    };
+    let mut app = scratch.app().map_err(|e| e.to_string())?;
+    match app.request("exec", json!({"command": command, "params": params})) {
+        Ok(answer) => Err(format!("the confinement should refuse the call; it answered {answer}")),
+        Err(error) => Ok((command_line, error)),
+    }
+}
+
 #[test]
 fn the_confinement_answers_in_the_commands_words() {
     let scratch = Scratch::new().expect("a scratch folder");
     let outside = scratch.outside_file().expect("a file outside both roots");
-    let command_line = cli_mcp_confined(scratch.root(), None, tools_call("execute_command", &json!({"command": "file.open", "params": {"path": outside}})))
-        .expect("the confined command line answered");
-    let command_line = match command_line {
-        Value::String(message) => scrubbed(&message, &[scratch.root()]),
-        other => panic!("the confined command line answered {other} where it should have refused"),
-    };
-
-    let mut app = scratch.app().expect("the app starts from prepared folders");
-    let answer = app.request("exec", json!({"command": "file.open", "params": {"path": outside}}));
-    match answer.expect_err("the confinement refuses the read") {
+    let (command_line, error) = confined_refusal_pair(&scratch, "file.open", &json!({"path": outside})).expect("both doors refused");
+    match error {
         CraftError::Io { message } => {
             assert_eq!(scrubbed(&message, &[scratch.path()]), command_line, "the confinement refusal differs from the command line's")
         }
@@ -1288,5 +1297,25 @@ fn an_mcp_session_is_answered_as_the_commands_mcp_answers_it() {
     assert_eq!(plugin.len(), command_line.len(), "the plugin answered other lines than the command line: {plugin:?}");
     for (mine, theirs) in plugin.iter().zip(&command_line) {
         assert_eq!(mine, theirs, "the reply differs from the command line's");
+    }
+}
+
+/// T18's half that the phone's confinement can answer: the scenario's two calls — `script.run` of
+/// `app.project.numItems`, and of a script that fails — through the command line's confined `mcp`
+/// and the plugin's `exec`. `script.run` is a command that runs scripts, so both confined doors
+/// refuse each before its script runs, and they refuse in the same words. Running the script, and
+/// reporting its output and error position alike, needs a session with script-running open, which
+/// the phone's confinement refuses on purpose; how scripts run on the phone is an open decision.
+#[test]
+fn the_confined_script_refusal_is_the_commands_refusal() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    for code in ["app.project.numItems", "throw new Error('the scenario fails here')"] {
+        let (command_line, error) = confined_refusal_pair(&scratch, "script.run", &json!({"code": code})).expect("both doors refused");
+        match error {
+            CraftError::Unsupported { message } => {
+                assert_eq!(scrubbed(&message, &[scratch.path()]), command_line, "the confined refusal of `{code}` differs from the command line's")
+            }
+            other => panic!("a confined script run must be `Unsupported`, got {other:?}"),
+        }
     }
 }

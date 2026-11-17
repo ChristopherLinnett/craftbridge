@@ -29,7 +29,7 @@ pub use engine::{Answer, Engine};
 pub use error::CraftError;
 pub use export::PROGRESS_INTERVAL;
 pub use frames::{FrameBytes, PixelFormat};
-pub use gpu::{GpuChoice, GpuDevice};
+pub use gpu::{GpuChoice, GpuDevice, GpuFailure, Platform};
 pub use journal::{JOURNAL_FILE, Recovery};
 pub use platform::memory::available_memory;
 pub use surface::{Presented, PreviewSurface};
