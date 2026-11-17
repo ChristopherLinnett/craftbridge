@@ -45,7 +45,7 @@ pub(crate) const CONFIGURATIONS: &[(&str, &[&str])] = &[
     (CLIPPY_CONFIGURATION, CLIPPY_CONFIGURATION_NAMES),
     ("rust/rustfmt.toml", &["rustfmt.toml", ".rustfmt.toml"]),
     (DENY_CONFIGURATION, &["deny.toml", "deny.exceptions.toml", ".deny.exceptions.toml"]),
-    ("ios/sdk/.swift-format", &[".swift-format"]),
+    (crate::swift_format::CONFIGURATION, &[".swift-format"]),
     ("ios/sdk/.swiftlint.yml", &[".swiftlint.yml"]),
     ("tools/licences.toml", &["licences.toml"]),
     (".editorconfig", &[".editorconfig"]),
@@ -78,6 +78,9 @@ const MACHINERY: &[&str] = &[
     "tools/env.sh",
     "tools/refused-switches.tsv",
     "tools/oracle.sh",
+    // The builds of the native library the Swift and Android stages compile and link against.
+    "tools/build-xcframework.sh",
+    "tools/build-android.sh",
     "tools/hooks/",
     "rust/xtask/",
     "rust/effects/craftbridge-effects-conformance/",

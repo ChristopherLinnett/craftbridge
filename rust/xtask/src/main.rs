@@ -2,8 +2,10 @@
 //! views, `cargo xtask plan-views --check`, rebuilt from their sources and compared; the judgements
 //! `tools/ci.sh` hands over from the stages it runs, `cargo xtask skipped-tasks <gradle log>`,
 //! `cargo xtask compiled`, and the lint library's run under its lock, `cargo xtask dylint …`; the file
-//! lists its stages read, `cargo xtask files <kind>`; and the pins the doctor and the gate read,
-//! `cargo xtask pins` and `cargo xtask swift-builds`.
+//! lists its stages read, `cargo xtask files <kind>`; the pins the doctor and the gate read,
+//! `cargo xtask pins` and `cargo xtask swift-builds`; the Swift stage's formatter check,
+//! `cargo xtask swift-format`; and the XCFramework `tools/build-xcframework.sh` builds,
+//! `cargo xtask xcframework`.
 //!
 //! The rules in `AGENTS.md` that no compiler, formatter or linter already enforces are checked here,
 //! behind one command, so a change cannot merge with one broken. Each check lives in its own module: a
@@ -15,6 +17,7 @@
 
 mod adaptations;
 mod attributes;
+mod bindings;
 mod buildfiles;
 mod compiled;
 mod direction;
@@ -41,11 +44,14 @@ mod rust_syntax;
 mod scan;
 mod scratch;
 mod sources;
+mod swift_bindings;
+mod swift_format;
 mod swift_lint;
 mod unsafe_check;
 mod update;
 mod upstream;
 mod versions;
+mod xcframework;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -96,6 +102,19 @@ fn root_of_run(built: &Path, here: &Path, named: Option<&Path>) -> Result<PathBu
 #[cfg(test)]
 fn repo_root() -> PathBuf {
     repository_root().unwrap_or_else(|reason| panic!("xtask: refused: {reason}"))
+}
+
+/// A script of `tools/` run with a command line it refuses ends with 64, `EX_USAGE`, before it builds
+/// anything, and says `usage` on its standard error, so a failed build is never taken for a wrong command
+/// line. One definition for the tests of every script that takes arguments.
+#[cfg(test)]
+fn assert_script_refuses(script: &str, misused: &[&[&str]], usage: &str) {
+    let path = repo_root().join("tools").join(script);
+    for args in misused {
+        let output = std::process::Command::new("bash").arg(&path).args(*args).output().unwrap();
+        assert_eq!(output.status.code(), Some(MISUSE.into()), "{script} {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(String::from_utf8_lossy(&output.stderr).contains(usage), "{script} {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+    }
 }
 
 /// The tree this binary was built in: its manifest folder, two parents up, as the system resolves it.
@@ -211,9 +230,11 @@ fn dispatch(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
         ["dylint", arguments @ ..] => lints::run_dylint(&root, arguments),
         ["upstream", "update", rev] => update::run(&root, rev),
         ["upstream", "source"] => upstream::run_source(&root),
+        ["swift-format"] => swift_format::run(&root),
         ["swift-lint"] => swift_lint::run(&root),
         ["pins"] => pins::run(&root),
         ["swift-builds"] => pins::builds(&root),
+        ["xcframework"] => xcframework::run(&root),
         _ => {
             usage();
             ExitCode::from(MISUSE)
@@ -236,9 +257,11 @@ fn usage() {
     eprintln!("       cargo xtask upstream source   (the official URL and the full commit the pin names on official main, for tools/oracle.sh)");
     eprintln!("       cargo <check|clippy|test> --message-format=json … | cargo xtask compiled");
     eprintln!("       cargo xtask dylint <cargo-dylint arguments…>   (cargo dylint, taking turns on the lock every lint library run shares)");
+    eprintln!("       cargo xtask swift-format");
     eprintln!("       cargo xtask swift-lint");
     eprintln!("       cargo xtask pins");
-    eprintln!("       cargo xtask swift-builds")
+    eprintln!("       cargo xtask swift-builds");
+    eprintln!("       cargo xtask xcframework   (through tools/build-xcframework.sh: the native library's XCFramework, joined again only when it changed)")
 }
 
 /// Run every check, print one line per failure and `ok` per clean check, and fail if any failed.

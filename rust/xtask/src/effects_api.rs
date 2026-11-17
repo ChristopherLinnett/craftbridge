@@ -98,28 +98,10 @@ pub(crate) fn diff(root: &Path, old: &Path, new: &Path) -> Result<SurfaceDiff, S
     judged(output.status.code(), &output.stdout, &output.stderr)
 }
 
-/// Build the codegen and return the path of its binary, as Cargo reports it: Cargo, not a guess at its
-/// target folder, says where the build wrote it.
+/// Build the codegen and return the path of its binary, as Cargo reports it.
 fn build_codegen(rust_dir: &Path) -> Result<PathBuf, String> {
-    let output = Command::new(env!("CARGO"))
-        .current_dir(rust_dir)
-        .args(["build", "--locked", "--package", CODEGEN, "--message-format=json-render-diagnostics"])
-        .output()
-        .map_err(|error| format!("cannot run `{} build`: {error}", env!("CARGO")))?;
-    if !output.status.success() {
-        return Err(format!("building {CODEGEN} exited with {}: {}", output.status, String::from_utf8_lossy(&output.stderr).trim()));
-    }
-    let artifacts = crate::compiled::read_messages(output.stdout.as_slice())?;
-    executable_of(&artifacts).ok_or_else(|| format!("cargo built {CODEGEN} but reported no binary for it"))
-}
-
-/// The codegen's binary among the units cargo reported building.
-fn executable_of(artifacts: &[crate::compiled::Artifact]) -> Option<PathBuf> {
-    artifacts
-        .iter()
-        .find(|artifact| artifact.target_name == CODEGEN && artifact.target_kinds.iter().any(|kind| kind == "bin"))
-        .and_then(|artifact| artifact.executable.as_deref())
-        .map(PathBuf::from)
+    let artifacts = crate::compiled::build(rust_dir, &[CODEGEN])?;
+    crate::compiled::executable_of(&artifacts, CODEGEN).ok_or_else(|| format!("cargo built {CODEGEN} but reported no binary for it"))
 }
 
 #[cfg(test)]
@@ -165,7 +147,7 @@ mod tests {
         ]
         .join("\n");
         let artifacts = crate::compiled::read_messages(messages.as_bytes()).unwrap();
-        assert_eq!(executable_of(&artifacts), Some(PathBuf::from("/t/debug/craftbridge-effects-codegen")));
+        assert_eq!(crate::compiled::executable_of(&artifacts, CODEGEN), Some(PathBuf::from("/t/debug/craftbridge-effects-codegen")));
     }
 
     #[test]
@@ -174,7 +156,7 @@ mod tests {
         let codegen_test =
             r#"{"reason":"compiler-artifact","target":{"name":"craftbridge-effects-codegen","kind":["test"]},"executable":"/t/debug/deps/codegen-1"}"#;
         let artifacts = crate::compiled::read_messages(format!("{other_binary}\n{codegen_test}\n").as_bytes()).unwrap();
-        assert_eq!(executable_of(&artifacts), None);
+        assert_eq!(crate::compiled::executable_of(&artifacts, CODEGEN), None);
     }
 
     #[test]

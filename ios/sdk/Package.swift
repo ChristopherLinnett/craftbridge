@@ -10,7 +10,9 @@ let package = Package(
         .library(name: "CraftBridgeEffects", targets: ["CraftBridgeEffects"]),
     ],
     targets: [
-        .target(name: "CraftBridge"),
+        .binaryTarget(name: "CraftBridgeFFIBinary", path: "Frameworks/CraftBridgeEffectsFFI.xcframework"),
+        .target(name: "CraftBridgeFFI", dependencies: ["CraftBridgeFFIBinary"]),
+        .target(name: "CraftBridge", dependencies: ["CraftBridgeFFI"]),
         .target(name: "CraftBridgeEffects", dependencies: ["CraftBridge"]),
         .testTarget(name: "CraftBridgeEffectsTests", dependencies: ["CraftBridge", "CraftBridgeEffects"]),
     ],

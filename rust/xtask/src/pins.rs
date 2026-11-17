@@ -1,9 +1,10 @@
 //! The pins: `cargo xtask pins` prints what `rust/rust-toolchain.toml` and the Gradle version catalog
 //! name — the toolchain's targets and the catalog's Android pins — as `key=value` lines, and
 //! `cargo xtask swift-builds` prints the Swift package's shipping builds — a configuration and an
-//! `xcodebuild` destination for every Apple slice the toolchain file names — as `configuration<TAB>destination`
-//! lines. `tools/ci.sh` and `tools/doctor.sh` read every pin through these commands and read no pin by
-//! text themselves.
+//! `xcodebuild` destination, and the architectures to build it for, for every Apple slice the toolchain
+//! file names — as `configuration<TAB>destination<TAB>architectures` lines. `tools/ci.sh` and
+//! `tools/doctor.sh` read every pin through these commands and read no pin by text themselves, and the
+//! XCFramework is built for the same slices (`crate::xcframework`).
 //!
 //! Both files are parsed with the `toml` crate, the parser rustup itself reads the toolchain file with, so
 //! every form rustup and Gradle accept gives these commands the same values: basic and literal strings,
@@ -149,15 +150,24 @@ fn pins(root: &Path) -> Result<Vec<String>, String> {
 }
 
 /// The Swift package's shipping builds: every configuration of every slice the toolchain names, one
-/// `configuration<TAB>destination` line each, for the `swift_build` stage to build in order. A generic
-/// destination builds every architecture of its platform — `generic/platform=iOS Simulator` compiles the
-/// arm64 and the Intel simulator alike — so two slices that name one destination share its builds, and no
-/// build is listed twice.
+/// `configuration<TAB>destination<TAB>architectures` line each, for the `swift_build` stage to build in
+/// order. A generic destination builds every architecture of its platform — `generic/platform=iOS
+/// Simulator` compiles the arm64 and the Intel simulator alike, whichever the native library holds — so
+/// the line names the architectures of the slices the toolchain lists for that destination, which the
+/// stage hands the build as `ARCHS`: the package is built for the slices its binary target links and no
+/// other. Two slices that name one destination share its builds, and no build is listed twice.
 fn swift_builds(root: &Path) -> Result<Vec<String>, String> {
+    let slices = apple_slices(root)?;
     let mut lines: Vec<String> = Vec::new();
-    for slice in apple_slices(root)? {
+    for slice in &slices {
+        let mut architectures: Vec<&str> = Vec::new();
+        for same in slices.iter().filter(|same| same.destination == slice.destination) {
+            if !architectures.contains(&same.architecture) {
+                architectures.push(same.architecture);
+            }
+        }
         for configuration in SWIFT_CONFIGURATIONS {
-            let line = format!("{configuration}\t{}", slice.destination);
+            let line = format!("{configuration}\t{}\t{}", slice.destination, architectures.join(" "));
             if !lines.contains(&line) {
                 lines.push(line);
             }
@@ -175,10 +185,7 @@ fn print(lines: Result<Vec<String>, String>, command: &str) -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        Err(failure) => {
-            eprintln!("cargo xtask {command}: {failure}");
-            ExitCode::from(1)
-        }
+        Err(failure) => crate::report::failed(command, failure),
     }
 }
 
@@ -266,19 +273,32 @@ mod tests {
         assert_eq!(
             swift_builds(&canonical.0).unwrap(),
             [
-                "Debug\tgeneric/platform=iOS",
-                "Release\tgeneric/platform=iOS",
-                "Debug\tgeneric/platform=iOS Simulator",
-                "Release\tgeneric/platform=iOS Simulator"
+                "Debug\tgeneric/platform=iOS\tarm64",
+                "Release\tgeneric/platform=iOS\tarm64",
+                "Debug\tgeneric/platform=iOS Simulator\tarm64",
+                "Release\tgeneric/platform=iOS Simulator\tarm64"
             ]
         );
         // A slice added to the toolchain file joins the builds with no other edit anywhere: alone, it is built
         // on its own; beside the arm64 simulator, in the simulator builds the two share.
         let intel_alone = scratch_with("[toolchain]\ntargets = [\"x86_64-apple-ios\"]\n", CATALOG_BASIC, "builds-intel-alone");
-        assert_eq!(swift_builds(&intel_alone.0).unwrap(), ["Debug\tgeneric/platform=iOS Simulator", "Release\tgeneric/platform=iOS Simulator"]);
+        assert_eq!(
+            swift_builds(&intel_alone.0).unwrap(),
+            ["Debug\tgeneric/platform=iOS Simulator\tx86_64", "Release\tgeneric/platform=iOS Simulator\tx86_64"],
+            "a slice the library is not built for is not built for: the Intel simulator alone names its own architecture"
+        );
         let intel =
             scratch_with(&TOOLCHAIN_BASIC.replace("aarch64-apple-ios-sim", "aarch64-apple-ios-sim\", \"x86_64-apple-ios"), CATALOG_BASIC, "builds-intel");
-        assert_eq!(swift_builds(&intel.0).unwrap(), swift_builds(&canonical.0).unwrap(), "one destination is built once, whichever slices name it");
+        assert_eq!(
+            swift_builds(&intel.0).unwrap(),
+            [
+                "Debug\tgeneric/platform=iOS\tarm64",
+                "Release\tgeneric/platform=iOS\tarm64",
+                "Debug\tgeneric/platform=iOS Simulator\tarm64 x86_64",
+                "Release\tgeneric/platform=iOS Simulator\tarm64 x86_64"
+            ],
+            "one destination is built once, for every architecture the toolchain names for it"
+        );
     }
 
     #[test]

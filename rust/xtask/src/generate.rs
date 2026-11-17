@@ -37,6 +37,7 @@ pub(crate) fn generators() -> Vec<Generator> {
         Generator { name: "effects-swift-facade", output_dir: crate::effects_api::SWIFT_OUTPUT_DIR, generate: crate::effects_api::generate_swift },
         Generator { name: "effects-kotlin-facade", output_dir: crate::effects_api::KOTLIN_OUTPUT_DIR, generate: crate::effects_api::generate_kotlin },
         Generator { name: "effects-version", output_dir: crate::effects_api::VERSION_OUTPUT_DIR, generate: crate::effects_api::generate_version },
+        Generator { name: "swift-bindings", output_dir: crate::swift_bindings::OUTPUT_DIR, generate: crate::swift_bindings::generate },
     ]
 }
 
@@ -515,5 +516,6 @@ mod tests {
         assert!(registry.iter().any(|generator| generator.name == "effects-swift-facade" && generator.output_dir.ends_with("/CraftBridgeEffects/Generated")));
         assert!(registry.iter().any(|generator| generator.name == "effects-kotlin-facade" && generator.output_dir.ends_with("/craftbridge/effects")));
         assert!(registry.iter().any(|generator| generator.name == "effects-version" && generator.output_dir == crate::effects_api::VERSION_OUTPUT_DIR));
+        assert!(registry.iter().any(|generator| generator.name == "swift-bindings" && generator.output_dir == crate::swift_bindings::OUTPUT_DIR));
     }
 }

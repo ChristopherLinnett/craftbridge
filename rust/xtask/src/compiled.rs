@@ -54,10 +54,60 @@ impl Artifact {
     }
 }
 
-/// Read cargo's messages: print what a person reads (each diagnostic as cargo renders it, and every line
-/// that is not a message, such as a test's output), and keep each built unit.
+/// What cargo reported of one command: every unit it built, and the text of every diagnostic it passed on
+/// from rustc, as rustc wrote it rather than as cargo renders it.
+pub(crate) struct Reported {
+    pub(crate) artifacts: Vec<Artifact>,
+    pub(crate) diagnostics: Vec<String>,
+}
+
+/// Ask cargo, in `rust_dir`, to build `packages` for the host, and return every unit it reports: Cargo,
+/// not a guess at its target folder, says where each file was written. Both the codegen's binary and the
+/// binding generators' library and bindgen come from here.
+pub(crate) fn build(rust_dir: &Path, packages: &[&str]) -> Result<Vec<Artifact>, String> {
+    let mut arguments = vec!["--message-format=json-render-diagnostics"];
+    for package in packages {
+        arguments.extend(["--package", package]);
+    }
+    compile(rust_dir, "build", &arguments, &[]).map(|reported| reported.artifacts)
+}
+
+/// Run `cargo <command> --locked <arguments>` in `rust_dir`, with `variables` for the compilers it runs, and
+/// read what it reports in the JSON messages `arguments` asks for. Besides [`build`], the native library the
+/// XCFramework holds is built here, through `cargo rustc`, which hands what follows `--` to that library's
+/// own compilation alone.
+pub(crate) fn compile(rust_dir: &Path, command: &str, arguments: &[&str], variables: &[(&str, &str)]) -> Result<Reported, String> {
+    let output = std::process::Command::new(env!("CARGO"))
+        .current_dir(rust_dir)
+        .args([command, "--locked"])
+        .args(arguments)
+        .envs(variables.iter().copied())
+        .output()
+        .map_err(|error| format!("cannot run `{} {command}`: {error}", env!("CARGO")))?;
+    if !output.status.success() {
+        return Err(format!("`cargo {command} {}` exited with {}: {}", arguments.join(" "), output.status, String::from_utf8_lossy(&output.stderr).trim()));
+    }
+    read_reported(output.stdout.as_slice())
+}
+
+/// The binary of the target named `name` among the units cargo reported building.
+pub(crate) fn executable_of(artifacts: &[Artifact], name: &str) -> Option<PathBuf> {
+    artifacts
+        .iter()
+        .find(|artifact| artifact.target_name == name && artifact.target_kinds.iter().any(|kind| kind == "bin"))
+        .and_then(|artifact| artifact.executable.as_deref())
+        .map(PathBuf::from)
+}
+
+/// Read cargo's messages as [`read_reported`] does, keeping only the units it built.
 pub(crate) fn read_messages(input: impl BufRead) -> Result<Vec<Artifact>, String> {
-    let mut artifacts = Vec::new();
+    read_reported(input).map(|reported| reported.artifacts)
+}
+
+/// Read cargo's messages: print what a person reads (each diagnostic as cargo renders it, and every line
+/// that is not a message, such as a test's output), and keep each built unit and each diagnostic's text.
+pub(crate) fn read_reported(input: impl BufRead) -> Result<Reported, String> {
+    let mut reported = Reported { artifacts: Vec::new(), diagnostics: Vec::new() };
     for line in input.lines() {
         let line = line.map_err(|error| format!("cannot read cargo's messages: {error}"))?;
         let message = serde_json::from_str::<serde_json::Value>(&line).ok().filter(|value| value.get("reason").is_some());
@@ -67,15 +117,19 @@ pub(crate) fn read_messages(input: impl BufRead) -> Result<Vec<Artifact>, String
         };
         match message.get("reason").and_then(serde_json::Value::as_str) {
             Some("compiler-message") => {
-                if let Some(rendered) = message.get("message").and_then(|inner| inner.get("rendered")).and_then(serde_json::Value::as_str) {
+                let diagnostic = message.get("message");
+                if let Some(rendered) = diagnostic.and_then(|inner| inner.get("rendered")).and_then(serde_json::Value::as_str) {
                     print!("{rendered}");
                 }
+                if let Some(text) = diagnostic.and_then(|inner| inner.get("message")).and_then(serde_json::Value::as_str) {
+                    reported.diagnostics.push(text.to_string());
+                }
             }
-            Some("compiler-artifact") => artifacts.push(Artifact::of(&message)),
+            Some("compiler-artifact") => reported.artifacts.push(Artifact::of(&message)),
             _ => {}
         }
     }
-    Ok(artifacts)
+    Ok(reported)
 }
 
 /// The dep-info files rustc wrote for the unit a `compiler-artifact` message reports. A file the message
@@ -659,10 +713,12 @@ mod tests {
             "\"filenames\":[\"/t/deps/libx-1.rmeta\"],\"executable\":null}\n",
             "{\"reason\":\"compiler-artifact\",\"package_id\":\"path+file:///r/core/y#0.1.0\",\"target\":{\"name\":\"y\",\"kind\":[\"bin\"]},",
             "\"filenames\":[\"/t/debug/y\"],\"executable\":\"/t/debug/y\"}\n",
-            "{\"reason\":\"compiler-message\",\"message\":{\"rendered\":\"warning: x\\n\"}}\n",
+            "{\"reason\":\"compiler-message\",\"message\":{\"message\":\"x\",\"rendered\":\"warning: x\\n\"}}\n",
+            "{\"reason\":\"compiler-message\",\"message\":{\"rendered\":\"warning: rendered alone\\n\"}}\n",
             "test a ... ok\n",
             "{\"reason\":\"build-finished\",\"success\":true}\n"
         );
+        assert_eq!(read_reported(input.as_bytes()).unwrap().diagnostics, ["x"], "each diagnostic's own text, not cargo's rendering");
         let artifacts = read_messages(input.as_bytes()).unwrap();
         let [lib, bin] = artifacts.as_slice() else { panic!("two units: {}", artifacts.len()) };
         assert_eq!(lib.package_id, "path+file:///r/core/x#0.1.0");

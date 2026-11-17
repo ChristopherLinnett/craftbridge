@@ -10,7 +10,7 @@ One Swift package in `ios/sdk/`, `Package.swift` at its top (PD19), iOS 17 (PD11
 | Target | Change | What |
 |---|---|---|
 | `CraftBridgeFFIBinary` | NEW | `binaryTarget(path: "Frameworks/CraftBridgeEffectsFFI.xcframework")`, built by `tools/build-xcframework.sh` and never committed; `craftbridge-swift` carries `url:` and `checksum:` instead (`evidence/05-mobile-platforms.md` Finding 10, D-24) |
-| `CraftBridgeFFI` | NEW, generated | UniFFI Swift for both crates, in `Sources/CraftBridgeFFI/Generated/` (§20) |
+| `CraftBridgeFFI` | NEW, generated | UniFFI Swift for both crates, in `Sources/CraftBridgeFFI/Platform/Generated/`, where AGENTS §4's pointer rule holds (§20) |
 | `CraftBridge` | NEW | the core's Swift API |
 | `CraftBridgeEffects` | NEW | the EffectCraft API: hand-written fixed-shape calls plus `Generated/` (§21) |
 | `CraftBridgeEffectsTests` | NEW | Swift Testing: the conformance corpus on the simulator (QA-2) |
@@ -25,7 +25,7 @@ One Swift package in `ios/sdk/`, `Package.swift` at its top (PD19), iOS 17 (PD11
 
 **`CraftBridgeEffects`:** `EffectsEngine.start(folders:gpu:)`, `exec`, `run`, `props`, `get`, `set`, `frame`, `export`, `templates.open` and `templates.render` (returning a `TemplateInstance` with `set(_:_:)` and `set(_:media:)`), `replay`, `timings`, `mcp`, and the generated command namespaces. These are the calls used in §5.
 
-**Build.** `tools/build-xcframework.sh` builds `craftbridge-effects-ffi` with `--release` for `aarch64-apple-ios` and `aarch64-apple-ios-sim` with `IPHONEOS_DEPLOYMENT_TARGET=17.0`, runs `cargo xtask generate`, whose registered generator writes the Swift bindings into `Generated/` (§20), and joins the two static libraries with `xcodebuild -create-xcframework` into `ios/sdk/Frameworks/`.
+**Build.** `tools/build-xcframework.sh` runs `cargo xtask generate`, whose registered generator writes the Swift bindings into `Platform/Generated/` (§20), then `cargo xtask xcframework`, which builds `craftbridge-effects-ffi` with `--release` for `aarch64-apple-ios` and `aarch64-apple-ios-sim` with `IPHONEOS_DEPLOYMENT_TARGET=17.0`, and joins the two static libraries, each with the crates' headers and one module map, with `xcodebuild -create-xcframework` into `ios/sdk/Frameworks/`. A static library carries no link flags, so each module map also links the system frameworks and libraries its library calls into, which an app's link then takes. Each fact is read from what owns it: the targets are the Apple targets `rust/rust-toolchain.toml` lists, the iOS version and the framework's folder are the package's manifest's, each library's file is the one Cargo reports building, and what it links is rustc's own answer for that library (`--print native-static-libs`), so a framework new platform code calls into is linked with no other edit. The framework is joined again only when a library Cargo rebuilt or a header changed, since a new one makes every Swift build that links it rebuild what imports it. The gate builds it before the two stages that compile the package's Swift, `swift_build` and `swift_lint`, with `--keep-bindings`, which leaves the committed Swift as it is so that the `generated` stage still finds a hand edit; the rules read the package through its manifest, which needs no native library.
 
 **States.** Development (`ios/sdk/` by local path, the local XCFramework) · release (`craftbridge-swift` by URL, the XCFramework downloaded and checksum-verified by SwiftPM).
 
