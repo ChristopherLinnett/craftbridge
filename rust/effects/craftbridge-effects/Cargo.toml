@@ -38,8 +38,8 @@ wgpu.workspace = true
 # gives boa a layout that tolerates it. Only Android needs it, so this crate asks for it through a
 # target-specific dependency and Cargo unifies the feature over every boa in the Android build —
 # EffectCraft's own script and expression crates included — and over no other target. The
-# workspace's entry keeps boa's default features off, as EffectCraft's does, so Android's scripts
-# get the layout and nothing the desktop's do not have.
+# workspace's entry keeps boa's default features off, as EffectCraft's does, so Android's
+# expressions get the layout and nothing the desktop's do not have.
 [target.'cfg(target_os = "android")'.dependencies]
 boa_engine = { workspace = true, features = ["jsvalue-enum"] }
 

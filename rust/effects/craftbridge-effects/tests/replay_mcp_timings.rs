@@ -1,13 +1,16 @@
 //! The behaviours of the `replay`, `mcp` and `timings` rows: the door that withholds the model
 //! downloads (AD11) and the renders no one has listed the files of (AD3), and the confinement (L5) held on every path that hands a command to the engine,
-//! the shapes of the answers, and the one thing not built, `script`.
+//! the shapes of the answers, and the commands that run a script, which no path reaches (PD13).
 
 mod scratch;
+mod withheld;
 
 use craftbridge_core::{CraftApp, CraftError};
 use effectcraft_automation::confine::Confinement;
+use effectcraft_engine::commands::scripts::RUNS_SCRIPTS;
 use scratch::Scratch;
 use serde_json::{Value, json};
+use withheld::assert_withheld_every_way;
 
 const DOWNLOAD_WORDS: &str = "is not available in this build: it downloads by starting the system `curl`, and this build starts no process";
 
@@ -22,6 +25,9 @@ const RENDERS: [&str; 5] = ["renderQueue.render", "file.watchFolder", "file.watc
 
 /// A file outside the container, which the confinement refuses to read.
 const OUTSIDE: &str = "/etc/hosts";
+
+/// A script that leaves a comp named `Ran` behind, so a script that ran shows in the project.
+const SCRIPT_THAT_LEAVES_A_COMP: &str = "app.run('comp.new', {name: 'Ran'})";
 
 /// The door's refusal of `id`, in the words every path refuses it in.
 fn withheld(id: &str) -> String {
@@ -55,6 +61,13 @@ fn text_of(answer: &Value) -> Result<String, String> {
 fn comp_count(app: &mut craftbridge_effects::EffectCraftApp) -> Result<usize, String> {
     let info = app.request("info", json!({})).map_err(|e| e.to_string())?;
     Ok(info.pointer("/project/items").and_then(Value::as_array).map_or(0, Vec::len))
+}
+
+/// Whether the project holds the comp [`SCRIPT_THAT_LEAVES_A_COMP`] leaves.
+fn script_left_its_comp(app: &mut craftbridge_effects::EffectCraftApp) -> Result<bool, String> {
+    let info = app.request("info", json!({})).map_err(|e| e.to_string())?;
+    let items = info.pointer("/project/items").and_then(Value::as_array).ok_or("the project lists its items")?;
+    Ok(items.iter().any(|item| item.get("name").and_then(Value::as_str) == Some("Ran")))
 }
 
 #[test]
@@ -117,7 +130,7 @@ fn a_replay_is_refused_whole_by_the_door_and_the_confinement_before_any_line_run
     ] {
         refused.push((line, outside.clone(), io));
     }
-    for command in ["script.run", "file.runScript"] {
+    for command in RUNS_SCRIPTS {
         let words = confinement_says(&scratch, command, &json!({})).expect("the confinement's words");
         refused.push((json!({"command": command, "params": {"code": "1"}}), words.clone(), unsupported));
         refused.push((in_a_batch(json!({"command": command, "params": {"code": "1"}})), words, unsupported));
@@ -264,7 +277,8 @@ fn mcp_keeps_the_confinement_and_withholds_scripts() {
     let mut app = scratch.app().expect("the app starts");
     let read = json!({"path": OUTSIDE});
     let code = json!({"code": "1 + 1"});
-    for (command, params) in [("file.open", read), ("script.run", code.clone())] {
+    let scripts = RUNS_SCRIPTS.iter().map(|command| (*command, code.clone()));
+    for (command, params) in std::iter::once(("file.open", read)).chain(scripts) {
         let words = confinement_says(&scratch, command, &params).expect("the confinement's words");
         let step = json!({"command": command, "params": params});
         for call in [
@@ -356,19 +370,44 @@ fn no_tool_starts_an_unlisted_render_past_the_door() {
     assert_eq!(std::fs::read_dir(scratch.path()).expect("the container reads").count(), before, "a refused call wrote nothing");
 }
 
+/// `script` is no method of the phone build (PD13), so every command that runs a script, which the
+/// engine lists itself, is a command the confinement refuses by its id, whatever it is given: on its
+/// own, as a step of `run`, and as a step of an `engine.batch`, in both the spellings of a batch
+/// step. The forms of `file.runScript` (a `.jsx` file, an installed script by name, a recent one) and
+/// of `script.run` are each given to every one of them, so none is let through for its parameters.
 #[test]
-fn script_is_not_answered_while_the_confinement_cannot_hold_for_it() {
+fn every_command_that_runs_a_script_is_refused_on_every_path() {
     let scratch = Scratch::new().expect("a scratch folder");
     let mut app = scratch.app().expect("the app starts");
-    assert!(matches!(app.request("script", json!({"code": "1"})).expect_err("refused"), CraftError::Unsupported { .. }));
-    for method in ["exec", "run"] {
-        let params = if method == "exec" {
-            json!({"command": "script.run", "params": {"code": "1"}})
-        } else {
-            json!({"steps": [{"command": "script.run", "params": {"code": "1"}}]})
-        };
-        assert!(matches!(app.request(method, params).expect_err("refused"), CraftError::Unsupported { .. }));
+    let file = scratch.path().join("make.jsx");
+    std::fs::write(&file, SCRIPT_THAT_LEAVES_A_COMP).expect("a script file to name");
+    let forms = [json!({}), json!({"code": SCRIPT_THAT_LEAVES_A_COMP}), json!({"path": file}), json!({"name": "make.jsx"}), json!({"recent": 0})];
+    for command in RUNS_SCRIPTS {
+        for params in &forms {
+            let words = confinement_says(&scratch, command, params).expect("the confinement's words");
+            assert_withheld_every_way(&mut app, command, params, &words).unwrap_or_else(|why| panic!("{command} {params}: {why}"));
+        }
     }
+    assert!(!script_left_its_comp(&mut app).expect("the project lists its items"), "a script ran");
+}
+
+/// Every tool the server offers, given each command that runs a script in every shape its arguments
+/// take, runs no script past the confinement: a script that leaves a comp behind leaves none.
+#[test]
+fn no_tool_runs_a_script_past_the_confinement() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts");
+    let file = scratch.path().join("make.jsx");
+    std::fs::write(&file, SCRIPT_THAT_LEAVES_A_COMP).expect("a script file to name");
+    let params = json!({"code": SCRIPT_THAT_LEAVES_A_COMP, "path": file, "name": "make.jsx"});
+    for command in RUNS_SCRIPTS {
+        for line in lines_naming(command, &params) {
+            app.mcp(&line);
+        }
+    }
+    let code = json!({"code": SCRIPT_THAT_LEAVES_A_COMP});
+    app.mcp(&tool_call(1, "run_script", code).to_string());
+    assert!(!script_left_its_comp(&mut app).expect("the project lists its items"), "a script ran");
 }
 
 #[test]

@@ -5,9 +5,8 @@
 //! Android and the desktop answer with EffectCraft's own WebAssembly loader — the engine's
 //! confinement (L5) already refuses reading a module from anywhere outside the roots the folders
 //! derive — and iOS answers with [`bundle_loader`], which takes a module only from the plug-in
-//! folder the app named inside its bundle (PD13), because on iOS a script or a command must not be
-//! able to load a plug-in out of the container even though the confinement lets the file through
-//! (T24).
+//! folder the app named inside its bundle (PD13), because on iOS a command must not be able to load
+//! a plug-in out of the container even though the confinement lets the file through (T24).
 
 use std::path::{Path, PathBuf};
 use std::sync::{PoisonError, RwLock};
