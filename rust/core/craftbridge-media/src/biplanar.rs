@@ -3,7 +3,9 @@
 //! bits for 10-bit ones. A biplanar surface is a luma plane and a plane of interleaved Cb, Cr pairs, a row
 //! each `stride` bytes apart, and 10-bit samples sit in the high bits of 16-bit words; Android's
 //! `YUV_420_888` image is a luma plane and a Cb and a Cr plane, whose samples sit a pixel stride apart (one
-//! for planar, two for the semi-planar layout most devices use).
+//! for planar, two for the semi-planar layout most devices use). A locked P010 hardware buffer is the biplanar
+//! surface again, which Android reports as three planes: the Cb plane's samples sit four bytes apart and the
+//! Cr plane starts two bytes after it, so the two are one plane of interleaved pairs.
 //!
 //! Safe code, so every target tests it; the decoder that reads a surface into these slices is the
 //! platform module's.
@@ -56,7 +58,7 @@ pub(crate) enum Depth {
     Ten,
 }
 
-#[cfg(any(target_os = "ios", test))]
+#[cfg(any(target_os = "ios", target_os = "android", test))]
 impl Depth {
     pub(crate) fn bits(self) -> u32 {
         match self {
@@ -94,6 +96,66 @@ impl Strided<'_> {
         }
         Some(())
     }
+}
+
+/// One plane of a locked hardware buffer as `AHardwareBuffer_lockPlanes` reports it, with the plane's
+/// address as a number: the decision whether the planes are a P010 buffer's is safe code every target tests,
+/// and the platform module alone turns an address into bytes.
+#[cfg(any(target_os = "android", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Locked {
+    pub(crate) address: usize,
+    /// Bytes from the start of one row to the start of the next.
+    pub(crate) row_stride: usize,
+    /// Bytes from one sample to the next in a row.
+    pub(crate) pixel_stride: usize,
+}
+
+/// How many bytes of a locked P010 buffer hold the picture, and how far apart its rows are: the luma plane
+/// and the plane of interleaved Cb, Cr pairs that starts at the Cb plane's address.
+#[cfg(any(target_os = "android", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct P010Extents {
+    pub(crate) luma_len: usize,
+    pub(crate) luma_stride: usize,
+    pub(crate) chroma_len: usize,
+    pub(crate) chroma_stride: usize,
+}
+
+#[cfg(any(target_os = "android", test))]
+const NOT_P010: &str = "the decoded picture's planes are not a P010 buffer's";
+
+/// The bytes `rows` rows of `row_bytes` bytes take when each starts `stride` bytes after the last: the last
+/// row's padding is not part of the buffer.
+#[cfg(any(target_os = "android", test))]
+fn span(stride: usize, rows: usize, row_bytes: usize) -> Option<usize> {
+    if stride < row_bytes {
+        return None;
+    }
+    stride.checked_mul(rows.checked_sub(1)?)?.checked_add(row_bytes)
+}
+
+/// The extents of a P010 buffer of `width` x `height` samples from the three planes locking it gave (Y, Cb,
+/// Cr). `AHardwareBuffer_lockPlanes` reports no length, so the picture's own size bounds every read, the way
+/// Android's own reader bounds its plane data: a row stride times the rows before the last, plus the last
+/// row's samples. An error unless the planes are P010's biplanar layout: 16-bit luma, and Cb and Cr words
+/// interleaved in one plane, which locking reports as two planes four bytes per sample apart, the Cr plane
+/// two bytes after the Cb plane. Any other layout the buffer's format name allows is left to the software
+/// decoder, never read as if it were this one.
+#[cfg(any(target_os = "android", test))]
+pub(crate) fn p010_extents(planes: &[Locked], width: usize, height: usize) -> Result<P010Extents, &'static str> {
+    let [luma, cb, cr] = planes else { return Err(NOT_P010) };
+    let interleaved = cb.address.checked_add(2) == Some(cr.address) && cb.row_stride == cr.row_stride;
+    if (luma.pixel_stride, cb.pixel_stride, cr.pixel_stride) != (2, 4, 4) || !interleaved || luma.address == 0 || cb.address == 0 {
+        return Err(NOT_P010);
+    }
+    if width == 0 || height == 0 {
+        return Err("the decoded picture is empty");
+    }
+    let luma_len = span(luma.row_stride, height, width.checked_mul(2).ok_or(NOT_P010)?);
+    let chroma_len = span(cb.row_stride, height.div_ceil(2), width.div_ceil(2).checked_mul(4).ok_or(NOT_P010)?);
+    let (luma_len, chroma_len) = luma_len.zip(chroma_len).ok_or(NOT_P010)?;
+    Ok(P010Extents { luma_len, luma_stride: luma.row_stride, chroma_len, chroma_stride: cb.row_stride })
 }
 
 const SHORT: &str = "the decoded picture's planes are smaller than the picture";
@@ -144,7 +206,7 @@ pub(crate) fn planar_to_pixels(luma: Plane<'_>, cb: Strided<'_>, cr: Strided<'_>
 /// produces for it: planes of exactly the picture's size (the chroma planes rounded up for an odd one), and
 /// the 10-bit samples shifted down from the high bits. An error when the planes hold less than the
 /// picture, or `crop` starts at an odd sample, which 4:2:0 chroma cannot start at.
-#[cfg(any(target_os = "ios", test))]
+#[cfg(any(target_os = "ios", target_os = "android", test))]
 pub(crate) fn to_pixels(luma: Plane<'_>, chroma: Plane<'_>, crop: Crop, depth: Depth) -> Result<PixelData, &'static str> {
     let Crop { x, y, width, height } = crop;
     let (chroma_width, chroma_height) = chroma_size(crop)?;
@@ -350,5 +412,139 @@ mod tests {
         assert!(planes(&cb, &Strided { stride: 0, ..cr }, whole).is_err(), "a row stride of nothing");
         assert!(planar_to_pixels(plane(&luma, 8), cb, cr, Crop { x: 0, y: 0, width: 8, height: 8 }).is_ok());
         assert!(planar_to_pixels(plane(&luma, 0), cb, cr, whole).is_err(), "a luma plane with no stride");
+    }
+    /// A P010 buffer of `rows` luma rows, `luma_stride` bytes apart, and the `rows / 2` rows of Cb, Cr pairs
+    /// after it, `chroma_stride` bytes apart: the sample at (x, y) is `y * 100 + x` in luma, and a pair's Cb
+    /// is `500 + y * 100 + pair` and its Cr 50 more, all as P010 words, with a filler byte in every padding.
+    fn buffer(luma_stride: usize, chroma_stride: usize, rows: usize) -> (Vec<u8>, usize) {
+        let mut bytes = Vec::new();
+        for y in 0..rows {
+            let row: Vec<u16> = (0..luma_stride / 2).map(|x| (y * 100 + x) as u16).collect();
+            bytes.extend(p010(&row));
+        }
+        let chroma_at = bytes.len();
+        for y in 0..rows.div_ceil(2) {
+            let row: Vec<u16> = (0..chroma_stride / 2).map(|i| (500 + y * 100 + i / 2) as u16 + if i % 2 == 1 { 50 } else { 0 }).collect();
+            bytes.extend(p010(&row));
+        }
+        (bytes, chroma_at)
+    }
+
+    /// The planes locking `bytes` reports, the Cb plane at `chroma_at` and the Cr plane two bytes after it.
+    fn locked(chroma_at: usize, luma_stride: usize, chroma_stride: usize) -> [Locked; 3] {
+        [
+            Locked { address: 4096, row_stride: luma_stride, pixel_stride: 2 },
+            Locked { address: 4096 + chroma_at, row_stride: chroma_stride, pixel_stride: 4 },
+            Locked { address: 4096 + chroma_at + 2, row_stride: chroma_stride, pixel_stride: 4 },
+        ]
+    }
+
+    /// What reading `bytes` as the P010 buffer of `width` x `height` samples with `planes` gives at `crop`.
+    fn read(bytes: &[u8], planes: &[Locked], (width, height): (usize, usize), crop: Crop) -> Result<PixelData, &'static str> {
+        let extents = p010_extents(planes, width, height)?;
+        let at = |plane: &Locked, len: usize, stride: usize| {
+            let from = plane.address - 4096;
+            bytes.get(from..from + len).map(|data| Plane { data, stride }).ok_or("the test's buffer is shorter than its extents")
+        };
+        let luma = at(planes.first().unwrap(), extents.luma_len, extents.luma_stride)?;
+        let chroma = at(planes.get(1).unwrap(), extents.chroma_len, extents.chroma_stride)?;
+        to_pixels(luma, chroma, crop, Depth::Ten)
+    }
+
+    #[test]
+    fn a_locked_p010_buffer_with_padded_rows_gives_the_pictures_ten_bit_planes() {
+        // 6 samples of 12 bytes in a row of 20 bytes (4 words of padding), 4 rows.
+        let (bytes, chroma_at) = buffer(20, 24, 4);
+        let planes = locked(chroma_at, 20, 24);
+        let whole = Crop { x: 0, y: 0, width: 6, height: 4 };
+        let pixels = read(&bytes, &planes, (6, 4), whole).unwrap();
+        let (y, cb, cr) = yuv16(&pixels);
+        assert_eq!(y, [0, 1, 2, 3, 4, 5, 100, 101, 102, 103, 104, 105, 200, 201, 202, 203, 204, 205, 300, 301, 302, 303, 304, 305]);
+        assert_eq!(cb, [500, 501, 502, 600, 601, 602]);
+        assert_eq!(cr, [550, 551, 552, 650, 651, 652]);
+    }
+
+    #[test]
+    fn a_locked_p010_buffer_is_cropped_and_odd_sizes_round_the_chroma_up() {
+        let (bytes, chroma_at) = buffer(20, 24, 4);
+        let planes = locked(chroma_at, 20, 24);
+        let pixels = read(&bytes, &planes, (6, 4), Crop { x: 2, y: 2, width: 3, height: 2 }).unwrap();
+        let (y, cb, cr) = yuv16(&pixels);
+        assert_eq!(y, [202, 203, 204, 302, 303, 304]);
+        // Chroma row 1 from pair 1, two pairs across (3 samples round up) and one down.
+        assert_eq!((cb, cr), (&[601, 602][..], &[651, 652][..]));
+        // A buffer of 5 x 3 samples, whose chroma rows are 3 pairs across and 2 down.
+        let pixels = read(&bytes, &locked(chroma_at, 20, 24), (5, 3), Crop { x: 0, y: 0, width: 5, height: 3 }).unwrap();
+        let (y, cb, _) = yuv16(&pixels);
+        assert_eq!((y.len(), cb), (15, &[500, 501, 502, 600, 601, 602][..]));
+    }
+
+    #[test]
+    fn a_locked_p010_buffers_extents_stop_at_the_last_samples_so_planes_that_end_there_are_enough_and_one_byte_less_is_not() {
+        let (bytes, chroma_at) = buffer(20, 24, 4);
+        let planes = locked(chroma_at, 20, 24);
+        let extents = p010_extents(&planes, 6, 4).unwrap();
+        assert_eq!(extents, P010Extents { luma_len: 20 * 3 + 12, luma_stride: 20, chroma_len: 24 + 12, chroma_stride: 24 });
+        let whole = Crop { x: 0, y: 0, width: 6, height: 4 };
+        let (luma, chroma) = (plane(bytes.get(..extents.luma_len).unwrap(), 20), plane(bytes.get(chroma_at..chroma_at + extents.chroma_len).unwrap(), 24));
+        assert!(to_pixels(luma, chroma, whole, Depth::Ten).is_ok());
+        let short_luma = plane(bytes.get(..extents.luma_len - 1).unwrap(), 20);
+        assert!(to_pixels(short_luma, chroma, whole, Depth::Ten).is_err(), "a luma plane a byte short");
+        let short_chroma = plane(bytes.get(chroma_at..chroma_at + extents.chroma_len - 1).unwrap(), 24);
+        assert!(to_pixels(luma, short_chroma, whole, Depth::Ten).is_err(), "a chroma plane a byte short");
+    }
+
+    #[test]
+    fn planes_that_are_not_a_p010_buffers_biplanar_layout_are_refused() {
+        let planes = locked(1000, 20, 24);
+        assert!(p010_extents(&planes, 6, 4).is_ok());
+        let refused = |change: &dyn Fn(&mut [Locked; 3])| {
+            let mut planes = planes;
+            change(&mut planes);
+            assert_eq!(p010_extents(&planes, 6, 4), Err(NOT_P010));
+        };
+        refused(&|p| p[0].pixel_stride = 1);
+        refused(&|p| p[1].pixel_stride = 2);
+        refused(&|p| p[2].pixel_stride = 2);
+        refused(&|p| p[2].address = p[1].address + 4);
+        refused(&|p| p[2].address = p[1].address - 2);
+        refused(&|p| p[2].row_stride = 28);
+        refused(&|p| p[0].address = 0);
+        refused(&|p| p[1].address = 0);
+        refused(&|p| p[0].row_stride = 11);
+        refused(&|p| (p[1].row_stride, p[2].row_stride) = (11, 11));
+        assert_eq!(p010_extents(planes.get(..2).unwrap(), 6, 4), Err(NOT_P010), "two planes");
+        assert_eq!(p010_extents(&[planes[0], planes[1], planes[2], planes[2]], 6, 4), Err(NOT_P010), "four planes");
+        assert_eq!(p010_extents(&planes, 0, 4), Err("the decoded picture is empty"));
+        assert_eq!(p010_extents(&planes, 6, 0), Err("the decoded picture is empty"));
+        assert_eq!(p010_extents(&planes, usize::MAX, 4), Err(NOT_P010));
+        let huge = Locked { row_stride: usize::MAX, ..planes[0] };
+        assert_eq!(p010_extents(&[huge, planes[1], planes[2]], 6, 4), Err(NOT_P010), "a stride times the rows overflows");
+    }
+    #[test]
+    fn a_real_ten_bit_pictures_planes_laid_out_as_a_p010_buffer_read_back_to_the_picture() {
+        // The software decoder's 10-bit picture of a real stream, written the way a P010 buffer holds it (each
+        // sample six bits up, every row padded, the Cb and Cr words interleaved) and read through the locked
+        // planes' route.
+        let entry = crate::fixtures::hevc10_entry();
+        let mut software = filmcraft_codecs::software_video_decoder(&entry).unwrap();
+        let picture = crate::fixtures::pictures(software.as_mut(), &crate::fixtures::hevc10_samples()).remove(1);
+        let PixelData::Yuv16 { planes: [luma, cb, cr], .. } = &picture.frame.data else { panic!("a 10-bit picture") };
+        let (width, height) = (picture.frame.width as usize, picture.frame.height as usize);
+        let (luma_stride, chroma_stride) = (width * 2 + 12, width * 2 + 8);
+        let mut bytes = Vec::new();
+        for row in luma.chunks(width) {
+            bytes.extend(p010(row));
+            bytes.extend([0xAB; 12]);
+        }
+        let chroma_at = bytes.len();
+        for (cb_row, cr_row) in cb.chunks(width / 2).zip(cr.chunks(width / 2)) {
+            bytes.extend(cb_row.iter().zip(cr_row).flat_map(|(&b, &r)| p010(&[b, r])));
+            bytes.extend([0xCD; 8]);
+        }
+        let planes = locked(chroma_at, luma_stride, chroma_stride);
+        let whole = Crop { x: 0, y: 0, width, height };
+        let read_back = read(&bytes, &planes, (width, height), whole).unwrap();
+        assert_eq!(format!("{read_back:?}"), format!("{:?}", picture.frame.data));
     }
 }
