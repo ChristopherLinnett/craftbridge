@@ -71,10 +71,12 @@ filmcraft-color = { git = "https://github.com/storytold/filmcraft", rev = "d5ead
 filmcraft-frame = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
 filmcraft-isobmff = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
 
-# Apple's media frameworks, for the iOS hardware decoder in craftbridge-media (plan §18). Each crate turns on
-# only the framework headers it reads.
+# Apple's frameworks, through the bindings generated from their headers: the media ones for the iOS hardware
+# decoder in craftbridge-media (plan §18), CoreText for the faces craftbridge-core's iOS platform module reads
+# (plan §16). Each crate turns on only the framework headers it reads.
 objc2-core-foundation = { version = "0.3.2", default-features = false }
 objc2-core-media = { version = "0.3.2", default-features = false }
+objc2-core-text = { version = "0.3.2", default-features = false }
 objc2-core-video = { version = "0.3.2", default-features = false }
 objc2-video-toolbox = { version = "0.3.2", default-features = false }
 

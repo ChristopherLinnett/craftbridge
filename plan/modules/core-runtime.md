@@ -5,7 +5,7 @@
 
 ## 16. Core runtime design
 
-`craftbridge-core` is the universal runtime: it knows how to host a Craft app's session on a phone and nothing about EffectCraft (PD9). Lints: the workspace table every crate inherits, with `unsafe_code` denied (and, without a platform module, never allowed) and the never-crash lints (`clippy::unwrap_used`, `panic`, `unimplemented`, `todo` and `unreachable` at `forbid`, `expect_used` at `deny`, and the same calls named by path in `rust/clippy.toml`), stricter than EffectCraft's (`AGENTS.md`, "Never crash").
+`craftbridge-core` is the universal runtime: it knows how to host a Craft app's session on a phone and nothing about EffectCraft (PD9). Lints: the workspace table every crate inherits, with `unsafe_code` denied — switched off only on the `mod platform` declaration (FX-3's CoreText calls, and the memory calls of D-20 when they land), per `AGENTS.md` §4 — and the never-crash lints (`clippy::unwrap_used`, `panic`, `unimplemented`, `todo` and `unreachable` at `forbid`, `expect_used` at `deny`, and the same calls named by path in `rust/clippy.toml`), stricter than EffectCraft's (`AGENTS.md`, "Never crash").
 
 | File | Change | What |
 |---|---|---|
@@ -17,6 +17,7 @@
 | `src/folders.rs` | NEW | `Folders` → `Confinement` read roots (container, bundle) and write root (container) (L5) |
 | `src/error.rs` | NEW | `CraftError` and the mapping in §14 |
 | `src/platform/memory.rs` | NEW | `available_memory()`: what the platform says the app may still allocate, `os_proc_available_memory()` on iOS and `MemAvailable` from `/proc/meminfo` on Android, for AD7 (§15). The core never depends on EffectCraft (PD9), and EffectCraft's `sysinfo` has no branch for either platform, so the core reads it itself; the layer table marks `craftbridge-core` a platform crate for this module (D-20) |
+| `src/platform/coretext.rs` | NEW | AD2 (FX-3): the faces CoreText offers this application — `coretext_faces()`, the (file, PostScript name) pairs of `CTFontCollectionCreateFromAvailableFonts` + `CTFontCollectionCreateMatchingFontDescriptors` through `kCTFontURLAttribute` and `kCTFontNameAttribute` — and `available_family_names()`, the families the phone itself lists, read through the C call `UIFont.familyNames` is built on. The calls go through `objc2-core-text` and `objc2-core-foundation`, the bindings generated from the SDK's headers that `craftbridge-media` uses too (§18), so no C declaration is written by hand; their `unsafe` sits in this one module of the crate the layer table marks as a platform crate (AGENTS §4), and the plug-in asks it through these public functions; it names no font folder and never lists a face — it answers what the platform says, which is what the plug-in's listing filter needs (V1) |
 | `src/gpu.rs`, `src/surface.rs`, `src/blit.rs`, `src/frames.rs` | NEW | §17; the blit pass's WGSL is a string in `blit.rs`, because the gate refuses an `include_str!` of any file that is not one of the crate's own `.rs` files (AGENTS.md §3), and a test validates it with naga, the WGSL front end wgpu compiles it with, so a broken shader fails the gate rather than a device |
 
 **Behaviour.**

@@ -20,9 +20,14 @@
 //! answered only through [`CraftApp::frame`](craftbridge_core::CraftApp::frame), since pixels cannot
 //! come back through `request`'s JSON; its request is resolved as the command line's `render-frame`
 //! resolves its flags (AD4).
+//!
+//! At engine start the plugin registers the phone's font folders with EffectCraft and takes the
+//! font listing every app-facing call answers from the platform's own answer (AD2); scripts keep
+//! EffectCraft's full registry.
 
 mod app;
 mod files;
+mod fonts;
 /// What the generator writes, one file to a module under `src/generated/`.
 mod generated {
     pub(crate) mod version;

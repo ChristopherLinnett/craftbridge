@@ -80,10 +80,12 @@ struct Call<'a> {
 /// the door, then the report of a render whose items failed. `step` names the step of a `run` for
 /// the rows that carry one.
 pub(crate) fn run_command(backend: &mut Backend, command: &str, params: Value, step: Option<u32>) -> Result<Value> {
-    let value = execute(backend, command, params, step)?;
+    let value = execute(backend, command, params.clone(), step)?;
     match failed_render(command, &value) {
         Some(failure) => Err(CraftError::command_failed(command, failure, step)),
-        None => Ok(value),
+        // A font listing answers through the platform's face list at this one entry, so `exec` and
+        // every `run` step, and anything built over them, cannot answer untrimmed.
+        None => Ok(crate::fonts::filtered(command, &params, value)),
     }
 }
 

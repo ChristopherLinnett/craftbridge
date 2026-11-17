@@ -114,13 +114,14 @@ lint_library() {
 # its own lint over what it ships.
 # The shipping targets, which clippy's first run and the lint library's run read: `"${shipping[@]}"`.
 shipping=(--workspace --lib --bins --examples --all-features --locked --message-format=json)
+# The levels the tests are linted at, on the host and on every phone target: `"${tests_lints[@]}"`.
+tests_lints=(-D warnings -A clippy::disallowed_methods -A clippy::disallowed_macros)
 # Clippy's two runs through one cargo runner: `clippy_runs compiling` for the workspace, `clippy_runs
 # in_library` for the lint library.
 clippy_runs() {
   local run="$1" status=0
   "$run" clippy "${shipping[@]}" -- -D warnings || status=1
-  "$run" clippy --workspace --tests --benches --all-features --locked --message-format=json -- -D warnings \
-    -A clippy::disallowed_methods -A clippy::disallowed_macros || status=1
+  "$run" clippy --workspace --tests --benches --all-features --locked --message-format=json -- "${tests_lints[@]}" || status=1
   return "$status"
 }
 stage_rust_clippy() {
@@ -151,13 +152,16 @@ stage_rust_mobile() {
   # a bare check: the platform modules compile only for the phones, so the never-crash lints and the
   # SAFETY comments are only checked on them here, in the release profile apps link as well as the dev
   # one, since code under `cfg(not(debug_assertions))` exists only in the first; the lint library's run
-  # follows each clippy run for the same reason. Every target is checked even after one fails, so one run
-  # names each target that is broken.
+  # follows each clippy run for the same reason. Their tests are linted on each target too, at the levels
+  # the host's are, in the dev profile they build in: a test that compiles only for a phone (the font tests
+  # the simulator and the emulator run) is read by no other run. Every target is checked even after one
+  # fails, so one run names each target that is broken.
   for target in $CRAFTBRIDGE_RUST_TARGETS; do
     for profile in dev release; do
       compiling clippy --locked --all-features --target "$target" --profile "$profile" --message-format=json -- -D warnings || status=1
       lint_library --locked --all-features --target "$target" --profile "$profile" --message-format=json || status=1
     done
+    compiling clippy --locked --all-features --tests --target "$target" --message-format=json -- "${tests_lints[@]}" || status=1
   done
   return "$status"
 }

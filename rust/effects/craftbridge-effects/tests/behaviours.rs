@@ -3,6 +3,7 @@
 //! plug-ins switched off, the method table's rows, and `run` stopping at the right step.
 
 mod common;
+mod scratch;
 
 use common::{EVERY_FORMAT, Scratch};
 use craftbridge_core::{CraftApp, CraftError, Engine, PixelFormat};

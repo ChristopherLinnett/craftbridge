@@ -9,6 +9,7 @@
 
 mod common;
 mod export;
+mod scratch;
 
 use common::{EVERY_FORMAT, Scratch};
 use craftbridge_core::{CraftApp, CraftError, FrameBytes, PixelFormat};

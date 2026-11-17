@@ -13,7 +13,7 @@ use craftbridge_core::folders::Folders;
 use effectcraft_engine::project::Footage;
 use effectcraft_engine::{Exporter, Importer, Session};
 
-use crate::plugins;
+use crate::{fonts, plugins};
 
 /// The importer EffectCraft's host uses: a probe is EffectCraft's own media probe, so a phone reads
 /// footage exactly as the command line does (AD1).
@@ -57,16 +57,21 @@ pub(crate) fn build(folders: &Folders) -> Session {
     // The one call EffectCraft's own host makes after filling the fields: it installs the script
     // runner and ScriptUI dispatches over the commands, leaving every switch at its default.
     effectcraft_script::install(&mut session);
+    // AD2 (plan §19, step 1): then the phone's fonts. The platform's font folders are registered
+    // through EffectCraft's one registration entry, and the font-list filter is set from the same
+    // answer, before the session serves its first command.
+    fonts::register(folders);
     session
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// The folders as a value: building the session reads only the names it is given, never the
-    /// disk, so these need not exist (the tests that drive a session prepare real ones).
-    fn folders(plugins: Option<std::path::PathBuf>) -> Folders {
+    /// disk, so these need not exist (the tests that drive a session prepare real ones). Shared with the
+    /// tests of other modules that build a session the same way.
+    pub(crate) fn folders(plugins: Option<std::path::PathBuf>) -> Folders {
         Folders {
             container: "/app".into(),
             bundle: None,
