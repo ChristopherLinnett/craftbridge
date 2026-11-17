@@ -166,8 +166,9 @@ craftbridge_refused_environment() {
 }
 # The refusal itself, for a script that builds what it checks: each refused variable on a line of its own
 # under the script's name, and status 1, so `craftbridge_refuse_switches || exit 1` stops it before any
-# build. The gate, the Android build and a device run all build this way; the doctor reports the same lines
-# as gaps.
+# build. The gate (tools/ci.sh), the Android build (tools/build-android.sh), a test run on an Android
+# device (craftbridge_android_test, below) and the iPhone's device runner (tools/ios-device-test.sh) all
+# build this way; the doctor reports the same lines as gaps.
 craftbridge_refuse_switches() {
   local refused name
   name="$(basename "$0" .sh)"
@@ -240,6 +241,23 @@ export CRAFTBRIDGE_UPSTREAM_CACHE="${CRAFTBRIDGE_UPSTREAM_CACHE:-$HOME/.cache/cr
 
 # The Xcode release the iOS build is made and tested with.
 export CRAFTBRIDGE_XCODE="26.6"
+
+# What building for the iOS device takes, written once for every run that compiles or runs one: the gate's
+# rust_mobile stage, tools/build-xcframework.sh and tools/ios-device-test.sh. gemm-f16 (through
+# candle-core, from EffectCraft) assembles fp16 instructions, which rustc's default CPU for
+# `aarch64-apple-ios`, the A7, lacks (`instruction requires: fullfp16`). The device code is built for the
+# A12, the oldest chip iOS 17 runs on (the package's minimum, `ios/sdk/Package.swift`), which has them: a
+# newer CPU lets LLVM use instructions the A12 lacks (the A13's dot products, for one), which stop an app
+# with an illegal instruction on a phone the package supports, so this moves only with that minimum. The
+# Simulator target defaults to a newer CPU, so the other triples need nothing. A target-specific flag, never
+# `target-cpu=native`, which is the host's. The gate refuses the variable in the environment it starts in,
+# so each run sets it itself, for the triple it names, in the shell that starts cargo:
+# `craftbridge_ios_target_env <triple>`.
+craftbridge_ios_target_env() {
+  case "$1" in
+    aarch64-apple-ios) export CARGO_TARGET_AARCH64_APPLE_IOS_RUSTFLAGS="-C target-cpu=apple-a12" ;;
+  esac
+}
 
 # SwiftLint runs the Swift stage's built-in rules from `ios/sdk/.swiftlint.yml` (`missing_docs`). The gate
 # pins the version: a release can add a rule or change what a rule reads, so an upgrade is an edit here and

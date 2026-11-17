@@ -20,6 +20,9 @@ unset $(git rev-parse --local-env-vars 2>/dev/null)
 # shellcheck source=tools/env.sh
 source "$(dirname "$0")/env.sh"
 cd "$CRAFTBRIDGE_ROOT"
+# What ships is built as the gate builds: a `RUSTFLAGS` or a profile in the shell's environment, which cargo
+# reads over the CPU target tools/env.sh sets, would change the library without a word.
+craftbridge_refuse_switches || exit 1
 
 regenerate=yes
 case "$*" in
@@ -39,4 +42,8 @@ craftbridge_xtask_build "$work"
 xtask="$work/debug/xtask"
 
 if [ "$regenerate" = yes ]; then "$xtask" generate; fi
+# The device slice is built for the CPU target tools/env.sh sets once for every build for the iOS device,
+# and says why, so the library that ships is the code the gate's iOS clippy and the device runner compile;
+# xtask hands the variable on to the cargo it starts.
+craftbridge_ios_target_env aarch64-apple-ios
 "$xtask" xcframework

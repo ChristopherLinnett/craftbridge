@@ -1,0 +1,34 @@
+# The tests tools/ios-device-test.sh does not run as they stand on the acceptance iPhone, each with its reason.
+# A line is seven tab-separated fields, `-` where a field does not apply:
+#   package <TAB> cargo target <TAB> test <TAB> kind <TAB> child test <TAB> child environment <TAB> why
+# The target is the name cargo gives the test binary (a library's is its crate name, an integration test's its
+# file name), and the test is its full name as the harness lists it. The kinds:
+#   host-path  the test reads a path of the machine that built it (a CARGO_MANIFEST_DIR path), which a phone
+#              does not hold. It is left out, and the host's own run of the same test is its check.
+#   rerun      the test starts its own binary again as a child process (craftbridge_process::rerun), which an
+#              iOS app cannot do: it has no way to start a process. The runner runs the child test itself, in
+#              an app launch of its own, with the environment the parent's call gives its child (NAME=value
+#              words, or `-` for none), so the child's own assertions run on the phone in a process that has
+#              the environment from its start, which is all the parent exists to arrange. The child field
+#              names the `#[ignore]`d test the parent reruns; no other kind has a child or an environment.
+#   host-tool  the test starts a program of the machine that built it (cargo, rustc, mkfifo, the EffectCraft
+#              command line the conformance stage builds), which a phone does not hold and an iOS app could not
+#              start. The test field `*` names every test of a binary such a program drives from its first
+#              line, which the runner then does not install.
+# The runner refuses, before it builds anything, a line that is not this shape: another number of fields, an
+# empty one, another kind, no reason, or a rerun's child missing. It refuses a line whose test the binary does
+# not list, or whose name is part of another test's (the harness skips by part of a name), so a rename cannot
+# leave a test quietly unrun (a `*` line is not checked, since it names no test).
+craftbridge-effects	craftbridge_effects	fonts::tests::a_batch_trims_only_its_text_fonts_rows	host-path	-	-	reads the bundled font folder through the compile-time path of the machine that built it (env!("CARGO_MANIFEST_DIR")/assets/fonts)
+craftbridge-effects	craftbridge_effects	fonts::tests::bundled_folders_report_bundled_origin	host-path	-	-	reads the bundled font folder through the compile-time path of the machine that built it (env!("CARGO_MANIFEST_DIR")/assets/fonts)
+craftbridge-effects	craftbridge_effects	fonts::tests::coretext_pairs_keep_their_faces_as_system	host-path	-	-	reads the bundled font folder through the compile-time path of the machine that built it (env!("CARGO_MANIFEST_DIR")/assets/fonts)
+craftbridge-effects	craftbridge_effects	fonts::tests::a_bundled_file_coretext_also_lists_stays_bundled	host-path	-	-	reads the bundled font folder through the compile-time path of the machine that built it (env!("CARGO_MANIFEST_DIR")/assets/fonts)
+craftbridge-effects	craftbridge_effects	fonts::tests::a_later_engine_without_font_folders_keeps_the_earlier_ones_bundled_faces	host-path	-	-	reads the bundled font folder through the compile-time path of the machine that built it (env!("CARGO_MANIFEST_DIR")/assets/fonts)
+craftbridge-effects	craftbridge_effects	mcp::tests::every_tool_path_trims_its_listing_where_a_face_list_is_supplied	host-path	-	-	reads the bundled font folder through the compile-time path of the machine that built it (env!("CARGO_MANIFEST_DIR")/assets/fonts), through the fonts tests' helpers it lists with
+craftbridge-effects	platform_fonts_ios	the_listing_is_the_phones_own_families_plus_the_bundled	host-path	-	-	reads the bundled font folder through the compile-time path of the machine that built it (env!("CARGO_MANIFEST_DIR")/assets/fonts), through the scratch folder helper in tests/fontlisting
+craftbridge-effects	platform_fonts_ios	every_app_facing_call_shape_answers_the_same_list	host-path	-	-	reads the bundled font folder through the compile-time path of the machine that built it (env!("CARGO_MANIFEST_DIR")/assets/fonts), through the scratch folder helper in tests/fontlisting
+craftbridge-effects	platform_fonts_ios	the_written_standards_choose_their_bundled_faces	host-path	-	-	reads the bundled font folder through the compile-time path of the machine that built it (env!("CARGO_MANIFEST_DIR")/assets/fonts), through the scratch folder helper in tests/fontlisting
+craftbridge-core	craftbridge_core	gpu::tests::a_child_started_with_wgpu_backend_gl_still_gets_the_core_s_backend	rerun	gpu::tests::child_asked_with_wgpu_backend_gl	WGPU_BACKEND=gl	reruns itself with WGPU_BACKEND=gl so the variable is in the environment when wgpu builds its instance
+craftbridge-core	craftbridge_core	journal::tests::a_start_holds_the_journals_lock_while_it_deals_with_the_journal	host-tool	-	-	starts mkfifo to make the pipe it hands the start as its journal, and an iOS app cannot start a process
+craftbridge-effects	parity_with_cli	*	host-tool	-	-	compares every method with the answer of the EffectCraft command line at the pin, a program tools/oracle.sh builds on the host and the test starts as a child process
+craftbridge-effects	boa_android_feature	*	host-tool	-	-	asks cargo and rustc about the workspace's features and targets, programs of the host, and reads the workspace's Cargo.toml by a compile-time path
