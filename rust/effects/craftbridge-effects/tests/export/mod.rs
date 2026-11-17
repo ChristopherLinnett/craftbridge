@@ -180,9 +180,6 @@ fn parity(flags: &[Flag], file: &str) -> Result<usize, String> {
     if plugin != command_line {
         return Err(format!("the answers differ: {plugin} against {command_line}"));
     }
-    if !exported.reports.iter().any(|(_, total)| *total > 0) && file.ends_with(".mp4") {
-        return Err(format!("the plugin reported no frames: {:?}", exported.reports));
-    }
     same_files(&plugin_out, &cli_out)
 }
 
@@ -447,15 +444,18 @@ pub(super) fn entries_under(root: &Path, skip: &[&PathBuf]) -> Result<Vec<PathBu
 fn a_cancelled_export_answers_cancelled_and_leaves_no_output() {
     let scratch = Scratch::new().expect("a scratch folder");
     let engine = start_engine(&scratch).expect("the engine starts");
-    // Long enough that the cancel lands while the exporter is still writing: a quarter-size second
-    // takes the command line a few hundredths of a second, and the first beat comes after a tenth.
-    let slow =
-        |file: &str, format: &str| json!({"output": scratch.path().join(file).display().to_string(), "format": format, "end": 4, "resolution": "quarter"});
+    // The whole demo at half its size, so the cancel lands while the exporter is still writing: a cancel
+    // lands only on a progress beat, a tenth of a second apart, and EffectCraft, optimised in the tests
+    // as in its own workspace, writes a short export's second half between two beats.
+    let slow = |file: &str, format: &str| json!({"output": scratch.path().join(file).display().to_string(), "format": format, "end": 10, "resolution": "half"});
 
     // The same export, left alone, writes: what the cancel leaves out would have been there.
     let finished = export(&engine, slow("control.mp4", "h264"), &CancelToken::new(), None);
     assert!(finished.answer.is_ok(), "{:?}", finished.answer);
     assert!(scratch.path().join("control.mp4").is_file());
+    // Progress is reported on the beat, so only an export that outlasts a beat reports any frames: the
+    // short exports of the parity cases may end before their first.
+    assert!(finished.reports.iter().any(|(_, total)| *total > 0), "an export longer than a beat reports its frames: {:?}", finished.reports);
 
     // The cancelled exports write into a folder the export makes: the exporter removes the file it
     // opened when it sees the stop, but only the engine removes the folder, so the folder is what
@@ -471,7 +471,7 @@ fn a_cancelled_export_answers_cancelled_and_leaves_no_output() {
         assert_eq!(contents_in(&scratch).expect("the container reads"), before, "a cancelled export leaves no file and no folder it made ({file})");
     }
     // The session is free again: nothing is left rendering behind the cancel.
-    let again = export(&engine, slow("after.mp4", "h264"), &CancelToken::new(), None);
+    let again = export(&engine, request_of(&small(), &scratch.path().join("after.mp4")), &CancelToken::new(), None);
     assert!(again.answer.is_ok(), "{:?}", again.answer);
     engine.close().expect("the engine closes");
 }

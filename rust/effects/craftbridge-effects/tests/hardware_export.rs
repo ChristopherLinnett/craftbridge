@@ -208,7 +208,10 @@ fn a_stopped_hardware_export_leaves_no_movie() {
     let scratch = Scratch::new().unwrap();
     let mut app = started(&scratch).unwrap();
     let output = scratch.path().join("stopped.mp4");
-    let request = with(with(small("h264", &output), "hardware", json!(true)), "end", json!(2.0));
+    // The whole demo at full size: the stop lands only on a progress beat, and EffectCraft, optimised in
+    // the tests as in its own workspace, renders a short quarter-size export's frames between two beats.
+    // The export stops at its first frames, so its length costs nothing.
+    let request = json!({"format": "h264", "output": output.display().to_string(), "hardware": true, "end": 10, "resolution": "full"});
     let answer = app.request_with_progress("export", request, &mut |done, _, _| done < 2, &mut |_| Ok(()));
     assert!(matches!(answer, Err(CraftError::Cancelled)), "{answer:?}");
     assert!(!output.exists(), "no half-written movie is left");
