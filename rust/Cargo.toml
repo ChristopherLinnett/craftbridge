@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core/*", "effects/*", "craftbridge-process", "xtask"]
+members = ["core/*", "effects/*", "craftbridge-process", "uniffi-bindgen", "xtask"]
 # Host tools build only when named, so a plain `cargo build` builds the libraries.
 default-members = ["core/*", "effects/craftbridge-effects", "effects/craftbridge-effects-ffi"]
 
@@ -17,6 +17,7 @@ craftbridge-media = { path = "core/craftbridge-media" }
 craftbridge-core = { path = "core/craftbridge-core" }
 craftbridge-core-ffi = { path = "core/craftbridge-core-ffi" }
 craftbridge-effects = { path = "effects/craftbridge-effects" }
+craftbridge-effects-ffi = { path = "effects/craftbridge-effects-ffi" }
 craftbridge-process = { path = "craftbridge-process" }
 
 # The workspace's external libraries: what the host tools use, and the few a shipped crate uses.
@@ -54,6 +55,13 @@ pollster = "1"
 # is short (AD7), and its tests ask the global pool how many threads it has. It resolves to the one copy EffectCraft already builds, so
 # the pool EffectCraft's export counts its threads in is the pool this one builds.
 rayon = "1"
+# The native boundary (plan §20). The one version builds the scaffolding in each -ffi crate and, through
+# rust/uniffi-bindgen, the generator that reads it back, so the two can never differ.
+uniffi = "0.32"
+# The channel the engine thread answers each call on (plan §16): a caller blocks on it or awaits it, so the
+# FFI's async calls wait for the engine's own answer without blocking a thread. It is the channel the
+# JavaScript engine in EffectCraft's graph already uses.
+oneshot = { version = "0.2", features = ["std", "async"] }
 
 effectcraft-engine = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
 effectcraft-host = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }

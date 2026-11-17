@@ -56,14 +56,33 @@ impl Gate {
 /// Hand one plain call to `engine` from the test's own thread and take the channel its answer
 /// comes on: the inbox is first in, first out, so calls handed over one after another from one
 /// thread reach the engine in that order, with no thread to schedule.
-pub(crate) fn queue_call(engine: &Engine, method: &str, params: Value) -> mpsc::Receiver<Result<Value>> {
+pub(crate) fn queue_call(engine: &Engine, method: &str, params: Value) -> oneshot::Receiver<Result<Value>> {
     engine.submit(Message::request(method, params)).unwrap()
+}
+
+/// What a test waits on for an answer: the oneshot channel the engine answers a call on, or a channel
+/// of the test's own that a thread making the call answers on.
+pub(crate) trait Arrives<T> {
+    /// The answer, or none if it did not arrive within `timeout`.
+    fn within(&self, timeout: Duration) -> Option<T>;
+}
+
+impl<T> Arrives<T> for oneshot::Receiver<T> {
+    fn within(&self, timeout: Duration) -> Option<T> {
+        self.recv_timeout(timeout).ok()
+    }
+}
+
+impl<T> Arrives<T> for mpsc::Receiver<T> {
+    fn within(&self, timeout: Duration) -> Option<T> {
+        self.recv_timeout(timeout).ok()
+    }
 }
 
 /// Take the answer that arrives on `rx`, failing the test at the deadline if none ever does: an
 /// engine that stops answering is a test failure with a message, never a hung suite.
-pub(crate) fn recv<T>(rx: &mpsc::Receiver<T>) -> T {
-    rx.recv_timeout(DEADLINE).unwrap_or_else(|_| panic!("the call was never answered"))
+pub(crate) fn recv<T>(rx: &impl Arrives<T>) -> T {
+    rx.within(DEADLINE).unwrap_or_else(|| panic!("the call was never answered"))
 }
 
 /// Close `engine` from a thread of its own and return once the close has begun, so `Close` is

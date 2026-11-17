@@ -83,6 +83,7 @@ pub(crate) const ENTRIES: &[Entry] = &[
     Entry { name: "craftbridge-effects-conformance", kind: Kind::Tool, rank: 0, ffi: false, distribution: false, platform: false, build: false, upstream: &[] },
     Entry { name: "craftbridge-process", kind: Kind::Support, rank: 0, ffi: false, distribution: false, platform: false, build: false, upstream: &[] },
     Entry { name: "xtask", kind: Kind::Tool, rank: 0, ffi: false, distribution: false, platform: false, build: false, upstream: &[] },
+    Entry { name: "uniffi-bindgen", kind: Kind::Tool, rank: 0, ffi: false, distribution: false, platform: false, build: false, upstream: &[] },
 ];
 
 /// A crate's row, or `None` for a crate the table has never heard of.

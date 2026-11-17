@@ -25,7 +25,7 @@ pub mod platform;
 
 pub use app::CraftApp;
 pub use cancel::CancelToken;
-pub use engine::Engine;
+pub use engine::{Answer, Engine};
 pub use error::CraftError;
 pub use export::PROGRESS_INTERVAL;
 pub use frames::{FrameBytes, PixelFormat};

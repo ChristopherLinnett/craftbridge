@@ -1,0 +1,22 @@
+[package]
+name = "uniffi-bindgen"
+description = "The workspace's one UniFFI binding generator, built at the version the libraries are."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+uniffi = { workspace = true, features = ["cli"] }
+
+[dev-dependencies]
+# The distribution library the bindings are generated from: building the tests builds it, as an app's
+# build does, so the library-mode test reads what an app links.
+craftbridge-effects-ffi.workspace = true
+# A scratch folder for the generated bindings.
+tempfile.workspace = true
+
+[lints]
+workspace = true

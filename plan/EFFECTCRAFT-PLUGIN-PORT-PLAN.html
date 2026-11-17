@@ -870,24 +870,29 @@ pub trait ProgressListener: Send + Sync {
 #[derive(uniffi::Object)] pub struct CancelToken { /* Arc&lt;AtomicBool&gt; */ }
 #[derive(uniffi::Record)] pub struct FrameBytes { pub width: u32, pub height: u32, pub format: PixelFormat, pub data: Vec&lt;u8&gt; }
 #[derive(uniffi::Enum)]   pub enum PixelFormat { Png, Rgba8Straight, Bgra8Premultiplied }
+#[derive(uniffi::Record)] pub struct Recovery { pub removed: Vec&lt;String&gt;, pub untouched: Vec&lt;String&gt;,
+    pub refused: Vec&lt;RecoveryNote&gt;, pub failed: Vec&lt;RecoveryNote&gt;, pub journal: Vec&lt;String&gt; }
+#[derive(uniffi::Record)] pub struct RecoveryNote { pub path: String, pub reason: String }
 
 #[derive(uniffi::Object)]
 pub struct Engine { /* handle to the engine actor */ }
 
-#[uniffi::export(async_runtime = &quot;none&quot;)]
+#[uniffi::export]
 impl Engine {
     pub async fn request(&amp;self, method: String, params: String) -&gt; Result&lt;String, CraftError&gt;;
     pub async fn request_with_progress(&amp;self, method: String, params: String,
         listener: Arc&lt;dyn ProgressListener&gt;, cancel: Arc&lt;CancelToken&gt;) -&gt; Result&lt;String, CraftError&gt;;
     pub async fn frame(&amp;self, params: String, format: PixelFormat) -&gt; Result&lt;FrameBytes, CraftError&gt;;
-    pub async fn mcp(&amp;self, line: String) -&gt; Option&lt;String&gt;;
+    pub async fn mcp(&amp;self, line: String) -&gt; Result&lt;Option&lt;String&gt;, CraftError&gt;;
     pub async fn present(&amp;self, params: String) -&gt; Result&lt;(), CraftError&gt;;   // preview into the attached surface
     pub fn detach_preview(&amp;self);
     pub fn suspend_gpu(&amp;self);                          // L7: render on the CPU until resumed
     pub async fn resume_gpu(&amp;self) -&gt; Result&lt;(), CraftError&gt;;
-    pub async fn close(&amp;self);
+    pub async fn shut_down(&amp;self) -&gt; Result&lt;(), CraftError&gt;;   // the core&#39;s `close`; named apart because Kotlin&#39;s `AutoCloseable.close()` frees the handle
+    pub fn recovery(&amp;self) -&gt; Result&lt;Recovery, CraftError&gt;;    // what the start cleaned up after an export the system killed (D-17)
 }
 </code></pre>
+<p>Every engine call throws <code>CraftError</code>, <code>mcp</code> and <code>frame</code> included. <code>mcp(line)</code> answers the reply line, or <code>None</code> for a line that needs no reply (a notification); a closed engine and a caught panic throw <code>Internal</code>, as <code>request</code> does, and never answer as a reply line, since a reply the app never wrote must not read as one. UniFFI&#39;s <code>async_runtime</code> takes <code>tokio</code> and nothing else, and these calls need no runtime: the foreign caller polls each <code>async fn</code> on its own executor (UniFFI, <em>Async/Future support</em>), and at its first poll the call is handed to the engine and then awaits the oneshot channel the engine thread answers it on (§16), so the engine runs calls in the order they were made and no thread blocks for an answer. <code>shut_down</code> hands the stop to the engine as it is made, so every call made after it is refused in order, and waits for the engine thread to stop (stopping joins it) on a thread of its own; made from inside one of the engine&#39;s own calls, a progress listener&#39;s, it answers at once, as the core&#39;s <code>close</code> does. <code>recovery</code> is no <code>async</code> call: it answers at once with what the start did about the pending-export journal (§16, D-17), the files it deleted, left, refused to touch and could not delete, as text, so an app can tell its user what a killed export left behind; it throws <code>Io</code> only for a path that is not valid Unicode, which no text can name. The boundary&#39;s <code>CraftError</code>, <code>GpuChoice</code>, <code>PixelFormat</code> and <code>FrameBytes</code> are the core&#39;s own types, exported with <code>#[uniffi::remote]</code>, not second definitions; <code>Folders</code> is a record of its own because it holds paths as strings, and <code>CancelToken</code> an object that wraps the core&#39;s. In both bindings each <code>CraftError</code> variant&#39;s text is the field <code>detail</code>, since Kotlin&#39;s exception for a variant already has a <code>message</code> of its own (<code>uniffi.toml</code> renames it for both languages). One size check covers every answer that grows with what a call asks for; an error&#39;s text and the recovery report, which the journal&#39;s own size bound keeps far below the limit, cross unchecked. UniFFI writes a length into the buffer it lowers as <code>i32::try_from(len).unwrap()</code> (0.32.2, as in 0.28.3 and 0.30.0), so a longer value panics inside UniFFI and the app gets no <code>CraftError</code>, and Kotlin reads a buffer through one <code>ByteBuffer</code> of at most <code>i32::MAX</code> bytes. So a <code>frame</code> whose <code>data</code> is longer than <code>MAX_FRAME_BYTES</code> (<code>i32::MAX</code> less the 16 bytes of the record&#39;s other fields; a CPU render reaches it at about 23170 × 23170 RGBA), a <code>request</code> or <code>request_with_progress</code> answer longer than <code>MAX_ANSWER_BYTES</code> (<code>i32::MAX</code>: the text crosses whole) and an <code>mcp</code> reply line longer than <code>MAX_MCP_LINE_BYTES</code> (<code>i32::MAX</code> less the 5 bytes of its tag and length) each throw <code>InvalidParams</code>, the row for parameters the core refuses, naming the length, the limit and what to ask for less of, and the call can be made again for less. The bytes are copied as they cross: UniFFI serialises the record, <code>data</code> with it, into a buffer it hands over, and Kotlin&#39;s <code>ByteArray</code> lives on the JVM heap, so no call promises zero-copy.</p>
 <p>Platform handles live in <code>craftbridge-core-ffi</code>&#39;s platform modules (§20): <code>attach_metal_layer(engine, layer)</code> on iOS; on Android the JNI function <code>NativeSurfaces.acquire(surface)</code> returns an id that <code>attach_window(engine, id)</code> takes. Each app&#39;s distribution crate exports one constructor, for EffectCraft <code>start_effects_engine(folders: Folders, gpu: GpuChoice) -&gt; Result&lt;Arc&lt;Engine&gt;, CraftError&gt;</code>.</p>
 <p><strong>The EffectCraft method table</strong> (<code>craftbridge-effects</code>, answered by <code>request</code> and <code>request_with_progress</code>, bar the binary <code>frame</code> and the line <code>mcp</code>, which the core passes to the app through calls of their own, <code>frame</code> and <code>mcp</code>, §16):</p>
 <div class="table-wrap"><table>
@@ -1539,7 +1544,7 @@ impl Engine {
 <tr>
 <td><code>src/<wbr>engine.rs</code></td>
 <td>NEW</td>
-<td>the engine actor: one thread per engine (named <code>craftbridge-engine</code>), a channel of calls, each answered on a oneshot; <code>catch_unwind</code> around every call turns a panic into <code>Internal</code> and keeps the session (as EffectCraft&#39;s own guard does)</td>
+<td>the engine actor: one thread per engine (named <code>craftbridge-engine</code>), a channel of calls, each answered on a oneshot, which the caller blocks on (<code>request</code>) or awaits (<code>send_request</code>, <code>send_request_with_progress</code>, <code>send_frame</code> and <code>send_mcp</code> hand the call over and answer with the oneshot&#39;s <code>Answer</code>); <code>catch_unwind</code> around every call turns a panic into <code>Internal</code> and keeps the session (as EffectCraft&#39;s own guard does)</td>
 </tr>
 <tr>
 <td><code>src/<wbr>export.rs</code></td>
@@ -1587,7 +1592,7 @@ impl Engine {
 <li><code>start</code> (called by the app crate&#39;s constructor, <code>start_effects_engine</code>, through <code>Engine::start_in(folders, app)</code>) creates the folders if missing, deals with the files its pending-export journal still lists (D-17, <em>Returning app</em> below), builds the GPU device unless <code>GpuChoice::CpuOnly</code> (§17), registers the hardware decoders (§18) and spawns the actor with the app.</li>
 <li>Each call becomes a message. Async calls resolve when the actor answers; nothing blocks the caller&#39;s thread.</li>
 <li>A call during an export waits (L3); <code>info</code>, progress and cancel are answered at once.</li>
-<li><code>close</code> stops a running export (as cancel), drops the GPU and surface, and joins the thread.</li>
+<li><code>close</code> stops a running export (as cancel), drops the GPU and surface, and joins the thread. <code>begin_close</code> is its half that waits for nothing: it refuses the calls made after it and queues the stop, so the FFI&#39;s <code>shut_down</code> takes effect in the order it was made and leaves only the join to a thread of its own.</li>
 </ol>
 <p><strong>States.</strong> Starting · Ready · Exporting · CPU only · Closed · Failed to start (§13, d03).</p>
 <ul>
@@ -1802,7 +1807,7 @@ impl Engine {
 <tbody><tr>
 <td><code>rust/<wbr>core/<wbr>craftbridge-core-ffi</code></td>
 <td>NEW</td>
-<td>the §14 boundary for the core: <code>Engine</code>, <code>Folders</code>, <code>GpuChoice</code>, <code>CraftError</code>, <code>ProgressListener</code>, <code>CancelToken</code>, <code>FrameBytes</code>, <code>PixelFormat</code>; <code>src/<wbr>platform/<wbr>ios.rs</code> and <code>src/<wbr>platform/<wbr>android.rs</code></td>
+<td>the §14 boundary for the core: <code>Engine</code>, <code>Folders</code>, <code>GpuChoice</code>, <code>CraftError</code>, <code>ProgressListener</code>, <code>CancelToken</code>, <code>FrameBytes</code>, <code>PixelFormat</code>, <code>Recovery</code>, <code>RecoveryNote</code>; <code>src/<wbr>platform/<wbr>ios.rs</code> and <code>src/<wbr>platform/<wbr>android.rs</code></td>
 </tr>
 <tr>
 <td><code>rust/<wbr>effects/<wbr>craftbridge-effects-ffi</code></td>
@@ -1820,11 +1825,12 @@ impl Engine {
 <p><strong>Bindings generation</strong> (library mode on a host build of <code>craftbridge-effects-ffi</code>, by <code>rust/<wbr>uniffi-bindgen</code>, which pins the generator to the library&#39;s UniFFI version). The bindings are committed generated code (D-26), so they are written by generators registered with <code>cargo xtask generate</code> (AGENTS §6), one for each folder below, since each generator owns one output directory: each builds the library for the host, runs <code>rust/<wbr>uniffi-bindgen</code> into its folder and prepends the <code>@generated</code> marker UniFFI does not write, and <code>generate --check</code> regenerates and compares them in the gate. The build scripts of §22 and §23 call <code>cargo xtask generate</code> rather than the generator itself.</p>
 <ul>
 <li><strong>Swift:</strong> the generated Swift of both crates is compiled into one module, <code>CraftBridgeFFI</code> (<code>ios/<wbr>sdk/<wbr>Sources/<wbr>CraftBridgeFFI/<wbr>Generated/<wbr></code>; UniFFI requires external types in one Swift module, <code>evidence/<wbr>05-mobile-platforms.md</code> Finding 8).</li>
-<li><strong>Kotlin:</strong> one package per crate, <code>io.github.christopherlinnett.craftbridge.ffi.core</code> (in <code>:core</code>) and <code>…ffi.effects</code> (in <code>:effects</code>), each in its package&#39;s folder of its module&#39;s <code>src/<wbr>generated/<wbr>kotlin/<wbr></code> (<code>…/<wbr>craftbridge/<wbr>ffi/<wbr>&lt;module&gt;/<wbr></code>), the one folder its generator owns, beside the <code>effects</code> folder the facade&#39;s generator owns (§21), both loading <code>libcraftbridge_effects_ffi.so</code> (<code>cdylib_name</code> in <code>uniffi.toml</code>).</li>
+<li><strong>Kotlin:</strong> one package per crate, <code>io.github.christopherlinnett.craftbridge.ffi.core</code> (in <code>:core</code>) and <code>…ffi.effects</code> (in <code>:effects</code>), each in its package&#39;s folder of its module&#39;s <code>src/<wbr>generated/<wbr>kotlin/<wbr></code> (<code>…/<wbr>craftbridge/<wbr>ffi/<wbr>&lt;module&gt;/<wbr></code>), the one folder its generator owns, beside the <code>effects</code> folder the facade&#39;s generator owns (§21), both loading <code>libcraftbridge_effects_ffi.so</code>, which library mode names from the library it generates them from.</li>
+<li><strong>Settings:</strong> each <code>-ffi</code> crate&#39;s <code>uniffi.toml</code> sits at its crate root, as library mode reads it (<code>rust/<wbr>core/<wbr>craftbridge-core-ffi/<wbr>uniffi.toml</code>): Kotlin&#39;s <code>package_name</code>, and the renames a name one language owns needs, written for both languages so the two bindings keep one name. Swift keeps UniFFI&#39;s own <code>module_name</code>, the crate&#39;s, because it names the files a crate&#39;s Swift is written to (<code>craftbridge_core_ffi.swift</code>, <code>craftbridge_core_ffiFFI.h</code>), not the module they compile into: one name shared by two crates would have the second crate&#39;s files overwrite the first&#39;s.</li>
 </ul>
 <p><strong>Panics.</strong> <code>panic = &quot;unwind&quot;</code> stays (EffectCraft&#39;s guard needs it, <code>AGENTS.md</code>); the actor&#39;s <code>catch_unwind</code> (§16) means no panic crosses the boundary.</p>
 <p><strong>Edge cases.</strong> A second distribution later (EffectCraft and FilmCraft in one app) gets one combined crate, <code>craftbridge-all-ffi</code>, depending on both app crates, so the app links one Rust runtime (<code>evidence/<wbr>05-mobile-platforms.md</code> Finding 8).</p>
-<p><strong>Tests.</strong> Generated bindings compile in the gate; Swift and Kotlin smoke tests call every boundary function once (QA-2).</p>
+<p><strong>Tests.</strong> <code>cargo test -p uniffi-bindgen</code> generates both bindings in library mode from the host build of the distribution library and checks that every exported type and call is declared in each, under no name Kotlin&#39;s own members hold; the generated bindings compile in the gate once the Swift package and the Android build take them in (§22, §23); Swift and Kotlin smoke tests call every boundary function once (QA-2).</p>
 <h2 id="21-api-generator-design">21. API generator design<a class="anchor" href="#21-api-generator-design" aria-label="link">#</a></h2>
 <p><code>craftbridge-effects-codegen</code> is a host binary linking the pinned EffectCraft crates; <code>cargo xtask generate</code> runs it. It reads the engine&#39;s registry at run time, never its source (PD4, PD7).</p>
 <div class="table-wrap"><table>

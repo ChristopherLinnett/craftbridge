@@ -26,12 +26,12 @@
 use crate::Result;
 use crate::app::CraftApp;
 use crate::cancel::CancelToken;
-use crate::engine::{Message, guarded};
+use crate::engine::{Answering, Message, guarded};
 use crate::error::CraftError;
 use crate::journal::{Journal, Pending};
 use serde_json::Value;
 use std::collections::VecDeque;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 /// The interval a progress loop is measured on: 100 ms, the interval EffectCraft's own command
@@ -51,12 +51,12 @@ pub(crate) struct ExportCall {
     params: Value,
     cancel: CancelToken,
     progress: Box<dyn FnMut(u64, u64, Option<f64>) + Send>,
-    answer: Sender<Result<Value>>,
+    answer: Answering<Value>,
 }
 
 impl ExportCall {
     /// The export of `method`, built once the engine gives it the channel its answer goes back on.
-    pub(crate) fn message<F>(method: &str, params: Value, on_progress: F, cancel: &CancelToken) -> impl FnOnce(Sender<Result<Value>>) -> Message
+    pub(crate) fn message<F>(method: &str, params: Value, on_progress: F, cancel: &CancelToken) -> impl FnOnce(Answering<Value>) -> Message
     where
         F: FnMut(u64, u64, Option<f64>) + Send + 'static,
     {
@@ -157,7 +157,7 @@ mod tests {
     use serde_json::json;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
-    use std::sync::mpsc::{self, RecvTimeoutError};
+    use std::sync::mpsc;
     use std::sync::{Arc, Mutex};
     use std::thread;
 
@@ -376,7 +376,7 @@ mod tests {
 
     /// Hand one export to the engine from the test's own thread, so it lands in the inbox behind
     /// everything handed over before it and ahead of everything after, with no thread to schedule.
-    fn queue_export(engine: &Engine, cancel: &CancelToken) -> (ProgressRx, mpsc::Receiver<Result<Value>>) {
+    fn queue_export(engine: &Engine, cancel: &CancelToken) -> (ProgressRx, oneshot::Receiver<Result<Value>>) {
         let (listen, progress) = listener();
         (progress, engine.submit(ExportCall::message("export", Value::Null, listen, cancel)).unwrap())
     }
@@ -705,11 +705,11 @@ mod tests {
         let racer = engine.racer().unwrap();
 
         let closer = close_begun(&engine);
-        let (answer, raced) = mpsc::channel();
+        let (answer, raced) = oneshot::channel();
         racer.send(Message::request("echo", json!({ "n": 1 }))(answer)).unwrap();
         shared.open(1);
         assert_eq!(recv(&answers), Err(CraftError::Cancelled));
-        assert_eq!(raced.recv_timeout(DEADLINE), Err(RecvTimeoutError::Disconnected), "a call behind the close was not refused");
+        assert_eq!(raced.recv_timeout(DEADLINE), Err(oneshot::RecvTimeoutError::Disconnected), "a call behind the close was not refused");
         assert!(!shared.dropped.load(Ordering::SeqCst), "a call behind the close waited for the session's drop");
         shared.drop_released.open();
         assert_eq!(closer.join().unwrap(), Ok(()));
