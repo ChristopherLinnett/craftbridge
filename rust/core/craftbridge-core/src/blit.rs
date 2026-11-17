@@ -343,7 +343,7 @@ pub(crate) mod tests {
 
     /// Draw `frame` into a fresh offscreen texture of `format` and `size`, the surface's own usage,
     /// and read it back as straight RGBA bytes, whatever channel order the format stores.
-    fn render(rig: &Rig, format: wgpu::TextureFormat, output: Output, frame: &wgpu::Texture, size: (u32, u32)) -> Vec<[u8; 4]> {
+    pub(crate) fn render(rig: &Rig, format: wgpu::TextureFormat, output: Output, frame: &wgpu::Texture, size: (u32, u32)) -> Vec<[u8; 4]> {
         let blit = Blit::new(&rig.device, format, output).expect("the blit pass is made");
         render_with(rig, &blit, format, frame, size)
     }

@@ -15,6 +15,29 @@ uniffi.workspace = true
 serde_json.workspace = true
 # Stopping's answer comes back to the foreign caller's future from the thread that waited for the engine.
 oneshot.workspace = true
+# A preview surface is a wgpu surface on the engine's device; the platform modules below make it.
+wgpu.workspace = true
+
+# The layer a preview draws on, which only an Apple build has: the class the app's layer is, and the geometry
+# it reads its live size from (src/platform/ios.rs). The macOS build has it too, which is where the module's
+# test runs the same rule as the simulator does.
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
+objc2.workspace = true
+objc2-quartz-core = { workspace = true, features = ["std", "objc2-core-foundation", "objc2-core-graphics", "objc2-metal", "CALayer", "CAMetalLayer"] }
+
+# Android's window NDK, which only an Android build has: the app's Surface arrives as an ANativeWindow, which
+# is taken in, sized and released (src/platform/android.rs).
+[target.'cfg(target_os = "android")'.dependencies]
+ndk.workspace = true
+
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dev-dependencies]
+# The test makes a layer of its own and gives it a size, which is the geometry types' home.
+objc2-core-foundation = { workspace = true, features = ["std", "CFCGTypes"] }
+
+# The test's stand-in for an app's Surface: an AImageReader's window, whose filled buffers the test reads
+# back to see what was drawn (src/platform/android.rs).
+[target.'cfg(target_os = "android")'.dev-dependencies]
+ndk = { workspace = true, features = ["media", "api-level-29"] }
 
 [dev-dependencies]
 # The tests drive the exported async calls to their answer without a runtime.

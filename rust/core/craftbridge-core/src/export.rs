@@ -491,6 +491,24 @@ mod tests {
         engine.close().unwrap();
     }
 
+    /// A present made during an export waits like every call but `info`: it is not answered while the
+    /// export runs, and once the export ends it runs ahead of a call made after it (plan §17's "a
+    /// preview during an export waits"). This engine has no surface, so its answer is the empty one.
+    #[test]
+    fn a_present_during_an_export_waits_until_it_ends_then_runs_in_order() {
+        let (engine, shared, _cancel, progress, answers) = started_export();
+        let present = engine.submit(Message::preview_present(json!({ "n": 1 }))).unwrap();
+        let echo = queue_call(&engine, "echo", json!({ "n": 2 }));
+        shared.open(1);
+        assert_eq!(progress.next(), Some((1, POLLS, Some(1.0))), "the export never polled again");
+        assert!(present.try_recv().is_err(), "a present was answered during the export");
+        shared.open(POLLS - 1);
+        assert_eq!(recv(&answers), Ok(json!({ "done": POLLS })));
+        assert_eq!(recv(&echo), Ok(json!({ "n": 2 })));
+        assert_eq!(present.try_recv(), Ok(Err(CraftError::gpu("no surface"))), "the present was answered before the call made after it");
+        engine.close().unwrap();
+    }
+
     /// A call the export's beats took out of the inbox runs before one still in the inbox when the
     /// export ends: the inbox then holds only calls made after the export's last beat, which are
     /// newer than every call a beat took out (plan §13, L3).

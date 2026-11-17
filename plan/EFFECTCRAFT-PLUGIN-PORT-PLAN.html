@@ -890,7 +890,7 @@ impl Engine {
     pub async fn frame(&amp;self, params: String, format: PixelFormat) -&gt; Result&lt;FrameBytes, CraftError&gt;;
     pub async fn mcp(&amp;self, line: String) -&gt; Result&lt;Option&lt;String&gt;, CraftError&gt;;
     pub async fn present(&amp;self, params: String) -&gt; Result&lt;(), CraftError&gt;;   // preview into the attached surface
-    pub fn detach_preview(&amp;self);
+    pub async fn detach_preview(&amp;self) -&gt; Result&lt;(), CraftError&gt;;   // ending a preview is a call like every other: async, and it throws
     pub async fn suspend_gpu(&amp;self) -&gt; Result&lt;(), CraftError&gt;;  // L7: render on the CPU until resumed
     pub async fn resume_gpu(&amp;self) -&gt; Result&lt;Option&lt;String&gt;, CraftError&gt;;   // ask for a device again: None on one, else the CPU note
     pub async fn shut_down(&amp;self) -&gt; Result&lt;(), CraftError&gt;;   // the core&#39;s `close`; named apart because Kotlin&#39;s `AutoCloseable.close()` frees the handle
@@ -1618,7 +1618,12 @@ impl Engine {
 <tr>
 <td><code>src/<wbr>gpu_lifecycle.rs</code></td>
 <td>NEW</td>
-<td>the engine&#39;s GPU lifecycle, held by the engine thread: the device it handed the app and the preview surface made on it. At the start it hands the app the device the start&#39;s <code>GpuChoice</code> asks for, or the CPU note, and an app that refuses the device is handed the refusal as its CPU note, so <code>info.gpu</code> says why. Before every call it reads the device&#39;s failure notice and, on the first report, drops the surface and the app&#39;s device (<code>drop_gpu</code>) and renders on the CPU from then on (L7); <code>suspend_gpu</code> drops the same and <code>resume_gpu</code> asks <code>GpuDevice::request</code> with the choice the engine started with and hands the answer to <code>attach_gpu</code>, keeping a device it already holds, and answers the CPU note when none comes</td>
+<td>the engine&#39;s GPU lifecycle, held by the engine thread: the device it handed the app and the preview surface made on it, which the preview calls (<code>attach_preview</code>, <code>present</code>, <code>detach_preview</code>) work on, so the surface is made on the engine&#39;s one device, answers <code>Gpu</code> when there is none, and goes with the device on a failure and on <code>suspend_gpu</code>, to come back only when the app attaches its surface again. At the start it hands the app the device the start&#39;s <code>GpuChoice</code> asks for, or the CPU note, and an app that refuses the device is handed the refusal as its CPU note, so <code>info.gpu</code> says why. Before every call it reads the device&#39;s failure notice and, on the first report, drops the surface and the app&#39;s device (<code>drop_gpu</code>) and renders on the CPU from then on (L7); <code>suspend_gpu</code> drops the same and <code>resume_gpu</code> asks <code>GpuDevice::request</code> with the choice the engine started with and hands the answer to <code>attach_gpu</code>, keeping a device it already holds, and answers the CPU note when none comes</td>
+</tr>
+<tr>
+<td><code>src/<wbr>preview.rs</code></td>
+<td>NEW</td>
+<td>the preview surface the lifecycle above holds: <code>present</code> runs the app&#39;s <code>CraftApp::present</code> with it, <code>detach_preview</code> empties it, an attach replaces it, and a CPU frame is uploaded to it premultiplied (§17)</td>
 </tr>
 <tr>
 <td><code>src/<wbr>gpu.rs</code>, <code>src/<wbr>surface.rs</code>, <code>src/<wbr>blit.rs</code>, <code>src/<wbr>frames.rs</code></td>
@@ -1653,7 +1658,7 @@ impl Engine {
 <li>The app attaches its <code>CAMetalLayer</code> (iOS) or <code>Surface</code> (Android) once (§20 platform module); the core keeps a <code>wgpu::Surface</code> configured <code>Bgra8Unorm</code> (iOS) or <code>Rgba8Unorm</code> (Android), non-sRGB, <code>PresentMode::Fifo</code> with one frame in flight (the desktop window&#39;s <code>LOW_LATENCY</code>, <code>effectcraft: apps/<wbr>effectcraft/<wbr>src/<wbr>main.rs:475-482</code>), <code>CompositeAlphaMode::PostMultiplied</code> where offered, else <code>Opaque</code>, else <code>Inherit</code>: Android&#39;s surfaces offer <code>Inherit</code> alone, because its window manager composites the window (Android&#39;s Vulkan loader, <code>frameworks/<wbr>native/<wbr>vulkan/<wbr>libvulkan/<wbr>swapchain.cpp</code>), so the pass writes alpha 1 there, as for <code>Opaque</code>.</li>
 <li><code>present({comp, time})</code> asks the app crate for a display frame: <code>Gpu::render_display</code> leaves the composited frame on the GPU as premultiplied <code>Rgba8Unorm</code> with mips (<code>effectcraft: crates/<wbr>gpu/<wbr>src/<wbr>lib.rs:143-147</code>, <code>effectcraft: crates/<wbr>gpu/<wbr>src/<wbr>lib.rs:224-236</code>).</li>
 <li>The core&#39;s blit pass (the WGSL in <code>blit.rs</code>, one full-screen triangle drawn into the aspect-fit viewport, linear filtering on the mip chain) scales it into the surface texture between opaque black bars, un-premultiplying it first when the surface is <code>PostMultiplied</code>, and presents (AD14).</li>
-<li>When <code>render_display</code> returns <code>None</code> (the GPU declined the frame), the app crate renders on the CPU (<code>Session::render_rgba8_alpha</code>, <code>crates/<wbr>engine/<wbr>src/<wbr>session/<wbr>render.rs:132-143</code>) and the core uploads it into a reusable texture before the same blit.</li>
+<li>When <code>render_display</code> returns <code>None</code> (the GPU declined the frame), the app crate renders on the CPU (<code>Session::render_rgba8_alpha</code>, <code>crates/<wbr>engine/<wbr>src/<wbr>session/<wbr>render.rs:132-143</code>) and the core uploads it, premultiplied as the blit reads every frame, into a reusable texture before the same blit.</li>
 </ol>
 <p><strong>Platform images and PNG (<code>frame</code>).</strong></p>
 <ul>
@@ -1888,7 +1893,7 @@ impl Engine {
 <tbody><tr>
 <td><code>rust/<wbr>core/<wbr>craftbridge-core-ffi</code></td>
 <td>NEW</td>
-<td>the §14 boundary for the core: <code>Engine</code>, <code>Folders</code>, <code>GpuChoice</code>, <code>CraftError</code>, <code>ProgressListener</code>, <code>CancelToken</code>, <code>FrameBytes</code>, <code>PixelFormat</code>, <code>Recovery</code>, <code>RecoveryNote</code>; <code>src/<wbr>platform/<wbr>ios.rs</code> and <code>src/<wbr>platform/<wbr>android.rs</code></td>
+<td>the §14 boundary for the core: <code>Engine</code>, <code>Folders</code>, <code>GpuChoice</code>, <code>CraftError</code>, <code>ProgressListener</code>, <code>CancelToken</code>, <code>FrameBytes</code>, <code>PixelFormat</code>, <code>Recovery</code>, <code>RecoveryNote</code>; <code>src/<wbr>platform/<wbr></code>: <code>mod.rs</code> (both attach exports and the surface work they share), <code>ios.rs</code>, <code>android.rs</code> and <code>ids.rs</code> (the window id table)</td>
 </tr>
 <tr>
 <td><code>rust/<wbr>effects/<wbr>craftbridge-effects-ffi</code></td>
@@ -1901,6 +1906,7 @@ impl Engine {
 <ul>
 <li><strong>iOS:</strong> <code>attach_metal_layer(engine, layer: u64)</code>. Swift passes <code>Unmanaged.passUnretained(layer).toOpaque()</code> and keeps the layer alive while attached (L6); Rust calls <code>Instance::create_surface_unsafe(SurfaceTargetUnsafe::CoreAnimationLayer(ptr))</code> (wgpu v30.0.1 <code>wgpu/<wbr>src/<wbr>api/<wbr>surface.rs</code>).</li>
 <li><strong>Android:</strong> UniFFI&#39;s Kotlin bindings call through JNA, which cannot pass a JNI environment, so one hand-written JNI function, <code>Java_io_github_christopherlinnett_craftbridge_core_NativeSurfaces_acquire(env, class, surface) -&gt; jlong</code>, calls <code>ndk::native_window::NativeWindow::from_surface</code> and stores the window in a process-wide table. Kotlin then calls the UniFFI method <code>engine.attachWindow(id)</code>; <code>NativeSurfaces.release(id)</code> returns it (L6).</li>
+<li><strong>Both, in every build:</strong> <code>attach_metal_layer</code> and <code>attach_window</code> are exported from every target&#39;s library, each answering <code>Unsupported</code> where its platform&#39;s object does not exist, because both bindings are generated from one host build (below) and name every call that build exports, and UniFFI&#39;s Kotlin binds every call it names as the library loads.</li>
 </ul>
 <p><strong>Async and cancellation.</strong> Every engine call is an <code>async fn</code> without a Rust runtime: it resolves when the actor answers (§16). UniFFI futures cannot be cancelled (<code>evidence/<wbr>05-mobile-platforms.md</code> Finding 6), so cancellation is the explicit <code>CancelToken</code>; the Swift layer wires it to <code>Task</code> cancellation and the Kotlin layer to coroutine cancellation.</p>
 <p><strong>Bindings generation</strong> (library mode on a host build of <code>craftbridge-effects-ffi</code>, by <code>rust/<wbr>uniffi-bindgen</code>, which pins the generator to the library&#39;s UniFFI version). The bindings are committed generated code (D-26), so they are written by generators registered with <code>cargo xtask generate</code> (AGENTS §6), one for each folder below, since each generator owns one output directory: each builds the library for the host, runs <code>rust/<wbr>uniffi-bindgen</code> into its folder and prepends the <code>@generated</code> marker UniFFI does not write, and <code>generate --check</code> regenerates and compares them in the gate. The build scripts of §22 and §23 call <code>cargo xtask generate</code> rather than the generator itself.</p>

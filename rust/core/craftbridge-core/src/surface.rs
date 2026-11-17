@@ -1,14 +1,15 @@
 //! The app's preview surface: how it is configured, resized, drawn into and lost (plan §17).
 //!
-//! The platform hands the core a `CAMetalLayer` (iOS) or an Android `Surface` once, already made into
-//! a wgpu surface on the core's own instance. This module chooses everything the surface is
+//! The platform hands the core a `CAMetalLayer` (iOS) or an Android `Surface` once, already made
+//! into a wgpu surface on the core's own instance. This module chooses everything the surface is
 //! configured with, from the platform and from what the surface reports it supports, so a surface
 //! that cannot offer a choice answers an error instead of a configuration wgpu would panic on.
 //!
-//! The surface itself is reached through [`Swapchain`], which `wgpu::Surface` implements, and the
-//! texture it hands over for a frame through `Taken`, which `wgpu::SurfaceTexture` implements, so
-//! the rules here — what is configured on a resize, what each way a frame can fail to be acquired
-//! answers, how a frame is drawn and shown — run on the desktop without a window.
+//! The surface itself is reached through [`Swapchain`], which the platform modules implement over
+//! the surface they made from the app's handle (it is the handle that knows its own size, §17), and
+//! the texture it hands over for a frame through `Taken`, which `wgpu::SurfaceTexture` implements,
+//! so the rules here — what is configured on a resize, what each way a frame can fail to be
+//! acquired answers, how a frame is drawn and shown — run on the desktop without a window.
 
 use crate::Result;
 use crate::blit::{Blit, Output};
@@ -102,7 +103,10 @@ impl Choice {
     }
 }
 
-/// What the preview surface needs of a wgpu surface.
+/// What the preview surface needs of a wgpu surface. The platform modules implement this over the
+/// wgpu surface they made from the app's layer or window, because only that handle knows the
+/// surface's current size: a `wgpu::Surface` on its own can answer nothing about the CAMetalLayer's
+/// bounds or the ANativeWindow's size, which is what §17 sizes and resizes by.
 pub trait Swapchain {
     /// What the surface supports on this adapter.
     fn capabilities(&self, adapter: &wgpu::Adapter) -> wgpu::SurfaceCapabilities;
@@ -110,23 +114,15 @@ pub trait Swapchain {
     fn configure(&self, device: &wgpu::Device, configuration: &wgpu::SurfaceConfiguration);
     /// Take the texture to draw the next frame into, or say why there is none.
     fn acquire(&self) -> wgpu::CurrentSurfaceTexture;
+    /// The surface's current size in pixels: the app's layer or window as it is now, zero on an
+    /// axis with no pixels yet (§17). [`PreviewSurface::present`] compares every present against
+    /// this and configures again when it has changed.
+    fn current_size(&self) -> (u32, u32);
 }
 
-impl Swapchain for wgpu::Surface<'static> {
-    fn capabilities(&self, adapter: &wgpu::Adapter) -> wgpu::SurfaceCapabilities {
-        self.get_capabilities(adapter)
-    }
-
-    fn configure(&self, device: &wgpu::Device, configuration: &wgpu::SurfaceConfiguration) {
-        wgpu::Surface::configure(self, device, configuration);
-    }
-
-    fn acquire(&self) -> wgpu::CurrentSurfaceTexture {
-        self.get_current_texture()
-    }
-}
-
-/// A surface of any kind, as the engine holds the app's preview surface for the platform that made it.
+/// A platform's surface with its type erased, which is how the engine holds one: the message that
+/// attaches a surface is built in the platform module, whose concrete wrapper type no engine code
+/// names, and the surface lives on the engine's thread beside the lifecycle that owns it.
 impl Swapchain for Box<dyn Swapchain + Send> {
     fn capabilities(&self, adapter: &wgpu::Adapter) -> wgpu::SurfaceCapabilities {
         (**self).capabilities(adapter)
@@ -138,6 +134,10 @@ impl Swapchain for Box<dyn Swapchain + Send> {
 
     fn acquire(&self) -> wgpu::CurrentSurfaceTexture {
         (**self).acquire()
+    }
+
+    fn current_size(&self) -> (u32, u32) {
+        (**self).current_size()
     }
 }
 
@@ -212,8 +212,9 @@ pub enum Presented {
     Skipped,
 }
 
-/// The app's preview surface, configured and ready to blit into.
-pub struct PreviewSurface<S: Swapchain = wgpu::Surface<'static>> {
+/// The app's preview surface, configured and ready to blit into. The engine holds one with the
+/// platform's wrapper type erased ([`Box<dyn Swapchain + Send>`]); tests hold a script.
+pub struct PreviewSurface<S: Swapchain = Box<dyn Swapchain + Send>> {
     swapchain: S,
     choice: Choice,
     blit: Blit,
@@ -228,8 +229,9 @@ pub struct PreviewSurface<S: Swapchain = wgpu::Surface<'static>> {
 
 impl<S: Swapchain> PreviewSurface<S> {
     /// Take the platform's surface, choose its configuration from what it supports on the core's
-    /// `adapter`, make the blit pass for it, and configure it at `size`.
-    pub fn attach(swapchain: S, adapter: &wgpu::Adapter, device: &wgpu::Device, size: (u32, u32)) -> Result<Self> {
+    /// `adapter`, make the blit pass for it, and configure it at the size the surface has now.
+    pub fn attach(swapchain: S, adapter: &wgpu::Adapter, device: &wgpu::Device) -> Result<Self> {
+        let size = swapchain.current_size();
         let choice = Choice::from_capabilities(Platform::current(), &swapchain.capabilities(adapter))?;
         let blit = Blit::new(device, choice.format, choice.output)?;
         let mut surface = Self { swapchain, choice, blit, size, max_side: device.limits().max_texture_dimension_2d, configured: false, lost: false };
@@ -243,11 +245,11 @@ impl<S: Swapchain> PreviewSurface<S> {
         self.choice
     }
 
-    /// The surface changed size: configure it again at `size`. A size of no pixels leaves it
-    /// unconfigured, and presents skip until it has one.
-    pub fn resize(&mut self, device: &wgpu::Device, size: (u32, u32)) -> Result<()> {
-        self.size = size;
-        self.reconfigure(device)
+    /// The size the surface is configured at, which is the size its swapchain last reported; a
+    /// surface of no pixels is unconfigured until it has some.
+    #[must_use]
+    pub const fn size(&self) -> (u32, u32) {
+        self.size
     }
 
     /// Configure the swapchain for the current size, or note it has none.
@@ -271,7 +273,25 @@ impl<S: Swapchain> PreviewSurface<S> {
         if self.lost {
             return Err(Fault::Lost.error());
         }
-        if !self.configured {
+        // §17: a layer or window resized between presents is found here first, from the handle's
+        // live size — a CAMetalLayer resized with no error ever reaching wgpu, and a window resized
+        // before an acquire could say so: configure again for the new size, answer `Gpu`, and the
+        // next present draws. A surface that only now has a size is not a resize: it configures and
+        // draws this frame.
+        let size = self.swapchain.current_size();
+        if size != self.size {
+            let was_configured = self.configured;
+            self.size = size;
+            self.reconfigure(device)?;
+            if !self.configured {
+                // A surface that has no size, whether it never had one or has just lost it: nothing
+                // there can show a frame, so this present skips, as any present on it does.
+                return Ok(Presented::Skipped);
+            }
+            if was_configured {
+                return Err(Fault::Outdated.error());
+            }
+        } else if !self.configured {
             return Ok(Presented::Skipped);
         }
         // wgpu reports an acquire that fails validation to the device's error scopes, and panics
@@ -282,7 +302,12 @@ impl<S: Swapchain> PreviewSurface<S> {
             Err(fault) => {
                 match fault {
                     Fault::Lost => self.lost = true,
-                    Fault::Outdated => self.reconfigure(device)?,
+                    // The resize wgpu itself saw: take the live size with it, so the frame the
+                    // next present draws goes into a surface configured for the size it has.
+                    Fault::Outdated => {
+                        self.size = self.swapchain.current_size();
+                        self.reconfigure(device)?;
+                    }
                     Fault::Validation => {}
                 }
                 Err(fault.error())
@@ -315,24 +340,8 @@ impl<S: Swapchain> PreviewSurface<S> {
 mod tests {
     use super::*;
     use crate::blit::tests::{assert_matches, ramp_frame, reference, target};
-    use crate::testing::{Rig, read_back, rig, texture};
-    use std::cell::{Cell, RefCell};
-    use std::collections::VecDeque;
-
-    /// What a surface reports, written out: formats, present modes, alpha modes.
-    fn caps(formats: &[wgpu::TextureFormat], modes: &[wgpu::PresentMode], alpha: &[wgpu::CompositeAlphaMode]) -> wgpu::SurfaceCapabilities {
-        wgpu::SurfaceCapabilities { formats: formats.to_vec(), present_modes: modes.to_vec(), alpha_modes: alpha.to_vec(), ..Default::default() }
-    }
-
-    const EVERYTHING: [wgpu::CompositeAlphaMode; 4] = [
-        wgpu::CompositeAlphaMode::Opaque,
-        wgpu::CompositeAlphaMode::PostMultiplied,
-        wgpu::CompositeAlphaMode::PreMultiplied,
-        wgpu::CompositeAlphaMode::Inherit,
-    ];
-    const MODES: [wgpu::PresentMode; 2] = [wgpu::PresentMode::Immediate, wgpu::PresentMode::Fifo];
-    const BOTH: [wgpu::TextureFormat; 4] =
-        [wgpu::TextureFormat::Rgba8UnormSrgb, wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Bgra8UnormSrgb, wgpu::TextureFormat::Bgra8Unorm];
+    use crate::testing::{BOTH, EVERYTHING, MODES, Rig, Scripted, caps, read_back, refuse, rig, texture};
+    use std::cell::Cell;
 
     /// §17's formats: `Bgra8Unorm` on iOS, `Rgba8Unorm` on Android, never sRGB, each only when the
     /// surface lists it, whatever order it lists them in.
@@ -416,52 +425,6 @@ mod tests {
         assert_eq!(choice.configuration((640, 0), 16_384), None);
     }
 
-    /// Raise a validation error on `device`, as wgpu does on a refused acquire or present: a
-    /// texture with no width.
-    fn refuse(device: &wgpu::Device) {
-        let _ = texture(device, (0, 4), 1, wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureUsages::TEXTURE_BINDING);
-    }
-
-    /// A surface that is a script: it reports what it is told, records every configuration, and
-    /// answers acquisitions from a queue, raising a device error while it acquires when told to.
-    struct Scripted {
-        capabilities: wgpu::SurfaceCapabilities,
-        configured: RefCell<Vec<(u32, u32)>>,
-        acquisitions: RefCell<VecDeque<wgpu::CurrentSurfaceTexture>>,
-        acquired: RefCell<u32>,
-        refuse: Option<wgpu::Device>,
-    }
-
-    impl Scripted {
-        fn new(acquisitions: impl IntoIterator<Item = wgpu::CurrentSurfaceTexture>) -> Self {
-            Self {
-                capabilities: caps(&BOTH, &MODES, &EVERYTHING),
-                configured: RefCell::new(Vec::new()),
-                acquisitions: RefCell::new(acquisitions.into_iter().collect()),
-                acquired: RefCell::new(0),
-                refuse: None,
-            }
-        }
-    }
-
-    impl Swapchain for &Scripted {
-        fn capabilities(&self, _: &wgpu::Adapter) -> wgpu::SurfaceCapabilities {
-            caps(&self.capabilities.formats, &self.capabilities.present_modes, &self.capabilities.alpha_modes)
-        }
-
-        fn configure(&self, _: &wgpu::Device, configuration: &wgpu::SurfaceConfiguration) {
-            self.configured.borrow_mut().push((configuration.width, configuration.height));
-        }
-
-        fn acquire(&self) -> wgpu::CurrentSurfaceTexture {
-            *self.acquired.borrow_mut() += 1;
-            if let Some(device) = &self.refuse {
-                refuse(device);
-            }
-            self.acquisitions.borrow_mut().pop_front().unwrap_or(wgpu::CurrentSurfaceTexture::Lost)
-        }
-    }
-
     /// A surface texture made offscreen, as a real surface's would be handed over: drawn into and
     /// read back, counting how often it was shown, and raising a device error as it is shown when told to.
     struct Offscreen<'a> {
@@ -488,16 +451,22 @@ mod tests {
         texture(&rig.device, (4, 4), 1, wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureUsages::TEXTURE_BINDING)
     }
 
-    /// Attaching configures at the size it was given, and every resize configures again at the new one.
+    /// Attaching configures at the size the surface has, and the present that finds a new size
+    /// configures again for it and answers `Gpu`, so the next frame draws at it (§17).
     #[test]
-    fn attach_and_every_resize_configure_the_surface() {
+    fn attach_and_a_resized_surface_configure_the_surface() {
         let rig = rig();
-        let scripted = Scripted::new([]);
-        let mut surface = PreviewSurface::attach(&scripted, &rig.adapter, &rig.device, (320, 240)).expect("the scripted surface attaches");
-        assert_eq!(*scripted.configured.borrow(), [(320, 240)]);
-        surface.resize(&rig.device, (640, 480)).expect("a resize");
-        surface.resize(&rig.device, (240, 320)).expect("a resize");
-        assert_eq!(*scripted.configured.borrow(), [(320, 240), (640, 480), (240, 320)]);
+        let scripted = Scripted::new((320, 240), []);
+        let mut surface = PreviewSurface::attach(scripted.clone(), &rig.adapter, &rig.device).expect("the scripted surface attaches");
+        assert_eq!(surface.size(), (320, 240), "the surface attaches at the size it reports");
+        assert_eq!(scripted.configured(), [(320, 240)]);
+        let outdated = CraftError::gpu("the preview surface changed size or format; it is configured again, so the next frame draws");
+        scripted.set_size((640, 480));
+        assert_eq!(surface.present(&rig.device, &rig.queue, &frame(&rig)), Err(outdated.clone()));
+        scripted.set_size((240, 320));
+        assert_eq!(surface.present(&rig.device, &rig.queue, &frame(&rig)), Err(outdated));
+        assert_eq!(scripted.configured(), [(320, 240), (640, 480), (240, 320)], "one configuration per size");
+        assert_eq!(scripted.acquired(), 0, "a present that finds a resize does not draw");
         // The platform's choice, from what the script offers: post-multiplied BGRA, as the host takes it.
         let choice = Choice { format: wgpu::TextureFormat::Bgra8Unorm, alpha_mode: wgpu::CompositeAlphaMode::PostMultiplied, output: Output::PostMultiplied };
         assert_eq!(surface.choice(), choice);
@@ -508,27 +477,27 @@ mod tests {
     #[test]
     fn a_surface_with_no_size_skips_until_it_has_one() {
         let rig = rig();
-        let scripted = Scripted::new([wgpu::CurrentSurfaceTexture::Occluded]);
-        let mut surface = PreviewSurface::attach(&scripted, &rig.adapter, &rig.device, (0, 0)).expect("a surface of no size attaches");
-        assert!(scripted.configured.borrow().is_empty());
+        let scripted = Scripted::new((0, 0), [wgpu::CurrentSurfaceTexture::Occluded]);
+        let mut surface = PreviewSurface::attach(scripted.clone(), &rig.adapter, &rig.device).expect("a surface of no size attaches");
+        assert!(scripted.configured().is_empty());
         assert_eq!(surface.present(&rig.device, &rig.queue, &frame(&rig)), Ok(Presented::Skipped));
-        assert_eq!(*scripted.acquired.borrow(), 0);
-        surface.resize(&rig.device, (16, 16)).expect("a first size");
-        assert_eq!(*scripted.configured.borrow(), [(16, 16)]);
+        assert_eq!(scripted.acquired(), 0);
+        scripted.set_size((16, 16));
+        assert_eq!(surface.present(&rig.device, &rig.queue, &frame(&rig)), Ok(Presented::Skipped));
+        assert_eq!(scripted.configured(), [(16, 16)], "the first size configures the surface");
         // Now it asks, and an occluded surface is a skip, not an error.
+        assert_eq!(scripted.acquired(), 1);
+        scripted.set_size((0, 16));
         assert_eq!(surface.present(&rig.device, &rig.queue, &frame(&rig)), Ok(Presented::Skipped));
-        assert_eq!(*scripted.acquired.borrow(), 1);
-        surface.resize(&rig.device, (0, 16)).expect("a resize to nothing");
-        assert_eq!(surface.present(&rig.device, &rig.queue, &frame(&rig)), Ok(Presented::Skipped));
-        assert_eq!(*scripted.acquired.borrow(), 1);
+        assert_eq!(scripted.acquired(), 1, "a surface of no size is never asked for a frame");
     }
 
     /// A timeout skips the frame and the session goes on.
     #[test]
     fn a_timeout_skips_the_frame() {
         let rig = rig();
-        let scripted = Scripted::new([wgpu::CurrentSurfaceTexture::Timeout]);
-        let mut surface = PreviewSurface::attach(&scripted, &rig.adapter, &rig.device, (16, 16)).expect("attached");
+        let scripted = Scripted::new((16, 16), [wgpu::CurrentSurfaceTexture::Timeout]);
+        let mut surface = PreviewSurface::attach(scripted.clone(), &rig.adapter, &rig.device).expect("attached");
         assert_eq!(surface.present(&rig.device, &rig.queue, &frame(&rig)), Ok(Presented::Skipped));
     }
 
@@ -537,15 +506,15 @@ mod tests {
     #[test]
     fn an_outdated_surface_is_configured_again_and_answers_gpu() {
         let rig = rig();
-        let scripted = Scripted::new([wgpu::CurrentSurfaceTexture::Outdated, wgpu::CurrentSurfaceTexture::Outdated]);
-        let mut surface = PreviewSurface::attach(&scripted, &rig.adapter, &rig.device, (16, 16)).expect("attached");
+        let scripted = Scripted::new((16, 16), [wgpu::CurrentSurfaceTexture::Outdated, wgpu::CurrentSurfaceTexture::Outdated]);
+        let mut surface = PreviewSurface::attach(scripted.clone(), &rig.adapter, &rig.device).expect("attached");
         let error = surface.present(&rig.device, &rig.queue, &frame(&rig)).expect_err("outdated is an error");
         assert_eq!(error, CraftError::gpu("the preview surface changed size or format; it is configured again, so the next frame draws"));
-        assert_eq!(*scripted.configured.borrow(), [(16, 16), (16, 16)], "configured again after the fault");
+        assert_eq!(scripted.configured(), [(16, 16), (16, 16)], "configured again after the fault");
         // It asks again on the next present: outdated is not lost.
         assert!(surface.present(&rig.device, &rig.queue, &frame(&rig)).is_err());
-        assert_eq!(*scripted.acquired.borrow(), 2);
-        assert_eq!(scripted.configured.borrow().len(), 3);
+        assert_eq!(scripted.acquired(), 2);
+        assert_eq!(scripted.configured().len(), 3);
     }
 
     /// A lost surface answers the `Gpu` error, never a panic, and keeps answering it without asking
@@ -553,16 +522,16 @@ mod tests {
     #[test]
     fn a_lost_surface_answers_gpu_and_stays_lost() {
         let rig = rig();
-        let scripted = Scripted::new([wgpu::CurrentSurfaceTexture::Lost]);
-        let mut surface = PreviewSurface::attach(&scripted, &rig.adapter, &rig.device, (16, 16)).expect("attached");
+        let scripted = Scripted::new((16, 16), [wgpu::CurrentSurfaceTexture::Lost]);
+        let mut surface = PreviewSurface::attach(scripted.clone(), &rig.adapter, &rig.device).expect("attached");
         let lost = CraftError::gpu("the preview surface was lost; attach a new surface to preview again");
         assert_eq!(surface.present(&rig.device, &rig.queue, &frame(&rig)), Err(lost.clone()));
         assert_eq!(surface.present(&rig.device, &rig.queue, &frame(&rig)), Err(lost));
-        assert_eq!(*scripted.acquired.borrow(), 1, "a lost surface is not asked again");
-        assert_eq!(*scripted.configured.borrow(), [(16, 16)], "a lost surface is not configured again");
+        assert_eq!(scripted.acquired(), 1, "a lost surface is not asked again");
+        assert_eq!(scripted.configured(), [(16, 16)], "a lost surface is not configured again");
         // The session is unharmed: a new surface attaches on the same device and presents.
-        let fresh = Scripted::new([wgpu::CurrentSurfaceTexture::Timeout]);
-        let mut surface = PreviewSurface::attach(&fresh, &rig.adapter, &rig.device, (16, 16)).expect("a new surface attaches");
+        let fresh = Scripted::new((16, 16), [wgpu::CurrentSurfaceTexture::Timeout]);
+        let mut surface = PreviewSurface::attach(fresh.clone(), &rig.adapter, &rig.device).expect("a new surface attaches");
         assert_eq!(surface.present(&rig.device, &rig.queue, &frame(&rig)), Ok(Presented::Skipped));
     }
 
@@ -570,12 +539,12 @@ mod tests {
     #[test]
     fn a_validation_error_answers_gpu_without_losing_the_surface() {
         let rig = rig();
-        let scripted = Scripted::new([wgpu::CurrentSurfaceTexture::Validation, wgpu::CurrentSurfaceTexture::Timeout]);
-        let mut surface = PreviewSurface::attach(&scripted, &rig.adapter, &rig.device, (16, 16)).expect("attached");
+        let scripted = Scripted::new((16, 16), [wgpu::CurrentSurfaceTexture::Validation, wgpu::CurrentSurfaceTexture::Timeout]);
+        let mut surface = PreviewSurface::attach(scripted.clone(), &rig.adapter, &rig.device).expect("attached");
         let error = surface.present(&rig.device, &rig.queue, &frame(&rig)).expect_err("a validation error");
         assert_eq!(error, CraftError::gpu("the preview surface reported a validation error"));
         assert_eq!(surface.present(&rig.device, &rig.queue, &frame(&rig)), Ok(Presented::Skipped));
-        assert_eq!(*scripted.configured.borrow(), [(16, 16)]);
+        assert_eq!(scripted.configured(), [(16, 16)]);
     }
 
     /// The device error wgpu raises when it refuses an acquire is the `Gpu` error with the device's
@@ -583,16 +552,16 @@ mod tests {
     #[test]
     fn a_device_error_while_acquiring_is_a_gpu_error_not_a_panic() {
         let rig = rig();
-        let mut scripted = Scripted::new([wgpu::CurrentSurfaceTexture::Validation, wgpu::CurrentSurfaceTexture::Timeout]);
-        scripted.refuse = Some(rig.device.clone());
-        let mut surface = PreviewSurface::attach(&scripted, &rig.adapter, &rig.device, (16, 16)).expect("attached");
+        let scripted = Scripted::new((16, 16), [wgpu::CurrentSurfaceTexture::Validation, wgpu::CurrentSurfaceTexture::Timeout]);
+        scripted.refuse(rig.device.clone());
+        let mut surface = PreviewSurface::attach(scripted.clone(), &rig.adapter, &rig.device).expect("attached");
         let Err(CraftError::Gpu { message }) = surface.present(&rig.device, &rig.queue, &frame(&rig)) else {
             panic!("a refused acquire must answer a Gpu error");
         };
         assert!(message.starts_with("acquiring the preview frame: "), "{message}");
         // The surface is not lost by it: the next present asks again.
         assert_eq!(surface.present(&rig.device, &rig.queue, &frame(&rig)), Err(CraftError::Gpu { message }));
-        assert_eq!(*scripted.acquired.borrow(), 2);
+        assert_eq!(scripted.acquired(), 2);
     }
 
     /// A texture the surface hands over is drawn into aspect-fit at its own size, matching the
@@ -601,8 +570,8 @@ mod tests {
     #[test]
     fn a_frame_is_drawn_aspect_fit_into_the_texture_the_surface_hands_over_and_shown() {
         let rig = rig();
-        let scripted = Scripted::new([]);
-        let mut surface = PreviewSurface::attach(&scripted, &rig.adapter, &rig.device, (48, 48)).expect("attached");
+        let scripted = Scripted::new((48, 48), []);
+        let mut surface = PreviewSurface::attach(scripted.clone(), &rig.adapter, &rig.device).expect("attached");
         let source = ramp_frame(&rig, 32, 16);
         for (size, suboptimal) in [((48, 48), false), ((24, 48), true)] {
             let drawn = target(&rig, surface.choice().format, size);
@@ -612,15 +581,15 @@ mod tests {
             assert_eq!(shown.get(), 1, "{size:?}: shown once");
             assert_matches(&read_back(&rig, &drawn), &reference((32, 16), size), size.0, &format!("{size:?}"));
         }
-        assert_eq!(*scripted.configured.borrow(), [(48, 48), (48, 48)], "configured again after the suboptimal frame only");
+        assert_eq!(scripted.configured(), [(48, 48), (48, 48)], "configured again after the suboptimal frame only");
     }
 
     /// A frame the pass cannot draw is the `Gpu` error and is not shown, so the surface keeps its last frame.
     #[test]
     fn a_frame_that_fails_to_draw_is_not_shown() {
         let rig = rig();
-        let scripted = Scripted::new([]);
-        let mut surface = PreviewSurface::attach(&scripted, &rig.adapter, &rig.device, (16, 16)).expect("attached");
+        let scripted = Scripted::new((16, 16), []);
+        let mut surface = PreviewSurface::attach(scripted.clone(), &rig.adapter, &rig.device).expect("attached");
         let unbindable = texture(&rig.device, (4, 4), 1, wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureUsages::COPY_DST);
         let shown = Cell::new(0);
         let taken = Offscreen { texture: target(&rig, surface.choice().format, (16, 16)), shown: &shown, refuse: None };
@@ -629,7 +598,7 @@ mod tests {
         };
         assert!(message.starts_with("the blit draw: "), "{message}");
         assert_eq!(shown.get(), 0, "an undrawn frame is not shown");
-        assert_eq!(*scripted.configured.borrow(), [(16, 16)], "nothing was shown, so nothing is configured again");
+        assert_eq!(scripted.configured(), [(16, 16)], "nothing was shown, so nothing is configured again");
     }
 
     /// The device error wgpu raises when it refuses to present is the `Gpu` error with the device's
@@ -637,8 +606,8 @@ mod tests {
     #[test]
     fn a_device_error_while_showing_is_a_gpu_error_not_a_panic() {
         let rig = rig();
-        let scripted = Scripted::new([]);
-        let mut surface = PreviewSurface::attach(&scripted, &rig.adapter, &rig.device, (16, 16)).expect("attached");
+        let scripted = Scripted::new((16, 16), []);
+        let mut surface = PreviewSurface::attach(scripted.clone(), &rig.adapter, &rig.device).expect("attached");
         let shown = Cell::new(0);
         let taken = Offscreen { texture: target(&rig, surface.choice().format, (16, 16)), shown: &shown, refuse: Some(&rig.device) };
         let Err(CraftError::Gpu { message }) = surface.show(&rig.device, &rig.queue, &ramp_frame(&rig, 4, 4), taken, false) else {
@@ -652,9 +621,9 @@ mod tests {
     #[test]
     fn attaching_to_a_surface_with_no_usable_format_is_a_gpu_error() {
         let rig = rig();
-        let mut scripted = Scripted::new([]);
-        scripted.capabilities = caps(&[wgpu::TextureFormat::Rgba16Float], &MODES, &EVERYTHING);
-        let Err(CraftError::Gpu { message }) = PreviewSurface::attach(&scripted, &rig.adapter, &rig.device, (16, 16)) else {
+        let scripted = Scripted::new((16, 16), []);
+        scripted.set_caps(caps(&[wgpu::TextureFormat::Rgba16Float], &MODES, &EVERYTHING));
+        let Err(CraftError::Gpu { message }) = PreviewSurface::attach(scripted.clone(), &rig.adapter, &rig.device) else {
             panic!("a surface with no usable format must not attach");
         };
         assert!(message.starts_with("the preview surface offers none of the formats"), "{message}");

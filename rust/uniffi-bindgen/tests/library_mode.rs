@@ -63,6 +63,12 @@ fn the_core_s_kotlin_holds_every_export_and_no_name_kotlin_owns() {
         "suspend fun `mcp`(`line`: kotlin.String): kotlin.String?",
         "suspend fun `suspendGpu`()",
         "suspend fun `resumeGpu`(): kotlin.String?",
+        "suspend fun `present`(`params`: kotlin.String)",
+        "suspend fun `detachPreview`()",
+        // Both platforms' attaches, in every build's bindings: Kotlin binds every call it names as the
+        // library loads, so the names must be the ones every platform's library exports (plan §20).
+        "suspend fun `attachWindow`(`id`: kotlin.Long)",
+        "suspend fun `attachMetalLayer`(`engine`: Engine, `layer`: kotlin.ULong) {",
         "suspend fun `shutDown`()",
         "fun `recovery`(): Recovery",
         "public interface CancelTokenInterface {",
@@ -112,6 +118,9 @@ fn the_core_s_swift_holds_every_export_in_files_named_for_its_crate() {
         "func mcp(line: String) async throws -> String?",
         "func suspendGpu() async throws",
         "func resumeGpu() async throws -> String?",
+        "func present(params: String) async throws",
+        "func detachPreview() async throws",
+        "func attachWindow(id: Int64) async throws",
         "func shutDown() async throws",
         "func recovery() throws -> Recovery",
         "public protocol CancelTokenProtocol: AnyObject, Sendable {",
@@ -128,6 +137,8 @@ fn the_core_s_swift_holds_every_export_in_files_named_for_its_crate() {
         "public var reason: String",
         "public var data: Data",
         "public enum GpuChoice: Equatable, Hashable {",
+        // The iOS attach of plan §20 is a top-level call taking the engine, as the plan names it.
+        "public func attachMetalLayer(engine: Engine, layer: UInt64)async throws {",
         "public enum PixelFormat: Equatable, Hashable {",
         // UniFFI writes the error's `public` on a line of its own.
         "enum CraftError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {",

@@ -9,12 +9,10 @@
 use crate::Result;
 use crate::app::CraftApp;
 use crate::engine::guarded;
+use crate::error::CraftError;
 use crate::gpu::{GpuChoice, GpuDevice};
-use crate::surface::{PreviewSurface, Swapchain};
-
-/// The app's preview surface as the engine holds it: any swapchain, since the platform decides what
-/// the surface is and the engine only keeps it for as long as the device it was made on lives.
-pub(crate) type Preview = PreviewSurface<Box<dyn Swapchain + Send>>;
+use crate::preview::{NO_DEVICE, Surface, SurfaceMaker};
+use serde_json::Value;
 
 /// What the engine holds of the GPU: the device it handed the app, and the preview surface made on
 /// that device. Neither is held with no device: a surface outlives its device by nothing but a
@@ -24,7 +22,7 @@ pub(crate) struct GpuLifecycle {
     /// asks again, so an engine that chose `CpuOnly` never gets one by resuming (plan §14).
     choice: GpuChoice,
     /// Declared before `held`, so the surface is dropped before the device it was configured on.
-    pub(crate) preview: Option<Preview>,
+    preview: Option<Surface>,
     /// The device the app was handed, kept for its failure notice: `Some` only while the app holds
     /// a real device, so the engine is on the GPU exactly when this is.
     held: Option<GpuDevice>,
@@ -44,6 +42,34 @@ impl GpuLifecycle {
             let _ = guarded(|| app.attach_gpu(&note));
         }
         lifecycle
+    }
+
+    /// Make the preview surface `make` builds on the device the app was handed, in place of the one
+    /// attached: that one is given up first, since Vulkan makes one surface of an Android window at
+    /// a time and an app may attach the window it already attached, so an attach that fails leaves
+    /// no surface and every present answers so until one succeeds. With no device, whether the engine
+    /// chose the CPU, found no adapter or gave its device up for the background, there is nothing to
+    /// preview on and `make` never runs: the app attaches again once it holds a device.
+    pub(crate) fn attach_preview(&mut self, make: SurfaceMaker) -> Result<()> {
+        self.preview = None;
+        let device = self.held.as_ref().ok_or_else(|| CraftError::gpu(NO_DEVICE))?;
+        self.preview = Some(make(device)?);
+        Ok(())
+    }
+
+    /// Run one `present` call on the app: the app takes the frame for its `params` and draws it
+    /// through the surface. With no surface — never attached, after an attach that failed, after
+    /// `detach_preview` or with the GPU gone — the call answers `Gpu { "no surface" }` and the
+    /// session is untouched (plan §17).
+    pub(crate) fn present_preview(&mut self, app: &mut dyn CraftApp, params: Value) -> Result<()> {
+        let surface = self.preview.as_mut().ok_or_else(|| CraftError::gpu("no surface"))?;
+        app.present(params, surface)
+    }
+
+    /// Drop the preview surface, and the platform handle and frame upload it holds. A detach with
+    /// nothing attached changes nothing.
+    pub(crate) fn detach_preview(&mut self) {
+        self.preview = None;
     }
 
     /// Drop the GPU if the notice of the device the app holds has a report: the first device-lost
@@ -116,7 +142,8 @@ mod tests {
     use crate::error::CraftError;
     use crate::frames::{FrameBytes, PixelFormat};
     use crate::gpu::GpuFailure;
-    use crate::testing::{Gate, rig};
+    use crate::surface::Swapchain;
+    use crate::testing::{Gate, Scripted, rig};
     use serde_json::{Value, json};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -225,6 +252,11 @@ mod tests {
         fn mcp(&mut self, _line: &str) -> Option<String> {
             self.shared.log("call mcp".to_string());
             None
+        }
+
+        fn present(&mut self, _params: Value, surface: &mut Surface) -> Result<()> {
+            self.shared.log("present".to_string());
+            surface.present_frame(&FrameBytes::new(1, 1, PixelFormat::Rgba8Straight, vec![0, 0, 0, 255])?).map(drop)
         }
 
         fn attach_gpu(&mut self, gpu: &GpuDevice) -> Result<()> {
@@ -540,6 +572,11 @@ mod tests {
             self.1.lock().unwrap().push("acquire");
             wgpu::CurrentSurfaceTexture::Timeout
         }
+
+        fn current_size(&self) -> (u32, u32) {
+            self.1.lock().unwrap().push("current_size");
+            (4, 4)
+        }
     }
 
     /// The engine holds the app's surface as a boxed swapchain, so the box must hand each call to the
@@ -563,7 +600,22 @@ mod tests {
         };
         swapchain.configure(&rig.device, &configuration);
         assert!(matches!(swapchain.acquire(), wgpu::CurrentSurfaceTexture::Timeout));
-        assert_eq!(*calls.lock().unwrap(), ["configure", "acquire"]);
+        assert_eq!(swapchain.current_size(), (4, 4));
+        assert_eq!(*calls.lock().unwrap(), ["configure", "acquire", "current_size"]);
+    }
+
+    /// A platform's call that makes no surface and flips `made` if it is ever run.
+    fn noting_maker(made: &Arc<AtomicBool>) -> SurfaceMaker {
+        let made = made.clone();
+        Box::new(move |_| {
+            made.store(true, Ordering::SeqCst);
+            Err(CraftError::gpu("made"))
+        })
+    }
+
+    /// A platform's call that makes a [`Flagged`] surface that flips `dropped` when it goes.
+    fn flagged(dropped: Arc<AtomicBool>) -> SurfaceMaker {
+        Box::new(move |gpu| Surface::new(Box::new(Flagged(dropped, Arc::default())), gpu))
     }
 
     /// A lifecycle on a device, holding a preview surface that flips `dropped` when it goes.
@@ -571,9 +623,7 @@ mod tests {
         let (mut app, shared) = Probe::new();
         let mut lifecycle = GpuLifecycle::start(&mut app, GpuChoice::Preferred);
         let dropped = Arc::new(AtomicBool::new(false));
-        let rig = rig();
-        let swapchain: Box<dyn Swapchain + Send> = Box::new(Flagged(dropped.clone(), Arc::default()));
-        lifecycle.preview = Some(PreviewSurface::attach(swapchain, &rig.adapter, &rig.device, (4, 4)).expect("the surface attaches"));
+        lifecycle.attach_preview(flagged(dropped.clone())).expect("the surface attaches");
         (lifecycle, app, shared, dropped)
     }
 
@@ -596,5 +646,71 @@ mod tests {
         lifecycle.settle(&mut app);
         assert!(dropped.load(Ordering::SeqCst));
         assert_eq!(shared.events().last().map(String::as_str), Some("drop_gpu"));
+    }
+
+    /// A preview attached, presented, dropped with the GPU on a suspend and attached again after a
+    /// resume: the engine's one device carries it, nothing brings it back but the app's own attach,
+    /// and while there is no device every attach and present answers so and makes nothing.
+    #[test]
+    fn a_preview_is_dropped_on_suspend_and_attaches_again_after_resume() {
+        let (app, shared) = Probe::new();
+        let engine = Engine::start(app, GpuChoice::Preferred).expect("the engine starts");
+        let dropped = Arc::new(AtomicBool::new(false));
+        engine.attach_preview(flagged(dropped.clone())).expect("the surface attaches on the engine's device");
+        assert_eq!(engine.present(json!({})), Ok(()));
+        engine.suspend_gpu().expect("the GPU is given up");
+        assert!(dropped.load(Ordering::SeqCst), "the surface goes with the device");
+        let no_surface = Err(CraftError::gpu("no surface"));
+        assert_eq!(engine.present(json!({})), no_surface);
+        let made = Arc::new(AtomicBool::new(false));
+        let refused = engine.attach_preview(noting_maker(&made));
+        assert_eq!(refused, Err(CraftError::gpu(NO_DEVICE)), "no device, nothing to preview on");
+        assert!(!made.load(Ordering::SeqCst), "no surface is made without a device");
+        assert_eq!(engine.resume_gpu(), Ok(None));
+        assert_eq!(engine.present(json!({})), no_surface, "a resume does not bring the surface back");
+        let again = Arc::new(AtomicBool::new(false));
+        engine.attach_preview(flagged(again.clone())).expect("the app attaches its surface again");
+        assert_eq!(engine.present(json!({})), Ok(()));
+        assert!(!again.load(Ordering::SeqCst));
+        // Only the two with a surface ran the app's present.
+        let presents = shared.events().iter().filter(|event| *event == "present").count();
+        assert_eq!(presents, 2, "a present with no surface never reaches the app");
+    }
+
+    /// An engine on the CPU has no device to make a surface on: the attach answers why and the
+    /// platform's call to make one never runs.
+    #[test]
+    fn an_attach_without_a_device_answers_why_and_makes_nothing() {
+        let (app, _) = Probe::new();
+        let engine = Engine::start(app, GpuChoice::CpuOnly).expect("the engine starts");
+        let made = Arc::new(AtomicBool::new(false));
+        let refused = engine.attach_preview(noting_maker(&made));
+        assert_eq!(refused, Err(CraftError::gpu(NO_DEVICE)));
+        assert!(!made.load(Ordering::SeqCst), "no surface is made without a device");
+    }
+
+    /// An attach gives up the surface attached before it makes its own, so one that fails leaves no
+    /// surface rather than the old one showing, and a detach, twice over, empties the slot.
+    #[test]
+    fn an_attach_gives_up_the_surface_attached_before_it_makes_its_own() {
+        let (mut app, _) = Probe::new();
+        let mut lifecycle = GpuLifecycle::start(&mut app, GpuChoice::Preferred);
+        let first = Scripted::new((8, 8), []);
+        let watch = first.clone();
+        lifecycle.attach_preview(Box::new(move |gpu| Surface::new(Box::new(first), gpu))).expect("the first surface attaches");
+        assert_eq!(watch.holders(), 2, "the lifecycle holds the first surface");
+        let held_when_made = Arc::new(Mutex::new(None));
+        let noted = held_when_made.clone();
+        let refused = lifecycle.attach_preview(Box::new(move |_| {
+            *noted.lock().unwrap() = Some(watch.holders());
+            Err(CraftError::gpu("the platform's handle cannot become a surface"))
+        }));
+        assert_eq!(*held_when_made.lock().unwrap(), Some(1), "the first surface was given up before the second was made");
+        assert_eq!(refused, Err(CraftError::gpu("the platform's handle cannot become a surface")));
+        assert!(lifecycle.preview.is_none(), "a failed attach leaves no surface, the old one included");
+        lifecycle.attach_preview(flagged(Arc::default())).expect("a new surface attaches");
+        lifecycle.detach_preview();
+        lifecycle.detach_preview();
+        assert!(lifecycle.preview.is_none(), "a detach drops the surface and a second changes nothing");
     }
 }

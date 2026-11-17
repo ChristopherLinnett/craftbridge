@@ -11,6 +11,7 @@ use crate::frames::{FrameBytes, PixelFormat};
 use crate::gpu::GpuChoice;
 use crate::gpu_lifecycle::GpuLifecycle;
 use crate::journal::{Journal, Recovery};
+use crate::preview::SurfaceMaker;
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::panic::{self, AssertUnwindSafe};
@@ -43,6 +44,9 @@ pub(crate) enum Message {
     Mcp { line: String, answer: Answering<Option<String>> },
     SuspendGpu { answer: Answering<()> },
     ResumeGpu { answer: Answering<Option<String>> },
+    PreviewAttach { make: SurfaceMaker, answer: Answering<()> },
+    PreviewPresent { params: Value, answer: Answering<()> },
+    PreviewDetach { answer: Answering<()> },
     Export { call: ExportCall },
     Close,
 }
@@ -108,6 +112,23 @@ impl Message {
     /// goes back on.
     pub(crate) fn resume_gpu() -> impl FnOnce(Answering<Option<String>>) -> Message {
         |answer| Message::ResumeGpu { answer }
+    }
+
+    /// Attaching the preview surface, built once the engine gives it the channel its answer goes
+    /// back on: the platform's call to make its surface, run on the engine thread where the
+    /// device is (§20).
+    pub(crate) fn preview_attach(make: SurfaceMaker) -> impl FnOnce(Answering<()>) -> Message {
+        move |answer| Message::PreviewAttach { make, answer }
+    }
+
+    /// One `present` call, built once the engine gives it the channel its answer goes back on.
+    pub(crate) fn preview_present(params: Value) -> impl FnOnce(Answering<()>) -> Message {
+        move |answer| Message::PreviewPresent { params, answer }
+    }
+
+    /// Emptying the preview slot, built once the engine gives it the channel its answer goes back on.
+    pub(crate) fn preview_detach() -> impl FnOnce(Answering<()>) -> Message {
+        move |answer| Message::PreviewDetach { answer }
     }
 }
 
@@ -293,9 +314,10 @@ impl Engine {
     /// Give the GPU up and wait for the engine to have done it (plan §14, §17, L7): the app's device,
     /// the engine's own handle to it and the preview surface made on it, so nothing of the engine can
     /// submit GPU work while the app is in the background, which iOS ends an app for. Every render
-    /// answers on the CPU until [`Engine::resume_gpu`]. It waits its turn as any call does, so the
-    /// calls made before it ran on the GPU, and suspending twice is not an error. One made during an
-    /// export waits for the export to end (plan §16 behaviour 3), since the engine cannot reach the
+    /// answers on the CPU until [`Engine::resume_gpu`], and a preview comes back only when the app
+    /// attaches its surface again ([`Engine::attach_preview`]). It waits its turn as any call does, so
+    /// the calls made before it ran on the GPU, and suspending twice is not an error. One made during
+    /// an export waits for the export to end (plan §16 behaviour 3), since the engine cannot reach the
     /// session while the export runs: the export renders on the device it started on until then.
     ///
     /// # Errors
@@ -338,6 +360,73 @@ impl Engine {
     /// What [`Engine::send_request`] refuses.
     pub fn send_resume_gpu(&self) -> Result<Answer<Option<String>>> {
         self.send(Message::resume_gpu())
+    }
+
+    /// Attach the surface `make` builds as this engine's preview, and wait for the engine's answer
+    /// (plan §16, §20). `make` — a platform's call, holding the app's layer or window — runs on the
+    /// engine thread on the device the engine holds, the one device the preview and every frame it
+    /// shows are made on: an engine on the CPU, whether it chose so, found no device or gave its
+    /// device up for the background, answers `Gpu` saying there is nothing to preview on, as a
+    /// surface whose handle the platform cannot use answers at this call rather than at the first
+    /// frame. Attaching again replaces the surface attached, which is given up before the new one is
+    /// made: that is how a lost one is given up and a new one taken, and an attach that fails leaves
+    /// no surface attached. The surface goes with the device on a failure and on
+    /// [`Engine::suspend_gpu`], and an app attaches it again once the device is back. It waits its
+    /// turn as any call does, and a call made from inside one of this engine's own calls is refused
+    /// with `Internal` at once, as [`Engine::request`] does.
+    pub fn attach_preview(&self, make: SurfaceMaker) -> Result<()> {
+        self.send_attach_preview(make)?.wait()
+    }
+
+    /// Hand [`Engine::attach_preview`]'s attach to the engine and answer with its [`Answer`],
+    /// without waiting for it, as [`Engine::send_request`] does for a plain call.
+    ///
+    /// # Errors
+    ///
+    /// What [`Engine::send_request`] refuses.
+    pub fn send_attach_preview(&self, make: SurfaceMaker) -> Result<Answer<()>> {
+        self.send(Message::preview_attach(make))
+    }
+
+    /// Draw one preview frame and wait for the engine's answer (plan §14, §16, §17). The call runs
+    /// on the app's [`CraftApp::present`] with the attached surface, so it waits behind an export
+    /// in the order it was made, as every other call (plan §13, L3). With no surface attached —
+    /// never attached, after an attach that failed, after [`Engine::detach_preview`], or after the
+    /// GPU was dropped — it answers [`CraftError::Gpu`] `{ "no surface" }` and the session is
+    /// untouched, and so does a surface that is lost or fails: §17's answers, none of them a panic,
+    /// none of them the session's end. A panic inside the app is answered as [`CraftError::Internal`]
+    /// and the session stays, and a call made from inside one of this engine's own calls is refused
+    /// with `Internal` at once.
+    pub fn present(&self, params: Value) -> Result<()> {
+        self.send_present(params)?.wait()
+    }
+
+    /// Hand [`Engine::present`]'s call to the engine and answer with its [`Answer`], without
+    /// waiting for it, as [`Engine::send_request`] does for a plain call.
+    ///
+    /// # Errors
+    ///
+    /// What [`Engine::send_request`] refuses.
+    pub fn send_present(&self, params: Value) -> Result<Answer<()>> {
+        self.send(Message::preview_present(params))
+    }
+
+    /// Empty the preview surface and wait for the engine's answer: the surface, the platform
+    /// handle it holds and its frame upload are dropped on the engine thread, behind the same
+    /// guard as a call (§16). Every present then answers `{ "no surface" }` until a new surface
+    /// is attached (§17). Detaching with nothing attached answers `Ok`: it is what a detach does.
+    pub fn detach_preview(&self) -> Result<()> {
+        self.send_detach_preview()?.wait()
+    }
+
+    /// Hand [`Engine::detach_preview`]'s call to the engine and answer with its [`Answer`],
+    /// without waiting for it, as [`Engine::send_request`] does for a plain call.
+    ///
+    /// # Errors
+    ///
+    /// What [`Engine::send_request`] refuses.
+    pub fn send_detach_preview(&self) -> Result<Answer<()>> {
+        self.send(Message::preview_detach())
     }
 
     /// Hand one call to the engine thread and answer with what its caller waits on.
@@ -488,6 +577,12 @@ fn run(mut app: Box<dyn CraftApp>, incoming: Receiver<Message>, closing: CancelT
             Message::Request { method, params, answer } => answer_call(answer, || app.request(&method, params)),
             Message::Frame { params, format, answer } => answer_call(answer, || app.frame(params, format)),
             Message::Mcp { line, answer } => answer_call(answer, || Ok(app.mcp(&line))),
+            Message::PreviewAttach { make, answer } => answer_call(answer, || gpu.attach_preview(make)),
+            Message::PreviewPresent { params, answer } => answer_call(answer, || gpu.present_preview(&mut *app, params)),
+            Message::PreviewDetach { answer } => answer_call(answer, || {
+                gpu.detach_preview();
+                Ok(())
+            }),
             Message::Export { call } => export::run_export(
                 &mut *app,
                 call,
@@ -500,11 +595,13 @@ fn run(mut app: Box<dyn CraftApp>, incoming: Receiver<Message>, closing: CancelT
     // Their callers read the disconnect as `engine is closed`.
     drop(incoming);
     drop(pending);
-    // The surface and the device go with the engine (plan §16 behaviour 4), the surface first.
-    drop(gpu);
-    // The session's drop is app code too, so it runs behind the same guard as a call: a panic there
-    // is the close's answer rather than a thread that died outside its guard.
-    guarded(move || drop(app))
+    // The surface and the device go with the engine (plan §16 behaviour 4), the surface first, behind
+    // the same guard as a call: letting go of the surface is the platform's code (its layer or window)
+    // and wgpu's, and a panic there is the close's answer rather than a thread that died outside its
+    // guard. The session's drop is app code too, guarded the same way, and runs whatever the surface's did.
+    let gpu = guarded(move || drop(gpu));
+    let session = guarded(move || drop(app));
+    gpu.and(session)
 }
 
 /// Run one call of the app behind the never-crash guard and send what it answered, or the panic it
@@ -558,7 +655,8 @@ fn closed() -> CraftError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{DEADLINE, Gate, close_begun, eventually, queue_call, recv};
+    use crate::preview::Surface;
+    use crate::testing::{Arrives, DEADLINE, Gate, Scripted, close_begun, eventually, queue_call, recv};
     use serde_json::json;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, OnceLock, Weak};
@@ -623,6 +721,11 @@ mod tests {
     }
 
     impl CraftApp for FakeApp {
+        /// Takes the device it is handed without using it, as a preview needs the engine to hold one.
+        fn attach_gpu(&mut self, _gpu: &crate::gpu::GpuDevice) -> Result<()> {
+            Ok(())
+        }
+
         fn request(&mut self, method: &str, params: Value) -> Result<Value> {
             self.log.push(format!("{method} {params}"));
             match method {
@@ -676,6 +779,21 @@ mod tests {
             }
         }
 
+        fn present(&mut self, params: Value, surface: &mut Surface) -> Result<()> {
+            self.log.push(format!("present {params}"));
+            match params.get("how").and_then(Value::as_str) {
+                Some("panic") => panic!("boom in present"),
+                Some("reenter") => self.own_engine()?.present(params),
+                // Draw what the surface says it is: the size the platform's handle last reported,
+                // so a test sees the app got a surface the engine had configured at its size.
+                Some("size") => {
+                    self.log.push(format!("surface {:?}", surface.size()));
+                    Ok(())
+                }
+                _ => Ok(()),
+            }
+        }
+
         /// The fake's MCP endpoint: it answers a line with the thread it ran on and the session's
         /// value, so a test sees both where it ran and that it reached the same session as `request`.
         fn mcp(&mut self, line: &str) -> Option<String> {
@@ -714,9 +832,9 @@ mod tests {
 
     /// An engine whose fake app can call its own engine, which the tests of a call made from inside a
     /// call need.
-    fn self_aware_engine() -> (Arc<Engine>, Arc<Shared>) {
+    fn self_aware_engine(gpu: GpuChoice) -> (Arc<Engine>, Arc<Shared>) {
         let (app, shared) = FakeApp::new();
-        let engine = Arc::new(Engine::start(app, GpuChoice::CpuOnly).unwrap());
+        let engine = Arc::new(Engine::start(app, gpu).unwrap());
         assert!(shared.engine.set(Arc::downgrade(&engine)).is_ok());
         (engine, shared)
     }
@@ -890,7 +1008,7 @@ mod tests {
     /// reply line the app never wrote.
     #[test]
     fn an_mcp_line_is_refused_after_close_and_from_inside_a_call() {
-        let (engine, _) = self_aware_engine();
+        let (engine, _) = self_aware_engine(GpuChoice::CpuOnly);
         let reentered = from_another_thread(&engine, |engine| engine.mcp("reenter"));
         assert_eq!(reentered, Ok(Ok(Some(REENTERED.to_string()))), "an mcp line waited for itself");
         engine.close().unwrap();
@@ -906,9 +1024,14 @@ mod tests {
         engine.close().unwrap();
     }
 
-    /// An app that answers only `request`, echoing its params: every other call keeps the trait's default.
+    /// An app that answers only `request`, echoing its params, and takes the device it is handed so a
+    /// preview can be attached: every other call keeps the trait's default.
     struct EchoApp;
     impl CraftApp for EchoApp {
+        fn attach_gpu(&mut self, _gpu: &crate::gpu::GpuDevice) -> Result<()> {
+            Ok(())
+        }
+
         fn request(&mut self, _method: &str, params: Value) -> Result<Value> {
             Ok(params)
         }
@@ -928,11 +1051,114 @@ mod tests {
     /// own calls is refused at once rather than waiting for itself.
     #[test]
     fn a_frame_after_close_or_from_inside_a_call_is_refused() {
-        let (engine, _) = self_aware_engine();
+        let (engine, _) = self_aware_engine(GpuChoice::CpuOnly);
         let reentered = from_another_thread(&engine, |engine| engine.frame(json!({ "how": "reenter" }), PixelFormat::Png));
         assert_eq!(reentered.map(|answer| answer.map(|_| ())), Ok(Err(CraftError::Internal { message: REENTERED.to_string() })));
         engine.close().unwrap();
         assert_eq!(engine.frame(json!({ "v": 1 }), PixelFormat::Png), Err(closed()));
+    }
+
+    /// A test surface attached the way a platform attaches one: a script reporting `size`.
+    fn attach_script(engine: &Engine, size: (u32, u32)) {
+        let scripted = Scripted::new(size, []);
+        engine.attach_preview(Box::new(move |gpu| Surface::new(Box::new(scripted), gpu))).expect("a scripted surface attaches to the host's device");
+    }
+
+    /// §17's empty answer: `present` with nothing attached, and `detach_preview` on an engine that
+    /// never attached or already detached, without touching the session; after close the present is
+    /// refused as every call is.
+    #[test]
+    fn a_present_without_a_surface_answers_gpu_and_keeps_the_session() {
+        let (app, _shared) = FakeApp::new();
+        let engine = Engine::start(app, GpuChoice::CpuOnly).unwrap();
+        // §17's own words for the empty answer, written out rather than read from a constant.
+        assert_eq!(engine.present(Value::Null), Err(CraftError::gpu("no surface")));
+        assert_eq!(call(&engine, "echo"), Ok(Value::Null), "the refused present left the session untouched");
+        engine.detach_preview().unwrap();
+        assert_eq!(engine.detach_preview(), Ok(()), "detaching what was never attached answers Ok, as detaching twice does");
+        engine.close().unwrap();
+        assert_eq!(engine.present(Value::Null), Err(closed()));
+    }
+
+    /// Attaching runs the platform's call on the engine thread and puts its surface in the slot;
+    /// `present` reaches the app with it — sized as the platform's handle reports — and after a
+    /// `detach_preview` the same present is the empty answer again (§16, §17).
+    #[test]
+    fn an_attached_surface_is_what_present_draws_into_until_detached() {
+        let (app, _shared) = FakeApp::new();
+        let engine = Engine::start(app, GpuChoice::Preferred).unwrap();
+        attach_script(&engine, (16, 16));
+        engine.present(json!({ "how": "size" })).unwrap();
+        let log = call(&engine, "log").unwrap();
+        assert_eq!(log, json!([r#"present {"how":"size"}"#, "surface (16, 16)", "log null"]), "the app drew into the attached surface at its size");
+        engine.detach_preview().unwrap();
+        assert_eq!(engine.present(Value::Null), Err(CraftError::gpu("no surface")), "after detach the slot is empty");
+        engine.detach_preview().unwrap();
+        assert_eq!(call(&engine, "echo"), Ok(Value::Null), "the detach kept the session");
+        engine.close().unwrap();
+    }
+
+    /// A present waits its turn behind a call that has the engine: handed over while the engine is
+    /// busy it is unanswered until the busy call ends, and runs before anything made after it
+    /// (plan §13, L3).
+    #[test]
+    fn a_present_waits_its_turn_as_every_call_does() {
+        let (app, shared) = FakeApp::new();
+        let engine = Arc::new(Engine::start(app, GpuChoice::Preferred).unwrap());
+        attach_script(&engine, (8, 8));
+        let blocked = busy(&engine, &shared);
+        let waiting = engine.submit(Message::preview_present(Value::Null)).unwrap();
+        assert!(waiting.within(DEADLINE / 4).is_none(), "the present jumped the call the engine was running");
+        shared.released.open();
+        blocked.join().unwrap().unwrap();
+        assert_eq!(recv(&waiting), Ok(()), "the present ran once the engine was free");
+        engine.request("echo", Value::Null).unwrap();
+        let log = call(&engine, "log").unwrap();
+        let entries = log.as_array().unwrap();
+        assert_eq!(&entries[entries.len() - 3..entries.len() - 1], [json!(r#"present null"#), json!("echo null")], "the present ran in the order it was made");
+        engine.close().unwrap();
+    }
+
+    /// A panic inside the app's present is `Internal` with the session kept — §17: nothing a frame
+    /// or a surface does ends the session — and a present made from inside one of the engine's own
+    /// calls is refused at once rather than waiting for itself.
+    #[test]
+    fn a_panicking_present_keeps_the_session_and_a_reentered_one_is_refused() {
+        let (app, _shared) = FakeApp::new();
+        let engine = Engine::start(app, GpuChoice::Preferred).unwrap();
+        engine.request("value_set", json!({ "v": 9 })).unwrap();
+        attach_script(&engine, (16, 16));
+        assert_eq!(engine.present(json!({ "how": "panic" })), Err(CraftError::Internal { message: "boom in present".to_string() }));
+        assert_eq!(call(&engine, "value_get").unwrap(), Value::from(9), "the session the present panicked in still answers");
+        engine.close().unwrap();
+        let (engine, _) = self_aware_engine(GpuChoice::Preferred);
+        attach_script(&engine, (8, 8));
+        let reentered = from_another_thread(&engine, |engine| engine.present(json!({ "how": "reenter" })));
+        assert_eq!(reentered, Ok(Err(CraftError::Internal { message: REENTERED.to_string() })));
+    }
+
+    /// A surface whose drop panics at close is the close's answer, `Internal` with the panic's words, and
+    /// the session is dropped all the same: the close drops the preview behind the guard every call
+    /// runs behind, as a detach does.
+    #[test]
+    fn a_surface_that_panics_as_the_close_drops_it_is_the_close_s_answer() {
+        let (app, shared) = FakeApp::new();
+        let engine = Engine::start(app, GpuChoice::Preferred).unwrap();
+        let scripted = Scripted::new((8, 8), []);
+        scripted.panic_when_dropped();
+        engine.attach_preview(Box::new(move |gpu| Surface::new(Box::new(scripted), gpu))).unwrap();
+        assert_eq!(engine.close(), Err(CraftError::Internal { message: "the scripted surface panicked as it was dropped".to_string() }));
+        assert!(shared.dropped.load(Ordering::SeqCst), "the session was dropped after the surface");
+    }
+
+    /// An app that keeps the trait's default previews nothing: `Unsupported`, and the engine serves on.
+    #[test]
+    fn an_app_without_previews_answers_unsupported_and_keeps_serving() {
+        let engine = Engine::start(EchoApp, GpuChoice::Preferred).unwrap();
+        attach_script(&engine, (8, 8));
+        assert_eq!(engine.present(Value::Null), Err(CraftError::unsupported("this app previews no frames")));
+        assert_eq!(engine.request("echo", json!({ "n": 1 })), Ok(json!({ "n": 1 })));
+        engine.close().unwrap();
     }
 
     /// A panic inside the app becomes `Internal` — carrying the panic's message — and the session is
@@ -1110,7 +1336,7 @@ mod tests {
         assert_eq!(engine.close(), Ok(()));
         assert!(shared.dropped.load(Ordering::SeqCst), "the close that follows begin_close did not wait for the session");
 
-        let (engine, _shared) = self_aware_engine();
+        let (engine, _shared) = self_aware_engine(GpuChoice::CpuOnly);
         assert_eq!(call(&engine, "begin_close_self"), Ok(Value::Bool(false)), "a wait from inside the engine's own call is for itself");
         assert_eq!(call(&engine, "echo"), Err(closed()));
         assert_eq!(engine.close(), Ok(()));
@@ -1133,7 +1359,7 @@ mod tests {
     /// thread; a close from outside then joins it.
     #[test]
     fn calls_from_inside_the_engines_own_calls_are_refused_and_never_wait() {
-        let (engine, shared) = self_aware_engine();
+        let (engine, shared) = self_aware_engine(GpuChoice::CpuOnly);
         let reentered = from_another_thread(&engine, |engine| engine.request("reenter", Value::Null));
         assert_eq!(reentered, Ok(Err(CraftError::Internal { message: REENTERED.to_string() })));
         assert_eq!(call(&engine, "close_self"), Ok(Value::Null));
@@ -1146,7 +1372,7 @@ mod tests {
     /// the export would wait behind the call that made it, which waits behind it.
     #[test]
     fn an_export_call_from_inside_the_engines_own_calls_is_refused() {
-        let (engine, _) = self_aware_engine();
+        let (engine, _) = self_aware_engine(GpuChoice::CpuOnly);
         let reentered = from_another_thread(&engine, |engine| engine.request("reenter_progress", Value::Null));
         assert_eq!(reentered, Ok(Err(CraftError::Internal { message: REENTERED.to_string() })));
         engine.close().unwrap();

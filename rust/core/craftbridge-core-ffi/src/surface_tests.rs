@@ -3,7 +3,7 @@
 
 use crate::crossing::Limits;
 use crate::{CancelToken, CraftError, Engine, Folders, FrameBytes, GpuChoice, PixelFormat, ProgressListener, Recovery, RecoveryNote};
-use craftbridge_core::CraftApp;
+use craftbridge_core::{CraftApp, Presented, Surface};
 use serde_json::{Value, json};
 use std::future::Future;
 use std::path::PathBuf;
@@ -17,6 +17,15 @@ use std::task::{Context, Poll, Waker};
 struct Probe {
     panics_on_drop: bool,
     counted: u64,
+    /// Whether the probe takes the device it is offered, as an app that previews does; otherwise it
+    /// renders on no GPU and refuses one.
+    takes_gpu: bool,
+}
+
+impl Probe {
+    fn new(takes_gpu: bool) -> Self {
+        Self { panics_on_drop: false, counted: 0, takes_gpu }
+    }
 }
 
 impl Drop for Probe {
@@ -76,6 +85,14 @@ impl CraftApp for Probe {
         FrameBytes::new(1, 1, format, vec![10, 20, 30, 255])
     }
 
+    fn present(&mut self, params: Value, surface: &mut Surface) -> craftbridge_core::Result<()> {
+        match params.as_str() {
+            // Straight red at half alpha: what reaches the surface shows whether it was premultiplied.
+            Some("translucent") => shown(surface.present_frame(&FrameBytes::new(1, 1, PixelFormat::Rgba8Straight, vec![255, 0, 0, 128])?)?),
+            _ => shown(surface.present_frame(&FrameBytes::new(1, 1, PixelFormat::Rgba8Straight, vec![255, 0, 0, 255])?)?),
+        }
+    }
+
     fn mcp(&mut self, line: &str) -> Option<String> {
         match line {
             "panic" => panic!("mcp blew up"),
@@ -85,22 +102,38 @@ impl CraftApp for Probe {
         }
     }
 
-    /// The probe renders on no GPU: it takes the CPU note and refuses a device.
+    /// The probe takes the CPU note, and a device only when it is told to.
     fn attach_gpu(&mut self, gpu: &craftbridge_core::GpuDevice) -> craftbridge_core::Result<()> {
         match gpu.parts() {
-            Some(_) => Err(CraftError::gpu("the probe renders on no GPU")),
-            None => Ok(()),
+            Some(_) if !self.takes_gpu => Err(CraftError::gpu("the probe renders on no GPU")),
+            _ => Ok(()),
         }
     }
 }
 
-fn engine() -> Arc<Engine> {
-    started(GpuChoice::CpuOnly)
+/// The probe's answer for a frame it presented: a skipped frame — a surface that timed out, was
+/// covered or has no size — is an error here, so a platform test's `Ok` means a real texture was
+/// acquired, drawn and shown.
+fn shown(presented: Presented) -> craftbridge_core::Result<()> {
+    match presented {
+        Presented::Shown => Ok(()),
+        Presented::Skipped => Err(CraftError::gpu("the probe's frame was skipped, not shown")),
+    }
 }
 
-/// An engine on the probe, started with the GPU `gpu` asks for.
-fn started(gpu: GpuChoice) -> Arc<Engine> {
-    Engine::from_core(craftbridge_core::Engine::start(Probe { panics_on_drop: false, counted: 0 }, gpu).expect("the engine starts"))
+/// An engine on the CPU, whose probe refuses the device it is offered.
+pub(crate) fn engine() -> Arc<Engine> {
+    started(GpuChoice::CpuOnly, false)
+}
+
+/// An engine on the host's device, whose probe takes it: what a preview is attached to.
+pub(crate) fn engine_on_a_device() -> Arc<Engine> {
+    started(GpuChoice::Preferred, true)
+}
+
+/// An engine on the probe, started with the GPU `gpu` asks for, which the probe takes when `takes_gpu`.
+fn started(gpu: GpuChoice, takes_gpu: bool) -> Arc<Engine> {
+    Engine::from_core(craftbridge_core::Engine::start(Probe::new(takes_gpu), gpu).expect("the engine starts"))
 }
 
 fn closed_engine() -> Arc<Engine> {
@@ -171,7 +204,7 @@ fn a_resume_with_no_device_answers_the_cpu_note_and_one_the_app_cannot_take_thro
     let engine = engine();
     assert_eq!(pollster::block_on(engine.suspend_gpu()), Ok(()));
     assert_eq!(pollster::block_on(engine.resume_gpu()), Ok(Some("the app asked for CPU-only rendering".to_string())), "the CPU note crosses as the answer");
-    let on_a_device = started(GpuChoice::Preferred);
+    let on_a_device = started(GpuChoice::Preferred, false);
     assert_eq!(pollster::block_on(on_a_device.suspend_gpu()), Ok(()));
     assert_eq!(
         pollster::block_on(on_a_device.resume_gpu()),
@@ -193,6 +226,61 @@ fn a_call_made_after_shut_down_is_refused_however_late_the_engine_thread_stops()
         let stopped = stopping.unwrap_or_else(pollster::block_on);
         assert_eq!(stopped, Ok(()));
     }
+}
+
+/// §17's empty answer through the boundary: a present with nothing attached throws `Gpu` with `no
+/// surface`, detaching nothing is `Ok`, and the engine answers on after both.
+#[test]
+fn a_present_without_a_surface_throws_the_empty_answer() {
+    let engine = engine();
+    empty_preview_keeps_the_session(&engine);
+    assert_eq!(pollster::block_on(engine.detach_preview()), Ok(()));
+}
+
+/// The boundary's answer with the preview empty: a present says `no surface` and the engine answers
+/// every other call the same — however the surface ended (§17). Every platform test ends this way.
+pub(crate) fn empty_preview_keeps_the_session(engine: &Engine) {
+    assert_eq!(pollster::block_on(engine.present("null".into())), Err(CraftError::gpu("no surface")));
+    assert_eq!(pollster::block_on(engine.request("echo".into(), "1".into())), Ok("1".to_string()), "the session kept answering after the surface ended");
+}
+
+/// A preview through the GPU's life, on a real surface (§14, §16): `attach` attaches the platform's
+/// surface and a present draws and shows on it; the GPU given up for the background drops the surface,
+/// so the present is the empty answer, and no resume brings it back, since only the app's own attach
+/// does once it holds the device again; then the present draws again. Every platform test of it passes
+/// the call that attaches its own surface, and `drew`, which it runs after each present that answered
+/// `Ok` to show on the platform's own terms that the frame reached the surface.
+pub(crate) fn a_preview_follows_the_gpu(engine: &Engine, mut attach: impl FnMut() -> Result<(), CraftError>, drew: impl Fn()) {
+    let no_surface = Err(CraftError::gpu("no surface"));
+    assert_eq!(attach(), Ok(()), "the surface attaches on the engine's device");
+    assert_eq!(pollster::block_on(engine.present("null".into())), Ok(()), "a real texture is drawn and shown");
+    drew();
+    assert_eq!(pollster::block_on(engine.suspend_gpu()), Ok(()));
+    assert_eq!(pollster::block_on(engine.present("null".into())), no_surface, "the surface went with the GPU");
+    assert_eq!(pollster::block_on(engine.resume_gpu()), Ok(None), "the device is back");
+    assert_eq!(pollster::block_on(engine.present("null".into())), no_surface, "a resume alone brings no surface back");
+    assert_eq!(attach(), Ok(()), "the app attaches its surface again");
+    assert_eq!(pollster::block_on(engine.present("null".into())), Ok(()), "and a real texture is drawn and shown again");
+    drew();
+    assert_eq!(pollster::block_on(engine.detach_preview()), Ok(()));
+    empty_preview_keeps_the_session(engine);
+}
+
+/// A present's bad JSON is refused as every call's is, before it reaches the engine.
+#[test]
+fn a_present_with_bad_json_throws_invalid_params_and_the_engine_answers_on() {
+    let engine = engine();
+    assert!(matches!(pollster::block_on(engine.present("{ not json".into())), Err(CraftError::InvalidParams { .. })));
+    assert_eq!(pollster::block_on(engine.request("echo".into(), "1".into())), Ok("1".to_string()));
+}
+
+/// Both preview calls are calls like the rest: made after a shut down they throw `Internal` closed,
+/// each however late the engine thread stops.
+#[test]
+fn a_present_or_detach_after_shut_down_is_refused() {
+    let engine = closed_engine();
+    assert_eq!(pollster::block_on(engine.present("null".into())), Err(CraftError::internal(CLOSED)));
+    assert_eq!(pollster::block_on(engine.detach_preview()), Err(CraftError::internal(CLOSED)));
 }
 
 #[test]
@@ -443,9 +531,7 @@ fn engine_after_a_killed_export(container: &std::path::Path) -> Arc<Engine> {
     std::fs::write(container.join("card.mp4"), b"half a movie").expect("the half-written output");
     let journal = core_folders.config.join(craftbridge_core::JOURNAL_FILE);
     std::fs::write(journal, json!({ "outputs": [{ "path": "card.mp4" }] }).to_string()).expect("the journal a kill left");
-    Engine::from_core(
-        craftbridge_core::Engine::start_in(&core_folders, Probe { panics_on_drop: false, counted: 0 }, GpuChoice::CpuOnly).expect("the engine starts"),
-    )
+    Engine::from_core(craftbridge_core::Engine::start_in(&core_folders, Probe::new(false), GpuChoice::CpuOnly).expect("the engine starts"))
 }
 
 #[test]

@@ -9,7 +9,7 @@ UniFFI 0.32 in proc-macro mode generates the Swift and Kotlin bindings (D-3). It
 
 | Crate | Change | What |
 |---|---|---|
-| `rust/core/craftbridge-core-ffi` | NEW | the §14 boundary for the core: `Engine`, `Folders`, `GpuChoice`, `CraftError`, `ProgressListener`, `CancelToken`, `FrameBytes`, `PixelFormat`, `Recovery`, `RecoveryNote`; `src/platform/ios.rs` and `src/platform/android.rs` |
+| `rust/core/craftbridge-core-ffi` | NEW | the §14 boundary for the core: `Engine`, `Folders`, `GpuChoice`, `CraftError`, `ProgressListener`, `CancelToken`, `FrameBytes`, `PixelFormat`, `Recovery`, `RecoveryNote`; `src/platform/`: `mod.rs` (both attach exports and the surface work they share), `ios.rs`, `android.rs` and `ids.rs` (the window id table) |
 | `rust/effects/craftbridge-effects-ffi` | NEW | `start_effects_engine(folders, gpu)`; `crate-type = ["staticlib", "cdylib", "lib"]`: the one native library of this distribution (D-4) |
 
 **Unsafe policy.** Both crates inherit the workspace's `unsafe_code = "deny"` and `clippy::undocumented_unsafe_blocks = "deny"`, and add `#![allow(unsafe_code)]` for the generated scaffolding. Hand-written `unsafe` appears only in `src/platform/*.rs`, each block with a `// SAFETY:` comment; `cargo xtask rules` fails on `unsafe`, or on `allow(unsafe_code)`, anywhere else (D-20).
@@ -17,6 +17,7 @@ UniFFI 0.32 in proc-macro mode generates the Swift and Kotlin bindings (D-3). It
 **Platform handles.**
 - **iOS:** `attach_metal_layer(engine, layer: u64)`. Swift passes `Unmanaged.passUnretained(layer).toOpaque()` and keeps the layer alive while attached (L6); Rust calls `Instance::create_surface_unsafe(SurfaceTargetUnsafe::CoreAnimationLayer(ptr))` (wgpu v30.0.1 `wgpu/src/api/surface.rs`).
 - **Android:** UniFFI's Kotlin bindings call through JNA, which cannot pass a JNI environment, so one hand-written JNI function, `Java_io_github_christopherlinnett_craftbridge_core_NativeSurfaces_acquire(env, class, surface) -> jlong`, calls `ndk::native_window::NativeWindow::from_surface` and stores the window in a process-wide table. Kotlin then calls the UniFFI method `engine.attachWindow(id)`; `NativeSurfaces.release(id)` returns it (L6).
+- **Both, in every build:** `attach_metal_layer` and `attach_window` are exported from every target's library, each answering `Unsupported` where its platform's object does not exist, because both bindings are generated from one host build (below) and name every call that build exports, and UniFFI's Kotlin binds every call it names as the library loads.
 
 **Async and cancellation.** Every engine call is an `async fn` without a Rust runtime: it resolves when the actor answers (§16). UniFFI futures cannot be cancelled (`evidence/05-mobile-platforms.md` Finding 6), so cancellation is the explicit `CancelToken`; the Swift layer wires it to `Task` cancellation and the Kotlin layer to coroutine cancellation.
 
