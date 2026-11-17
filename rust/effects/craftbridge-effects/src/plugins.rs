@@ -114,7 +114,7 @@ mod tests {
     use crate::EffectCraftApp;
     use crate::session::tests::{Scratch, folders};
     use crate::test_plugin;
-    use craftbridge_core::{CraftApp, CraftError};
+    use craftbridge_core::{CraftApp, CraftError, GpuChoice};
     use serde_json::{Value, json};
 
     /// The switch is off on every platform when the app names no plug-in folder (PD13).
@@ -258,8 +258,8 @@ mod tests {
         let scratch = Scratch::new(true, Some(Path::new("App.app/PlugIns")));
         let folder = scratch.folders.plugins.as_deref().expect("the app names a folder").canonicalize().expect("the folder resolves");
         let module = module(&folder.join("probe.wasm"), "io.github.christopherlinnett.craftbridge.iosthreads");
-        let closed = craftbridge_core::Engine::start(scratch.app(Platform::Ios)).expect("the first engine starts");
-        let dropped = craftbridge_core::Engine::start(scratch.app(Platform::Ios)).expect("the second engine starts");
+        let closed = craftbridge_core::Engine::start(scratch.app(Platform::Ios), GpuChoice::CpuOnly).expect("the first engine starts");
+        let dropped = craftbridge_core::Engine::start(scratch.app(Platform::Ios), GpuChoice::CpuOnly).expect("the second engine starts");
         assert_eq!(held(&folder), 2, "each engine's app holds the folder on its engine thread");
         closed.close().expect("the first engine closes");
         assert_eq!(held(&folder), 1, "closing an engine dropped its app, and its entry alone, on its thread");

@@ -27,8 +27,8 @@ pub struct EffectCraftApp {
     /// app that wired the line transport around a copy of the backend would fork the session.
     server: McpServer,
     /// The notice of the device last handed to [`CraftApp::attach_gpu`], kept so [`Self::drop_gpu`]
-    /// can name in `info.gpu` the failure that ended it (§17). It is checked on the way into every
-    /// request, which is where the app can see a failure reported since the last one.
+    /// can name in `info.gpu` the failure that ended it (§17). The engine reads the same notice and
+    /// calls `drop_gpu` between two calls once it has a report; the app never polls it.
     gpu_failure: Option<GpuFailure>,
     /// The app's place in the iOS plug-in gate's folder list, held while the app lives (§19).
     _admission: plugins::Admission,
@@ -58,16 +58,6 @@ impl EffectCraftApp {
         let confinement = EngineConfinement::new(roots.read_roots(), &[roots.write_root().to_path_buf()]).map_err(|error| CraftError::io(error.to_string()))?;
         backend.confine(confinement);
         Ok(Self { server: McpServer::new(backend), gpu_failure: None, _admission: admission })
-    }
-
-    /// The first device failure retires the GPU before the next request is answered: the notice has
-    /// failed and the session still holds the device, so the GPU goes the way [`Self::drop_gpu`]
-    /// sends it, and `info.gpu` says which loss it was (§17). An app with no device answers
-    /// nothing here: no notice, nothing to settle.
-    fn settle_gpu_failure(&mut self) {
-        if self.gpu_failure.as_ref().is_some_and(GpuFailure::failed) {
-            self.drop_gpu();
-        }
     }
 }
 
@@ -109,12 +99,7 @@ impl CraftApp for EffectCraftApp {
     /// the case the refusal is for. It speaks of `request` alone because the core reaches the app
     /// through calls of its own for the binary `frame`, the line `mcp` and a call with progress
     /// (plan §16), so a name refused here can be one the app answers through another call.
-    ///
-    /// A device lost since the last call settles first: the engine thread touches the session only
-    /// here, so this is where the first device-lost report finds it (§17), before any new command
-    /// runs on a dead device.
     fn request(&mut self, method: &str, params: Value) -> Result<Value> {
-        self.settle_gpu_failure();
         match METHODS.iter().find(|(name, _)| *name == method) {
             Some((_, answer)) => answer(self.server.backend(), &params),
             None => Err(CraftError::unsupported(not_answered(method, "request", METHODS.iter().map(|(name, _)| *name)))),
@@ -132,7 +117,6 @@ impl CraftApp for EffectCraftApp {
         on_progress: &mut dyn FnMut(u64, u64, Option<f64>) -> bool,
         list_outputs: &mut dyn FnMut(&[PathBuf]) -> Result<()>,
     ) -> Result<Value> {
-        self.settle_gpu_failure();
         match PROGRESS_METHODS.iter().find(|(name, _)| *name == method) {
             Some((_, answer)) => answer(self.server.backend(), &params, on_progress, list_outputs),
             None => Err(CraftError::unsupported(not_answered(method, "request_with_progress", PROGRESS_METHODS.iter().map(|(name, _)| *name)))),
@@ -142,7 +126,6 @@ impl CraftApp for EffectCraftApp {
     /// Render one frame (plan §14's binary `frame`): the request is resolved as `render-frame`
     /// resolves its flags. It has no row in [`METHODS`], so `request` keeps refusing the name.
     fn frame(&mut self, params: Value, format: PixelFormat) -> Result<FrameBytes> {
-        self.settle_gpu_failure();
         requests::frame(self.server.backend(), &params, format)
     }
 
@@ -150,7 +133,6 @@ impl CraftApp for EffectCraftApp {
     /// session every method reaches. It is not a row of [`METHODS`]: a line is not a method call, so
     /// `request` keeps refusing the name `mcp`.
     fn mcp(&mut self, line: &str) -> Option<String> {
-        self.settle_gpu_failure();
         mcp::answer(&mut self.server, line)
     }
 
@@ -167,7 +149,7 @@ impl CraftApp for EffectCraftApp {
     /// give each. That path reports to the core's notice for this device and to the compositor's
     /// shared-device notifier, which a borrowed device's owner must forward to so pending readbacks
     /// settle the moment the device is gone (`crates/gpu/src/context.rs`:826-830, :1070-1078). The
-    /// first report is the one the notice keeps, and the GPU is dropped before the next request
+    /// first report is the one the notice keeps, and the engine drops the GPU before the next call
     /// (§17).
     fn attach_gpu(&mut self, gpu: &GpuDevice) -> Result<()> {
         let Some((adapter, device, queue)) = gpu.parts() else {

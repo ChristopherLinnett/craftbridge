@@ -9,9 +9,10 @@ mod common;
 mod scratch;
 
 use common::{EVERY_FORMAT, Scratch};
-use craftbridge_core::{CraftApp, CraftError, Engine, GpuChoice, GpuDevice, PixelFormat};
+use craftbridge_core::{CraftApp, CraftError, Engine, GpuChoice, GpuDevice, GpuFailure, PixelFormat};
 use craftbridge_effects::EffectCraftApp;
 use serde_json::{Value, json};
+use std::sync::{Arc, Mutex};
 
 fn request(app: &mut EffectCraftApp, method: &str, params: Value) -> Result<Value, CraftError> {
     app.request(method, params)
@@ -651,7 +652,7 @@ fn the_app_drives_through_the_core_actor() {
     // method table answers there exactly as it does off it.
     let scratch = Scratch::new().expect("a scratch folder");
     let app = scratch.app().expect("the app starts from prepared folders");
-    let engine = Engine::start(app).expect("the engine starts with the app");
+    let engine = Engine::start(app, GpuChoice::CpuOnly).expect("the engine starts with the app");
     let info = engine.request("info", json!({})).expect("info answers on the engine thread");
     assert_eq!(info["engine"].as_str(), Some("effectcraft"));
     let unsupported = engine.request("frame", json!({})).expect_err("a name `request` does not answer");
@@ -757,48 +758,201 @@ fn the_states_of_the_gpu_read_through_info() {
     assert_eq!(gpu_of(&mut app).expect("`info` answers"), "the GPU was detached; renders run on the CPU", "the detach says so through `info.gpu`");
 }
 
-/// The device-lost callback the app installed reaches the core's notice for the device, in the
-/// words EffectCraft gives a lost device: after the device is destroyed and polled, the notice has
-/// the loss, the very next request drops the GPU, and `info.gpu` carries the loss as EffectCraft's
-/// desktop app notes a retired device — and a fresh device afterwards attaches again, so the drop
-/// is a state, not a death (§17: "The core drops the GPU on the first device-lost error").
-#[test]
-fn a_device_lost_drops_the_gpu_on_the_next_request() {
-    let scratch = Scratch::new().expect("a scratch folder");
-    let mut app = scratch.app().expect("the app starts from prepared folders");
-    let (gpu, device) = attach_the_device(&mut app).expect("the desktop device attaches and is named");
-
-    device.destroy();
-    let _ = device.poll(wgpu::PollType::wait_indefinitely());
-    let lost = "GPU device lost (Destroyed): ";
-    assert_eq!(gpu.device_failure_notifier().reason().as_deref(), Some(lost), "the device-lost callback reached the core's notice");
-    let retired = format!("GPU preview retired: {lost}");
-    assert_eq!(gpu_of(&mut app).expect("`info` answers after the loss"), retired, "the next request dropped the GPU and names the loss");
-    assert_eq!(gpu_of(&mut app).expect("`info` answers again"), retired, "the failure stays settled; no request re-attaches a lost device");
-
-    let fresh = GpuDevice::request(GpuChoice::Preferred);
-    app.attach_gpu(&fresh).expect("a fresh device attaches after the loss");
-    assert_eq!(gpu_of(&mut app).expect("`info` answers on the new device"), fresh.summary(), "the engine is on the new device");
+/// What an engine's app saw of the GPU, kept by [`Spy`] for the test to read and to act on: the
+/// calls in the order the app made them, and for each device it was handed, its handles and notice.
+#[derive(Default)]
+struct Seen {
+    events: Mutex<Vec<String>>,
+    devices: Mutex<Vec<wgpu::Device>>,
+    queues: Mutex<Vec<wgpu::Queue>>,
+    notices: Mutex<Vec<GpuFailure>>,
 }
 
-/// The uncaptured-error callback reaches the same notice: a buffer the device cannot give fails
-/// validation, wgpu hands the error to the device's uncaptured handler (no call claimed it), and
-/// the notice has it in the words EffectCraft gives an uncaptured error, and the next request finds
-/// the GPU dropped with those words in `info.gpu`.
-#[test]
-fn an_uncaptured_error_drops_the_gpu_too() {
-    let scratch = Scratch::new().expect("a scratch folder");
-    let mut app = scratch.app().expect("the app starts from prepared folders");
-    let (gpu, device) = attach_the_device(&mut app).expect("the desktop device attaches and is named");
+/// The list behind `list`, read through a poisoned lock too: a panic in the engine thread must not
+/// hide what the app had seen.
+fn held<T>(list: &Mutex<Vec<T>>) -> std::sync::MutexGuard<'_, Vec<T>> {
+    list.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
-    let oversized = wgpu::BufferDescriptor {
-        label: Some("craftbridge uncaptured-error probe"),
-        size: device.limits().max_buffer_size + 4096,
-        usage: wgpu::BufferUsages::UNIFORM,
-        mapped_at_creation: false,
-    };
-    let _ = device.create_buffer(&oversized);
-    let reason = gpu.device_failure_notifier().reason().expect("the uncaptured-error callback reached the core's notice");
-    assert!(reason.starts_with("uncaptured GPU error: "), "the notice keeps the error in EffectCraft's words: {reason}");
-    assert_eq!(gpu_of(&mut app).expect("`info` answers after the error"), format!("GPU preview retired: {reason}"), "the next request dropped the GPU");
+/// The EffectCraft app as an engine drives it, with a record of every call and of each device it is
+/// handed, since the engine makes the device itself and a test has no other way to reach it.
+struct Spy {
+    inner: EffectCraftApp,
+    seen: Arc<Seen>,
+}
+
+impl Spy {
+    fn note(&self, event: impl Into<String>) {
+        held(&self.seen.events).push(event.into());
+    }
+}
+
+impl CraftApp for Spy {
+    fn request(&mut self, method: &str, params: Value) -> Result<Value, CraftError> {
+        self.note(format!("call {method}"));
+        self.inner.request(method, params)
+    }
+
+    fn frame(&mut self, params: Value, format: PixelFormat) -> Result<craftbridge_core::FrameBytes, CraftError> {
+        self.note("call frame");
+        self.inner.frame(params, format)
+    }
+
+    fn attach_gpu(&mut self, gpu: &GpuDevice) -> Result<(), CraftError> {
+        self.note("attach_gpu");
+        if let Some((_, device, queue)) = gpu.parts() {
+            held(&self.seen.devices).push(device.clone());
+            held(&self.seen.queues).push(queue.clone());
+        }
+        held(&self.seen.notices).push(gpu.device_failure_notifier());
+        self.inner.attach_gpu(gpu)
+    }
+
+    fn drop_gpu(&mut self) {
+        self.note("drop_gpu");
+        self.inner.drop_gpu();
+    }
+}
+
+/// An engine on a scratch session that has one 8 by 6 comp with a blurred solid, which the
+/// compositor draws on the GPU, started as `choice` asks through the start an app's constructor
+/// makes, with what its app sees.
+fn engine_on(choice: GpuChoice) -> Result<(Scratch, Engine, Arc<Seen>), String> {
+    let scratch = Scratch::new().map_err(|e| e.to_string())?;
+    let seen = Arc::new(Seen::default());
+    let app = Spy { inner: scratch.app().map_err(|e| e.to_string())?, seen: seen.clone() };
+    let engine = Engine::start_in(&scratch.folders, app, choice).map_err(|e| e.to_string())?;
+    let steps = json!([
+        {"command": "comp.new", "params": {"name": "C", "width": 8, "height": 6}},
+        {"command": "layer.newSolid", "params": {"comp": 1, "name": "s"}},
+        {"command": "effect.apply", "params": {"comp": 1, "layer": "s", "effect": "Gaussian Blur"}}
+    ]);
+    engine.request("run", json!({ "steps": steps })).map_err(|e| format!("a blurred solid is made: {e}"))?;
+    Ok((scratch, engine, seen))
+}
+
+/// What `info.gpu` answers right now, in one string for the assertions.
+fn gpu_of_engine(engine: &Engine) -> Result<String, String> {
+    let info = engine.request("info", json!({})).map_err(|e| format!("`info` fails: {e}"))?;
+    info.pointer("/gpu").and_then(Value::as_str).map(str::to_string).ok_or("the `info` answer carries no `gpu` string".to_string())
+}
+
+/// How many batches of work the device had been given when this one was handed to it. wgpu counts
+/// the submissions of a device itself and keeps the count private, but a submission's index prints
+/// in its `Debug` text, so a test asks for it by handing the queue an empty batch: the difference of
+/// two answers, less the one asked for, is every other batch submitted between them.
+fn submissions(queue: &wgpu::Queue) -> Result<u64, String> {
+    let text = format!("{:?}", queue.submit([]));
+    text.chars().filter(char::is_ascii_digit).collect::<String>().parse().map_err(|e| format!("no submission index in `{text}`: {e}"))
+}
+
+/// The GPU's work between two probes of `queue`, by the device's own count.
+fn submitted_during(queue: &wgpu::Queue, work: impl FnOnce() -> Result<(), String>) -> Result<u64, String> {
+    let before = submissions(queue)?;
+    work()?;
+    Ok(submissions(queue)? - before - 1)
+}
+
+fn render(engine: &Engine) -> Result<(), String> {
+    let frame = engine.frame(json!({}), PixelFormat::Rgba8Straight).map_err(|e| format!("the frame renders: {e}"))?;
+    if (frame.width, frame.height) == (8, 6) { Ok(()) } else { Err(format!("a frame of {}x{}", frame.width, frame.height)) }
+}
+
+/// The GPU's work, by the device's own count on `queue`, over four renders of frames the compositor
+/// has not drawn before: the solid's blur is set to a new radius, from `radius` on, before each. A
+/// frame drawn again can come from the compositor's caches with no GPU work on the GPU too, and the
+/// work of one new frame reaches the device over more than one call, so one render alone can count
+/// none where four on the GPU always count some.
+fn submitted_rendering_new_frames(engine: &Engine, queue: &wgpu::Queue, radius: u32) -> Result<u64, String> {
+    submitted_during(queue, || {
+        (radius..radius + 4).try_for_each(|radius| {
+            let blur = json!({"comp": 1, "layer": "s", "path": "effects/#1/blurriness", "value": radius});
+            engine.request("set", blur).map_err(|e| format!("the blur is set: {e}"))?;
+            render(engine)
+        })
+    })
+}
+
+/// An engine started with a GPU attaches it, and `info.gpu` names the adapter as the compositor does
+/// (§17); one that asks for none is handed the reason and keeps it.
+#[test]
+fn an_engine_started_with_a_gpu_attaches_it_and_info_names_it() {
+    let (_scratch, engine, seen) = engine_on(GpuChoice::Preferred).expect("the engine starts");
+    let named = GpuDevice::request(GpuChoice::Preferred).summary();
+    assert_eq!(gpu_of_engine(&engine).expect("`info` answers"), named, "the attached device is named as `<adapter> (<backend>)`");
+    assert_eq!(held(&seen.devices).len(), 1, "the engine handed the app one device");
+
+    let (_scratch, engine, seen) = engine_on(GpuChoice::CpuOnly).expect("the engine starts");
+    assert_eq!(gpu_of_engine(&engine).expect("`info` answers"), "the app asked for CPU-only rendering");
+    assert!(held(&seen.devices).is_empty(), "a CpuOnly engine is handed no device");
+}
+
+/// Both of wgpu's failure callbacks reach the notice of the engine's device, in EffectCraft's words,
+/// and the engine drops the GPU before the next call, which `info.gpu` carries as EffectCraft's
+/// desktop app notes a retired device, and every render after it answers on the CPU (§17, L7).
+#[test]
+fn a_failure_drops_the_gpu_before_the_engines_next_call_and_renders_on_the_cpu() {
+    let causes: [(&str, &str, fn(&wgpu::Device)); 2] = [
+        ("a lost device", "GPU device lost (Destroyed): ", |device| {
+            device.destroy();
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }),
+        ("an uncaptured error", "uncaptured GPU error: ", |device| {
+            let oversized = wgpu::BufferDescriptor {
+                label: Some("craftbridge uncaptured-error probe"),
+                size: device.limits().max_buffer_size + 4096,
+                usage: wgpu::BufferUsages::UNIFORM,
+                mapped_at_creation: false,
+            };
+            let _ = device.create_buffer(&oversized);
+        }),
+    ];
+    for (name, words, cause) in causes {
+        let (_scratch, engine, seen) = engine_on(GpuChoice::Preferred).expect("the engine starts");
+        render(&engine).expect("the GPU renders");
+        let device = held(&seen.devices).first().cloned().expect("the app was handed a device");
+        cause(&device);
+        let reason = held(&seen.notices).first().and_then(GpuFailure::reason).unwrap_or_else(|| panic!("{name}: the notice has no report"));
+        assert!(reason.starts_with(words), "{name}: the notice keeps the failure in EffectCraft's words: {reason}");
+        assert_eq!(gpu_of_engine(&engine).expect("`info` answers after the failure"), format!("GPU preview retired: {reason}"), "{name}");
+        render(&engine).expect("the CPU renders after the failure");
+        let events = held(&seen.events).clone();
+        let dropped = events.iter().position(|event| event == "drop_gpu").unwrap_or_else(|| panic!("{name}: the GPU was never dropped: {events:?}"));
+        assert_eq!(events.iter().filter(|event| *event == "drop_gpu").count(), 1, "{name}: the GPU is dropped once");
+        assert_eq!(events.get(dropped + 1).map(String::as_str), Some("call info"), "{name}: the drop comes before the next call: {events:?}");
+    }
+}
+
+/// A suspended engine submits no work to the device it had, by the device's own count, and renders
+/// on the CPU; a resumed one holds a device again, named in `info.gpu`, and renders on it. Every
+/// count is of new frames, so no cache answers a render that would have run on the GPU.
+#[test]
+fn a_suspended_engine_submits_no_gpu_work_and_a_resumed_one_holds_a_device_again() {
+    let (_scratch, engine, seen) = engine_on(GpuChoice::Preferred).expect("the engine starts");
+    let first = held(&seen.queues).first().cloned().expect("the app was handed a device");
+    let on_the_gpu = submitted_rendering_new_frames(&engine, &first, 1).expect("the GPU renders are counted");
+    assert!(on_the_gpu > 0, "the counter sees GPU renders, so a count of none means something");
+
+    engine.suspend_gpu().expect("the engine suspends");
+    let idle = submitted_rendering_new_frames(&engine, &first, 10).expect("the renders are counted");
+    assert_eq!(idle, 0, "no GPU work is submitted while suspended");
+    assert_eq!(gpu_of_engine(&engine).expect("`info` answers"), "the GPU was detached; renders run on the CPU");
+
+    assert_eq!(engine.resume_gpu(), Ok(None), "a resume that got a device answers no CPU note");
+    assert_eq!(gpu_of_engine(&engine).expect("`info` answers"), GpuDevice::request(GpuChoice::Preferred).summary(), "the app holds a device again");
+    let second = held(&seen.queues).get(1).cloned().expect("the engine handed the app a second device");
+    assert!(submitted_rendering_new_frames(&engine, &second, 20).expect("the renders are counted") > 0, "the resumed device renders");
+}
+
+/// A resume that finds no device hands the app the CPU note: an engine that asked for none, resumed,
+/// is handed the reason again and never a device.
+#[test]
+fn a_resume_with_no_device_answers_the_cpu_note() {
+    let (_scratch, engine, seen) = engine_on(GpuChoice::CpuOnly).expect("the engine starts");
+    engine.suspend_gpu().expect("the engine suspends");
+    let note = "the app asked for CPU-only rendering".to_string();
+    assert_eq!(engine.resume_gpu(), Ok(Some(note.clone())), "no device is no failure, and the caller hears why");
+    assert_eq!(gpu_of_engine(&engine).expect("`info` answers"), note);
+    assert!(held(&seen.devices).is_empty(), "no device ever came");
+    render(&engine).expect("the CPU renders");
 }

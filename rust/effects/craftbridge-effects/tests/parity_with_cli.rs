@@ -12,7 +12,7 @@ mod export;
 mod scratch;
 
 use common::{EVERY_FORMAT, Scratch};
-use craftbridge_core::{CancelToken, CraftApp, CraftError, Engine, FrameBytes, PixelFormat};
+use craftbridge_core::{CancelToken, CraftApp, CraftError, Engine, FrameBytes, GpuChoice, PixelFormat};
 use craftbridge_effects::EffectCraftApp;
 use serde_json::{Value, json};
 use std::io::Write;
@@ -433,7 +433,7 @@ fn a_render_with_a_failed_item_fails_as_the_command_line_fails_it() {
         .failure()
         .expect("the command line reported the failure");
     assert_eq!(command_line.matches("; ").count(), 1, "each item's failure is named, joined once: {command_line}");
-    let engine = Engine::start(scratch.app().expect("the app starts from prepared folders")).expect("the engine starts");
+    let engine = Engine::start(scratch.app().expect("the app starts from prepared folders"), GpuChoice::CpuOnly).expect("the engine starts");
     engine.request("run", json!({"steps": steps_document(&failing_render_steps(&plugin_outputs))})).expect("the plugin's queue is set up");
     match engine.request_with_progress("export", json!({"queue": true}), |_, _, _| {}, &CancelToken::new()).expect_err("the failed item fails the render") {
         CraftError::CommandFailed { command, message, step } => {

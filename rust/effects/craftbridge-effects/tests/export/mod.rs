@@ -14,7 +14,7 @@ mod kill;
 
 use super::common::Scratch;
 use super::{cli, cli_run, scrub, scrubbed, steps_document};
-use craftbridge_core::{CancelToken, CraftError, Engine};
+use craftbridge_core::{CancelToken, CraftError, Engine, GpuChoice};
 use effectcraft_engine::project::render_queue::OutputFormat;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -85,7 +85,7 @@ fn same_files(plugin: &Path, command_line: &Path) -> Result<usize, String> {
 }
 
 fn start_engine(scratch: &Scratch) -> Result<Engine, String> {
-    let engine = Engine::start(scratch.app().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let engine = Engine::start(scratch.app().map_err(|e| e.to_string())?, GpuChoice::CpuOnly).map_err(|e| e.to_string())?;
     engine.request("exec", json!({"command": "file.openDemoProject"})).map_err(|e| format!("the demo project opens: {e}"))?;
     Ok(engine)
 }
@@ -280,7 +280,7 @@ fn the_projects_own_queue_exports_as_the_command_lines_queue() {
         .doc()
         .expect("the command line rendered its queue");
 
-    let engine = Engine::start(scratch.app().expect("the app starts")).expect("the engine starts");
+    let engine = Engine::start(scratch.app().expect("the app starts"), GpuChoice::CpuOnly).expect("the engine starts");
     engine.request("run", json!({"steps": steps_document(&queue_steps(&plugin_out))})).expect("the plugin's queue is set up");
     let exported = export(&engine, json!({"queue": true}), &CancelToken::new(), None);
     engine.close().expect("the engine closes");

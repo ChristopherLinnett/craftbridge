@@ -77,6 +77,24 @@ impl Engine {
         carry(Crossing::McpLine, reply, len, self.limits)
     }
 
+    /// Give the GPU up for the background: the engine drops its device and the preview surface, so
+    /// once this answers nothing is submitted to the GPU until [`Engine::resume_gpu`], and every
+    /// render answers on the CPU. It waits its turn as every call does, so one made during an export
+    /// answers once the export has ended, which renders on its device until then. Suspending twice is
+    /// not an error; a closed engine throws `Internal`.
+    pub async fn suspend_gpu(&self) -> Result<(), CraftError> {
+        self.core.send_suspend_gpu()?.answered().await
+    }
+
+    /// Ask for a device again and hand it to the app, on return to the foreground, answering `None`
+    /// once the app holds a device and the CPU note `info.gpu` reports when none came: that is no
+    /// failure. An engine that holds a device keeps it. It throws what the app answers when it
+    /// cannot take the device, and a closed engine throws `Internal`. The note crosses unchecked, as
+    /// an error's text does: no call's parameters make it grow.
+    pub async fn resume_gpu(&self) -> Result<Option<String>, CraftError> {
+        self.core.send_resume_gpu()?.answered().await
+    }
+
     /// Stop the engine after the calls it has accepted. Stopping twice is not an error.
     ///
     /// The calls made after this one are refused from the moment it is made, as every call is handed
