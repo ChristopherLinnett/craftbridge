@@ -45,6 +45,14 @@ Measured with a test app's 45-second and 660-second exports on emulator images o
 18. **API 30, 32 and 33 rest on documentation, not measurement:** the owner chose not to download those images. Android's "Changes to foreground services" (saved as `docs/fgs-changes.html`, listed in `evidence/v7/MANIFEST.md` with its SHA-256) changes nothing for these types before Android 14 (Android 11 adds only the camera and microphone types; 12L and 13 have no entry), so they are expected to behave like 29 and 31.
 19. **Amendment to §25 PD14:** Android uses `mediaProcessing` only from Android 15 on, and `dataSync` on Android 10–14. Of Android 14's two compat switches for `dataSync`, only `FGS_TYPE_DATA_SYNC_DISABLED_CHANGE_ID` (255659651) refuses it, with an `InvalidForegroundServiceTypeException` the host app catches; the deprecation one (255039210) only logs a warning (`final-v7-a34-combo-datasync-compat-disabled`, `-deprecated`). `specialUse` works on 29, 31, 34 and 37 as a Play-reviewed fallback.
 
+### V2: VideoToolbox decodes the running example's footage in hardware (#93, 2026-11-18)
+
+Measured on the acceptance iPhone (iPhone 12 Pro, A14, iOS 26.6.1) with `tools/ios-device-test.sh craftbridge-media -- t23 --nocapture`: the media crate's test binary for `aarch64-apple-ios`, signed, installed, run to its end and uninstalled by the runner, on the tree of `main` at `78ef8c8`.
+
+20. T23's footage is the movie a phone's hardware export writes in the running example's size, rate and length (1080 × 1080, 30 frames a second, 6 seconds, H.264 with a key frame every 2 seconds), written by the test through the phone's own hardware encoder; the test decodes it with the device's VideoToolbox session and with FilmCraft's software decoder, and compares every picture.
+21. The branch it took, as the test says it: `T23, the running example's footage: hardware, VideoToolbox H.264: 180 pictures, each the software decoder's`. `platform::videotoolbox::tests::t23_the_running_examples_footage_gives_the_pictures_the_software_decoder_gives` passed (`1 passed`, 9.9 s).
+22. The test fails on the phone when a picture is wrong: with each hardware picture replaced by the one VideoToolbox gave before it, the same run fails with `T23, the running example's footage: picture 1, at 1, is not the software decoder's`.
+
 ### Claims
 
 | Claim | How checked | Date | Result |
@@ -84,7 +92,8 @@ Measured with a test app's 45-second and 660-second exports on emulator images o
 | Release library size about 62 MB stripped per architecture | Android release build of the CLI (`analysis/device-probe/build-release.log`) | 2026-11-12 | true (the CLI; the plugin library is measured in V5) |
 | An iOS app can list and read its system fonts | an app in the iOS 26.5 simulator and on the acceptance iPhone (findings 9–14) | 2026-11-13 | true, through CoreText's folders; the simulator's `/System/Library/Fonts` is the Mac's (V1) |
 | Android 10–14 accept `dataSync` for a long export, `mediaProcessing` only from 15 | emulator runs on API 29, 31, 34 and 37; 30, 32 and 33 from Android's documentation (findings 15–19) | 2026-11-13 | true where measured; expected from the documentation on 30, 32 and 33 (V7) |
-| Physical-device GPU limits, hardware decoding, performance | not checkable without devices | — | open: V2–V5 |
+| VideoToolbox decodes the running example's footage in hardware on the acceptance iPhone, every frame equal to the software decoder's | T23 through `tools/ios-device-test.sh` on an iPhone 12 Pro, iOS 26.6.1 (findings 20–22) | 2026-11-18 | true: the hardware branch, VideoToolbox H.264, 180 of 180 pictures (V2) |
+| Physical-device GPU limits, MediaCodec hardware decoding, performance | not checkable without devices | — | open: V3–V5 |
 
 ## Calls the design makes into this system
 

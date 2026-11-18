@@ -1185,7 +1185,7 @@ Estimates are in engineer-days; each wave's total in §11 is the sum of its task
 | ID | Verification (closed during the build) | Closes in |
 |---|---|---|
 | V1 | An iOS app can list and read `/System/Library/Fonts` from its sandbox, on the simulator and the acceptance iPhone | before FX-3 |
-| V2 | VideoToolbox decodes the running example's footage in hardware on the acceptance iPhone, frames equal to software (T23) | MED-1 |
+| V2 | VideoToolbox decodes the running example's footage in hardware on the acceptance iPhone, frames equal to software (T23). Answered on 2026-11-18, on an iPhone 12 Pro (A14) with iOS 26.6.1, through `tools/ios-device-test.sh`: T23 took the hardware branch, VideoToolbox H.264, and all 180 pictures were the software decoder's (`evidence/99-verification.md` findings 20–22) | MED-1 |
 | V3 | MediaCodec does the same on both acceptance Android phones (T23) | MED-2 |
 | V4 | Metal and Vulkan devices with clamped limits on the three phones, and whether each also accepts the compositor's default limits (T8) | IOS-2, AND-2 |
 | V5 | Baseline per device: first preview and full export of the running example, and peak memory | QA-3 |
