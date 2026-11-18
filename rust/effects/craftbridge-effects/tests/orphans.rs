@@ -10,7 +10,6 @@ mod scratch;
 use scratch::Scratch;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 /// The name EffectCraft gives the temporary file of a write: the writing process's id and the
 /// write's own number, spelled between the two halves of the name (AD21).
@@ -18,14 +17,14 @@ fn temporary_name(process: u32, number: u64) -> String {
     format!(".effectcraft-{process}-{number}.tmp")
 }
 
-/// The id of a process that has ended, as a killed write's writer has: one started and reaped here, so
-/// no process has its id now.
-fn a_process_that_has_ended() -> std::io::Result<u32> {
-    let mut ended = Command::new("true").spawn()?;
-    let id = ended.id();
-    ended.wait()?;
-    Ok(id)
-}
+/// An id no process holds, as a killed write's writer's is once it has ended: the largest a
+/// process id, a `pid_t`, can spell. No system the SDK runs on gives a process an id that high
+/// (Darwin's go no higher than 99999, Linux's stay below 2^22), so no process can take it between
+/// a test's planting and the start's sweep, as one could an id the system gives out; and it is the
+/// last id the sweep asks the system about, the number after it being no process id at all, whose
+/// file stays (`a_name_short_of_effectcraft_s_own_spelling_is_kept`). A process cannot be started
+/// and reaped for an id instead, since an iOS app has no way to start one.
+const ENDED: u32 = i32::MAX.unsigned_abs();
 
 /// The working folders of the scratch container, from the core's one list of them, which the sweep
 /// reads too: a folder added to that list is planted in here with no second list.
@@ -39,7 +38,7 @@ fn working(scratch: &Scratch) -> impl Iterator<Item = &Path> {
 #[test]
 fn a_temporary_a_previous_process_left_in_the_app_s_folders_is_gone_after_a_start() {
     let scratch = Scratch::new().expect("a scratch folder");
-    let previous = a_process_that_has_ended().expect("a process that has ended");
+    let previous = ENDED;
     for folder in working(&scratch) {
         fs::write(folder.join(temporary_name(previous, 0)), b"half a write").expect("a temporary a killed write left");
         fs::write(folder.join("finished.txt"), b"a finished file").expect("a file of another name");
@@ -59,7 +58,7 @@ fn a_temporary_a_previous_process_left_in_the_app_s_folders_is_gone_after_a_star
 fn a_temporary_deep_inside_an_engine_folder_is_gone_after_a_start() {
     let scratch = Scratch::new().expect("a scratch folder");
     let deep = scratch.folders.cache.join("staged").join("one card").join("media");
-    let previous = a_process_that_has_ended().expect("a process that has ended");
+    let previous = ENDED;
     fs::create_dir_all(&deep).expect("a folder deep inside the cache");
     fs::write(deep.join("card.png"), b"a finished card").expect("a finished file");
     fs::write(deep.join(temporary_name(previous, 7)), b"half a card").expect("a temporary a killed write left deep");
@@ -76,7 +75,7 @@ fn a_temporary_deep_inside_an_engine_folder_is_gone_after_a_start() {
 #[test]
 fn a_temporary_outside_the_engine_s_folders_is_kept() {
     let scratch = Scratch::new().expect("a scratch folder");
-    let previous = a_process_that_has_ended().expect("a process that has ended");
+    let previous = ENDED;
     fs::write(scratch.root().join(temporary_name(previous, 0)), b"outside").expect("a temporary outside the container");
     fs::write(scratch.path().join(temporary_name(previous, 1)), b"beside the folders").expect("a temporary beside the engine's folders");
 
@@ -101,9 +100,11 @@ fn a_temporary_named_with_this_process_s_own_id_is_kept() {
 
 /// Another process that is still running may be writing in the same folders — an app extension sharing
 /// the container, or the last launch still being torn down — so a temporary named for it is a live
-/// write's, and the start keeps it: for a process this one may signal (its parent, which the system
-/// names as a running process however its first parent ended) and for one it may not (the system's
-/// first process, which runs as long as the system does), as another app's process is on a phone.
+/// write's, and the start keeps it: for one this process may not signal (the system's first
+/// process, which runs as long as the system does), as another app's process is on a phone, and for
+/// its parent, which the system names as a running process however its first parent ended. On a
+/// desktop the parent is one it may signal; an iOS app's parent is the system's first process, which
+/// starts it, so there the one process the app may signal is its own (the test above).
 #[test]
 fn a_temporary_of_another_process_still_running_is_kept() {
     let scratch = Scratch::new().expect("a scratch folder");
@@ -131,7 +132,7 @@ fn a_temporary_of_another_process_still_running_is_kept() {
 #[test]
 fn a_name_short_of_effectcraft_s_own_spelling_is_kept() {
     let scratch = Scratch::new().expect("a scratch folder");
-    let previous = a_process_that_has_ended().expect("a process that has ended");
+    let previous = ENDED;
     let misses = [
         format!("effectcraft-{previous}-0.tmp"),
         format!(".effectcraft-{previous}-0.bak"),
@@ -161,7 +162,7 @@ fn a_name_short_of_effectcraft_s_own_spelling_is_kept() {
 #[test]
 fn a_folder_of_a_leftover_s_name_is_kept() {
     let scratch = Scratch::new().expect("a scratch folder");
-    let named = scratch.folders.cache.join(temporary_name(a_process_that_has_ended().expect("a process that has ended"), 2));
+    let named = scratch.folders.cache.join(temporary_name(ENDED, 2));
     fs::create_dir(&named).expect("a folder of a leftover's name");
     fs::write(named.join("inside.txt"), b"the folder's own file").expect("a file inside that folder");
 
@@ -179,7 +180,7 @@ fn a_link_of_a_leftover_s_name_is_kept_and_nothing_through_a_link_is_touched() {
     use std::os::unix::fs::symlink;
 
     let scratch = Scratch::new().expect("a scratch folder");
-    let previous = a_process_that_has_ended().expect("a process that has ended");
+    let previous = ENDED;
     let target = scratch.root().join("real-file");
     fs::write(&target, b"a file outside the folders").expect("a file outside the folders");
     symlink(&target, scratch.folders.cache.join(temporary_name(previous, 3))).expect("a link of a leftover's name");
