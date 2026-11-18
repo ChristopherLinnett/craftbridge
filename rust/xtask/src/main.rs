@@ -41,6 +41,7 @@ mod licences;
 mod lints;
 mod machinery;
 mod meta;
+mod pin;
 mod pins;
 mod plan_views;
 mod report;

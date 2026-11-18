@@ -205,8 +205,8 @@ fn is_skip_path(trees: &[TokenTree], at: usize) -> bool {
     ) && (trees.get(at + 3).and_then(word).is_some_and(|skip| skip == "skip") || is_dollar(trees.get(at + 3)))
 }
 
-/// Is the predicate of a `cfg_attr` exactly `test`?
-fn is_test(predicate: &[TokenTree]) -> bool {
+/// Is the predicate of a `cfg_attr` or a `cfg` exactly `test`?
+pub(crate) fn is_test(predicate: &[TokenTree]) -> bool {
     matches!(predicate, [tree] if word(tree).as_deref() == Some("test"))
 }
 

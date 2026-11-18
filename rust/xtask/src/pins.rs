@@ -11,7 +11,7 @@
 //! inline tables, arrays over any number of lines at any spacing. A text reader in a script would know one
 //! spelling of each value and misread or stop on every other.
 //!
-//! This is the one reader of both files: of the toolchain file's targets and Apple slices — the rows below
+//! This is the one reader of both files: of the toolchain file's channel and targets, and its Apple slices — the rows below
 //! say what the Swift checks read the sources as (`rust/xtask/src/swift_lint.rs`) and what the
 //! `swift_build` stage compiles, so the list of slices the package ships for exists exactly once — and of
 //! the catalog, whose pins the doctor checks and whose libraries and plugins the licence check reads
@@ -79,6 +79,19 @@ const APPLE_SLICES: &[&Slice; 3] = &[
 fn toml_file(root: &Path, file: &str) -> Result<toml::Value, String> {
     let source = crate::scan::read_text(&root.join(file))?;
     toml::from_str::<toml::Value>(&source).map_err(|error| format!("{file}: is not valid TOML: {error}"))
+}
+
+/// The channel the toolchain file names: the toolchain every build of the gate runs in (AGENTS.md §7).
+/// Every cargo and rustc a tool starts names it in the variable rustup itself gives every command it
+/// starts under the pin (`crate::pin`), so no crate's own toolchain file decides which toolchain builds
+/// CraftBridge. A string is the only form a channel takes, in a `[toolchain]` table or an inline one.
+pub(crate) fn toolchain_channel(root: &Path) -> Result<String, String> {
+    toml_file(root, TOOLCHAIN)?
+        .get("toolchain")
+        .and_then(|toolchain| toolchain.get("channel"))
+        .and_then(toml::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| format!("{TOOLCHAIN}: names no channel for the build to run in"))
 }
 
 /// The toolchain file's targets, in the file's order: a list of strings, the one form rustup takes (it
@@ -324,5 +337,16 @@ mod tests {
         for sdk in sdks {
             assert!(doctor.contains(&format!("\"{sdk}:")), "tools/doctor.sh checks no {sdk} SDK, which a row of APPLE_SLICES builds against");
         }
+    }
+
+    /// The channel is read the same from every spelling rustup reads, and a file naming none fails with its
+    /// name: it is the value `crate::pin` names to every cargo a tool starts, so a second reader of the
+    /// file — or a silent default when the key is gone — is the one thing this cannot be.
+    #[test]
+    fn the_channel_is_named_however_the_file_writes_it() {
+        assert_eq!(toolchain_channel(&scratch_with(TOOLCHAIN_BASIC, CATALOG_BASIC, "pins-channel").0).unwrap(), "1.99.1");
+        assert_eq!(toolchain_channel(&scratch_with(TOOLCHAIN_OTHER_FORM, CATALOG_BASIC, "pins-channel-form").0).unwrap(), "1.99.1");
+        let no_channel = scratch_with("[toolchain]\ntargets = [\"aarch64-apple-ios\"]\n", CATALOG_BASIC, "pins-channel-missing");
+        assert_eq!(toolchain_channel(&no_channel.0).unwrap_err(), format!("{TOOLCHAIN}: names no channel for the build to run in"));
     }
 }

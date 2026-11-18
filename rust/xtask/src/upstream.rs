@@ -1168,8 +1168,7 @@ fn pin_from(root: &Path, cache: &Cache, rev: &str, full: &str) -> Result<(String
     std::fs::write(root.join("rust/Cargo.lock"), &upstream_lock).map_err(|error| format!("cannot write rust/Cargo.lock: {error}"))?;
     // Resolve CraftBridge's own crates on top of the copied lock (D-21): versions upstream locked
     // stay locked; only what CraftBridge adds beyond them resolves fresh.
-    let output = Command::new(env!("CARGO"))
-        .current_dir(root.join("rust"))
+    let output = crate::pin::cargo_in(&root.join("rust"))?
         .args(["metadata", "--format-version", "1"])
         .output()
         .map_err(|error| format!("cannot run cargo metadata: {error}"))?;

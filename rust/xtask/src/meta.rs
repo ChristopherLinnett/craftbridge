@@ -6,7 +6,6 @@
 //! defined once here.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// A package as `cargo metadata` describes it, kept small: only the fields a rule needs.
 pub(crate) struct Crate {
@@ -192,15 +191,16 @@ pub(crate) enum Graph {
 
 /// Run cargo metadata and parse what it printed. `--locked` because the gate reads the graph `Cargo.lock`
 /// pins and never writes it: a lock file that needs updating fails here instead of changing under the
-/// change being checked.
+/// change being checked. The run starts through `crate::pin`, like every cargo a tool starts: with the
+/// pinned toolchain named, and in the lint library's folder with that folder's own (AGENTS.md §7).
 fn run(rust_dir: &Path, graph: Graph) -> Result<Metadata, String> {
-    let mut command = Command::new(env!("CARGO"));
-    command.current_dir(rust_dir).arg("metadata").arg("--format-version").arg("1").arg("--locked");
+    let mut command = crate::pin::cargo_in(rust_dir)?;
+    command.arg("metadata").arg("--format-version").arg("1").arg("--locked");
     command.arg(match graph {
         Graph::Workspace => "--no-deps",
         Graph::Resolved => "--all-features",
     });
-    let output = command.output().map_err(|error| format!("could not run `{}`: {error}", env!("CARGO")))?;
+    let output = command.output().map_err(|error| format!("could not run `{}`: {error}", Path::new(command.get_program()).display()))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("cargo metadata exited with {}: {}", output.status, stderr.trim()));
