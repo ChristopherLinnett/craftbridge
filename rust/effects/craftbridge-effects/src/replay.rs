@@ -39,8 +39,13 @@ pub(crate) fn replay(backend: &mut Backend, folder: &Path, params: &Value) -> Re
     for (line, command, step_params, _) in &found {
         refuse_process(command, step_params, None).and_then(|()| check_unrun(backend, command, step_params)).map_err(|error| on_line(error, *line))?;
     }
-    let mut calls: Vec<(&str, &mut Value)> =
-        found.iter_mut().filter(|(.., at)| at.is_some()).map(|(_, command, step_params, _)| (command.as_str(), step_params)).collect();
+    // Every line the replay could run goes to the door, the `start` project's `file.open` among them:
+    // it is a command the call reaches, and a conversion later in the script cannot be handed a copy of
+    // what that project shows. What the door changes of a line whose parameters it builds itself is not
+    // written back, and nothing needs it to be: a project is read from where it lies, so that its own
+    // media resolve beside it, and a script that converts a file its project shows where it must be
+    // read from a copy is refused before a copy of anything is made.
+    let mut calls: Vec<(&str, &mut Value)> = found.iter_mut().map(|(_, command, step_params, _)| (command.as_str(), step_params)).collect();
     let staged = imports::staged(backend, Some(folder), &mut calls)?;
     let script = if staged.rewritten() { Cow::Owned(rewritten(script, &found)) } else { Cow::Borrowed(script) };
     let session = backend.session().ok_or_else(|| CraftError::internal("`replay`: the backend holds no session"))?;

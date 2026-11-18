@@ -96,9 +96,11 @@ struct Call<'a> {
 pub(crate) fn execute(backend: &mut Backend, folder: Option<&Path>, command: &str, params: Value, step: Option<u32>) -> Result<Value> {
     let mut params = if params.is_null() { empty_params() } else { params };
     refuse_process(command, &params, step)?;
-    // A copy that cannot be made is a refusal of the disk, worded as every other row's is in a step.
+    // A copy that cannot be made is a refusal of the disk, and a call the door cannot hand a copy is a
+    // refusal of this build: either is worded as every other row's is in a step of a `run`.
     let staged = crate::imports::staged(backend, folder, &mut [(command, &mut params)]).map_err(|error| match error {
         CraftError::Io { message } => CraftError::io(said(command, message, step)),
+        CraftError::Unsupported { message } => CraftError::unsupported(said(command, message, step)),
         other => other,
     })?;
     let answered = exec_on_engine(backend, command, &params, step);
