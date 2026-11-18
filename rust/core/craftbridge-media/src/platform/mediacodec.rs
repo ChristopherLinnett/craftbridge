@@ -544,7 +544,7 @@ pub(crate) mod tests {
     use std::sync::{Arc, OnceLock};
 
     use filmcraft_codecs::hw::{FrameCodec, FrameStreamInfo, hw_stats};
-    use filmcraft_codecs::{VideoDecoder, software_video_decoder};
+    use filmcraft_codecs::{VideoDecoder, make_video_decoder, software_video_decoder};
     use filmcraft_color::ColorInfo;
     use filmcraft_frame::Chroma;
     use ndk::hardware_buffer::{HardwareBufferDesc, HardwareBufferRef};
@@ -552,10 +552,11 @@ pub(crate) mod tests {
     use super::*;
     use crate::fallback::Fallback;
     use crate::fixtures::{
-        av1_entry, av1_samples, counters, decoded, h264_with_b_pictures_from_before_zero, hevc_entry, hevc_samples, hevc10_entry, hevc10_samples, pictures,
-        reordered_entry, reordered_samples, stream, text, through_a_failed_drain, tiny_entry, tiny_samples, two_runs,
+        self, Branch, Stream, av1_entry, av1_samples, counters, decoded, h264_with_b_pictures_from_before_zero, hevc_entry, hevc_samples, hevc10_entry,
+        hevc10_samples, pictures, reordered_entry, reordered_samples, stream, text, through_a_failed_drain, tiny_entry, tiny_samples, two_runs,
     };
     use crate::mediacodec_input::{AV1_MIME, H264_MIME, HEVC_MIME};
+    use crate::platform::mediacodec_encoder::tests::{through_a_software_codec, through_the_hardware};
 
     /// Names the file the harness writes from `MediaCodecList(MediaCodecList.REGULAR_CODECS)`, one codec a line
     /// in the list's order, tab-separated: `getName()`, `isHardwareAccelerated()`, `isEncoder()`, then
@@ -1361,5 +1362,81 @@ pub(crate) mod tests {
         let wanted = decoded(software(&hevc10_entry()).as_mut(), &samples);
         let compared: std::result::Result<usize, String> = (0..6).map(|_| ten_bit_run(ten_bit_decoder().1, &samples, &wanted)).sum();
         hardware_compared(HEVC_MIME, compared.unwrap()).unwrap();
+    }
+
+    /// `stream` opened through FilmCraft's registry, as an engine's start leaves it ([`crate::register`] over the
+    /// device's list), every picture held to the software decoder's: the branch it took. It is the device's: the
+    /// first hardware decoder the list names for the stream's type, with no picture from another decoder and no
+    /// switch to the software one, wherever the list names one and the platform can make the stream's pictures
+    /// (a 10-bit one needs the P010 reader, [`p010_reader_made`]); the software decoder, the decline counted,
+    /// everywhere else.
+    fn through_the_registry(stream: &Stream) -> Branch {
+        let layout = Layout::for_stream(&fixtures::stream(&stream.entry)).unwrap();
+        let mime = mediacodec_input::mime(&layout).unwrap();
+        let hardware = hardware_name(mime).filter(|_| layout.depth == Depth::Eight || p010_reader_made());
+        let backend = format!("{BACKEND} {}", layout.codec.name());
+        let (declined, fallbacks) = (hw_stats().declined, hw_stats().fallbacks);
+        let mut decoder = make_video_decoder(&stream.entry).unwrap();
+        let opened = decoder.name().to_string();
+        let compared = fixtures::compared_with_software(stream.name, decoder.as_mut(), &stream.entry, &stream.samples);
+        assert_eq!(compared, stream.samples.len(), "{}: a picture for each sample", stream.name);
+        let branch = match hardware {
+            Some(name) => {
+                assert_eq!(
+                    (opened.as_str(), decoder.name(), hw_stats().declined, hw_stats().fallbacks),
+                    (backend.as_str(), backend.as_str(), declined, fallbacks),
+                    "{}: {name} took every picture",
+                    stream.name
+                );
+                Branch::Hardware(format!("{name} ({backend})"))
+            }
+            None => {
+                let software = software_video_decoder(&stream.entry).unwrap();
+                assert_eq!((opened.as_str(), hw_stats().declined), (software.name(), declined + 1), "{}: the factory declined the stream", stream.name);
+                let why = decoder_with(&stream.entry, &fixtures::stream(&stream.entry), listed)
+                    .err()
+                    .map_or_else(|| "no hardware decoder".into(), |why| why.to_string());
+                Branch::Declined(why)
+            }
+        };
+        eprintln!("{}", branch.says(stream.name, compared));
+        branch
+    }
+
+    /// T23's footage on this device: the running example's movie as the device's hardware encoder writes it where
+    /// its list names one for H.264, and its own software encoder where not, as an emulator's list leaves none.
+    fn running_example_footage() -> Stream {
+        let hardware = mediacodec_input::hardware_encoders(device_codecs(), H264_MIME).first().copied();
+        let start = if hardware.is_some() { through_the_hardware } else { through_a_software_codec };
+        eprintln!(
+            "T23's footage: encoded by {}",
+            hardware.map_or("the device's software encoder, its list naming no hardware one".into(), |name| format!("hardware encoder {name}"))
+        );
+        fixtures::running_example_footage(start).unwrap()
+    }
+
+    /// T23 on this device: the running example's footage and the streams of the set, each opened through the
+    /// registry and held to the device's branch. The set's two offset crops are left out: through the registry,
+    /// the API 34 emulator's hardware H.264 decoder shows the wrong window of a crop that starts off the coded
+    /// picture's corner, with no error, a fault of the crop's offset that T23's footage, whose crop starts at
+    /// the corner, cannot show.
+    #[test]
+    fn t23_the_running_examples_footage_and_the_set_but_its_offset_crops_take_the_devices_branch_through_the_registry() {
+        let _counters = counters();
+        give_device_codecs();
+        let footage = running_example_footage();
+        assert_eq!(footage.samples.len() as u64, fixtures::T23_FRAMES);
+        crate::register(true);
+        let set = [
+            fixtures::h264(),
+            fixtures::h264_with_b_pictures(),
+            fixtures::h264_with_b_pictures_from_before_zero(),
+            fixtures::hevc(),
+            fixtures::hevc10(),
+            fixtures::av1(),
+        ];
+        for stream in set.iter().chain([&footage]) {
+            through_the_registry(stream);
+        }
     }
 }

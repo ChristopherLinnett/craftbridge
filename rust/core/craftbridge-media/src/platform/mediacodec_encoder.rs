@@ -287,7 +287,7 @@ fn asking(spec: &VideoSpec, settings: &Settings) -> Result<MediaFormat, EncodeEr
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::encodetests::{self, Start};
     use crate::hardware::HardwareEncoder;
@@ -298,7 +298,7 @@ mod tests {
     /// platform's answer to how this encoder asks, and a check that skipped it would pass while no hardware
     /// encoded anything. Where it names none, the decline is the answer, which the checks take as nothing to
     /// encode ([`the_export_declines_a_movie_the_device_has_no_hardware_encoder_for`] pins its words).
-    fn through_the_hardware(spec: VideoSpec) -> Result<HardwareEncoder, EncodeError> {
+    pub(crate) fn through_the_hardware(spec: VideoSpec) -> Result<HardwareEncoder, EncodeError> {
         give_device_codecs();
         let mime = mime(spec.codec);
         match (HardwareEncoder::start(spec), mediacodec_input::hardware_encoders(device_codecs(), mime).first()) {
@@ -319,7 +319,7 @@ mod tests {
 
     /// The whole production path over the device's software encoder: the same [`HardwareEncoder`] a caller
     /// gets, started over a named codec instead of the hardware answer.
-    fn through_a_software_codec(spec: VideoSpec) -> Result<HardwareEncoder, EncodeError> {
+    pub(crate) fn through_a_software_codec(spec: VideoSpec) -> Result<HardwareEncoder, EncodeError> {
         // A codec the device itself named must start: a refusal here is a broken device or a broken path,
         // and a shared check that skips rather than fails would hide exactly that.
         Ok(HardwareEncoder::started_over(Encoder::start_with(spec, software_codec).unwrap()))
