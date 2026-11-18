@@ -128,6 +128,11 @@ fn the_core_s_kotlin_holds_every_export_and_no_name_kotlin_owns() {
         "var `refused`: List<RecoveryNote>",
         "data class RecoveryNote (",
         "var `reason`: kotlin.String",
+        // The device's codec list, which the SDK reads from `MediaCodecList` and hands over before it
+        // starts an engine: the record, one field of it, and the call.
+        "data class CodecInfo (",
+        "var `hardwareAccelerated`: kotlin.Boolean",
+        "*/ fun `setDeviceCodecs`(`codecs`: List<CodecInfo>)",
         "var `data`: kotlin.ByteArray",
         "enum class GpuChoice {",
         "enum class PixelFormat {",
@@ -189,6 +194,9 @@ fn the_core_s_swift_holds_every_export_in_files_named_for_its_crate() {
         "public var refused: [RecoveryNote]",
         "public struct RecoveryNote: Equatable, Hashable {",
         "public var reason: String",
+        "public struct CodecInfo: Equatable, Hashable {",
+        "public var hardwareAccelerated: Bool",
+        "public func setDeviceCodecs(codecs: [CodecInfo]) {try! rustCall() {",
         "public var data: Data",
         "public enum GpuChoice: Equatable, Hashable {",
         // The iOS attach of plan §20 is a top-level call taking the engine, as the plan names it.

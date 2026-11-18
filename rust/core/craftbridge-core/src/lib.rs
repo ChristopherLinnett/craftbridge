@@ -28,6 +28,9 @@ pub mod platform;
 
 pub use app::CraftApp;
 pub use cancel::CancelToken;
+/// The device's codec list an Android app hands over before it starts an engine, which the start registers the
+/// hardware decoders from and an export's hardware encoder is chosen from (plan §18).
+pub use craftbridge_media::{CodecInfo, set_device_codecs};
 pub use engine::{Answer, Engine};
 pub use error::CraftError;
 pub use export::PROGRESS_INTERVAL;

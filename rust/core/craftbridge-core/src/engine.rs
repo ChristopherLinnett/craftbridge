@@ -222,7 +222,10 @@ impl Engine {
     /// Every start's one path: the processor check first, so nothing else runs on a processor the
     /// build cannot run on; then the folders, so an app built here is built from folders that exist,
     /// which is also how an app crate's tests see that its app is built inside a start that checked
-    /// first; then the app, built where the start says; then the journal; then the thread.
+    /// first; then the app, built where the start says; then the journal; then the hardware decoders,
+    /// registered from what the platform answers (plan §18): on Android the codec list the app handed over
+    /// before it started, so a start there with no list leaves every stream to the software decoders; then
+    /// the thread.
     fn launch<A: CraftApp + 'static>(folders: Option<&Folders>, build: impl FnOnce() -> Result<A>, gpu: GpuChoice) -> Result<Engine> {
         cpu::require_fp16(cpu::kernel_hwcap())?;
         let prepared = match folders {
@@ -238,6 +241,7 @@ impl Engine {
             }
             None => (None, Recovery::default()),
         };
+        craftbridge_media::register(true);
         Self::spawn(app, journal, recovery, gpu)
     }
 
@@ -1582,5 +1586,30 @@ mod tests {
             assert_eq!(Engine::start_in(&folders, FakeApp::new().0, GpuChoice::CpuOnly).err(), Some(refused.clone()));
         });
         assert!(!scratch.path().join("container").exists(), "a refused start touched the folders");
+    }
+
+    /// Every way into the engine registers the hardware decoders, with hardware decoding on, so no app
+    /// starts one that decodes every stream in software because it reached the engine another way. A
+    /// registration the start did not make would leave the `Off` this test registers first.
+    #[test]
+    fn every_start_registers_the_hardware_decoders() {
+        let scratch = tempfile::tempdir().unwrap();
+        let folders = crate::folders::Folders::inside(scratch.path().join("container"), "");
+        let registered = |start: &dyn Fn() -> Result<Engine>| {
+            craftbridge_media::register(false);
+            let engine = start().unwrap();
+            let found = craftbridge_media::availability();
+            engine.close().unwrap();
+            found
+        };
+        let starts: [(&str, &dyn Fn() -> Result<Engine>); 3] = [
+            ("start", &|| Engine::start(FakeApp::new().0, GpuChoice::CpuOnly)),
+            ("start_in", &|| Engine::start_in(&folders, FakeApp::new().0, GpuChoice::CpuOnly)),
+            ("start_in_with", &|| Engine::start_in_with(&folders, |_| Ok(FakeApp::new().0), GpuChoice::CpuOnly)),
+        ];
+        for (name, start) in starts {
+            let found = registered(start);
+            assert!(found.is_some() && found != Some(craftbridge_media::Availability::Off), "{name} left hardware decoding {found:?}");
+        }
     }
 }

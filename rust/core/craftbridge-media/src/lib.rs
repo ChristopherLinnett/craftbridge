@@ -9,6 +9,7 @@
 mod aac;
 #[cfg(any(target_os = "ios", target_os = "android", test))]
 mod biplanar;
+mod codec_list;
 mod encode;
 #[cfg(test)]
 mod encodetests;
@@ -32,13 +33,13 @@ mod settings;
 use filmcraft_codecs::hw::{StreamInfo, hardware_decoding, note_hw_declined, set_hardware_decoding, set_hw_backend};
 use filmcraft_codecs::{Result, VideoDecoder, register_video_decoder};
 use filmcraft_isobmff::SampleEntry;
+use std::sync::RwLock;
 
 pub use aac::AacSpec;
+pub use codec_list::CodecInfo;
 pub use encode::{ColourCodes, EncodeError, RateControl, Reorder, VideoCodec, VideoSpec, Yuv420};
 pub use fallback::{Draining, Fallback};
 pub use hardware::{HardwareEncoder, encode_aac};
-#[cfg(target_os = "android")]
-pub use mediacodec_input::CodecInfo;
 pub use movie::{AAC_FRAME, AudioTrack, Backend, Finished, Movie, Packet};
 
 /// What [`register`] left the process able to do.
@@ -133,14 +134,33 @@ pub fn set_device_codecs(codecs: Vec<CodecInfo>) {
     platform::mediacodec::set_device_codecs(codecs);
 }
 
+/// The list is read by Android's decoders and encoders alone, but the boundary exports the call on every
+/// target, so the bindings, which are generated from a host build, name it: elsewhere the list is dropped.
+#[cfg(not(target_os = "android"))]
+pub fn set_device_codecs(codecs: Vec<CodecInfo>) {
+    drop(codecs);
+}
+
+/// What the last [`register`] reported; nothing until one has run.
+static REPORTED: RwLock<Option<Availability>> = RwLock::new(None);
+
+/// What the last [`register`] in this process left it able to do, or `None` before any has run: the answer
+/// an app reads when it asks whether this build decodes on hardware, which only a registration can find
+/// out, since it is the registration that asks the device.
+pub fn availability() -> Option<Availability> {
+    *REPORTED.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Registers CraftBridge's decoders in FilmCraft's decoder registry, the one every app that decodes
-/// through FilmCraft opens movies through, and sets whether they may be used (`on`). Call it once per
-/// process at engine start; calling it again only changes the switch. A source picks the switch up when
-/// it is reopened.
+/// through FilmCraft opens movies through, and sets whether they may be used (`on`). Call it at engine
+/// start; calling it again, as every engine start in a process does, only changes the switch and what
+/// [`availability`] answers. A source picks the switch up when it is reopened.
 pub fn register(on: bool) -> Availability {
     register_video_decoder(factory);
     set_hardware_decoding(on);
-    report(on, backend())
+    let found = report(on, backend());
+    *REPORTED.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(found);
+    found
 }
 
 /// What [`register`] reports with hardware decoding `on` and the device's `backend`, which FilmCraft's own
@@ -1412,11 +1432,14 @@ mod tests {
         assert!(device.is_none_or(|name| name == BACKEND), "the only backend a device names is its platform's");
         let on = device.map_or(Availability::Unavailable, Availability::Hardware);
         assert_eq!(register(true), on);
+        assert_eq!(availability(), Some(on), "what the registration found is what the app reads afterwards");
         assert!(video_decoder_registered(factory));
         assert!(hardware_decoding());
         assert_eq!(register(false), Availability::Off);
+        assert_eq!(availability(), Some(Availability::Off));
         assert!(!hardware_decoding());
         assert_eq!(register(true), on);
+        assert_eq!(availability(), Some(on));
         assert!(hardware_decoding());
     }
 

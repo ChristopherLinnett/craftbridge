@@ -24,6 +24,9 @@ fn request(app: &mut EffectCraftApp, method: &str, params: Value) -> Result<Valu
 fn info_names_the_engine_its_version_and_the_builds_state() {
     let scratch = Scratch::new().expect("a scratch folder");
     let mut app = scratch.app().expect("the app starts from prepared folders");
+    // What every engine start registers, which this test makes itself, since the tests before it may have
+    // started engines or not: hardware only where the platform has a hardware decoder, as an iPhone does.
+    let registered = craftbridge_media::register(true);
     let info = request(&mut app, "info", json!({})).expect("info answers");
     assert_eq!(info["engine"].as_str(), Some("effectcraft"));
     assert_eq!(info["version"].as_str(), Some(effectcraft_engine::project::APP_VERSION));
@@ -38,7 +41,11 @@ fn info_names_the_engine_its_version_and_the_builds_state() {
         Some("headless: renders on the CPU"),
         "with no device attached, `info.gpu` carries the session's note, as plan §17's *CPU only* state has it"
     );
-    assert_eq!(info["hardwareDecoding"].as_bool(), Some(false));
+    assert_eq!(
+        info["hardwareDecoding"].as_bool(),
+        Some(matches!(registered, craftbridge_media::Availability::Hardware(_))),
+        "`info.hardwareDecoding` is what the registration found: {registered:?}"
+    );
     assert_eq!(
         info["project"]["renderer"]["why"].as_str(),
         Some("headless: renders on the CPU"),

@@ -706,6 +706,8 @@ internal object IntegrityCheckingUniffiLib {
     }
 
     internal fun ensureInitialized() = Unit
+    external fun uniffi_craftbridge_core_ffi_checksum_func_set_device_codecs(
+    ): Int
     external fun uniffi_craftbridge_core_ffi_checksum_func_craft_error_message(
     ): Int
     external fun uniffi_craftbridge_core_ffi_checksum_func_attach_metal_layer(
@@ -804,6 +806,8 @@ internal object UniffiLib {
     external fun uniffi_craftbridge_core_ffi_fn_init_callback_vtable_progresslistener(`vtable`: UniffiVTableCallbackInterfaceProgressListener,
     ): Unit
     external fun uniffi_craftbridge_core_ffi_fn_method_progresslistener_progress(`ptr`: Long,`done`: Long,`total`: Long,`secondsLeft`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_craftbridge_core_ffi_fn_func_set_device_codecs(`codecs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_craftbridge_core_ffi_fn_func_craft_error_message(`error`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -928,6 +932,9 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if ((lib.uniffi_craftbridge_core_ffi_checksum_func_set_device_codecs() and 0xFFFF) != 51457) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_craftbridge_core_ffi_checksum_func_craft_error_message() and 0xFFFF) != 64800) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2658,6 +2665,54 @@ public object FfiConverterTypeProgressListener: FfiConverter<ProgressListener, L
 
 
 
+data class CodecInfo (
+    var `name`: kotlin.String
+    , 
+    var `types`: List<kotlin.String>
+    , 
+    var `encoder`: kotlin.Boolean
+    , 
+    var `hardwareAccelerated`: kotlin.Boolean
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCodecInfo: FfiConverterRustBuffer<CodecInfo> {
+    override fun read(buf: ByteBuffer): CodecInfo {
+        return CodecInfo(
+            FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: CodecInfo) = (
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterSequenceString.allocationSize(value.`types`) +
+            FfiConverterBoolean.allocationSize(value.`encoder`) +
+            FfiConverterBoolean.allocationSize(value.`hardwareAccelerated`)
+    )
+
+    override fun write(value: CodecInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterSequenceString.write(value.`types`, buf)
+            FfiConverterBoolean.write(value.`encoder`, buf)
+            FfiConverterBoolean.write(value.`hardwareAccelerated`, buf)
+    }
+}
+
+
+
 /**
  * The folders the app names when it starts an engine, as text: Swift and Kotlin hold paths as
  * strings. The core takes them as paths through [`From`], and refuses a relative one when the
@@ -3340,6 +3395,34 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeCodecInfo: FfiConverterRustBuffer<List<CodecInfo>> {
+    override fun read(buf: ByteBuffer): List<CodecInfo> {
+        val len = buf.getInt()
+        return List<CodecInfo>(len) {
+            FfiConverterTypeCodecInfo.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<CodecInfo>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeCodecInfo.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<CodecInfo>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeCodecInfo.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeRecoveryNote: FfiConverterRustBuffer<List<RecoveryNote>> {
     override fun read(buf: ByteBuffer): List<RecoveryNote> {
         val len = buf.getInt()
@@ -3368,6 +3451,24 @@ public object FfiConverterSequenceTypeRecoveryNote: FfiConverterRustBuffer<List<
 
 
 
+
+        /**
+         * Hand over the device's codec list, `MediaCodecList(MediaCodecList.REGULAR_CODECS)` in its order, before
+         * an engine is started on Android: the start registers the hardware decoders from it, and
+         * `info.hardwareDecoding` reports whether it named one; an export that asks for hardware encoding takes its
+         * encoder from it too. There an engine started with no list decodes every stream, and encodes every export,
+         * in software. The NDK lists codecs, and says which are hardware, only from API 36, so Android's SDK reads
+         * the list itself. A platform with no codec list ignores it: on iOS the start asks VideoToolbox.
+         */ fun `setDeviceCodecs`(`codecs`: List<CodecInfo>)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_craftbridge_core_ffi_fn_func_set_device_codecs(
+    
+        
+        FfiConverterSequenceTypeCodecInfo.lower(`codecs`),_status)
+}
+    
+    
 
         /**
          * The sentence `error` shows the app's user: the core's own `Display` of it, a `CommandFailed`'s

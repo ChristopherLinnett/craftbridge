@@ -1414,6 +1414,63 @@ public func FfiConverterTypeProgressListener_lower(_ value: ProgressListener) ->
     return FfiConverterTypeProgressListener.lower(value)
 }
 
+public struct CodecInfo: Equatable, Hashable {
+    public var name: String
+    public var types: [String]
+    public var encoder: Bool
+    public var hardwareAccelerated: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, types: [String], encoder: Bool, hardwareAccelerated: Bool) {
+        self.name = name
+        self.types = types
+        self.encoder = encoder
+        self.hardwareAccelerated = hardwareAccelerated
+    }
+
+}
+
+#if compiler(>=6)
+    extension CodecInfo: Sendable {}
+#endif
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCodecInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CodecInfo {
+        return
+            try CodecInfo(
+                name: FfiConverterString.read(from: &buf),
+                types: FfiConverterSequenceString.read(from: &buf),
+                encoder: FfiConverterBool.read(from: &buf),
+                hardwareAccelerated: FfiConverterBool.read(from: &buf)
+            )
+    }
+
+    public static func write(_ value: CodecInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterSequenceString.write(value.types, into: &buf)
+        FfiConverterBool.write(value.encoder, into: &buf)
+        FfiConverterBool.write(value.hardwareAccelerated, into: &buf)
+    }
+}
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCodecInfo_lift(_ buf: RustBuffer) throws -> CodecInfo {
+    return try FfiConverterTypeCodecInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCodecInfo_lower(_ value: CodecInfo) -> RustBuffer {
+    return FfiConverterTypeCodecInfo.lower(value)
+}
+
 /// The folders the app names when it starts an engine, as text: Swift and Kotlin hold paths as
 /// strings. The core takes them as paths through [`From`], and refuses a relative one when the
 /// engine starts.
@@ -2135,6 +2192,31 @@ private struct FfiConverterSequenceString: FfiConverterRustBuffer {
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
+private struct FfiConverterSequenceTypeCodecInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [CodecInfo]
+
+    public static func write(_ value: [CodecInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeCodecInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [CodecInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [CodecInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0..<len {
+            seq.append(try FfiConverterTypeCodecInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
 private struct FfiConverterSequenceTypeRecoveryNote: FfiConverterRustBuffer {
     typealias SwiftType = [RecoveryNote]
 
@@ -2205,6 +2287,20 @@ private func uniffiFutureContinuationCallback(handle: UInt64, pollResult: Int8) 
         print("uniffiFutureContinuationCallback invalid handle")
     }
 }
+/// Hand over the device's codec list, `MediaCodecList(MediaCodecList.REGULAR_CODECS)` in its order, before
+/// an engine is started on Android: the start registers the hardware decoders from it, and
+/// `info.hardwareDecoding` reports whether it named one; an export that asks for hardware encoding takes its
+/// encoder from it too. There an engine started with no list decodes every stream, and encodes every export,
+/// in software. The NDK lists codecs, and says which are hardware, only from API 36, so Android's SDK reads
+/// the list itself. A platform with no codec list ignores it: on iOS the start asks VideoToolbox.
+public func setDeviceCodecs(codecs: [CodecInfo]) {
+    try! rustCall {
+        uniffiCallStatus in
+        uniffi_craftbridge_core_ffi_fn_func_set_device_codecs(
+            FfiConverterSequenceTypeCodecInfo.lower(codecs), uniffiCallStatus
+        )
+    }
+}
 /// The sentence `error` shows the app's user: the core's own `Display` of it, a `CommandFailed`'s
 /// command before its text and its step after. The bindings' messages read it from here — Swift's
 /// `LocalizedError`, which `CraftBridge` gives the error — so every language says what the core says,
@@ -2259,6 +2355,9 @@ private let initializationResult: InitializationResult = {
     let scaffolding_contract_version = ffi_craftbridge_core_ffi_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
+    }
+    if uniffi_craftbridge_core_ffi_checksum_func_set_device_codecs() != 51457 {
+        return InitializationResult.apiChecksumMismatch
     }
     if uniffi_craftbridge_core_ffi_checksum_func_craft_error_message() != 64800 {
         return InitializationResult.apiChecksumMismatch
