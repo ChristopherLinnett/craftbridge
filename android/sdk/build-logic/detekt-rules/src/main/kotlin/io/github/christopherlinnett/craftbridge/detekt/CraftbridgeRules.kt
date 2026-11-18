@@ -20,22 +20,31 @@ import dev.detekt.api.config
 import dev.detekt.core.suppressors.isSuppressedBy
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.components.KaDiagnosticCheckerFilter
+import org.jetbrains.kotlin.analysis.api.components.evaluate
+import org.jetbrains.kotlin.analysis.api.components.returnType
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
 import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaPropertySymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolVisibility
 import org.jetbrains.kotlin.analysis.api.types.symbol
+import org.jetbrains.kotlin.descriptors.annotations.AnnotationUseSiteTarget
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.name.ClassId
+import org.jetbrains.kotlin.name.StandardClassIds
 import org.jetbrains.kotlin.psi.KtAnnotated
 import org.jetbrains.kotlin.psi.KtAnnotationEntry
 import org.jetbrains.kotlin.psi.KtCallableDeclaration
+import org.jetbrains.kotlin.psi.KtClassBody
+import org.jetbrains.kotlin.psi.KtClassOrObject
 import org.jetbrains.kotlin.psi.KtDeclaration
 import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi.KtNamedFunction
 import org.jetbrains.kotlin.psi.KtPostfixExpression
 import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtPropertyAccessor
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
+import org.jetbrains.kotlin.psi.psiUtil.isAncestor
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentLinkedQueue
 
@@ -176,7 +185,13 @@ private fun fileWideMessage(annotation: KtAnnotationEntry) =
 /** The classes the compiler reads as a suppression, whatever name a file gives them. */
 private val suppressionClasses = setOf(ClassId.fromString("kotlin/Suppress"), ClassId.fromString("java/lang/SuppressWarnings"))
 
-private fun KtAnnotationEntry.resolvesToSuppression() = analyze(this) { typeReference?.type?.symbol?.classId } in suppressionClasses
+/**
+ * The class an annotation resolves to, as the compiler answers: the name it is written with says nothing,
+ * since an import alias or a typealias points at another class entirely.
+ */
+private fun KtAnnotationEntry.resolvedClass(): ClassId? = analyze(this) { typeReference?.type?.symbol?.classId }
+
+private fun KtAnnotationEntry.resolvesToSuppression() = resolvedClass() in suppressionClasses
 
 /**
  * A suppression written over a whole file switches checks off on every line of it — the compiler's
@@ -456,3 +471,310 @@ internal fun underFolder(
     folder: String,
     path: String,
 ): Boolean = path.startsWith("${folder.trimEnd('/')}/")
+
+/**
+ * TestNG's own annotations: kotlin-test's `Test` and `Ignore` are typealiases of the two here, and an
+ * annotation resolves to the class its typealias expands to.
+ */
+private const val TESTNG_ANNOTATIONS = "org.testng.annotations"
+
+private val testNgTest = ClassId.fromString("org/testng/annotations/Test")
+
+private val testNgIgnore = ClassId.fromString("org/testng/annotations/Ignore")
+
+private val jvmField = ClassId.fromString("kotlin/jvm/JvmField")
+
+private fun KtAnnotated.annotation(of: ClassId): KtAnnotationEntry? = annotationEntries.firstOrNull { it.resolvedClass() == of }
+
+/** The class whose body declares a member, the class TestNG reads it from; none for a local or top-level declaration. */
+private val KtDeclaration.memberOf: KtClassOrObject? get() = (parent as? KtClassBody)?.parent as? KtClassOrObject
+
+/**
+ * An annotation written on the declaration itself; on a property, through a use-site target or on an
+ * accessor, either of which lands it on an accessor, so a property carrying a `@Test` on either is a test
+ * of its own, whichever accessor ([ownTests] reads each apart).
+ */
+private fun KtDeclaration.ownAnnotation(of: ClassId): KtAnnotationEntry? =
+    annotation(of) ?: (this as? KtProperty)?.accessors?.firstNotNullOfOrNull { it.annotation(of) }
+
+/**
+ * Which of a property's two methods TestNG reads an annotation of its own on — for TestNG knows no property,
+ * only the methods Kotlin compiles. An annotation written with a `set` use-site target, or on the setter,
+ * is read on the setter's method; any other is read on the getter's, Kotlin putting TestNG's annotations
+ * nowhere else on a property.
+ */
+private fun KtProperty.readOnSetter(entry: KtAnnotationEntry): Boolean =
+    entry.useSiteTarget?.getAnnotationUseSiteTarget() == AnnotationUseSiteTarget.PROPERTY_SETTER ||
+        entry.getStrictParentOfType<KtPropertyAccessor>()?.isSetter == true
+
+/**
+ * An annotation a property carries on one of its two methods: written with that accessor's use-site
+ * target, or on the accessor itself. Each accessor is TestNG's own method, so what one carries says
+ * nothing of the other.
+ */
+private fun KtProperty.ownAnnotationOn(
+    of: ClassId,
+    onSetter: Boolean,
+): KtAnnotationEntry? =
+    annotationEntries.firstOrNull { it.resolvedClass() == of && readOnSetter(it) == onSetter }
+        ?: (if (onSetter) setter else getter)?.annotation(of)
+
+/**
+ * The `@Test`s a property carries itself, one for each method that carries one: the getter's, then the
+ * setter's. A property may carry both, and TestNG reads each apart, so neither hides the other.
+ */
+private fun KtProperty.ownTests(): List<KtAnnotationEntry> = listOf(false, true).mapNotNull { ownAnnotationOn(testNgTest, onSetter = it) }
+
+/**
+ * The `@Ignore` TestNG reads for a test: the one on the very method the test's own `@Test` sits on, for a
+ * property on that same accessor. A member that takes its test from the `@Test` over its class has none:
+ * TestNG reads a member's `@Ignore` only beside the member's own `@Test`, and runs the member whatever an
+ * `@Ignore` of its own says.
+ */
+private fun KtDeclaration.ignoreRead(test: KtAnnotationEntry): KtAnnotationEntry? =
+    when {
+        !isAncestor(test) -> null
+        this is KtProperty -> ownAnnotationOn(testNgIgnore, readOnSetter(test))
+        else -> annotation(testNgIgnore)
+    }
+
+/**
+ * How many tests TestNG reads in a declaration, one for each method: a function's one, a property's own
+ * `@Test`s, or, under the class's `@Test`, a property's getter and a `var`'s setter where that is public too.
+ */
+private fun KtDeclaration.testsRead(): Int {
+    if (governingTest() == null) return 0
+    if (this !is KtProperty) return 1
+    ownTests().size.takeIf { it > 0 }?.let { return it }
+    val property = this
+    val setter = analyze(property) { (property.symbol as? KaPropertySymbol)?.setter?.visibility }
+    return if (setter == KaSymbolVisibility.PUBLIC || setter == KaSymbolVisibility.INTERNAL) 2 else 1
+}
+
+/**
+ * The `@Test` TestNG reads a declaration's method under, or none where it reads no test. A method's own
+ * `@Test` makes it a test whatever its visibility, and alone decides how it runs, whatever its class says.
+ * A `@Test` over a class makes a test, run as that `@Test` says, of every other method public in the class
+ * file: a function or a property's getter Kotlin declares neither private nor protected, `internal` ones
+ * included, since they compile to public methods. Left out are a property that compiles to no getter
+ * (`const`, `@JvmField`) and a method carrying another of TestNG's annotations, which keeps it for another
+ * job — a configuration method, a data provider — where a dropped test costs nothing.
+ */
+private fun KtDeclaration.governingTest(): KtAnnotationEntry? {
+    val declaration = this
+    if (declaration !is KtNamedFunction && declaration !is KtProperty) return null
+    declaration.ownAnnotation(testNgTest)?.let { return it }
+    val overClass = declaration.memberOf?.annotation(testNgTest) ?: return null
+    val noGetter =
+        declaration is KtProperty && (declaration.hasModifier(KtTokens.CONST_KEYWORD) || declaration.annotation(jvmField) != null)
+    val otherJob =
+        declaration.annotationEntries.any { entry ->
+            entry
+                .resolvedClass()
+                ?.takeIf { it != testNgIgnore }
+                ?.packageFqName
+                ?.asString() == TESTNG_ANNOTATIONS
+        }
+    val visibility = analyze(declaration) { (declaration.symbol as? KaCallableSymbol)?.visibility }
+    val public = visibility == KaSymbolVisibility.PUBLIC || visibility == KaSymbolVisibility.INTERNAL
+    return overClass.takeIf { public && !noGetter && !otherJob }
+}
+
+/**
+ * Whether the test sits in a class an `@Ignore` is written over: that class's finding counts it, where the
+ * switch is written, so a finding of its own would report the same switch again below it.
+ */
+private fun KtDeclaration.countedOnItsClass(): Boolean = memberOf?.annotation(testNgIgnore) != null
+
+/** An annotation argument's value as the compiler folds it, so a name cannot hide it: none where the argument is not written. */
+private fun KtAnnotationEntry.constantArgument(name: String): Any? {
+    val argument =
+        valueArgumentList
+            ?.arguments
+            ?.firstOrNull { it.getArgumentName()?.asName?.asString() == name }
+            ?.getArgumentExpression()
+            ?: return null
+    return analyze(argument) { argument.evaluate()?.value }
+}
+
+private const val UNSEEN = "says nothing in any report, not even a skip, so the rule it pins goes unchecked while the run reads green"
+
+/**
+ * A test as a finding names it: by its own `@Test` where it carries one, else as a test of the `@Test`
+ * over its class.
+ */
+private fun KtDeclaration.named(test: KtAnnotationEntry): String {
+    val written = if (this is KtProperty) "${valOrVarKeyword.text} $name" else "fun $name()"
+    return when {
+        !isAncestor(test) -> "`$written`, a test through the `@Test` over its class,"
+        this is KtProperty && readOnSetter(test) -> "the setter test of `$written`"
+        else -> "`@Test $written`"
+    }
+}
+
+/**
+ * The switch on a test that TestNG reads as off, whichever kind of test it is: an `@Ignore` beside the
+ * test's own `@Test` ([ignoreRead]), and `enabled = false` or `invocationCount` below one on the `@Test`
+ * that governs it — its own, which says so, or its class's, which it takes them from. One reading for a
+ * function and a property's accessors, so each is read and named for its switch the same way.
+ */
+private fun switchedOff(
+    declaration: KtDeclaration,
+    test: KtAnnotationEntry,
+): String? {
+    val subject = declaration.named(test)
+    val says = if (declaration.isAncestor(test)) "says" else "takes from that `@Test`"
+    val invocations = test.constantArgument("invocationCount") as? Int
+    return when {
+        declaration.ignoreRead(test) != null -> {
+            "$subject is annotated `@Ignore`: TestNG does not run it and $UNSEEN: delete the test or the annotation"
+        }
+
+        test.constantArgument("enabled") == false -> {
+            "$subject $says `enabled = false`: TestNG does not run it and $UNSEEN: delete the test or the argument"
+        }
+
+        invocations != null && invocations < 1 -> {
+            "$subject $says `invocationCount = $invocations`: TestNG runs it that many times, which is never, and $UNSEEN: " +
+                "delete the test or the argument"
+        }
+
+        else -> {
+            null
+        }
+    }
+}
+
+/**
+ * A `@Test` TestNG never runs. TestNG builds each class's tests as it reads the class and drops there,
+ * without one word to any report, not even as a skip, every test whose JVM method returns a value:
+ * only a function bounded to `Unit`, and only non-null, compiles to a `void` one — a body bounded to a
+ * `runBlocking { … }` call or another expression without naming `Unit` returns that value, a `Nothing`
+ * one compiles to a method returning `java.lang.Void`, a `Unit?` one to one returning `kotlin.Unit`, a
+ * `suspend` one to one that takes a continuation and returns `Object`, and a property's getter returns the
+ * property — so every other return type, or one the analysis cannot settle, is refused rather than
+ * trusted. It runs none of a test whose own `@Test` sits beside an `@Ignore` — a member the `@Test` over
+ * its class governs runs whatever an `@Ignore` of its own says —, none of one saying `enabled = false`, and
+ * a test saying `invocationCount` below one that many times, which is never. A property's two accessors are two
+ * methods to TestNG, each with its own switch: a `@Test` read on the setter belongs to the setter method,
+ * whose one parameter TestNG fails to supply or fills from a data provider, so the run fails such a method
+ * or runs it and says so itself — only that method's own switch drops it into the silence, and no
+ * accessor's switch drops the other's test. The `@Test` a test runs under is
+ * its own, or, for a method that has none, the one over its class ([governingTest]), which makes a test of
+ * every public method there; so a class whose `@Test` says `enabled = false` still runs each method that
+ * has its own `@Test`, and runs none of the others. kotlin-test's `Test` and `Ignore` are typealiases of
+ * TestNG's, so each is matched as the class it resolves to, as the compiler answers, and the return type
+ * and every argument are asked of the compiler too. An `@Ignore` over a class drops every test the class
+ * holds the same silent way, and is reported once on the class, where the switch is written, instead of
+ * once per dropped method; TestNG reads it on that class alone, not on a class nested in it. Over a class
+ * that carries `@Test` it is refused even where the class holds no test: the build's test run reads the
+ * `@Test` it switches off as the one over every other class whose `@Test` says the same, and the tests
+ * that `@Test` makes of those classes' public methods then run nowhere either, while a member with its own
+ * `@Test` still runs. A `@Test` on
+ * a private method runs, since TestNG reaches it reflectively. The check is one of detekt's, not of a
+ * test report, because a report is exactly what such a test never produces (AGENTS.md §10 reads Kotlin
+ * through detekt).
+ */
+class UnrunTest(
+    config: Config,
+) : Rule(config, "TestNG runs no `@Test` it drops as it reads the class, and it drops these in silence"),
+    RequiresAnalysisApi {
+    override fun visitClassOrObject(classOrObject: KtClassOrObject) {
+        super.visitClassOrObject(classOrObject)
+        val ignored = classOrObject.annotation(testNgIgnore) ?: return
+        val tests = classOrObject.declarations.sumOf { it.testsRead() }
+        val message =
+            when {
+                tests > 0 -> {
+                    "`@Ignore` over this class runs none of the $tests tests TestNG reads in it and $UNSEEN: " +
+                        "delete the annotation or the tests"
+                }
+
+                // The build's run reads the `@Test` an `@Ignore` switches off as the one over every other
+                // class whose `@Test` says the same, so a class holding no test still silences the tests
+                // those make of their public methods.
+                classOrObject.annotation(testNgTest) != null -> {
+                    "`@Ignore` over this class switches off the `@Test` over it, and the build's test run then reads every other " +
+                        "class's `@Test` that says the same as switched off too, running none of the tests it makes of their public " +
+                        "methods, and $UNSEEN: delete the annotation or the `@Test`"
+                }
+
+                else -> {
+                    return
+                }
+            }
+        report(Finding(Entity.from(ignored), message))
+    }
+
+    override fun visitNamedFunction(function: KtNamedFunction) {
+        super.visitNamedFunction(function)
+        val problem = unrun(function) ?: return
+        report(Finding(Entity.from(function), problem))
+    }
+
+    override fun visitProperty(property: KtProperty) {
+        super.visitProperty(property)
+        if (property.countedOnItsClass()) return
+        // Each accessor is a method of its own to TestNG, so a property's own `@Test`s are read apart, one per
+        // method; a property with none is a test of the `@Test` over its class, through its getter.
+        for (test in property.ownTests().ifEmpty { listOfNotNull(property.governingTest()) }) {
+            // The switch is read of a property's test as of a function's, and before its return: a test
+            // switched off is never run, whatever its method returns, and is named for the switch that drops it.
+            val switch = switchedOff(property, test)
+            if (switch == null && property.isAncestor(test) && property.readOnSetter(test)) {
+                // A `@Test` read on the setter is TestNG's test of the setter method, which takes a value TestNG
+                // cannot supply unless a data provider fills it: TestNG fails such a method or runs it, and the
+                // run says so itself, so this rule — which catches the silence — names nothing. Only the setter's
+                // own switch, read above, could bring TestNG's silence back, and no message about the getter is
+                // true of a test written on the setter.
+                continue
+            }
+            val problem =
+                switch
+                    ?: (
+                        "${property.named(test)} puts the test on the getter of `${property.name}`, which returns the property's value, " +
+                            "so TestNG drops it and $UNSEEN: write the test as a function bounded to `Unit`, with the assertions inside it"
+                    )
+            report(Finding(Entity.from(property), problem))
+        }
+    }
+
+    private fun unrun(function: KtNamedFunction): String? {
+        val test = function.governingTest() ?: return null
+        if (function.countedOnItsClass()) return null
+        switchedOff(function, test)?.let { return it }
+        val subject = function.named(test)
+        return when {
+            function.hasModifier(KtTokens.SUSPEND_KEYWORD) -> {
+                "$subject is `suspend`, so it compiles to a method that takes a continuation and returns `Object`: TestNG drops it " +
+                    "as it reads the class and $UNSEEN: write a plain function whose body runs in `runBlocking`, bounded to `Unit`"
+            }
+
+            else -> {
+                returnProblem(function)?.let { "$subject $it" }
+            }
+        }
+    }
+
+    // Only `Unit`, and only non-null, compiles to a `void` method: `Nothing` compiles to one returning
+    // `java.lang.Void` and `Unit?` to one returning `kotlin.Unit`, and TestNG drops a `@Test` whose method
+    // returns either as silently as one returning any other value.
+    private fun returnProblem(function: KtNamedFunction): String? {
+        val (returnClass, nullable) = analyze(function) { function.returnType.symbol?.classId to function.returnType.isNullable }
+        return when {
+            returnClass == StandardClassIds.Unit && !nullable -> {
+                null
+            }
+
+            returnClass == null -> {
+                "has a return type the analysis cannot settle: TestNG drops any `@Test` that returns a value, so one no rule can " +
+                    "vouch for is refused: name the return type `Unit`"
+            }
+
+            else -> {
+                "returns `${returnClass.asString()}${if (nullable) "?" else ""}`: TestNG drops it as it reads the class and $UNSEEN: " +
+                    "bound the body to `Unit`, with the assertions inside it"
+            }
+        }
+    }
+}

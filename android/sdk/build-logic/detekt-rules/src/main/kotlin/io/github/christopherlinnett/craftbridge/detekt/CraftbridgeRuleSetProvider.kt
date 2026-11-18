@@ -28,6 +28,7 @@ class CraftbridgeRuleSetProvider : RuleSetProvider {
                 ::GateRuleSuppression,
                 ::ErrorSuppression,
                 ::GeneratedNameTaken,
+                ::UnrunTest,
             ),
         )
 
