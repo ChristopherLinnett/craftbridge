@@ -16,12 +16,29 @@ public final class EffectsEngine: Sendable {
         self.handle = engine
     }
 
-    /// Sends one request of the engine's method table, such as `"exec"`, and returns its reply. Internal:
-    /// the public calls are the typed ones built on it.
-    func request(_ method: String, _ params: JSONValue) async throws -> JSONValue {
+    /// Sends one request of the engine's method table, such as `"exec"`, and returns its reply. Package-wide
+    /// rather than public: the public calls are the typed ones built on it, and the package's conformance
+    /// tests make the corpus's requests through it, which name the method table's methods, not the typed calls.
+    package func request(_ method: String, _ params: JSONValue) async throws -> JSONValue {
         try JSONValue(
             jsonText: try await handle.request(method: method, params: params.jsonText())
         )
+    }
+
+    /// Starts `method` of the method table as a job that reports its progress to `progress`, as an export is
+    /// started: every call of the table that reports progress is made through here, so each is started alike.
+    package func job(
+        _ method: String,
+        _ params: JSONValue,
+        progress: @escaping ProgressHandler = { _, _, _ in }
+    ) throws -> ExportJob {
+        try ExportJob(engine: handle, method: method, params: params, progress: progress)
+    }
+
+    /// Renders one frame as the engine's `frame` is asked with `params`: the typed `frame` call asks it with
+    /// the keys its arguments name, and the conformance tests ask it with the corpus's own.
+    package func frame(params: JSONValue, format: PixelFormat) async throws -> FrameBytes {
+        try await handle.frame(params: params.jsonText(), format: format)
     }
 
     /// Runs the command `id` with the keys the caller typed in `params` over the untyped ones in `extra`,

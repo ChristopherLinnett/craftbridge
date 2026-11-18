@@ -93,3 +93,6 @@
 "org.testng:testng" = "Apache-2.0"
 
 [swiftpm]
+# Reads the conformance corpus, which is TOML, in the Swift tests alone (ios/sdk/Package.swift); no target
+# that ships imports it.
+"https://github.com/dduan/TOMLDecoder.git" = "MIT"
