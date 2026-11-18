@@ -460,6 +460,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(target_os = "macos"), ignore = "asks SwiftPM through xcrun, which only macOS has")]
     fn a_compliant_repository_finds_nothing() {
         let repo = ScratchRepo::new(
             "clean",
@@ -484,6 +485,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(target_os = "macos"), ignore = "asks SwiftPM through xcrun, which only macOS has")]
     fn a_resolved_pin_needs_a_declaration_like_any_package() {
         let repo = ScratchRepo::new("pins", "[swiftpm]\n\"https://github.com/mozilla/uniffi.git\" = \"MPL-2.0\"\n", "", UNIFFI_MANIFEST);
         let unpinned = repo.errors();

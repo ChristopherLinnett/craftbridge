@@ -2,21 +2,15 @@
 # every push to it (AGENTS.md §12). Locally a change runs only the checks for what it touches; a merge waits
 # for nothing here, and a failure on main is fixed on a branch of its own when it fires.
 #
-# One job per runner kind, each running tools/ci.sh: every stage runs even after one fails, and the job ends
-# `ci: failed: <stages>`, naming each failed stage. tools/ci.sh refuses a stage name it does not know before
-# any stage runs, so a misspelt name fails the job. The Linux job runs the stages LINUX_STAGES names; the
-# macOS job runs every other stage, `tools/ci.sh --except $LINUX_STAGES`, so a stage tools/ci.sh gains runs
-# there with no list here to extend:
-# - Linux, the stages that read the same there: rustfmt, cargo-deny over the lockfiles, the plan's views on
-#   Node, the Gradle build on the JVM, and jscpd.
-# - macOS, on the newest arm64 image: the Swift stages and the doctor, which need Xcode and its tools; the
-#   rules, which ask SwiftPM through xcrun; every stage that compiles the workspace, for the host, whose
-#   code compiles differently on macOS (`cfg(target_os = "macos")`), the host the SDK is built and tested
-#   on, and for the phones, iOS among them; and shell, because Homebrew's shellcheck is the release the
-#   doctor's fix installs, while Ubuntu's is an older one whose checks differ.
-# No stage is left out: none needs a device, a simulator or an emulator. A stage a hosted runner cannot run
-# would be added to the macOS job's `--except`, here, with its reason. The device acceptance runs (plan §28)
-# are no stage of the gate and stay with the machine that has the devices.
+# One job per runner kind, each running `tools/ci.sh --hosted`: every stage runs even after one fails, and the
+# job ends `ci: failed: <stages>`, naming each failed stage. tools/ci.sh takes each job's stages from the
+# runner's system, RUNNER_OS, and refuses a system it has no job for before any stage runs, so no list or
+# group of stages stands here. The Linux job runs the stages that read the same there, among them the host
+# tools' clippy, lint library and test runs, which reach the code only Linux compiles; the macOS job, on the
+# newest arm64 image, runs every other stage, each with the reason it is left to macOS. tools/ci.sh names
+# them all where it splits them. Every stage runs in at least one job, and none
+# needs a device, a simulator or an emulator. The device acceptance runs (plan §28) are no stage of the gate
+# and stay with the machine that has the devices.
 #
 # Every tool the repository pins comes from that pin, never a second list here: the Rust toolchains from
 # rust/rust-toolchain.toml and the lint library's, as rustup reads them; the Xcode, cargo-dylint and
@@ -49,7 +43,6 @@ env:
   # disk; the gate leaves the switch alone because it changes what a build costs, never what a check reads
   # (tools/refused-switches.tsv).
   CARGO_INCREMENTAL: "0"
-  LINUX_STAGES: rust_fmt rust_deny plan_views android duplicates
 
 defaults:
   run:
@@ -136,8 +129,8 @@ jobs:
 
       - name: Install cargo-deny
         run: cargo install --locked cargo-deny
+      # The lint library's runs take it, and so do xtask's tests.
       - name: Install the cargo-dylint release tools/env.sh pins
-        if: runner.os == 'macOS'
         run: |
           source tools/env.sh
           cargo install --locked "cargo-dylint@$CRAFTBRIDGE_DYLINT"
@@ -172,10 +165,4 @@ jobs:
           tools/update-upstream.sh "$rev"
 
       - name: The gate, tools/ci.sh
-        run: |
-          # shellcheck disable=SC2086 # one stage per word, split on purpose
-          if [ "$RUNNER_OS" = Linux ]; then
-            tools/ci.sh $LINUX_STAGES
-          else
-            tools/ci.sh --except $LINUX_STAGES
-          fi
+        run: tools/ci.sh --hosted

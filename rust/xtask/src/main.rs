@@ -372,28 +372,164 @@ mod tests {
         assert_eq!(super::dispatch([OsString::from("upstream"), OsString::from("pin")].into_iter()), ExitCode::SUCCESS);
     }
 
+    /// What the gate at `gate` does with a selection it only reads, a refusal or `--list`, for a runner whose
+    /// system is `runner` (`RUNNER_OS`, which a hosted runner sets in every test's environment too).
+    fn gate_output_of(gate: &std::path::Path, runner: Option<&str>, args: &[&str]) -> std::process::Output {
+        let mut command = std::process::Command::new("bash");
+        command.arg(gate).args(args);
+        match runner {
+            Some(system) => command.env("RUNNER_OS", system),
+            None => command.env_remove("RUNNER_OS"),
+        };
+        command.output().unwrap()
+    }
+
+    /// [`gate_output_of`] for the tree's own `tools/ci.sh`.
+    fn gate_output(runner: Option<&str>, args: &[&str]) -> std::process::Output {
+        gate_output_of(&crate::repo_root().join("tools/ci.sh"), runner, args)
+    }
+
     /// The gate refuses a selection it cannot run before any stage starts, in its own words: a stage name
     /// it does not know, `--except` naming nothing, `--except` leaving nothing, and `--except` anywhere but
-    /// first, which is no stage. So a hosted job that misspells a stage, or whose list empties, fails rather
-    /// than passing on less. Every stage is read from the gate's own refusal, so no second list of them
-    /// stands here.
+    /// first, which is no stage; and `--hosted` on a runner whose system it has no job for, none at all, or
+    /// with a stage named beside it. So a selection that misspells a stage or whose list empties, and a
+    /// hosted job on a runner the gate has no job for, fail rather than pass on less. Every stage is read
+    /// from the gate's own refusal, so no second list of them stands here. Each selection is asked behind
+    /// `--list`, which reaches every refusal first, so a gate that stopped refusing one lists its stages
+    /// here rather than running them, this test among them.
     #[test]
     fn the_gate_refuses_a_selection_it_cannot_run() {
-        let gate = |args: &[&str]| {
-            let output = std::process::Command::new("bash").arg(crate::repo_root().join("tools/ci.sh")).args(args).output().unwrap();
+        let gate = |runner: Option<&str>, args: &[&str]| {
+            let output = gate_output(runner, &[&["--list"], args].concat());
             (output.status.code(), String::from_utf8_lossy(&output.stderr).trim_end().to_string())
         };
-        let (code, misspelt) = gate(&["rust_fmtt"]);
+        let (code, misspelt) = gate(None, &["rust_fmtt"]);
         assert_eq!(code, Some(2), "{misspelt}");
         let stages = misspelt
             .strip_prefix("ci: no stage 'rust_fmtt' (stages: ")
             .and_then(|rest| rest.strip_suffix("; groups: rust, swift)"))
             .unwrap_or_else(|| panic!("the refusal names every stage: {misspelt}"));
-        assert_eq!(gate(&["--except"]), (Some(2), "ci: --except names no stage to leave out: name them, or run tools/ci.sh alone for every stage".to_string()));
+        assert_eq!(
+            gate(None, &["--except"]),
+            (Some(2), "ci: --except names no stage to leave out: name them, or run tools/ci.sh alone for every stage".to_string())
+        );
         let every: Vec<&str> = std::iter::once("--except").chain(stages.split(' ')).collect();
-        assert_eq!(gate(&every), (Some(2), "ci: --except leaves no stage to run".to_string()));
-        let (code, late) = gate(&["shell", "--except", "rules"]);
+        assert_eq!(gate(None, &every), (Some(2), "ci: --except leaves no stage to run".to_string()));
+        let (code, late) = gate(None, &["shell", "--except", "rules"]);
         assert!(code == Some(2) && late.starts_with("ci: no stage '--except' (stages: "), "{late}");
+        for (runner, named) in [(Some("Windows"), "Windows"), (Some("linux"), "linux"), (None, "")] {
+            assert_eq!(
+                gate(runner, &["--hosted"]),
+                (Some(2), format!("ci: --hosted runs the hosted job of the runner's system, which RUNNER_OS names Linux or macOS; it names '{named}'"))
+            );
+        }
+        assert_eq!(
+            gate(Some("Linux"), &["--hosted", "rules"]),
+            (Some(2), "ci: --hosted names no stage: RUNNER_OS, the runner's system, chooses the hosted job's stages".to_string())
+        );
+    }
+
+    /// The hosted jobs' stages, read as each job asks for them (`tools/ci.sh --hosted`, the workflow's only
+    /// words for them): the Linux job runs the host tools' clippy and lint library runs and their tests, so
+    /// the code only Linux compiles (`cfg(target_os = "linux")`) meets a compiler, the lints and a test
+    /// there; the macOS job runs the whole workspace's, which the host tools' are part of, so Linux alone
+    /// runs those as stages of their own; and the stages that need Xcode, the phones' SDKs or the host's GPU
+    /// stay on macOS.
+    #[test]
+    fn the_linux_job_lints_and_tests_the_host_tools_and_macos_keeps_the_rest() {
+        let job = |system: &str| {
+            let output = gate_output(Some(system), &["--list", "--hosted"]);
+            assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+            String::from_utf8_lossy(&output.stdout).split_whitespace().map(str::to_string).collect::<Vec<_>>()
+        };
+        let linux = job("Linux");
+        let macos = job("macOS");
+        for (host, whole) in [("rust_host_clippy", "rust_clippy"), ("rust_host_test", "rust_test")] {
+            assert!(linux.contains(&host.to_string()), "the Linux job does not run {host}: {linux:?}");
+            assert!(!macos.contains(&host.to_string()), "the macOS job runs {host} through {whole}: {macos:?}");
+        }
+        for stage in
+            ["doctor", "rules", "rust_clippy", "rust_test", "conformance", "rust_mobile", "generated", "swift_format", "swift_build", "swift_lint", "shell"]
+        {
+            assert!(macos.contains(&stage.to_string()) && !linux.contains(&stage.to_string()), "{stage} runs on macOS alone: linux {linux:?}, macos {macos:?}");
+        }
+    }
+
+    /// The workflow names no stage: its one gate step is `tools/ci.sh --hosted`, which takes each job's stages
+    /// from the runner's system, and nothing in it sets that system. A workflow that ran the gate another way
+    /// would choose stages in YAML, where the split tests above cannot see it.
+    #[test]
+    fn the_workflow_runs_the_hosted_gate_and_names_no_stage() {
+        let workflow = std::fs::read_to_string(crate::repo_root().join(".github/workflows/ci.yml")).unwrap();
+        let code: Vec<&str> = workflow.lines().map(str::trim).filter(|line| !line.starts_with('#')).collect();
+        let gate: Vec<&&str> = code.iter().filter(|line| line.contains("ci.sh") && !line.starts_with("- name:")).collect();
+        assert_eq!(gate, [&"run: tools/ci.sh --hosted"], "the workflow runs the gate other than as `tools/ci.sh --hosted`");
+        assert!(code.iter().all(|line| !line.contains("RUNNER_OS")), "the workflow sets or reads the runner's system, which only the runner may");
+    }
+
+    /// The host tools' clippy, lint library and test runs read one list of packages, `host_tools`, so a tool
+    /// added to it is linted and tested by all three, and none of them can quietly keep a list of its own:
+    /// the lines of the two stages name no package, and each of the three runs takes the list.
+    #[test]
+    fn the_host_tools_stages_share_one_list_of_packages() {
+        let gate = std::fs::read_to_string(crate::repo_root().join("tools/ci.sh")).unwrap();
+        let (_, from_clippy) = gate.split_once("stage_rust_host_clippy() {").expect("the gate has the host tools' clippy stage");
+        let (clippy, from_test) = from_clippy.split_once("stage_rust_host_test()").expect("the gate has the host tools' test stage after it");
+        let stages = format!("{clippy}{}", from_test.lines().next().expect("the test stage ends its line"));
+        assert!(!stages.contains("--package") && !stages.contains("-p "), "a host tools stage names a package of its own:\n{stages}");
+        assert_eq!(stages.matches("\"${host_tools[@]}\"").count(), 3, "clippy, the lint library and the tests each take the list:\n{stages}");
+    }
+
+    /// The gate holds its hosted split before it reads any name, `--list` too: a stage function `stages` does
+    /// not list, which neither job would run; a stage the Linux job does not run that gives no reason it is
+    /// left to macOS, whether it is new or its reason went; and a reason for a stage the Linux job runs, for no
+    /// stage, a second one, or one that is no `<stage>: <reason>` — each refused in its own words. Each plant
+    /// is made in a copy of the tree's own gate, which passes untouched.
+    #[test]
+    fn the_gate_refuses_a_hosted_split_that_loses_a_stage_or_its_reason() {
+        let root = crate::repo_root();
+        let gate = std::fs::read_to_string(root.join("tools/ci.sh")).unwrap();
+        let env = std::fs::read_to_string(root.join("tools/env.sh")).unwrap();
+        // The gate with each `(from, to)` made in turn, each `from` asserted to be there, so no plant is lost
+        // to a moved line.
+        let planted = |plants: &[(&str, &str)]| {
+            let mut text = gate.clone();
+            for (from, to) in plants {
+                assert!(text.contains(from), "the plant's anchor {from:?} is in tools/ci.sh");
+                text = text.replacen(from, to, 1);
+            }
+            let scratch = crate::scratch::Scratch::new("ci-split");
+            scratch.write("tools/env.sh", &env);
+            scratch.write("tools/ci.sh", text);
+            let output = gate_output_of(&scratch.0.join("tools/ci.sh"), None, &["--list", "rules"]);
+            (output.status.code(), String::from_utf8_lossy(&output.stderr).trim_end().to_string())
+        };
+        let refused = |messages: &[&str]| (Some(2), messages.iter().map(|message| format!("ci: {message}")).collect::<Vec<_>>().join("\n"));
+        assert_eq!(planted(&[]), (Some(0), String::new()), "the tree's own split");
+        let function = ("\nstage_rules() {", "\nstage_planted() { :; }\nstage_rules() {");
+        let listed = ("stages=(doctor rules ", "stages=(doctor rules planted ");
+        let doctor = "  \"doctor: it checks Xcode, the NDK and the phone targets\"\n";
+        let reason = |entry: &str| format!("left_to_macos=(\n  \"{entry}\"\n");
+        let no_reason = |stage: &str| format!("{stage} runs in no Linux job, and left_to_macos gives no reason it is left to macOS");
+        assert_eq!(planted(&[function]), refused(&["stage_planted is a stage `stages` does not list, so no hosted job runs it"]));
+        assert_eq!(planted(&[function, listed]), refused(&[&no_reason("planted")]));
+        assert_eq!(planted(&[(doctor, "")]), refused(&[&no_reason("doctor")]));
+        for (stage, why) in [("rust_fmt", "which the Linux job runs"), ("rust_host_clippy", "which the Linux job runs"), ("rust_fmtt", "which is no stage")] {
+            let entry = reason(&format!("{stage}: planted"));
+            assert_eq!(planted(&[("left_to_macos=(\n", &entry)]), refused(&[&format!("left_to_macos gives a reason for {stage}, {why}")]));
+        }
+        let twice = reason("shell doctor: planted");
+        assert_eq!(
+            planted(&[("left_to_macos=(\n", &twice)]),
+            refused(&["left_to_macos gives doctor a second reason", "left_to_macos gives shell a second reason"])
+        );
+        for malformed in ["doctor:", "doctor: ", "doctor - planted", ": planted", " : planted"] {
+            let entry = format!("  \"{malformed}\"\n");
+            assert_eq!(
+                planted(&[(doctor, &entry)]),
+                refused(&[&format!("left_to_macos holds '{malformed}', which is no '<stage>…: <reason>'"), &no_reason("doctor")])
+            );
+        }
     }
 
     /// A script that removes its run's folder through `craftbridge_remove_on_exit` passes only by saying
