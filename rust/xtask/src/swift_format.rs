@@ -151,6 +151,7 @@ mod tests {
     /// Each exemption is one the committed bindings need: with any one of the rules switched back on, the
     /// bindings fail it. The stage itself shows that the exemptions are enough.
     #[test]
+    #[cfg_attr(not(target_os = "macos"), ignore = "runs swift-format through xcrun, which only macOS has")]
     fn every_exempted_rule_is_one_the_committed_bindings_break() {
         let root = crate::repo_root();
         let bindings: Vec<String> = crate::files::listed(&root, "swift").unwrap().into_iter().filter(|file| crate::swift_bindings::holds(file)).collect();

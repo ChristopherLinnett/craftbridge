@@ -522,6 +522,7 @@ mod tests {
     /// The rules read the package without its binary target built: SwiftPM describes no such package, so a
     /// check of the rules' that asked it would fail on every checkout the native library is not built in.
     #[test]
+    #[cfg_attr(not(target_os = "macos"), ignore = "asks SwiftPM through xcrun, which only macOS has")]
     fn the_rules_read_a_package_whose_binary_target_is_not_built() {
         let scratch = scratch_package(
             ".binaryTarget(name: \"CraftBridgeFFIBinary\", path: \"Frameworks/CraftBridgeEffectsFFI.xcframework\"), .target(name: \"CraftBridge\", dependencies: [\"CraftBridgeFFIBinary\"]), .target(name: \"CraftBridgeEffects\", dependencies: [\"CraftBridge\", \"CraftBridgeEffectsFilm\"]), .target(name: \"CraftBridgeEffectsFilm\")",
@@ -589,6 +590,7 @@ mod tests {
     /// moved to `Plugins/` by `path:`, and every target moved with no `path:` at all by renaming `Sources/` to
     /// a folder SwiftPM also searches. The default layout passes.
     #[test]
+    #[cfg_attr(not(target_os = "macos"), ignore = "asks SwiftPM through xcrun, which only macOS has")]
     fn a_target_moved_out_of_sources_fails_the_check_that_asks_swiftpm() {
         let targets = ".target(name: \"CraftBridge\"), .target(name: \"CraftBridgeEffects\", dependencies: [\"CraftBridge\"])";
         let scratch = scratch_package(targets);

@@ -237,6 +237,7 @@ mod tests {
     /// The step that asks for the GPU renders on it: the app names the device where it says it renders, which
     /// a machine without a GPU cannot do, and the conformance stage needs one for T8 in any case.
     #[test]
+    #[cfg_attr(target_os = "linux", ignore = "a hosted Linux runner has no GPU adapter, which this test asks for")]
     fn a_step_that_asks_for_the_gpu_has_it() {
         let (_scratch, answer) = printed("[scenario.step.host]\ngpu = true\n", INFO, "");
         let info: Value = serde_json::from_str(&answer.expect("the machine has a GPU")).expect("JSON");
