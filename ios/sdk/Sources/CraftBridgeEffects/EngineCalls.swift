@@ -131,7 +131,7 @@ extension EffectsEngine {
     /// Draws the frame of `comp` — the active composition when left out — at `time` — the current time
     /// when left out — into `layer`, the app's own `CAMetalLayer`, straight from the GPU. The layer is
     /// attached the first time, and again whenever the engine let it go, as after the app returned from the
-    /// background; the same layer costs nothing to name on every call.
+    /// background; naming the same layer on every call costs no attach.
     ///
     /// Show a transparent frame over the app's own views by making the layer non-opaque. The frame waits
     /// its turn behind a running export, as every call does, so the app shows its last frame meanwhile.
@@ -159,7 +159,7 @@ extension EffectsEngine {
     package func previewRequest(comp: ItemReference?, at time: Duration?) -> JSONValue {
         given([
             "comp": comp?.jsonValue,
-            "time": time.map { .number(Double($0.components.seconds) + Double($0.components.attoseconds) * 1e-18) },
+            "time": time.map { .number(engineSeconds($0)) },
         ])
     }
 
@@ -253,4 +253,20 @@ extension EffectsEngine {
     public func mcp(_ line: String) async throws -> String? {
         try await handle.mcp(line: line)
     }
+}
+
+/// `time` in the seconds the engine reads: its nearest whole nanoseconds over a billion, rounded once,
+/// which is what Kotlin's `Duration.toDouble(DurationUnit.SECONDS)` makes of the same duration, so a moment
+/// reaches the engine as the same seconds from either platform, and as the seconds a `frame` call names it
+/// by. Adding the two halves of `components` as doubles rounds twice and misses the nearest double for
+/// many durations: `.milliseconds(9)` would be `0.009000000000000001`. A duration past what an `Int64`
+/// counts in nanoseconds, some 292 years, is read in whole seconds: no composition runs that long.
+private func engineSeconds(_ time: Duration) -> Double {
+    let (seconds, attoseconds) = time.components
+    // The two halves carry the same sign, so the nearest nanosecond rounds half away from zero.
+    let half: Int64 = attoseconds < 0 ? -500_000_000 : 500_000_000
+    let (whole, overflowed) = seconds.multipliedReportingOverflow(by: 1_000_000_000)
+    let (nanoseconds, carried) = whole.addingReportingOverflow((attoseconds + half) / 1_000_000_000)
+    guard !overflowed, !carried else { return Double(seconds) }
+    return Double(nanoseconds) / 1e9
 }

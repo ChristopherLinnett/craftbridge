@@ -119,6 +119,15 @@ impl Engine {
         self.core.send_detach_preview()?.answered().await
     }
 
+    /// Answer whether the engine holds a preview surface: from an `attach` of the app's layer or
+    /// window until `detach_preview` gives it up, or the GPU goes with it — suspended for the
+    /// background, or lost. A preview call skips its attach only while this answers yes and the
+    /// surface held is its own, so one question, asked of the engine that holds the answer, serves
+    /// both bindings; neither keeps a copy of the fact of its own.
+    pub async fn has_preview_surface(&self) -> Result<bool, CraftError> {
+        self.core.send_has_preview_surface()?.answered().await
+    }
+
     /// Stop the engine after the calls it has accepted. Stopping twice is not an error.
     ///
     /// The calls made after this one are refused from the moment it is made, as every call is handed

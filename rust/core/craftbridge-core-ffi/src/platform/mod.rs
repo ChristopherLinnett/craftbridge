@@ -6,8 +6,8 @@
 //! app hands over, the JNI call that takes Android's window in, and the wgpu surfaces made from them.
 //! The id table that carries a window between that call and `attach_window` is plain code.
 //!
-//! Both attach calls are exported from every build, each answering `Unsupported` where its platform's
-//! object does not exist. The Swift and Kotlin bindings are generated once, from the host's build of the
+//! Both attach calls, and the window's address, are exported from every build, each answering
+//! `Unsupported` where its platform's object does not exist. The Swift and Kotlin bindings are generated once, from the host's build of the
 //! library (§20), and each binding names every call that build exports: a call compiled for one platform
 //! alone would be missing from the bindings generated on another host, or named in bindings whose
 //! library lacks it, and UniFFI's Kotlin binds every call it names as the library loads.
@@ -47,6 +47,10 @@ mod android {
     pub(super) async fn attach(_: &Engine, _: i64) -> Result<(), CraftError> {
         Err(super::absent("Android window"))
     }
+
+    pub(super) fn address(_: i64) -> Result<i64, CraftError> {
+        Err(super::absent("Android window"))
+    }
 }
 
 /// What an attach answers on a build whose platform has no such object: the app called the other
@@ -81,6 +85,17 @@ impl Engine {
     pub async fn attach_window(&self, id: i64) -> Result<(), CraftError> {
         android::attach(self, id).await
     }
+}
+
+/// The address of the window the `id` names — an id the JNI call handed out for the app's `Surface` —
+/// which no other live window shares (plan §20): the Kotlin SDK keeps the address of the window it
+/// attached last and compares it with this one's, to tell whether the engine previews into the window a
+/// `Surface` names now. The window stays under its id, for the attach or the release after. An id the
+/// table does not hold is `NotFound`, and on a platform with no Android window every call answers
+/// `Unsupported`.
+#[uniffi::export]
+pub fn window_address(id: i64) -> Result<i64, CraftError> {
+    android::address(id)
 }
 
 /// The app's own object underneath a preview surface: what the wgpu surface was made from, and where its
@@ -126,13 +141,15 @@ mod tests {
     use crate::CraftError;
     use crate::surface_tests::engine;
 
-    /// The window's attach is in every build, so the bindings generated on any host name it, and a build
-    /// with no Android window answers it `Unsupported` with the engine answering on.
+    /// The window's attach and address are in every build, so the bindings generated on any host name
+    /// them, and a build with no Android window answers both `Unsupported` with the engine answering on.
     #[cfg(not(target_os = "android"))]
     #[test]
     fn a_window_where_there_are_none_is_unsupported() {
         let engine = engine();
-        assert_eq!(pollster::block_on(engine.attach_window(1)), Err(CraftError::unsupported("this platform has no Android window to preview on")));
+        let absent = CraftError::unsupported("this platform has no Android window to preview on");
+        assert_eq!(pollster::block_on(engine.attach_window(1)), Err(absent.clone()));
+        assert_eq!(super::window_address(1), Err(absent), "and so is the address of one");
         assert_eq!(pollster::block_on(engine.request("echo".into(), "3".into())), Ok("3".to_string()));
     }
 

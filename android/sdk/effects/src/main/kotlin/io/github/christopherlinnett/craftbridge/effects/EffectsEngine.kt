@@ -21,14 +21,16 @@ import io.github.christopherlinnett.craftbridge.ffi.core.FrameBytes
 import io.github.christopherlinnett.craftbridge.ffi.core.GpuChoice
 import io.github.christopherlinnett.craftbridge.ffi.core.PixelFormat
 import io.github.christopherlinnett.craftbridge.ffi.effects.startEffectsEngine
+import kotlin.time.Duration
+import kotlin.time.DurationUnit
 
 /** An EffectCraft engine: the fixed-shape calls of the plan's table, and the typed command
  * namespaces over its one generic request call, which the `generated/` facade hangs off this. */
 public class EffectsEngine internal constructor(
     /** The universal core engine behind this one: what its exports, its frame and MCP calls, and its
      * end all go through. The typed [preview], [frameBitmap] and [frameHardwareBuffer] go through it, and an app
-     * reaches the rest of the preview (`attachPreview` once for many frames, `detachPreview`, `suspendGpu`,
-     * `resumeGpu`) and the raw core calls on it. */
+     * reaches the engine's own report of the preview surface (`hasPreviewSurface`, `holdsPreview`), the
+     * surface's raw attach ([Engine.attachPreview]) and the GPU's life (`suspendGpu`, `resumeGpu`) on it. */
     public val core: Engine,
     /** How one request of the engine's method table is sent and its reply read back: JSON text
      * through [core] for a real engine, a recording stand-in for a host test of the shapes sent. */
@@ -246,39 +248,53 @@ public class EffectsEngine internal constructor(
     ): HardwareBuffer = core.frameHardwareBuffer(frameRequest(comp, time, frame, maxSide, scale, transparent))
 
     /**
-     * Preview [comp] at [time] into [surface], the app's own: the surface is attached, replacing the one
-     * the engine previewed before, and the frame is drawn into it on the GPU. [comp] is the active comp
-     * when it is left out, [time] its current time. Attaching costs a window and a configuration each
-     * call, so an app that draws many frames into one surface attaches it once through [core]'s
-     * `attachPreview` and then calls the overload without a surface.
+     * Preview [comp] at [time] into [surface], the app's own: the surface is attached when the engine is
+     * not previewing into this one yet — on the first call, on a new surface, on a [Surface] object that
+     * names another window since (a `SurfaceView` hands out one object for every surface it makes), on a
+     * surface lost with a GPU given up for the background, and after [endPreview] gave it up — and the frame
+     * is drawn into it on the GPU. An app that draws many frames into one surface names the same surface
+     * every time, and it is attached once: naming the surface the engine already previews into costs no
+     * attach and no second configuration. Naming a surface after resizing it is how the resize reaches the
+     * frame: the draw answers [GpuException] as the surface is configured again, and the draw after it
+     * draws. [comp] is the active comp when it is left out, [time] its current time.
      *
-     * @throws GpuException when there is no device to draw on or the surface is lost, and [CraftException]
-     * for whatever else the core's `attachPreview` or `present` refuse with.
+     * @throws GpuException when there is no device to draw on or the surface is lost or changed, and
+     * [CraftException] for whatever else the core's `attachPreview` or `present` refuse with.
      */
     public suspend fun preview(
         surface: Surface,
         vararg namedOnly: NamedArguments,
         comp: JSONValue? = null,
-        time: Double? = null,
+        time: Duration? = null,
     ) {
-        core.attachPreview(surface)
+        if (!core.holdsPreview(surface)) core.attachPreview(surface)
         preview(comp = comp, time = time)
     }
 
     /**
      * Draw [comp] at [time] into the surface attached last: [comp] is the active comp when it is left out,
-     * [time] its current time. The engine lets that surface go at [core]'s `detachPreview`, and with the GPU
-     * at its `suspendGpu`, so after either, as with none attached, it answers `GpuException` until a surface
-     * is attached again, as the overload that takes one attaches it.
+     * [time] its current time. The engine lets that surface go at [endPreview], and with the GPU at
+     * [core]'s `suspendGpu`, so after either, as with none attached, it answers `GpuException` until a
+     * surface is attached again, as the overload that takes one attaches it.
      *
      * @throws GpuException when the surface or the device fails, [CraftException] otherwise.
      */
     public suspend fun preview(
         vararg namedOnly: NamedArguments,
         comp: JSONValue? = null,
-        time: Double? = null,
+        time: Duration? = null,
     ) {
-        core.present(frameRequest(comp, time, null, null, null, null))
+        core.present(previewRequest(comp, time))
+    }
+
+    /**
+     * Ends the preview: the engine gives its preview surface up, and forgets it, so a later [preview] of
+     * any surface attaches afresh. Ending a preview nobody started is not an error.
+     *
+     * @throws CraftException for whatever the core's `detachPreview` answers when it gives the surface up.
+     */
+    public suspend fun endPreview() {
+        core.detachPreview()
     }
 
     /**
@@ -376,6 +392,16 @@ private fun frameRequest(
             "transparent" to transparent?.jsonValue,
         ),
     )
+
+/**
+ * The request a preview hands to the core's `present`: the `frame` fields of a picture — [comp] and the
+ * preview [time] — with the rest left unnamed. This one place turns a `Duration` into the seconds the
+ * engine speaks, so a preview's request is a frame's, byte for byte, whatever duration the app named.
+ */
+private fun previewRequest(
+    comp: JSONValue?,
+    time: Duration?,
+): String = frameRequest(comp, time?.toDouble(DurationUnit.SECONDS), null, null, null, null)
 
 /** The JSON object of these request fields, dropping the ones the caller left out. */
 internal fun fields(vararg entries: Pair<String, JSONValue?>): JSONValue.Object =

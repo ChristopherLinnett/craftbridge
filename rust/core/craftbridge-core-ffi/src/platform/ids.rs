@@ -46,18 +46,20 @@ impl<T> IdTable<T> {
     /// Take the handle the id names out of the table, leaving its slot. An id that names none — never
     /// handed out, or already taken out — answers `None`.
     pub(crate) fn take(&self, id: i64) -> Option<T> {
-        let slot = usize::try_from(id.checked_sub(1)?).ok()?;
-        self.lock().get_mut(slot)?.take()
+        self.lock().get_mut(slot(id)?)?.take()
+    }
+
+    /// Read the handle the id names, leaving it in the table: what `read` answers of it, or `None` for an
+    /// id that names none, as [`IdTable::take`] answers.
+    pub(crate) fn read<R>(&self, id: i64, read: impl FnOnce(&T) -> R) -> Option<R> {
+        self.lock().get(slot(id)?)?.as_ref().map(read)
     }
 
     /// Put the handle the id named back under that same id, as a failed attach does so the app still holds
     /// what it held. It answers `false`, having taken `value` to give it up, when the table has no slot
     /// for that id.
     pub(crate) fn put(&self, id: i64, value: T) -> bool {
-        let Some(below) = id.checked_sub(1) else {
-            return false;
-        };
-        let Ok(slot) = usize::try_from(below) else {
+        let Some(slot) = slot(id) else {
             return false;
         };
         match self.lock().get_mut(slot) {
@@ -74,6 +76,11 @@ impl<T> IdTable<T> {
     fn lock(&self) -> MutexGuard<'_, Vec<Option<T>>> {
         self.slots.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+/// The slot an id is held in: its position, one below it, since zero names no entry.
+fn slot(id: i64) -> Option<usize> {
+    usize::try_from(id.checked_sub(1)?).ok()
 }
 
 #[cfg(test)]
@@ -118,5 +125,19 @@ mod tests {
         assert_eq!(table.take(id), Some("a"), "the same id serves the same window again");
         assert!(!table.put(id + 100, "lost"), "an id no slot knows takes nothing in");
         assert_eq!(table.take(id + 100), None, "and nothing went in under a neighbour");
+    }
+
+    /// A read leaves the entry where it is, so the id still names it for the take or release after; an id
+    /// that names none, zero among them, reads nothing.
+    #[test]
+    fn a_read_leaves_the_entry_under_its_id() {
+        let table = IdTable::new();
+        let id = table.insert("a");
+        assert_eq!(table.read(id, |entry| entry.len()), Some(1));
+        assert_eq!(table.read(id, |entry| *entry), Some("a"), "a read took nothing out");
+        assert_eq!(table.take(id), Some("a"));
+        assert_eq!(table.read(id, |entry| *entry), None, "a taken id reads nothing");
+        assert_eq!(table.read(0, |entry| *entry), None, "zero is the no-id for a read too");
+        assert_eq!(table.read(-3, |entry| *entry), None);
     }
 }
