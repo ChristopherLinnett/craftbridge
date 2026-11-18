@@ -94,8 +94,22 @@ pub(crate) fn described_planes(format: i32, planes: i32, strides: [(i32, i32); 3
     Ok(strides)
 }
 
+/// What a decoder's description of a crop that starts off the coded picture's corner cannot be told from, in
+/// words, for the decoder's error and the tests that pin it.
+pub(crate) const IGNORED_OFFSET: &str = "a decoder that ignores a crop's offset describes its picture alike";
+
 /// Where the picture is in a decoded image whose crop rectangle is `rect` (left, top, right, bottom): the
-/// rectangle must be the stream's own picture size, since the image reader was made for it.
+/// platform's own description of where the decoder put the picture, which must be the stream's own picture
+/// size, since the image reader was made for it. It is not held to the image's own width and height, which can
+/// be the picture's size alone while a crop at the stream's offset runs past them, the planes holding the coded
+/// picture. For a stream whose crop starts at the coded picture's corner the rectangle is taken wherever it
+/// starts: there is no offset a decoder could ignore. For one whose crop starts off the corner it is taken only
+/// at that corner. A decoder that ignores a crop's offset writes the coded picture from where it starts its
+/// picture and describes a picture of the stream's size there, the image's origin unless it pads the image,
+/// which is also how a decoder that crops for itself describes the window it wrote, in an image of the same
+/// size; so a description at any other corner cannot be told from the coded picture's corner, and reading the
+/// wrong one gives another window of the picture with no error. The stream is refused, and the software
+/// decoder takes it.
 pub(crate) fn crop_of(rect: (i32, i32, i32, i32), layout: &Layout) -> Result<Crop, String> {
     let (left, top, right, bottom) = rect;
     let side = |from: i32, to: i32| to.checked_sub(from).and_then(|length| usize::try_from(length).ok());
@@ -105,6 +119,12 @@ pub(crate) fn crop_of(rect: (i32, i32, i32, i32), layout: &Layout) -> Result<Cro
     };
     if (width, height) != layout.size() {
         return Err(format!("the decoded picture is {width}x{height}, not the stream's size"));
+    }
+    let (wanted_x, wanted_y) = layout.offset();
+    if (wanted_x, wanted_y) != (0, 0) && (x, y) != (wanted_x, wanted_y) {
+        return Err(format!(
+            "the decoded picture's crop starts at {x},{y}, not where the stream's crop starts, {wanted_x},{wanted_y}: {IGNORED_OFFSET}, so it cannot be told from the coded picture's corner"
+        ));
     }
     Ok(Crop { x, y, width, height })
 }
@@ -371,6 +391,38 @@ mod tests {
             ((i32::MIN, 0, i32::MAX, height), outside((i32::MIN, 0, i32::MAX, height))),
         ] {
             assert_eq!(crop_of(rect, &taken), Err(message), "{rect:?}");
+        }
+    }
+
+    #[test]
+    fn a_crop_that_starts_off_the_corner_is_taken_only_where_the_decoder_describes_that_corner() {
+        let offset = |x: u32, y: u32| {
+            layout(|info| {
+                info.coded = (64, 64);
+                info.crop = (x, y, 32, 32);
+            })
+        };
+        let ambiguous = |at: (i32, i32), wanted: (u32, u32)| {
+            format!(
+                "the decoded picture's crop starts at {},{}, not where the stream's crop starts, {},{}: \
+                 a decoder that ignores a crop's offset describes its picture alike, so it cannot be told from the coded picture's corner",
+                at.0, at.1, wanted.0, wanted.1
+            )
+        };
+        assert!(ambiguous((0, 0), (8, 4)).contains(IGNORED_OFFSET));
+        // A crop 8 in and 4 down, one only across and one only down.
+        for (x, y) in [(8, 4), (8, 0), (0, 4)] {
+            let window = Crop { x: x as usize, y: y as usize, width: 32, height: 32 };
+            let (left, top) = (x as i32, y as i32);
+            assert_eq!(crop_of((left, top, left + 32, top + 32), &offset(x, y)), Ok(window), "the corner the stream's crop starts at, {x},{y}");
+            // A decoder that ignores the offset describes the picture's size where it starts its picture, the origin
+            // unless it pads the image, as one that crops for itself does.
+            for at in [(0, 0), (4, 4), (left, 0), (0, top), (left + 2, top)] {
+                if at != (left, top) {
+                    let rect = (at.0, at.1, at.0 + 32, at.1 + 32);
+                    assert_eq!(crop_of(rect, &offset(x, y)), Err(ambiguous(at, (x, y))), "{rect:?} for a crop at {x},{y}");
+                }
+            }
         }
     }
 

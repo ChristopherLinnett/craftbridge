@@ -349,6 +349,8 @@ impl Pipeline {
 
 /// The picture in a decoded image, as the frame FilmCraft's software decoder makes for the stream.
 fn read_picture(image: &Image, layout: &Layout) -> std::result::Result<VideoFrame, Failure> {
+    // The platform's own description of where the picture is in the image: the only answer there is, and
+    // [`mediacodec_input::crop_of`] says when it cannot be trusted.
     let rect = step(image.crop_rect(), "reading the picture's crop")?;
     let crop = mediacodec_input::crop_of((rect.left, rect.top, rect.right, rect.bottom), layout)?;
     let pixels = match mediacodec_input::reader_format(layout.depth) {
@@ -1364,42 +1366,64 @@ pub(crate) mod tests {
         hardware_compared(HEVC_MIME, compared.unwrap()).unwrap();
     }
 
+    /// Why the device's hardware decoder refuses a picture of `stream`: the error of the first sample it fails,
+    /// `None` where it decodes every sample.
+    fn first_refusal(stream: &Stream) -> Option<String> {
+        let mut decoder = decoder_with(&stream.entry, &fixtures::stream(&stream.entry), listed).unwrap();
+        let refused = stream.samples.iter().find_map(|(pts, sample)| decoder.decode(sample, *pts).err());
+        decoder.flush();
+        refused.map(|error| error.to_string())
+    }
+
     /// `stream` opened through FilmCraft's registry, as an engine's start leaves it ([`crate::register`] over the
     /// device's list), every picture held to the software decoder's: the branch it took. It is the device's: the
     /// first hardware decoder the list names for the stream's type, with no picture from another decoder and no
     /// switch to the software one, wherever the list names one and the platform can make the stream's pictures
     /// (a 10-bit one needs the P010 reader, [`p010_reader_made`]); the software decoder, the decline counted,
-    /// everywhere else.
+    /// everywhere else. One more is allowed: a decoder that describes the window of a crop that starts off the
+    /// coded picture's corner as a decoder that ignores the offset does ([`mediacodec_input::IGNORED_OFFSET`])
+    /// is refused at the stream's first picture, naming the corner the stream's own record gives its crop, and
+    /// the stream goes to the software decoder, the switch counted; any other refusal fails the test. The branch
+    /// is held to what the registry did, so the branch the test says is the one taken.
     fn through_the_registry(stream: &Stream) -> Branch {
         let layout = Layout::for_stream(&fixtures::stream(&stream.entry)).unwrap();
         let mime = mediacodec_input::mime(&layout).unwrap();
         let hardware = hardware_name(mime).filter(|_| layout.depth == Depth::Eight || p010_reader_made());
+        let refusal = hardware.as_ref().and_then(|_| first_refusal(stream));
         let backend = format!("{BACKEND} {}", layout.codec.name());
         let (declined, fallbacks) = (hw_stats().declined, hw_stats().fallbacks);
         let mut decoder = make_video_decoder(&stream.entry).unwrap();
         let opened = decoder.name().to_string();
         let compared = fixtures::compared_with_software(stream.name, decoder.as_mut(), &stream.entry, &stream.samples);
         assert_eq!(compared, stream.samples.len(), "{}: a picture for each sample", stream.name);
-        let branch = match hardware {
-            Some(name) => {
-                assert_eq!(
-                    (opened.as_str(), decoder.name(), hw_stats().declined, hw_stats().fallbacks),
-                    (backend.as_str(), backend.as_str(), declined, fallbacks),
-                    "{}: {name} took every picture",
-                    stream.name
-                );
-                Branch::Hardware(format!("{name} ({backend})"))
+        let did = (opened.as_str(), decoder.name(), hw_stats().declined, hw_stats().fallbacks);
+        let branch = match (hardware, refusal) {
+            (Some(name), None) => Branch::Hardware(format!("{name} ({backend})")),
+            (Some(name), Some(why)) => {
+                // The corner the stream's own record gives its crop, not the layout's reading of it.
+                let corner = match fixtures::stream(&stream.entry) {
+                    StreamInfo::Nal(info) => (info.crop.0, info.crop.1),
+                    StreamInfo::Frame(_) => (0, 0),
+                };
+                let reason = format!("not where the stream's crop starts, {},{}: {}", corner.0, corner.1, mediacodec_input::IGNORED_OFFSET);
+                assert!(why.contains(&reason), "{}: {name} refused a picture, and not with {reason:?}: {why}", stream.name);
+                Branch::Switched(format!("{name} ({backend})"), why)
             }
-            None => {
-                let software = software_video_decoder(&stream.entry).unwrap();
-                assert_eq!((opened.as_str(), hw_stats().declined), (software.name(), declined + 1), "{}: the factory declined the stream", stream.name);
-                let why = decoder_with(&stream.entry, &fixtures::stream(&stream.entry), listed)
-                    .err()
-                    .map_or_else(|| "no hardware decoder".into(), |why| why.to_string());
-                Branch::Declined(why)
-            }
+            (None, _) => Branch::Declined(
+                decoder_with(&stream.entry, &fixtures::stream(&stream.entry), listed).err().map_or_else(|| "no hardware decoder".into(), |why| why.to_string()),
+            ),
         };
-        eprintln!("{}", branch.says(stream.name, compared));
+        // What the registry does on each branch: the decoder it opens the stream with and the one it ends with,
+        // and the declines and switches it counts.
+        let software = software_video_decoder(&stream.entry).unwrap();
+        let does = match &branch {
+            Branch::Hardware(_) => (backend.as_str(), backend.as_str(), declined, fallbacks),
+            Branch::Switched(..) => (backend.as_str(), software.name(), declined, fallbacks + 1),
+            Branch::Declined(_) => (software.name(), software.name(), declined + 1, fallbacks),
+        };
+        let said = branch.says(stream.name, compared);
+        assert_eq!(did, does, "the registry took another branch than this: {said}");
+        eprintln!("{said}");
         branch
     }
 
@@ -1416,12 +1440,10 @@ pub(crate) mod tests {
     }
 
     /// T23 on this device: the running example's footage and the streams of the set, each opened through the
-    /// registry and held to the device's branch. The set's two offset crops are left out: through the registry,
-    /// the API 34 emulator's hardware H.264 decoder shows the wrong window of a crop that starts off the coded
-    /// picture's corner, with no error, a fault of the crop's offset that T23's footage, whose crop starts at
-    /// the corner, cannot show.
+    /// registry and held to the device's branch, the two offset crops among them: each is the window the software
+    /// decoder shows or is refused for its decoder's description of it, and says which.
     #[test]
-    fn t23_the_running_examples_footage_and_the_set_but_its_offset_crops_take_the_devices_branch_through_the_registry() {
+    fn t23_the_running_examples_footage_and_the_set_take_the_devices_branch_through_the_registry() {
         let _counters = counters();
         give_device_codecs();
         let footage = running_example_footage();
@@ -1434,6 +1456,8 @@ pub(crate) mod tests {
             fixtures::hevc(),
             fixtures::hevc10(),
             fixtures::av1(),
+            fixtures::h264_with_an_offset_crop(),
+            fixtures::hevc_with_an_offset_crop(),
         ];
         for stream in set.iter().chain([&footage]) {
             through_the_registry(stream);
