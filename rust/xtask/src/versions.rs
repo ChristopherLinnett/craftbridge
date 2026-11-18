@@ -92,6 +92,18 @@ fn string_of<'a>(table: &'a toml::Value, key: &str) -> Option<&'a str> {
     table.get(key).and_then(toml::Value::as_str)
 }
 
+/// The one release a version the catalog writes names: a string, or a rich version that is `strictly`
+/// that release and says nothing else, which is how the catalog has Gradle take no other version of a
+/// library wherever it is handed out. Every other rich version (`require`, `prefer`, `reject`, or
+/// `strictly` beside one of them) names none.
+fn one_release(version: &toml::Value) -> Option<&str> {
+    match version {
+        toml::Value::String(release) => Some(release),
+        toml::Value::Table(rich) if rich.len() == 1 => string_of(version, "strictly"),
+        _ => None,
+    }
+}
+
 /// The version a catalog library or plugin carries: a reference to `[versions]`, a string of its own, or
 /// none, as a library whose version a platform or BOM decides has none.
 enum Version<'a> {
@@ -102,8 +114,8 @@ enum Version<'a> {
 
 /// A catalog library or plugin as Gradle reads it: the artifact that publishes it and its version.
 /// Gradle takes `"group:name:version"` (`"id:version"` for a plugin) as well as a table, so both are
-/// read. A rich version (`strictly`, `require`, `prefer`) or an entry this cannot read is an error
-/// naming it, never a version passed over.
+/// read. A version is read as [`one_release`] reads it; any other rich version, or an entry this cannot
+/// read, is an error naming it, never a version passed over.
 fn entry_of<'a>(kind: &str, alias: &str, entry: &'a toml::Value) -> Result<(Artifact, Version<'a>), String> {
     let unreadable = || format!("{kind} {alias} is in no form this reads, so its newer releases would never be looked for");
     let marker = |id: &str| Artifact { group: id.to_string(), name: format!("{id}.gradle.plugin"), plugin_marker: true };
@@ -124,10 +136,9 @@ fn entry_of<'a>(kind: &str, alias: &str, entry: &'a toml::Value) -> Result<(Arti
     };
     let version = match entry.get("version") {
         None => Version::Unpinned,
-        Some(toml::Value::String(literal)) => Version::Literal(literal),
-        Some(table) => string_of(table, "ref")
-            .map(Version::Reference)
-            .ok_or_else(|| format!("{kind} {alias} carries a rich version, which names no one release to look a newer one up for"))?,
+        Some(version) => string_of(version, "ref").map(Version::Reference).or_else(|| one_release(version).map(Version::Literal)).ok_or_else(|| {
+            format!("{kind} {alias} carries a rich version other than `strictly` one release, so no release is named to look a newer one up for")
+        })?,
     };
     Ok((artifact, version))
 }
@@ -150,8 +161,8 @@ fn pinned(catalog: &toml::Value) -> Result<Vec<Pinned>, String> {
             Version::Reference(key) => {
                 let version = versions
                     .get(key)
-                    .and_then(toml::Value::as_str)
-                    .ok_or_else(|| format!("{kind} {alias} refers to version {key}, which [versions] does not hold as a string"))?;
+                    .and_then(one_release)
+                    .ok_or_else(|| format!("{kind} {alias} refers to version {key}, which [versions] holds as no one release"))?;
                 let name = if kind == "plugin" { format!("{key} ({called})") } else { key.to_string() };
                 found.entry(key.to_string()).or_insert(Pinned { name, version: version.to_string(), artifact });
             }
@@ -165,7 +176,7 @@ fn pinned(catalog: &toml::Value) -> Result<Vec<Pinned>, String> {
         if found.contains_key(key) || crate::pins::CATALOG_PINS.contains(&key.as_str()) || BUILD_TARGET_LEVELS.contains(&key.as_str()) {
             continue;
         }
-        let version = value.as_str().ok_or_else(|| format!("version {key} is no string: a release cannot be looked up for it"))?;
+        let version = one_release(value).ok_or_else(|| format!("version {key} names no one release: a newer one cannot be looked up for it"))?;
         match UNREFERENCED.iter().find(|(known, ..)| known == key) {
             Some((_, group, name)) => {
                 found.insert(
@@ -391,6 +402,32 @@ guava = { group = "com.google.guava", name = "guava", version = "33.0.0" }
         assert_eq!(newer_releases(&catalog, WRAPPER, &answers(table)).unwrap(), []);
     }
 
+    /// The update loop reads the repository's own catalog, so a library that is `strictly` one release is
+    /// looked up from that file and a newer release of it is named, as it is for a plain version.
+    #[test]
+    fn a_strictly_pinned_library_of_the_repositorys_catalog_has_its_newer_release_named() {
+        let root = crate::repo_root();
+        let catalog = crate::pins::catalog(&root).unwrap().expect("the repository has an Android build");
+        let testng = pinned(&catalog).unwrap().into_iter().find(|pin| pin.name == "testng").expect("the catalog pins TestNG");
+        let scratch = crate::scratch::Scratch::new("versions-strictly");
+        scratch.write(crate::pins::CATALOG, std::fs::read(root.join(crate::pins::CATALOG)).unwrap());
+        scratch.write(WRAPPER_PROPERTIES, WRAPPER);
+        let mut table: Vec<(String, String)> =
+            pinned(&catalog).unwrap().into_iter().map(|pin| (pin.artifact.metadata_url(), metadata(&[pin.version.as_str()]))).collect();
+        table.retain(|(url, _)| *url != testng.artifact.metadata_url());
+        table.push((GRADLE_RELEASES.to_string(), GRADLE.replace("\"9.10.0\"", "\"9.9.0\"")));
+        let fetch_for = |listed: Vec<&str>| {
+            let mut table = table.clone();
+            table.push((testng.artifact.metadata_url(), metadata(&listed)));
+            answers(table)
+        };
+        let newer = newer_releases_in(&scratch.0, &fetch_for(vec![&testng.version, "99.0.1"]));
+        assert!(
+            newer.is_ok_and(|found| found.iter().any(|one| one.name == "testng" && one.newest == "99.0.1")),
+            "the strict pin is read and a newer release named"
+        );
+    }
+
     #[test]
     fn a_preview_is_followed_by_anything_newer_and_a_release_only_by_a_release() {
         let published: Vec<String> = ["2.0.0-alpha.5", "2.0.0-alpha.6", "2.0.0-alpha.7", "2.0.0"].iter().map(ToString::to_string).collect();
@@ -428,7 +465,7 @@ guava = { group = "com.google.guava", name = "guava", version = "33.0.0" }
     #[test]
     fn every_form_gradle_reads_is_looked_up_or_refused_by_name() {
         let catalog: toml::Value = toml::from_str(
-            "[versions]\n[plugins]\nshadow = \"com.gradleup.shadow:9.0.0\"\nversioned = { id = \"org.example.tool\", version = \"2.1\" }\n[libraries]\ngson = \"com.google.code.gson:gson:2.13.1\"\nno-version = { module = \"androidx.core:core\" }\n",
+            "[versions]\nstrict = { strictly = \"7.12.0\" }\n[plugins]\nshadow = \"com.gradleup.shadow:9.0.0\"\nversioned = { id = \"org.example.tool\", version = \"2.1\" }\n[libraries]\ngson = \"com.google.code.gson:gson:2.13.1\"\nno-version = { module = \"androidx.core:core\" }\nstrict-ref = { module = \"org.testng:testng\", version.ref = \"strict\" }\nstrict-own = { module = \"org.example:own\", version = { strictly = \"3.0\" } }\n",
         )
         .unwrap();
         let found: Vec<(String, String, String)> =
@@ -437,13 +474,17 @@ guava = { group = "com.google.guava", name = "guava", version = "33.0.0" }
             found,
             [
                 ("gson".to_string(), "2.13.1".to_string(), "com.google.code.gson:gson".to_string()),
+                ("strict-own".to_string(), "3.0".to_string(), "org.example:own".to_string()),
                 ("plugin shadow".to_string(), "9.0.0".to_string(), "com.gradleup.shadow:com.gradleup.shadow.gradle.plugin".to_string()),
                 ("plugin versioned".to_string(), "2.1".to_string(), "org.example.tool:org.example.tool.gradle.plugin".to_string()),
+                ("strict".to_string(), "7.12.0".to_string(), "org.testng:testng".to_string()),
             ],
-            "a string notation and a plugin's own version are looked up; a library with no version pins none"
+            "a string notation, a plugin's own version and a version that is strictly one release, in [versions] or of its own, are looked up; a library with no version pins none"
         );
         for (entry, named) in [
-            ("[libraries]\nrich = { module = \"a:b\", version = { strictly = \"1.0\" } }\n", "library rich"),
+            ("[libraries]\nrich = { module = \"a:b\", version = { strictly = \"1.0\", prefer = \"1.0\" } }\n", "library rich"),
+            ("[libraries]\nrequired = { module = \"a:b\", version = { require = \"1.0\" } }\n", "library required"),
+            ("loose = { prefer = \"1.0\" }\n[libraries]\nreferring = { module = \"a:b\", version.ref = \"loose\" }\n", "library referring"),
             ("[libraries]\nodd = \"a:b:c:d\"\n", "library odd"),
             ("[libraries]\nshort = \"a:b\"\n", "library short"),
             ("[libraries]\nbare = { module = \"ab\", version = \"1\" }\n", "library bare"),
@@ -497,7 +538,7 @@ guava = { group = "com.google.guava", name = "guava", version = "33.0.0" }
         let root = crate::repo_root();
         let catalog = crate::pins::catalog(&root).unwrap().expect("the repository has an Android build");
         let pins = pinned(&catalog).unwrap();
-        for key in ["agp", "kotlin", "spotless", "ktlint", "detekt"] {
+        for key in ["agp", "kotlin", "spotless", "ktlint", "detekt", "testng"] {
             assert!(pins.iter().any(|pin| pin.name.starts_with(key)), "{key} is not looked up: {pins:?}");
         }
         let wrapper = std::fs::read_to_string(root.join(WRAPPER_PROPERTIES)).unwrap();

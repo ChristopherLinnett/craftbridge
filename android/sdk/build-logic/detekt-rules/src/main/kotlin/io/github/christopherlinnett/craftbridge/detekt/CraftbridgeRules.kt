@@ -667,10 +667,9 @@ private fun switchedOff(
  * and every argument are asked of the compiler too. An `@Ignore` over a class drops every test the class
  * holds the same silent way, and is reported once on the class, where the switch is written, instead of
  * once per dropped method; TestNG reads it on that class alone, not on a class nested in it. Over a class
- * that carries `@Test` it is refused even where the class holds no test: the build's test run reads the
- * `@Test` it switches off as the one over every other class whose `@Test` says the same, and the tests
- * that `@Test` makes of those classes' public methods then run nowhere either, while a member with its own
- * `@Test` still runs. A `@Test` on
+ * that carries `@Test` as well it switches that `@Test` off, and reads the switch on that class alone: a
+ * class holding no test is switched to no test and drops nothing, so such a class passes, and only one
+ * holding tests is refused. A `@Test` on
  * a private method runs, since TestNG reaches it reflectively. The check is one of detekt's, not of a
  * test report, because a report is exactly what such a test never produces (AGENTS.md §10 reads Kotlin
  * through detekt).
@@ -683,27 +682,20 @@ class UnrunTest(
         super.visitClassOrObject(classOrObject)
         val ignored = classOrObject.annotation(testNgIgnore) ?: return
         val tests = classOrObject.declarations.sumOf { it.testsRead() }
-        val message =
-            when {
-                tests > 0 -> {
-                    "`@Ignore` over this class runs none of the $tests tests TestNG reads in it and $UNSEEN: " +
-                        "delete the annotation or the tests"
-                }
-
-                // The build's run reads the `@Test` an `@Ignore` switches off as the one over every other
-                // class whose `@Test` says the same, so a class holding no test still silences the tests
-                // those make of their public methods.
-                classOrObject.annotation(testNgTest) != null -> {
-                    "`@Ignore` over this class switches off the `@Test` over it, and the build's test run then reads every other " +
-                        "class's `@Test` that says the same as switched off too, running none of the tests it makes of their public " +
-                        "methods, and $UNSEEN: delete the annotation or the `@Test`"
-                }
-
-                else -> {
-                    return
-                }
-            }
-        report(Finding(Entity.from(ignored), message))
+        // An `@Ignore` switches off the class it sits over, and no other, so a class that holds no test
+        // — its own, or made of its members by a `@Test` it carries — has nothing the switch could drop
+        // in silence, and an empty one carrying both annotations is switched to nothing, which is what
+        // it says: only a class holding tests has tests to lose, and only then is there something unseen.
+        if (tests == 0) {
+            return
+        }
+        report(
+            Finding(
+                Entity.from(ignored),
+                "`@Ignore` over this class runs none of the $tests tests TestNG reads in it and $UNSEEN: " +
+                    "delete the annotation or the tests",
+            ),
+        )
     }
 
     override fun visitNamedFunction(function: KtNamedFunction) {

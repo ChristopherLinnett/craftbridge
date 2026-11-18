@@ -66,9 +66,7 @@
 "dev.drewhamilton.poko:poko-annotations-jvm" = "Apache-2.0"
 "io.github.detekt.sarif4k:sarif4k" = "Apache-2.0"
 "io.github.detekt.sarif4k:sarif4k-jvm" = "Apache-2.0"
-"com.beust:jcommander" = "Apache-2.0"
 "com.github.ben-manes.caffeine:caffeine" = "Apache-2.0"
-"com.google.code.findbugs:jsr305" = "Apache-2.0"
 "com.google.errorprone:error_prone_annotations" = "Apache-2.0"
 "org.checkerframework:checker-qual" = "MIT"
 "org.jcommander:jcommander" = "Apache-2.0"
@@ -95,6 +93,10 @@
 "org.jetbrains.kotlinx:kotlinx-serialization-json-jvm" = "Apache-2.0"
 "org.snakeyaml:snakeyaml-engine" = "Apache-2.0"
 "org.testng:testng" = "Apache-2.0"
+# What the catalog's TestNG brings onto the tests' runtime classpaths: its logging facade, and a jQuery
+# webjar its published runtime dependencies name, though its HTML report writes the jQuery its own jar holds.
+"org.slf4j:slf4j-api" = "MIT"
+"org.webjars:jquery" = "MIT"
 
 [swiftpm]
 # Reads the conformance corpus, which is TOML, in the Swift tests alone (ios/sdk/Package.swift); no target
