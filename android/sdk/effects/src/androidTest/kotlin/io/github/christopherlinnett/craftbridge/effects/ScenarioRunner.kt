@@ -290,20 +290,31 @@ internal class ScenarioRunner(
             scenario.steps.any { it.host?.gpu == true } && scenario.compares.any { it.pixels != null }
 
         /**
+         * Why the engine whose `info` this is renders on the CPU, in EffectCraft's words, or `null` when it renders
+         * on the GPU. The engine renders on the GPU when its session names the adapter it holds
+         * (`/project/renderer/adapter`, EffectCraft's own record). `/gpu` names the adapter or says in words why
+         * there is none, a start that found no adapter included, so it alone cannot tell the two apart.
+         */
+        fun noAdapter(info: JSONValue): String? {
+            if (info.valueAt("/project/renderer/adapter") is JSONValue.Text) {
+                return null
+            }
+            return info.valueAt("/gpu")?.shown ?: "it says nothing of why"
+        }
+
+        /**
          * Why a step cannot be judged, given the engine's `info`, when it does not render where [onTheGPU] says:
          * a step that asked for the GPU on a machine with none would run on the CPU and pass, and a CPU's render
-         * made on the GPU would hold the GPU's render to itself. The engine renders on the GPU when its session
-         * names the adapter it holds (`/project/renderer/adapter`, EffectCraft's own record). `/gpu` names the
-         * adapter or says in words why there is none, a start that found no adapter included, so it alone cannot
-         * tell the two apart.
+         * made on the GPU would hold the GPU's render to itself.
          */
         fun failure(
             info: JSONValue,
             onTheGPU: Boolean,
         ): RunnerFailure? {
             val adapter = info.valueAt("/project/renderer/adapter") ?: JSONValue.Null
+            val onTheCPU = noAdapter(info)
             return when {
-                onTheGPU && adapter is JSONValue.Text -> {
+                onTheGPU && onTheCPU == null -> {
                     null
                 }
 
@@ -312,10 +323,7 @@ internal class ScenarioRunner(
                 }
 
                 onTheGPU -> {
-                    RunnerFailure(
-                        "the step needs the GPU, and the engine renders on the CPU: " +
-                            (info.valueAt("/gpu")?.shown ?: "it says nothing of why"),
-                    )
+                    RunnerFailure("the step needs the GPU, and the engine renders on the CPU: $onTheCPU")
                 }
 
                 else -> {

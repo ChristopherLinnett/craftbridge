@@ -7,6 +7,8 @@ import android.app.Instrumentation
 import android.content.Context
 import android.os.Bundle
 import android.util.Log
+import io.github.christopherlinnett.craftbridge.core.JSONValue
+import io.github.christopherlinnett.craftbridge.ffi.core.GpuChoice
 import kotlinx.coroutines.runBlocking
 import java.util.regex.PatternSyntaxException
 
@@ -28,8 +30,9 @@ internal class Case(
  */
 private fun cases(context: Context): List<Case> {
     val checks =
-        folderChecks + engineChecks + wordsChecks + hardwareDecodingChecks + frameChecks + previewChecks + apiChecks + typedCallChecks +
-            selectionChecks + corpusModelChecks + scenarioRunnerChecks + conformanceChecks(context) + plugInPolicyChecks
+        folderChecks + engineChecks + wordsChecks + hardwareDecodingChecks + fp16FloorChecks + exportPoolChecks + frameChecks +
+            previewChecks + apiChecks + typedCallChecks + selectionChecks + corpusModelChecks + scenarioRunnerChecks +
+            conformanceChecks(context) + plugInPolicyChecks
     return checks + scenarioCountCheck(checks)
 }
 
@@ -74,9 +77,40 @@ internal fun chosen(
     return all.filter { case -> pattern.containsMatchIn(case.name) }.ifEmpty { listOf(Case(asked) { error("no check's name matches it") }) }
 }
 
-/** The checks of how a run is narrowed. */
+/**
+ * The line a run of [made] checks ends with, [refused] of them failing: the shape a JUnit runner ends a run with,
+ * written here because these checks have no JUnit runner to write it, the line a person, or a script that does not
+ * read exit codes, looks for. After a failure on a device that gives the engine no GPU adapter it says why
+ * ([noGpuAdapter]), so the failures of the checks that render on the GPU read as the device's gap.
+ */
+internal fun runEnd(
+    refused: Int,
+    made: Int,
+    noGpuAdapter: String?,
+): String {
+    if (refused == 0) {
+        return "OK ($made checks)"
+    }
+    val gap =
+        noGpuAdapter?.let { why ->
+            "; this device gives the engine no GPU adapter, which every check that renders on the GPU needs: $why"
+        }
+    return "FAILURES!!! ($refused of $made checks refused${gap.orEmpty()})"
+}
+
+/** The checks of how a run is narrowed, and of how it ends. */
 internal val selectionChecks: List<Case> =
     listOf(
+        Case("a run ends OK with its count, or with its failures counted and why the device gives the engine no GPU adapter") {
+            agreed(runEnd(0, 74, "no adapter: none found"), "OK (74 checks)", "a run with no failure")
+            agreed(runEnd(1, 74, null), "FAILURES!!! (1 of 74 checks refused)", "a failure on a device with a GPU adapter")
+            agreed(
+                runEnd(9, 74, "no adapter: none found"),
+                "FAILURES!!! (9 of 74 checks refused; this device gives the engine no GPU adapter, " +
+                    "which every check that renders on the GPU needs: no adapter: none found)",
+                "failures on a device with no GPU adapter",
+            )
+        },
         Case(
             "`-e only` narrows a run to the checks it matches, and a pattern that matches none or is no pattern fails the run",
         ) { context ->
@@ -96,6 +130,20 @@ internal val selectionChecks: List<Case> =
 
 /** The key the run's end puts its failures under, for whoever reads the run's last report. */
 private const val ERROR_KEY = "Error"
+
+/**
+ * Why this device gives the engine no GPU adapter, in EffectCraft's words, or `null` where it gives one. Every check
+ * that renders on the GPU fails on such a device, which is the device's gap, not the plug-in's, so a run's end says
+ * it beside the failures; an adapter search that broke on a phone with a GPU says it there too, and still fails.
+ */
+private suspend fun noGpuAdapter(context: Context): String? {
+    val engine = EffectsEngine.start(context, gpu = GpuChoice.PREFERRED)
+    try {
+        return ScenarioRunner.noAdapter(engine.request("info", JSONValue.Object(emptyMap())))
+    } finally {
+        engine.shutDown()
+    }
+}
 
 /**
  * The device checks' runner. The usual runner for instrumented checks is androidx.test's, which needs
@@ -140,14 +188,10 @@ public class CraftBridgeInstrumentation : Instrumentation() {
                 )
             }
         }
-        // The shape a JUnit runner ends a run with, written here because these checks have no JUnit
-        // runner to write it: the line a person, or a script that does not read exit codes, looks for.
-        val ended =
-            if (failures.isEmpty()) {
-                "OK (${cases.size} checks)"
-            } else {
-                "FAILURES!!! (${failures.size} of ${cases.size} checks refused)"
-            }
+        // Asked only after a failure; an engine that does not start says nothing of the GPU, and the checks' own
+        // failures say why.
+        val gpuGap = if (failures.isEmpty()) null else runCatching { runBlocking { noGpuAdapter(targetContext) } }.getOrNull()
+        val ended = runEnd(failures.size, cases.size, gpuGap)
         Log.i(LOG_TAG, ended)
         // The line goes with the run's end, not as a report of its own: a report names a check, and one
         // that names none is read as no check's, or not at all.

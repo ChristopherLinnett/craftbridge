@@ -271,6 +271,68 @@ pub(crate) fn until_the_end<T>(
     }
 }
 
+/// How the planes of a decoded image lie in memory, as the platform describes them, and the picture's place in it:
+/// what a device test records of the real images a hardware decoder gives.
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ImageLayout {
+    pub(crate) image: (i32, i32),
+    pub(crate) picture: (i32, i32),
+    /// Each plane's row stride and pixel stride.
+    pub(crate) planes: [(i32, i32); 3],
+}
+
+#[cfg(test)]
+impl ImageLayout {
+    /// The layout in words: the chroma's pixel stride says whether the image is planar (1) or semi-planar (2), a
+    /// row stride past the plane's row is padding, and an image larger than the picture holds a coded size the
+    /// picture is cropped from.
+    pub(crate) fn says(&self) -> String {
+        let [(luma_row, _), (chroma_row, chroma_pixel), _] = self.planes;
+        let planar = if chroma_pixel == 2 { "semi-planar" } else { "planar" };
+        let padded = if luma_row > self.image.0 || chroma_row > (self.image.0 + 1) / 2 * chroma_pixel { "padded row strides" } else { "unpadded rows" };
+        let coded = if self.image == self.picture { "an image the picture's size" } else { "a coded size larger than the picture" };
+        format!("{planar}, {padded}, {coded}: image {:?}, picture {:?}, (row stride, pixel stride) per plane {:?}", self.image, self.picture, self.planes)
+    }
+
+    /// [`Self::says`] for the images of `stream`, as a device test says it.
+    pub(crate) fn says_of(&self, stream: &str) -> String {
+        format!("{stream}: its images were read as {}", self.says())
+    }
+}
+
+/// What the decoder met while a test decoded, kept with the thread it was met on: the tests run side by side, each
+/// decoding on its own thread, so each reads only its own.
+#[cfg(test)]
+pub(crate) struct PerThread<T>(std::sync::Mutex<Vec<(std::thread::ThreadId, T)>>);
+
+#[cfg(test)]
+impl<T> PerThread<T> {
+    pub(crate) const fn new() -> Self {
+        Self(std::sync::Mutex::new(Vec::new()))
+    }
+
+    pub(crate) fn push(&self, item: T) {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((std::thread::current().id(), item));
+    }
+
+    /// What this thread met since it last asked, in the order it came.
+    pub(crate) fn take(&self) -> Vec<T> {
+        let mut all = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let here = std::thread::current().id();
+        let (mine, others): (Vec<_>, Vec<_>) = std::mem::take(&mut *all).into_iter().partition(|(thread, _)| *thread == here);
+        *all = others;
+        mine.into_iter().map(|(_, item)| item).collect()
+    }
+}
+
+/// What a device test says of the decoder it picked for `mime`: whether the device's list calls it a hardware
+/// decoder, and its name.
+#[cfg(test)]
+pub(crate) fn picked_decoder_says(mime: &str, name: &str, hardware: bool) -> String {
+    format!("{mime}: {} decoder {name}", if hardware { "hardware" } else { "software" })
+}
+
 #[cfg(test)]
 mod tests {
     use filmcraft_codecs::hw::{FrameCodec, FrameStreamInfo, NalCodec};
@@ -281,6 +343,50 @@ mod tests {
     use super::*;
     use crate::fallback::stream_info;
     use crate::fixtures::{av1_entry, av1_samples, avc_entry, hevc_entry, hevc10_entry, hevc10_samples, pictures, pps, sps};
+
+    #[test]
+    fn an_image_layout_is_said_as_planar_or_semi_planar_padded_or_not_and_coded_larger_or_not() {
+        let layout = |image, picture, planes| ImageLayout { image, picture, planes }.says();
+        assert_eq!(
+            layout((160, 120), (160, 120), [(256, 1), (256, 2), (256, 2)]),
+            "semi-planar, padded row strides, an image the picture's size: image (160, 120), picture (160, 120), (row stride, pixel stride) per plane [(256, 1), (256, 2), (256, 2)]"
+        );
+        assert_eq!(
+            layout((160, 128), (160, 120), [(160, 1), (80, 1), (80, 1)]),
+            "planar, unpadded rows, a coded size larger than the picture: image (160, 128), picture (160, 120), (row stride, pixel stride) per plane [(160, 1), (80, 1), (80, 1)]"
+        );
+        // Chroma rows padded while the luma's are not, in an image of an odd width whose chroma is rounded up.
+        assert!(layout((159, 120), (159, 120), [(159, 1), (84, 1), (84, 1)]).starts_with("planar, padded row strides, "));
+        assert!(layout((159, 120), (159, 120), [(159, 1), (80, 1), (80, 1)]).starts_with("planar, unpadded rows, "));
+    }
+
+    #[test]
+    fn the_images_of_a_stream_are_said_with_the_streams_name() {
+        let layout = ImageLayout { image: (160, 120), picture: (160, 120), planes: [(160, 1), (80, 1), (80, 1)] };
+        assert_eq!(layout.says_of("AV1"), format!("AV1: its images were read as {}", layout.says()));
+        assert!(layout.says_of("AV1").starts_with("AV1: its images were read as planar, unpadded rows, an image the picture's size: image (160, 120)"));
+    }
+
+    #[test]
+    fn what_a_thread_met_is_read_by_that_thread_alone_in_the_order_it_came() {
+        let recorder = PerThread::new();
+        recorder.push("mine, first");
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                recorder.push("the other's");
+                assert_eq!(recorder.take(), ["the other's"], "only what the other thread met");
+            });
+        });
+        recorder.push("mine, second");
+        assert_eq!(recorder.take(), ["mine, first", "mine, second"]);
+        assert!(recorder.take().is_empty(), "what a thread has read is not read again");
+    }
+
+    #[test]
+    fn a_picked_decoder_is_said_with_its_type_its_kind_and_its_name() {
+        assert_eq!(picked_decoder_says(H264_MIME, "c2.qti.avc.decoder", true), "video/avc: hardware decoder c2.qti.avc.decoder");
+        assert_eq!(picked_decoder_says(AV1_MIME, "c2.android.av1.decoder", false), "video/av01: software decoder c2.android.av1.decoder");
+    }
 
     fn nal() -> NalStreamInfo {
         NalStreamInfo::from_entry(&avc_entry()).unwrap().unwrap()

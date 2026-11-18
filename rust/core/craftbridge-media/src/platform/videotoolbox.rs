@@ -547,21 +547,9 @@ mod tests {
     #[test]
     fn a_seek_to_an_hevc_cra_gives_the_pictures_the_software_decoder_gives_from_it() {
         let _counters = counters();
-        let stream = fixtures::hevc();
-        let StreamInfo::Nal(info) = fixtures::stream(&stream.entry) else { panic!("HEVC is a stream of NAL units") };
-        // A CRA in mid-stream (21), whose RASL picture refers back past it and is left out of a run that starts there.
-        let cra = stream.samples.iter().position(|(_, sample)| info.nal_types(sample).contains(&21)).filter(|&at| at > 0).unwrap();
-        let (mut decoder, branch) = on_this_device(&stream.entry);
-        let from_the_cra = Stream { name: "HEVC from its CRA", entry: stream.entry.clone(), samples: stream.samples[cra..].to_vec() };
-        // Sought to from the stream's start, from part way through the run before it, and from its end.
-        for before in [0..0, 0..3, 0..stream.samples.len()] {
-            for (pts, sample) in &stream.samples[before.clone()] {
-                decoder.decode(sample, *pts).unwrap();
-            }
-            decoder.reset();
-            let compared = fixtures::compared_with_software(from_the_cra.name, decoder.as_mut(), &stream.entry, &from_the_cra.samples);
-            assert_eq!(compared, from_the_cra.samples.len() - 1, "after samples {before:?}: every picture from the CRA on but its RASL picture");
-            settle(&from_the_cra, &branch, compared);
+        let (mut decoder, branch) = on_this_device(&fixtures::hevc().entry);
+        for compared in fixtures::seek_to_the_hevc_cra(decoder.as_mut()) {
+            settle(&fixtures::hevc_from_its_cra(), &branch, compared);
         }
     }
 

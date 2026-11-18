@@ -31,7 +31,7 @@ private fun stepAnswer(
     return answer.entries[key]?.numberOrNull() ?: error("step $step answered no `$key`: $answer")
 }
 
-private fun startOn(context: Context): EffectsEngine = EffectsEngine.start(context, gpu = GpuChoice.CPU_ONLY)
+internal fun startOn(context: Context): EffectsEngine = EffectsEngine.start(context, gpu = GpuChoice.CPU_ONLY)
 
 /**
  * The text the instance of [card] holds in its control [name], as the engine's own `essential.instance`
@@ -167,7 +167,7 @@ private val square =
     mapOf("width" to 32.0.jsonValue, "height" to 32.0.jsonValue, "duration" to 1.0.jsonValue, "frameRate" to 30.0.jsonValue)
 
 /** The one id an `exec` of [command] answers under [key]: a step's `comp` or `layer`, or an import's first item. */
-private suspend fun EffectsEngine.idOf(
+internal suspend fun EffectsEngine.idOf(
     command: String,
     params: Map<String, JSONValue>,
     key: String,
