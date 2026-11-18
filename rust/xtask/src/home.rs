@@ -59,6 +59,21 @@ const FOLDERS: [&str; 2] = ["/home", "/users"];
 const MESSAGE: &str =
     "an absolute home-folder path names the user of the machine that wrote it, and the repository is public: write the home folder as `$HOME`";
 
+/// The `git grep` the check runs, as its arguments: the fixed strings first, then the pattern.
+fn grep_args() -> [&'static str; 17] {
+    let [first, second] = FOLDERS;
+    ["grep", "-z", "-n", "-a", "-i", "-E", "--no-color", "--no-column", "(", "-e", first, "-e", second, ")", "--and", "-e", HOME_FOLDER]
+}
+
+/// The git the check runs over the checkout at `root`, which its tests run in the same way. `LC_ALL`
+/// outranks every other locale variable the machine sets, and with `C` gettext prints git's own words in an
+/// error the same on every machine too.
+fn grep_command(root: &Path) -> std::process::Command {
+    let mut git = crate::git::command(root);
+    git.env("LC_ALL", "C");
+    git
+}
+
 /// Run the check over the tracked files of the checkout at `root`. Outside a git checkout nothing is
 /// tracked, so there is nothing to report; inside one, a git that cannot answer is an error, never an
 /// empty answer, or the check would pass files nobody read.
@@ -66,17 +81,10 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     if !crate::git::is_checkout(root) {
         return Ok(Vec::new());
     }
-    let [first, second] = FOLDERS;
-    let args = ["grep", "-z", "-n", "-a", "-i", "-E", "--no-color", "--no-column", "(", "-e", first, "-e", second, ")", "--and", "-e", HOME_FOLDER];
-    // `LC_ALL` outranks every other locale variable the machine sets, and with `C` gettext prints git's
-    // own words in an error the same on every machine too.
-    let output = crate::git::command(root).env("LC_ALL", "C").args(args).output().map_err(|error| format!("could not run git: {error}"))?;
     // `git grep` exits 0 when a line matches and 1 when none does. A file it could not read is named on its
     // error output, whichever of the two it exits with, and then the answer leaves that file unread.
-    match output.status.code() {
-        Some(0 | 1) if output.stderr.is_empty() => Ok(found(&output.stdout)),
-        _ => Err(format!("`git {}` failed: {}", args.join(" "), String::from_utf8_lossy(&output.stderr).trim())),
-    }
+    let answered = |output: &std::process::Output| matches!(output.status.code(), Some(0 | 1)) && output.stderr.is_empty();
+    crate::git::run_judged(grep_command(root), &grep_args(), answered).map(|printed| found(&printed))
 }
 
 /// One error per matching line of what `git grep -z -n` printed: each record is the path, a NUL, the line
@@ -274,8 +282,7 @@ mod tests {
         let broken = Scratch::new("home-broken");
         broken.write(".git", "gitdir: does-not-exist\n");
         let failure = check(&broken.0).unwrap_err();
-        assert!(failure.starts_with("`git grep -z -n -a -i -E --no-color --no-column ( -e /home -e /users ) --and -e "), "{failure}");
-        assert!(failure.contains("not a git repository"), "{failure}");
+        assert_eq!(failure, crate::git::said(grep_command(&broken.0), &grep_args()));
     }
 
     /// A tracked file git cannot open is an error in git's words, never a pass: `git grep` names it on its
@@ -293,9 +300,10 @@ mod tests {
             let locked = scratch.0.join("docs/locked.md");
             std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
             let outcome = check(&scratch.0);
+            let said = outcome.is_err().then(|| crate::git::said(grep_command(&scratch.0), &grep_args()));
             std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
             match outcome {
-                Err(failure) => assert!(failure.contains("'docs/locked.md'"), "{tag}: {failure}"),
+                Err(failure) => assert_eq!(Some(failure), said, "{tag}"),
                 Ok(errors) => {
                     let mut expected = vec![error("docs/locked.md", 1)];
                     expected.extend(others.iter().map(|(path, _)| error(path, 1)));

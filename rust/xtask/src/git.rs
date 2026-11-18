@@ -23,7 +23,7 @@
 //! directory listing would not find that name and would treat it as something git does not hold.
 
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::sync::OnceLock;
 
 /// The repository variables git itself lists, asked once. Git answers from its own build, whatever the
@@ -60,13 +60,29 @@ pub(crate) fn output(dir: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
 
 /// Run `git`, a [`command`] its caller has set up further, with `args`, and return what it printed, or
 /// git's own words when it fails.
-pub(crate) fn run(mut git: Command, args: &[&str]) -> Result<Vec<u8>, String> {
+pub(crate) fn run(git: Command, args: &[&str]) -> Result<Vec<u8>, String> {
+    run_judged(git, args, |output| output.status.success())
+}
+
+/// Run `git` as [`run`] does, for a command whose exit alone does not tell whether it answered: return what
+/// it printed when `answered` says it did, or git's own words when it did not.
+pub(crate) fn run_judged(mut git: Command, args: &[&str], answered: impl Fn(&Output) -> bool) -> Result<Vec<u8>, String> {
     let output = git.args(args).output().map_err(|error| format!("could not run git: {error}"))?;
-    if output.status.success() {
-        Ok(output.stdout)
-    } else {
-        Err(format!("`git {}` failed: {}", args.join(" "), String::from_utf8_lossy(&output.stderr).trim()))
-    }
+    if answered(&output) { Ok(output.stdout) } else { Err(format!("`git {}` failed: {}", args.join(" "), String::from_utf8_lossy(&output.stderr).trim())) }
+}
+
+/// The failure a check reports when `git` (a [`command`] its caller has set up) is run with `args`: the
+/// command, then what git itself said on its error output. Git's words are taken from the git that runs,
+/// since its wording changes between releases; the rest is written out here rather than taken from
+/// [`run_judged`], so a check that lost or rewrote git's words is held to git's, never to its own report.
+/// A command that says nothing there is no failure to compare with; its exit is the caller's to judge,
+/// since `git grep` names a file it could not read there whether it exits 0 or 1.
+#[cfg(test)]
+pub(crate) fn said(mut git: Command, args: &[&str]) -> String {
+    let output = git.args(args).output().unwrap();
+    let said = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    assert!(!said.is_empty(), "`git {}` said nothing on its error output", args.join(" "));
+    format!("`git {}` failed: {said}", args.join(" "))
 }
 
 /// The paths a `-z` listing printed, one per entry. The NUL separator leaves every name as stored, with no
@@ -182,9 +198,13 @@ mod tests {
 
     #[test]
     fn a_failing_command_names_git_s_error_and_a_scratch_tree_is_no_checkout() {
+        // A `.git` naming a folder that is not there: git's words name the tree, so the ones the failure is
+        // held to can only be this tree's.
+        let broken = Scratch::new("git-broken");
+        broken.write(".git", "gitdir: does-not-exist\n");
+        let error = output(&broken.0, &["ls-files"]).unwrap_err();
+        assert_eq!(error, said(command(&broken.0), &["ls-files"]));
         let scratch = Scratch::new("git-none");
-        let error = output(&scratch.0, &["ls-files"]).unwrap_err();
-        assert!(error.contains("not a git repository"), "{error}");
         assert!(!is_checkout(&scratch.0));
         assert!(is_checkout(&crate::repo_root()));
     }
