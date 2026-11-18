@@ -38,9 +38,10 @@
 # the background, whose trip would otherwise interrupt a render or an export another test has in flight. The
 # host keeps the screen from locking, since a locked phone suspends an app and every test in it hangs, and it
 # fails by name a test that runs past CRAFTBRIDGE_DEVICE_TEST_LIMIT. A test that needs the app in the
-# background prints the line the runner put in its environment (CRAFTBRIDGE_RUNNER_BACKGROUND_REQUEST), and the
-# runner then brings a second app of its own, the host's executable under another bundle id, to the front for a
-# few seconds and brings the host back.
+# background prints the line the runner put in its environment (CRAFTBRIDGE_RUNNER_BACKGROUND_REQUEST), with
+# ` for <n> seconds` after it for a stay of its own, and the runner then brings a second app of its own, the
+# host's executable under another bundle id, to the front for those seconds (a few, by default) and brings the
+# host back.
 #
 # Exit status 0 when every binary passed, 1 when a test failed, a binary could not run or no test ran at all.
 set -euo pipefail
@@ -66,6 +67,7 @@ test_limit="${CRAFTBRIDGE_DEVICE_TEST_LIMIT:-300}"
 # app the line, so it is defined here alone. `cover` is the bundle id of the second app that does it, which
 # is on the phone for the run.
 background_request="craftbridge-runner: send the app to the background"
+# How long a request that names no stay keeps the app in the background.
 cover_seconds=6
 cover=""
 phone_hint="If the phone is locked, unlock it; if it asks to trust this computer, trust it; then run again"
@@ -212,22 +214,24 @@ resume_app() {
 
 # Serves what a running app asks of the runner through its output, while the launch's devicectl, `<devicectl
 # pid>`, waits on it: an app that needs to be in the background prints `$background_request`, and the runner
-# brings the cover app to the front, which sends the app to the background, and after `$cover_seconds` the app
-# itself, which returns. Each request is served once, in the order they are printed, and the log is read every
+# brings the cover app to the front, which sends the app to the background, and after the seconds the request
+# names (`$background_request for <n> seconds`; `$cover_seconds` when it names none) the app itself, which
+# returns. Each request is served once, in the order they are printed, and the log is read every
 # second until the launch ends and once more after, so a request printed last is not lost. The log still has
 # the console's carriage returns, so a line is matched by its start.
 # `serve_requests <devicectl pid> <log>`.
 serve_requests() {
-  local launcher="$1" log="$2" served=0 asked running=yes
+  local launcher="$1" log="$2" served=0 asked running=yes stay
   while [ "$running" = yes ]; do
     kill -0 "$launcher" 2>/dev/null || running=no
     asked="$(grep -c "^$background_request" "$log" 2>/dev/null || true)"
     while [ "$served" -lt "${asked:-0}" ]; do
       served=$((served + 1))
-      echo "ios-device-test: sending the app to the background (request $served)" >&2
+      stay="$(grep "^$background_request" "$log" | sed -n "${served}s/^.* for \([0-9][0-9]*\) seconds[[:space:]]*\$/\1/p")"
+      echo "ios-device-test: sending the app to the background for ${stay:-$cover_seconds} seconds (request $served)" >&2
       xcrun devicectl device process launch --device "$device" "$cover" >"$log.cover" 2>&1 </dev/null ||
         echo "ios-device-test: could not bring the cover app to the front: see $log.cover" >&2
-      sleep "$cover_seconds"
+      sleep "${stay:-$cover_seconds}"
       xcrun devicectl device process launch --device "$device" "$installed" >>"$log.cover" 2>&1 </dev/null ||
         echo "ios-device-test: could not bring the app back to the front: see $log.cover" >&2
     done

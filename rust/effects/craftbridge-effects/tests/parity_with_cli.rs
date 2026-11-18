@@ -237,7 +237,7 @@ fn mark_accel_note(doc: &mut Value) {
 /// The plugin's `info` against the command line's: the plugin names its engine and its pin beside
 /// the same engine state, which is what plan §14 asks of it.
 fn compare_info(cli_doc: &mut Value, plugin_doc: &mut Value, dirs: &[&Path]) {
-    let mut plugin = without(plugin_doc, &["engine", "pin", "gpu", "hardwareDecoding"]);
+    let mut plugin = without(plugin_doc, &["engine", "pin", "gpu", "hardwareDecoding", "decoding"]);
     let mut command_line = without(cli_doc, &["mode"]);
     mark_accel_note(&mut plugin);
     mark_accel_note(&mut command_line);

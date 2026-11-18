@@ -247,6 +247,7 @@ depends = [
   { item = "hw::set_hardware_decoding", at = [{ file = "crates/codecs/src/hw.rs", lines = ["25"] }] },
   { item = "hw::hardware_decoding", at = [{ file = "crates/codecs/src/hw.rs", lines = ["30"] }] },
   { item = "hw::set_hw_backend", at = [{ file = "crates/codecs/src/hw.rs", lines = ["38"] }] },
+  { item = "hw::hw_stats and hw::HwStats, the process-wide counters of hardware decoding, which `info.decoding` reports so an app sees a decoder fail and the stream go on in software", at = [{ file = "crates/codecs/src/hw.rs", lines = ["50-76"] }] },
   { item = "hw::note_hw_frames", at = [{ file = "crates/codecs/src/hw.rs", lines = ["78"] }] },
   { item = "hw::note_hw_session", at = [{ file = "crates/codecs/src/hw.rs", lines = ["83"] }] },
   { item = "hw::note_hw_declined", at = [{ file = "crates/codecs/src/hw.rs", lines = ["88"] }] },

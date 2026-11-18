@@ -80,13 +80,13 @@ equals = 763
 step = 0
 pointer = "/effects"
 equals = 308
-# The plug-in names its engine and pin beside the same state, says where it renders, and has no
-# start flag for the renderer's note to name. The command line prints no pin to hold the plug-in's to:
+# The plug-in names its engine and pin beside the same state, says where it renders and what its hardware
+# decoders have done, and has no start flag for the renderer's note to name. The command line prints no pin to hold the plug-in's to:
 # that is the constant `cargo xtask generate` writes from the workspace's pin, which the gate regenerates.
 [[scenario.same]]
 kind = "output"
 step = 0
-omit = ["/mode", "/engine", "/pin", "/gpu", "/hardwareDecoding", "/renderer/why", "/project/renderer/why"]
+omit = ["/mode", "/engine", "/pin", "/gpu", "/hardwareDecoding", "/decoding", "/renderer/why", "/project/renderer/why"]
 
 [[scenario]]
 id = "T2"
@@ -155,7 +155,7 @@ step = 0
 [[scenario.same]]
 kind = "output"
 step = 1
-omit = ["/mode", "/engine", "/pin", "/gpu", "/hardwareDecoding", "/renderer/why", "/project/renderer/why"]
+omit = ["/mode", "/engine", "/pin", "/gpu", "/hardwareDecoding", "/decoding", "/renderer/why", "/project/renderer/why"]
 [[scenario.compare]]
 kind = "json"
 actual = "t3.ecproj"

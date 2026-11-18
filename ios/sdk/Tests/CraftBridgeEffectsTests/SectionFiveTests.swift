@@ -21,16 +21,6 @@ private func value(of reply: JSONValue) -> JSONValue? {
     return nil
 }
 
-/// Writes a solid-color picture the engine can import, standing in for the photo from the camera.
-private func picture(_ color: UIColor, to url: URL) throws {
-    let renderer = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8))
-    let data = renderer.pngData { _ in
-        color.setFill()
-        UIRectFill(CGRect(x: 0, y: 0, width: 8, height: 8))
-    }
-    try data.write(to: url)
-}
-
 /// The value of each control of `card`'s instance, by the control's name, as the engine reads it. The
 /// wrapper composition holds the instance as its one layer, its first.
 private func controls(of card: TemplateInstance, in engine: EffectsEngine) async throws -> [String: JSONValue] {
@@ -72,42 +62,17 @@ private func middle(of card: TemplateInstance, in engine: EffectsEngine) async t
         }
         #expect(home["families"] != nil)
 
-        // The running example in small, as the corpus's card scenario steps it — by name, not by id,
-        // so nothing here depends on which numbers the session happens to hand out.
+        // The running example in small, as the corpus's card scenario steps it.
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ios1c-\(UUID().uuidString)", conformingTo: .directory)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let photo = dir.appendingPathComponent("photo.png")
         let sam = dir.appendingPathComponent("sam.png")
         let ann = dir.appendingPathComponent("ann.png")
-        let cardURL = dir.appendingPathComponent("card.ectemplate")
         let movie = dir.appendingPathComponent("card.mp4")
         let halted = dir.appendingPathComponent("halted.mp4")
-        try picture(.red, to: photo)
         try picture(.green, to: sam)
         try picture(.blue, to: ann)
-        let steps: [(command: String, params: JSONValue)] = [
-            (
-                command: "comp.new",
-                params: ["name": "Card", "width": 160, "height": 90, "duration": 6, "frameRate": 30]
-            ),
-            (command: "layer.newSolid", params: ["comp": "Card", "name": "Bg", "color": "#223344"]),
-            (command: "layer.newText", params: ["comp": "Card", "text": "Hello", "name": "Name"]),
-            (command: "file.import", params: ["paths": [.string(photo.path(percentEncoded: false))]]),
-            (command: "layer.addItem", params: ["comp": "Card", "item": "photo.png"]),
-            (
-                command: "essential.addProperty",
-                params: [
-                    "comp": "Card", "layer": "Name", "path": "text/sourceText", "name": "Name",
-                ]
-            ),
-            (command: "essential.addMedia", params: ["layer": "photo.png", "name": "Photo"]),
-            (
-                command: "essential.exportTemplate",
-                params: ["comp": "Card", "path": .string(cardURL.path(percentEncoded: false))]
-            ),
-        ]
-        _ = try await engine.run(steps)
+        let cardURL = try await makeCardTemplate(engine, in: dir, width: 160, height: 90)
         #expect(FileManager.default.fileExists(atPath: cardURL.path), "the template was saved")
 
         // The §5 calls themselves, and what they left on the card.
