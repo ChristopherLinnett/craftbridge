@@ -7,6 +7,7 @@ Every artifact (the Rust crates, the Swift package and both Maven artifacts) sha
 ### Fixed
 
 - The MediaCodec decoder no longer shows the wrong window of a stream whose crop starts off the coded picture's corner: it takes the window from the decoded image's own crop rectangle only where that is the stream's own corner, and a decoder that describes such a picture at the origin, as the Android 14 emulator's H.264 hardware decoder does, is refused with the reason named, so the software decoder gives the stream's pictures.
+- `craftbridge-core`'s pending-export journal no longer refuses an export, or has a start deal with nothing, because another process holds `pending-exports.lock` when no other process uses the container. A process the app starts from any thread keeps a copy of every handle the app has open until it runs its program, the lock's among them, and the lock belongs to the open file those copies share, so the engine now unlocks it before it closes its handle, where the close alone left the lock held by that copy.
 
 ### Added
 

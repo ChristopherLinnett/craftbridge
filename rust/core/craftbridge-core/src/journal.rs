@@ -87,13 +87,17 @@
 //! another process's running export from a killed one's. So a process holds an exclusive lock on
 //! [`LOCK_FILE`], beside the journal, while a start of its own deals with the journal and while
 //! exports of its own run with it: from the first listing until the last of them clears. The system
-//! releases the lock when a process ends, however it ends. A start that finds another process holding
-//! it deals with nothing and says so; a listing that does is refused, so its export does not run; each
-//! later start and listing tries again. The lock is never held longer, because iOS terminates a
-//! suspended app that holds a file lock outside its own data container, as in an App Group container a
-//! host may share with an extension (Apple's developer forums, thread 655225: "You must release file
-//! locks before coming eligible for suspension"), and an app keeps a running export from suspension
-//! with a background task.
+//! releases the lock when a process ends, however it ends. A process lets go of it by unlocking it
+//! before it closes its handle, never by the close alone: the lock belongs to the open file, and a
+//! process the app starts from any thread keeps a copy of every handle the app has open until it
+//! runs its program, so a close would leave the lock with that copy, and the app's next start or
+//! listing would be refused as if another process ran exports with the journal. A start that finds
+//! another process holding it deals with nothing and says so; a listing that does is refused, so
+//! its export does not run; each later start and listing tries again. The lock is never held
+//! longer, because iOS terminates a suspended app that holds a file lock outside its own data
+//! container, as in an App Group container a host may share with an extension (Apple's developer
+//! forums, thread 655225: "You must release file locks before coming eligible for suspension"), and
+//! an app keeps a running export from suspension with a background task.
 //!
 //! While it holds the lock, a process knows what the journal holds, the entries it keeps for a start
 //! and those of its running exports, and every listing and clear writes that without reading the file.
@@ -186,7 +190,24 @@ struct Known {
     taken: Taken,
     /// The lock on [`LOCK_FILE`], which keeps every other process from the journal while this one
     /// holds it; none on a disk that has no locks, where this process is the one it is used by.
-    lock: Option<File>,
+    lock: Option<Hold>,
+}
+
+/// This process's hold on the lock on [`LOCK_FILE`], taken through the handle it keeps, and let go
+/// of when it drops.
+#[derive(Debug)]
+struct Hold(File);
+
+impl Drop for Hold {
+    /// Unlock, then close. The lock belongs to the open file, which every copy of the handle shares,
+    /// and a process the app starts while the hold lives keeps a copy until it runs its program, so
+    /// the close alone would leave the lock held by that copy, and the app's next start or listing
+    /// would be refused for it. An unlock lets go for every copy at once.
+    fn drop(&mut self) {
+        // A drop has nobody to answer, and an unlock that fails leaves only what the close leaves: a
+        // lock that goes once the last copy of the handle closes.
+        let _unlocked = self.0.unlock();
+    }
 }
 
 impl Known {
@@ -402,7 +423,7 @@ enum Unread {
 /// What taking the journal's lock came to.
 enum Locked {
     /// This process holds it now.
-    Taken(File),
+    Taken(Hold),
     /// Another live process holds it: why.
     Elsewhere(String),
     /// The disk gave no answer: why.
@@ -449,7 +470,7 @@ impl Journal {
         let (Known { held, running, taken, lock }, taken_now) = match known.remove(&self.file) {
             Some(ours) => (ours, false),
             None => match self.take_lock() {
-                Locked::Taken(file) => (Known { lock: Some(file), ..Known::default() }, true),
+                Locked::Taken(hold) => (Known { lock: Some(hold), ..Known::default() }, true),
                 // A disk with no locks cannot keep a second process out: the start goes on as the one
                 // process there is.
                 Locked::Unsupported(why) => {
@@ -643,7 +664,7 @@ impl Journal {
             Slot::Occupied(ours) => Ok(ours.into_mut()),
             Slot::Vacant(slot) => {
                 let lock = match self.take_lock() {
-                    Locked::Taken(file) => Some(file),
+                    Locked::Taken(hold) => Some(hold),
                     Locked::Unsupported(_) => None,
                     Locked::Elsewhere(why) => return Err(CraftError::io(format!("{why}; nothing can be listed while it does"))),
                 };
@@ -670,7 +691,7 @@ impl Journal {
             Err(error) => return unsupported(&error),
         };
         match file.try_lock() {
-            Ok(()) => Locked::Taken(file),
+            Ok(()) => Locked::Taken(Hold(file)),
             Err(TryLockError::WouldBlock) => {
                 Locked::Elsewhere(format!("another process holds the lock on {}, so it may be running exports of its own", path.display()))
             }
@@ -1219,8 +1240,8 @@ mod tests {
     use crate::gpu::GpuChoice;
     use crate::testing::Gate;
     use serde_json::json;
+    use std::sync::Arc;
     use std::sync::mpsc;
-    use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard};
     use std::thread;
     use tempfile::TempDir;
 
@@ -1255,17 +1276,11 @@ mod tests {
         }
     }
 
-    /// Held shared by every [`Sandbox`] while it lives, and exclusively while a test starts a process:
-    /// a process started while another test holds the journal's lock keeps a copy of that lock until it
-    /// runs its program, and would make that test's start meet a lock no process holds.
-    static NO_PROCESS_STARTS: RwLock<()> = RwLock::new(());
-
     /// An app's folders under a scratch root, with `outside` a folder beside the container.
     struct Sandbox {
         root: TempDir,
         folders: Folders,
         outside: PathBuf,
-        _alive: RwLockReadGuard<'static, ()>,
     }
 
     impl Sandbox {
@@ -1280,7 +1295,7 @@ mod tests {
             fs::create_dir_all(&outside)?;
             let folders = Folders::inside(root.path().join(container), "");
             folders.prepare().map_err(|error| io::Error::other(error.to_string()))?;
-            Ok(Self { root, folders, outside, _alive: NO_PROCESS_STARTS.read().unwrap_or_else(PoisonError::into_inner) })
+            Ok(Self { root, folders, outside })
         }
 
         fn journal(&self) -> Journal {
@@ -1322,23 +1337,13 @@ mod tests {
         fn real(&self, name: &str) -> PathBuf {
             fs::canonicalize(&self.folders.container).unwrap().join(name)
         }
-
-        /// Run `program` with `args` on these folders: the sandbox lets go of its hold for the run
-        /// ([`run_alone`]), and the same folders come back, held again.
-        #[cfg(target_os = "macos")]
-        fn running(self, program: &str, args: &[&std::ffi::OsStr]) -> std::result::Result<Self, io::Error> {
-            let Self { root, _alive, .. } = self;
-            drop(_alive);
-            run_alone(program, args)?;
-            Self::at(root, "container")
-        }
     }
 
-    /// Run `program` with `args` while no sandbox lives, as a test that starts a process must
-    /// ([`NO_PROCESS_STARTS`]).
+    /// Run `program` with `args` to its end. Other tests hold journals' locks meanwhile, and the process
+    /// keeps a copy of each lock's handle until it runs its program; this process lets go of a lock by
+    /// unlocking it ([`Hold`]), so that copy keeps none.
     #[cfg(unix)]
-    fn run_alone(program: &str, args: &[&std::ffi::OsStr]) -> io::Result<()> {
-        let _alone = NO_PROCESS_STARTS.write().unwrap_or_else(PoisonError::into_inner);
+    fn run_program(program: &str, args: &[&std::ffi::OsStr]) -> io::Result<()> {
         let status = std::process::Command::new(program).args(args).status()?;
         if status.success() { Ok(()) } else { Err(io::Error::other(format!("{program} answered {status}"))) }
     }
@@ -1438,10 +1443,7 @@ mod tests {
         export.list(&[before.folders.container.join("exports/card.mp4")])?;
         before.put("exports/card.mp4", b"half");
         export.killed();
-        let Sandbox { root, folders, outside, _alive } = before;
-        // The guard goes before the next sandbox takes its own: a thread that waits for a second shared
-        // hold behind a waiting writer would wait for ever.
-        drop((outside, _alive));
+        let Sandbox { root, folders, .. } = before;
         fs::rename(&folders.container, root.path().join("Application-2"))?;
 
         let after = Sandbox::at(root, "Application-2")?;
@@ -1848,8 +1850,7 @@ mod tests {
                         let mut killed = sand.journal().pending();
                         killed.list(std::slice::from_ref(&path))?;
                         killed.killed();
-                        let other = lock_handle(&sand)?;
-                        other.lock()?;
+                        let _other = held_elsewhere(&sand)?;
                         sand.start()?
                     }
                 };
@@ -2022,10 +2023,22 @@ mod tests {
         open_lock(&sand.folders.config.join(LOCK_FILE))
     }
 
+    /// The journal's lock, taken as another process takes it, through a handle of its own, until the
+    /// hold drops.
+    fn held_elsewhere(sand: &Sandbox) -> io::Result<Hold> {
+        let handle = lock_handle(sand)?;
+        handle.lock()?;
+        Ok(Hold(handle))
+    }
+
     /// Whether another process could take the journal's lock now: a handle of its own on the lock file,
-    /// as another process has, takes it, and lets it go as it drops.
+    /// as another process has, takes it, and lets it go as a hold does, whether it took it or not, since
+    /// unlocking a handle that holds nothing changes nothing.
     fn lock_is_free(sand: &Sandbox) -> io::Result<bool> {
-        Ok(lock_handle(sand)?.try_lock().is_ok())
+        let probe = lock_handle(sand)?;
+        let free = probe.try_lock().is_ok();
+        drop(Hold(probe));
+        Ok(free)
     }
 
     /// The journals set aside in the config folder, with what each holds.
@@ -2729,9 +2742,9 @@ mod tests {
         sand.start()?;
         set_mode(&newer_than(&sand, &older)?, 0o600)?;
         // The system's flag that keeps a file from being removed, even by its owner, while it reads.
-        let sand = sand.running("chflags", &["uchg".as_ref(), older.as_os_str()])?;
+        run_program("chflags", &["uchg".as_ref(), older.as_os_str()])?;
         let first = sand.start();
-        let sand = sand.running("chflags", &["nouchg".as_ref(), older.as_os_str()])?;
+        run_program("chflags", &["nouchg".as_ref(), older.as_os_str()])?;
         let first = first?;
         let kept = format!("cannot remove the set-aside journal {}: {}", real_shelf(&sand, &older)?.display(), io::Error::from_raw_os_error(1));
         assert!(first.recovery().journal.contains(&kept), "{:?}", first.recovery());
@@ -2764,9 +2777,9 @@ mod tests {
         // A journal the disk reads, but will not let a start replace or remove.
         let journal = sand.file();
         fs::write(&journal, json!({ OUTPUTS: [] }).to_string())?;
-        let sand = sand.running("chflags", &["uchg".as_ref(), journal.as_os_str()])?;
+        run_program("chflags", &["uchg".as_ref(), journal.as_os_str()])?;
         let first = sand.start();
-        let sand = sand.running("chflags", &["nouchg".as_ref(), journal.as_os_str()])?;
+        run_program("chflags", &["nouchg".as_ref(), journal.as_os_str()])?;
         let first = first?;
         let uncleared = format!(
             "cannot clear the pending-export journal {}: {}",
@@ -3033,8 +3046,7 @@ mod tests {
         let running = sand.put("card.mp4", b"another process is writing this");
         sand.write_journal(&[entry("card.mp4")]);
         let before = fs::read(sand.file())?;
-        let other = lock_handle(&sand)?;
-        other.lock()?;
+        let other = held_elsewhere(&sand)?;
 
         let engine = sand.start()?;
         assert_eq!(fs::read(&running)?, b"another process is writing this", "a start deleted another process's running export");
@@ -3046,7 +3058,7 @@ mod tests {
         let again = sand.start()?;
         assert!(running.exists() && again.recovery().journal.iter().any(|line| line.contains("another process holds the lock")), "{:?}", again.recovery());
 
-        other.unlock()?;
+        drop(other);
         assert_start_frees_the_journal(&sand)
     }
 
@@ -3071,24 +3083,36 @@ mod tests {
         Ok(())
     }
 
-    /// A start holds the journal's lock from before it reads the journal until it has dealt with it, so
-    /// no other process sets the journal aside or deletes a listed file while it does. The journal is a
-    /// pipe the start waits to read, which slows the start itself and nothing else.
+    /// A fresh sandbox whose start is held mid-read, for a test that wants to run while a start of its
+    /// own holds the journal's lock: the journal is a pipe the start waits to read, which slows the
+    /// start itself and nothing else. Opening the returned writer returns once the start has opened
+    /// the pipe to read, which it does after taking the lock; whatever the test does next runs while
+    /// the start holds the lock and has dealt with nothing. Writing to the writer ends the read, and
+    /// joining the start answers what it dealt with.
     #[cfg(unix)]
-    #[test]
-    fn a_start_holds_the_journals_lock_while_it_deals_with_the_journal() -> Test {
+    fn start_blocked_reading_the_journal() -> std::result::Result<(Sandbox, fs::File, thread::JoinHandle<std::result::Result<Recovery, CraftError>>), io::Error>
+    {
         let pipes = TempDir::new()?;
         let pipe = pipes.path().join("journal");
-        run_alone("mkfifo", &[pipe.as_os_str()])?;
+        run_program("mkfifo", &[pipe.as_os_str()])?;
         let sand = Sandbox::new()?;
         std::os::unix::fs::symlink(&pipe, sand.file())?;
         let start = thread::spawn({
             let folders = sand.folders.clone();
             move || Engine::start_in(&folders, Scripted::idle(), GpuChoice::CpuOnly).map(|engine| engine.recovery().clone())
         });
-        // Opening the pipe to write returns once the start opens it to read, which it does after taking
-        // the lock, and then the start waits for what is written.
-        let mut writer = fs::OpenOptions::new().write(true).open(&pipe)?;
+        // Both ends of the pipe are open by the time this returns, so the pipe's own scratch folder
+        // can go: the read carries on through the open handles.
+        fs::OpenOptions::new().write(true).open(&pipe).map(|writer| (sand, writer, start))
+    }
+
+    /// A start holds the journal's lock from before it reads the journal until it has dealt with it, so
+    /// no other process sets the journal aside or deletes a listed file while it does. The journal is a
+    /// pipe the start waits to read, which slows the start itself and nothing else.
+    #[cfg(unix)]
+    #[test]
+    fn a_start_holds_the_journals_lock_while_it_deals_with_the_journal() -> Test {
+        let (sand, mut writer, start) = start_blocked_reading_the_journal()?;
         let free_while_reading = lock_is_free(&sand);
         writer.write_all(br#"{"outputs": []}"#)?;
         drop(writer);
@@ -3096,6 +3120,84 @@ mod tests {
         assert!(!free_while_reading?, "another process could take the journal while a start dealt with it");
         assert!(recovery.journal.is_empty(), "{recovery:?}");
         assert!(lock_is_free(&sand)?, "the start kept the lock once it was done");
+        Ok(())
+    }
+
+    /// A start deals with the journal in process: its listing and clearing wait for a start of this
+    /// process that is reading it, rather than running through it or being refused by it. So an export
+    /// never writes the journal under a start's nose, and no start deletes the finished file of an
+    /// export that ended while it was still reading, which is what a listing kept for its own export
+    /// and cleared when that export ended.
+    #[cfg(unix)]
+    #[test]
+    fn an_export_lists_only_after_a_start_has_read_the_journal() -> Test {
+        let (sand, mut writer, start) = start_blocked_reading_the_journal()?;
+        sand.put("stale.mp4", b"a killed run left this");
+        let (sent, listed) = mpsc::channel();
+        let export = thread::spawn({
+            let folders = sand.folders.clone();
+            move || -> Result<()> {
+                let journal = Journal::new(&folders, &folders.prepare().unwrap()).unwrap();
+                let movie = folders.container.join("movie.mp4");
+                let mut export = journal.pending();
+                let got = export.list(std::slice::from_ref(&movie));
+                let _ = sent.send(got.is_ok());
+                got?;
+                fs::write(&movie, b"a finished movie").map_err(|error| CraftError::io(error.to_string()))?;
+                export.clear()
+            }
+        });
+        // The start is still reading the journal, so the export's listing waits: nothing came through.
+        assert!(
+            matches!(listed.recv_timeout(std::time::Duration::from_secs(2)), Err(mpsc::RecvTimeoutError::Timeout)),
+            "the export's listing came through, or failed, while a start was still reading the journal"
+        );
+        // The start's read ends and it deals with the journal it read; the listing, which waited,
+        // then writes its entry.
+        writer.write_all(br#"{"outputs": [{"path": "stale.mp4"}]}"#)?;
+        drop(writer);
+        let recovery = start.join().map_err(|_| "the start panicked")??;
+        assert_eq!(recovery.removed, [sand.real("stale.mp4")], "{recovery:?}");
+        export.join().map_err(|_| "the export panicked")??;
+        // The export wrote its file and finished; the start that was mid-read never saw its entry, so
+        // the file stays through that start and the next.
+        let movie = sand.folders.container.join("movie.mp4");
+        assert_eq!(fs::read(&movie)?, b"a finished movie");
+        let later = sand.start()?;
+        assert!(later.recovery().removed.is_empty(), "{:?}", later.recovery());
+        assert_eq!(fs::read(&movie)?, b"a finished movie", "a start deleted a file a finished export wrote");
+        Ok(())
+    }
+
+    /// The race, made to happen every time: one engine, the handle of its lock work held open, then an
+    /// export. A process the app starts from any thread keeps a copy of every handle the app has open
+    /// until it runs its program, the one the journal's lock is held through among them, and the lock
+    /// belongs to the open file those copies share. Here a copy of the handle the engine's export holds
+    /// the lock through outlives the export. The process has let go of the lock, so its next export
+    /// lists, its next start deals with the journal, and another process could take it: none of them
+    /// hears of another process holding it.
+    #[test]
+    fn a_process_the_app_starts_keeps_no_lock_once_the_app_lets_go() -> Test {
+        let sand = Sandbox::new()?;
+        let journal = sand.journal().file;
+        let card = sand.folders.container.join("card.mp4");
+        let (sent, copies) = mpsc::channel();
+        let engine = sand.start_running(Box::new(move |_, list_outputs| {
+            list_outputs(std::slice::from_ref(&card))?;
+            // What a process the app starts now keeps: a copy of the handle the export holds the lock through.
+            let copy = lock(&KNOWN).get(&journal).and_then(|ours| ours.lock.as_ref()).map(|held| held.0.try_clone());
+            sent.send(copy).unwrap();
+            Ok(Value::Null)
+        }))?;
+        let export = || engine.request_with_progress("export", Value::Null, |_, _, _| {}, &CancelToken::new());
+        export()?;
+        let copy = copies.recv()?.ok_or("the export held no lock")??;
+        let again = export();
+        assert!(again.is_ok(), "the engine's next export was refused for a lock its process had let go of: {again:?}");
+        let started = sand.start()?;
+        assert!(started.recovery().journal.is_empty(), "{:?}", started.recovery());
+        assert!(lock_is_free(&sand)?, "a copy of the handle kept the lock after the process let go of it");
+        drop(copy);
         Ok(())
     }
 
@@ -3132,8 +3234,7 @@ mod tests {
         let sand = Sandbox::new()?;
         let partial = sand.put("card.mp4", b"half");
         sand.write_journal(&[entry("card.mp4")]);
-        let other = lock_handle(&sand)?;
-        other.lock()?;
+        let other = held_elsewhere(&sand)?;
         let _engine = sand.start()?;
         assert_listing_refused(&sand, "another process holds the lock");
         drop(other);
