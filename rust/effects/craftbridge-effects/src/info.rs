@@ -1,7 +1,7 @@
 //! The `info` method: the engine's state as one document, in the command line's shape (plan §14).
 
 use craftbridge_core::{CraftError, Result};
-use craftbridge_media::Availability;
+use craftbridge_media::{Availability, DecodingStats};
 use effectcraft_automation::Backend;
 use serde_json::Value;
 
@@ -11,7 +11,7 @@ use crate::methods::{empty_params, object, tool_json};
 /// The engine this plugin answers for, named as plan §21 spells it.
 const ENGINE: &str = "effectcraft";
 
-/// `info`: `{engine, version, pin, commands, effects, project, activeComp, gpu, hardwareDecoding}`.
+/// `info`: `{engine, version, pin, commands, effects, project, activeComp, gpu, hardwareDecoding, decoding}`.
 ///
 /// The project and active comp come from EffectCraft's own tools, so the document is the command
 /// line's `info` with the plugin's identity beside it. `gpu` says where the engine renders
@@ -21,7 +21,8 @@ const ENGINE: &str = "effectcraft";
 /// decodes on hardware: true once an engine start's registration found a hardware decoder (plan §18),
 /// VideoToolbox's on an iPhone, or on Android one the codec list the app handed over names; false where it
 /// found none, as in the iOS Simulator, on the desktop, and on an Android device whose list names none or
-/// that was handed no list.
+/// that was handed no list. `decoding` counts what the hardware decoders have done since the process
+/// started (see [`decoding`]), so an app can tell that one failed and the stream went on in software.
 pub(crate) fn info(backend: &mut Backend, params: &Value) -> Result<Value> {
     if !(params.is_null() || params.as_object().is_some_and(serde_json::map::Map::is_empty)) {
         return Err(CraftError::invalid_params("`info`: takes no parameters"));
@@ -48,7 +49,19 @@ pub(crate) fn info(backend: &mut Backend, params: &Value) -> Result<Value> {
         ("activeComp", active_comp),
         ("gpu", gpu),
         ("hardwareDecoding", Value::Bool(decodes_on_hardware(craftbridge_media::availability()))),
+        ("decoding", decoding(craftbridge_media::decoding_stats())),
     ]))
+}
+
+/// `info.decoding`: `{sessions, pictures, declined, fallbacks}`, FilmCraft's counters for its hardware
+/// decoders, which only grow, so two readings measure what happened between them.
+fn decoding(stats: DecodingStats) -> Value {
+    object([
+        ("sessions", Value::from(stats.sessions)),
+        ("pictures", Value::from(stats.pictures)),
+        ("declined", Value::from(stats.declined)),
+        ("fallbacks", Value::from(stats.fallbacks)),
+    ])
 }
 
 /// Whether `registered`, what the engine start's registration reported, left a hardware decoder in use: not
@@ -67,5 +80,11 @@ mod tests {
         assert!(!decodes_on_hardware(Some(Availability::Unavailable)), "a device that lists no hardware decoder");
         assert!(!decodes_on_hardware(Some(Availability::Off)), "hardware decoding turned off");
         assert!(!decodes_on_hardware(None), "no registration has run");
+    }
+
+    #[test]
+    fn decoding_names_each_counter_for_what_it_counts() {
+        let stats = DecodingStats { sessions: 1, pictures: 5, declined: 2, fallbacks: 3 };
+        assert_eq!(decoding(stats), serde_json::json!({"sessions": 1, "pictures": 5, "declined": 2, "fallbacks": 3}));
     }
 }

@@ -48,6 +48,9 @@ fn info_names_the_engine_its_version_and_the_builds_state() {
         Some(matches!(registered, craftbridge_media::Availability::Hardware(_))),
         "`info.hardwareDecoding` is what the registration found: {registered:?}"
     );
+    for counter in ["sessions", "pictures", "declined", "fallbacks"] {
+        assert!(info["decoding"][counter].is_u64(), "`info.decoding.{counter}` counts the hardware decoders' work: {}", info["decoding"]);
+    }
     assert_eq!(
         info["project"]["renderer"]["why"].as_str(),
         Some("headless: renders on the CPU"),

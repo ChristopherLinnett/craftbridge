@@ -5,6 +5,7 @@ import CraftBridge
 import CraftBridgeEffects
 import CraftBridgeFFI
 import Foundation
+import UIKit
 import os
 
 /// What the engine was asked, in order, kept for the test to read.
@@ -268,4 +269,47 @@ extension Folders {
     static func isolated() -> Folders {
         engineFolders(container: temporaryFolder("tests"), bundle: Bundle.main.bundleURL)
     }
+}
+
+/// Writes a solid-color picture the engine can import, standing in for the photo from the camera.
+func picture(_ color: UIColor, to url: URL) throws {
+    let renderer = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8))
+    let data = renderer.pngData { _ in
+        color.setFill()
+        UIRectFill(CGRect(x: 0, y: 0, width: 8, height: 8))
+    }
+    try data.write(to: url)
+}
+
+/// The running example's card template, made the way Leo makes one: a composition of `width` by `height`, 6
+/// seconds at 30 frames a second, with a text layer and a red picture as imported footage, a Name control on
+/// the text and a Photo control on the picture, saved as `card.ectemplate` in `folder`. The steps name the
+/// layers and items, not their ids, so nothing depends on which numbers the session hands out.
+func makeCardTemplate(_ engine: EffectsEngine, in folder: URL, width: Int, height: Int) async throws -> URL {
+    let photo = folder.appending(path: "photo.png")
+    let template = folder.appending(path: "card.ectemplate")
+    try picture(.red, to: photo)
+    _ = try await engine.run([
+        (
+            command: "comp.new",
+            params: [
+                "name": "Card", "width": .number(Double(width)), "height": .number(Double(height)), "duration": 6,
+                "frameRate": 30,
+            ]
+        ),
+        (command: "layer.newSolid", params: ["comp": "Card", "name": "Bg", "color": "#223344"]),
+        (command: "layer.newText", params: ["comp": "Card", "text": "Hello", "name": "Name"]),
+        (command: "file.import", params: ["paths": [.string(photo.path(percentEncoded: false))]]),
+        (command: "layer.addItem", params: ["comp": "Card", "item": "photo.png"]),
+        (
+            command: "essential.addProperty",
+            params: ["comp": "Card", "layer": "Name", "path": "text/sourceText", "name": "Name"]
+        ),
+        (command: "essential.addMedia", params: ["layer": "photo.png", "name": "Photo"]),
+        (
+            command: "essential.exportTemplate",
+            params: ["comp": "Card", "path": .string(template.path(percentEncoded: false))]
+        ),
+    ])
+    return template
 }

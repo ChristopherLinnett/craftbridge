@@ -30,7 +30,7 @@ mod platform;
 #[cfg(any(target_vendor = "apple", target_os = "android", test))]
 mod settings;
 
-use filmcraft_codecs::hw::{StreamInfo, hardware_decoding, note_hw_declined, set_hardware_decoding, set_hw_backend};
+use filmcraft_codecs::hw::{HwStats, StreamInfo, hardware_decoding, hw_stats, note_hw_declined, set_hardware_decoding, set_hw_backend};
 use filmcraft_codecs::{Result, VideoDecoder, register_video_decoder};
 use filmcraft_isobmff::SampleEntry;
 use std::sync::RwLock;
@@ -149,6 +149,31 @@ static REPORTED: RwLock<Option<Availability>> = RwLock::new(None);
 /// out, since it is the registration that asks the device.
 pub fn availability() -> Option<Availability> {
     *REPORTED.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// How the hardware decoders have done since the process started, read from FilmCraft's own counters, which
+/// only grow: an app subtracts two readings to measure what happened between them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DecodingStats {
+    /// Hardware decoders started, one for each stream opened (a seek reuses its decoder).
+    pub sessions: u64,
+    /// Pictures the hardware decoders gave.
+    pub pictures: u64,
+    /// Streams a hardware decoder was asked for and the software decoders took instead.
+    pub declined: u64,
+    /// Hardware decoders that failed in the middle of a stream and went on in software.
+    pub fallbacks: u64,
+}
+
+/// The counters so far: the one way an app sees that a hardware decoder it was using failed and the stream
+/// went on in software, which the pictures themselves do not show, since the two decoders give the same ones.
+pub fn decoding_stats() -> DecodingStats {
+    stats_of(hw_stats())
+}
+
+/// FilmCraft's counters under the names this crate's callers read them by.
+fn stats_of(counters: HwStats) -> DecodingStats {
+    DecodingStats { sessions: counters.sessions, pictures: counters.frames, declined: counters.declined, fallbacks: counters.fallbacks }
 }
 
 /// Registers CraftBridge's decoders in FilmCraft's decoder registry, the one every app that decodes
@@ -1571,6 +1596,17 @@ mod tests {
         assert_eq!(report(false, Some("a backend")), Availability::Off);
         assert_eq!(hw_backend(), Some("a backend"), "FilmCraft's diagnostics name it even while it is off");
         assert_eq!(report(true, Some("a backend")), Availability::Hardware("a backend"));
+    }
+
+    #[test]
+    fn the_stats_name_each_of_filmcrafts_counters_for_what_it_counts() {
+        let counters = filmcraft_codecs::hw::HwStats { frames: 5, sessions: 1, declined: 2, fallbacks: 3 };
+        assert_eq!(stats_of(counters), DecodingStats { sessions: 1, pictures: 5, declined: 2, fallbacks: 3 });
+        // The counters only grow, so a test running beside this one cannot take a reading below the figure its
+        // own notes add: the live reading is FilmCraft's, which no fixed figure above says.
+        let before = decoding_stats().pictures;
+        filmcraft_codecs::hw::note_hw_frames(1 << 40);
+        assert!(decoding_stats().pictures >= before + (1 << 40), "the counters are read as they stand");
     }
 
     #[test]
