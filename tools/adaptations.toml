@@ -443,7 +443,7 @@ summary = "The core makes the GPU device itself: the backend is picked per platf
 replaces = "GpuContext::request()'s own instance and limits (crates/gpu/src/context.rs:1403-1444): it takes any backend, or the ones WGPU_BACKEND names — the emulator's best adapter was its GL translator, with no compute shaders — and asks wgpu::Limits::default() for every limit but those two, which the iOS Simulator's Metal device refused against its 15 inter-stage shader variables (plan/evidence/03-device-feasibility.md Findings 6 and 7, decision D-7). The compositor's own interface stays: the device enters Gpu::new the way the desktop app's does."
 depends = [
   { item = "Gpu::new, which takes a device the caller made", at = [{ file = "crates/gpu/src/lib.rs", lines = ["162-166"] }] },
-  { item = "the adapter limits and the two required limits of GpuContext::request", at = [{ file = "crates/gpu/src/context.rs", lines = ["1430-1435"] }] },
+  { item = "the adapter limits and the two required limits of GpuContext::request, and the defaults it asks for every other limit, which the core asks clamped to the adapter, and its device test unclamped to record whether a device takes them as they are", at = [{ file = "crates/gpu/src/context.rs", lines = ["1430-1435"] }] },
   { item = "device_descriptor, whose memory hints the core's own descriptor mirrors", at = [{ file = "crates/gpu/src/context.rs", lines = ["816-818"] }] },
   { item = "the device name GpuContext::new gives, adapter and backend, which info.gpu spells alike", at = [{ file = "crates/gpu/src/context.rs", lines = ["866"] }] },
   { item = "the words GpuContext::request reports no adapter in, which the core's reason follows", at = [{ file = "crates/gpu/src/context.rs", lines = ["1426"] }] },

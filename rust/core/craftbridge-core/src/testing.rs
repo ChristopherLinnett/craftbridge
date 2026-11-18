@@ -94,19 +94,20 @@ pub(crate) fn close_begun(engine: &Arc<Engine>) -> JoinHandle<Result<()>> {
     closer
 }
 
-/// The host's GPU, which the tests that draw run on.
+/// The GPU of the machine the tests run on, which the tests that draw run on.
 pub(crate) struct Rig {
     pub(crate) adapter: wgpu::Adapter,
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
 }
 
-/// The host's GPU, asked as the engine asks for it. The machines the gate runs on have one (Metal),
-/// so a host without one fails the tests that draw instead of passing what they never proved.
+/// The GPU of the machine the tests run on, the host's or, in a device run, the phone's or the
+/// emulator's, asked as the engine asks for it. The machines the gate runs on have one (Metal), so a
+/// machine without one fails the tests that draw instead of passing what they never proved.
 pub(crate) fn rig() -> Rig {
     match GpuDevice::request(GpuChoice::Preferred) {
         GpuDevice::Device { adapter, device, queue, .. } => Rig { adapter, device, queue },
-        GpuDevice::CpuOnly { reason } => panic!("the host must answer a GPU for this test to mean anything: {reason}"),
+        GpuDevice::CpuOnly { reason } => panic!("this machine must answer a GPU for this test to mean anything: {reason}"),
     }
 }
 
