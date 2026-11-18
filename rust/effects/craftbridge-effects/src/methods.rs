@@ -90,9 +90,9 @@ struct Call<'a> {
 ///
 /// `folder` is the staged folder of the app whose command this is, where the door puts the copy a
 /// command that writes beside its source reads. A command the app names carries it; the commands the
-/// plugin's own methods and runners run carry `None`, since none of them is a command the door copies
-/// for (a template's import reads the copy the template runner made before the call,
-/// [`crate::templates::staged`]).
+/// plugin's own methods and runners run carry `None`: the one of them the door copies for, a template's
+/// import, reads the copy the template runner made before the call ([`crate::templates::staged`]), and
+/// none of the others is a command the door copies for.
 pub(crate) fn execute(backend: &mut Backend, folder: Option<&Path>, command: &str, params: Value, step: Option<u32>) -> Result<Value> {
     let mut params = if params.is_null() { empty_params() } else { params };
     refuse_process(command, &params, step)?;

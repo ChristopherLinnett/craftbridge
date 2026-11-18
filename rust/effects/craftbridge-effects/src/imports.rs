@@ -2,15 +2,16 @@
 //! when the folder that holds the file may not be written.
 //!
 //! `file.importLottie` writes each image a Lottie file embeds as `<name>_<asset id>.<ext>` beside the
-//! file, and `layer.create` with `shapesFromVector` writes each image of a vector file as
-//! `<file> Image <n>.png` beside it. A file in the app bundle would have them land in the bundle: on
-//! iOS the Lottie import drops an image whose write fails without a word and the vector conversion
-//! skips it, and on Android, where the bundle's unpacked assets can be written, they escape the
-//! confinement. So the file is copied first, through the one staging a template goes through
+//! file, `layer.create` with `shapesFromVector` writes each image of a vector file as
+//! `<file> Image <n>.png` beside it, and `essential.importTemplate` writes each medium of a template
+//! into `<stem> Media/` beside it. A file in the app bundle would have them land in the bundle: on
+//! iOS the Lottie import drops an image whose write fails without a word, the vector conversion skips
+//! it and the template's media come out missing, and on Android, where the bundle's unpacked assets
+//! can be written, they escape the confinement. So the file is copied first, through the one staging a template goes through
 //! ([`staging::stage`]), and the call reads the copy, beside which its writes land inside the
 //! container.
 //!
-//! [`staged`] is the one door on every way a call reaches either command: `exec` and each step of
+//! [`staged`] is the one door on every way a call reaches any of the three: `exec` and each step of
 //! `run` ([`crate::methods::execute`]), each tool call of `mcp` and each line of `replay`, and inside
 //! any of them each step of an `engine.batch`, read by the one reader of the commands a call reaches
 //! that the door withholding commands reads too ([`crate::methods::reached`]). It runs before the
@@ -22,7 +23,9 @@
 //!   read where it is;
 //! - for a conversion of vector footage, every vector file the call names or the project's footage
 //!   shows, since which footage a conversion reads turns on the layers, the selection and the footage
-//!   the call's earlier steps may make, which nothing can read before the call runs.
+//!   the call's earlier steps may make, which nothing can read before the call runs;
+//! - for the template's import, the file its `path` names, as the command reads it, whatever the
+//!   template holds: its media are in its bytes, and no probe is needed to tell that it writes.
 //!
 //! The call then reads the copy wherever it names the source, and every footage item that shows the
 //! source names the copy. Only a call the confinement lets run as it came is handed a copy: a write to
@@ -55,19 +58,26 @@
 //! import makes of a file the call names then shows the copy, so footage that still needs one is footage
 //! read from a file the call does not name, a project's or a folder's, and the call is refused for it. Which path
 //! is a project is the engine's to tell, never read from a suffix here.
+//!
+//! A template's import makes the folders of its media itself, on the disk, past the file service the scratch
+//! session refuses every write through. So the probe reads each template it imports through a link in a
+//! folder of its own, which goes whole once the probe has run ([`Links`]): a call refused for its conversion
+//! leaves no empty media folder behind, beside a template in the bundle, its copy, or one read where it is.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use craftbridge_core::{CraftError, Result};
 use effectcraft_automation::Backend;
-use effectcraft_automation::confine::Confinement;
+use effectcraft_automation::confine::{Access, Confinement};
 use effectcraft_engine::project::{ItemId, ItemKind, Project};
 use effectcraft_engine::{Services, Session, vector};
 use serde_json::Value;
 
 use crate::staging;
+use crate::templates;
 
 /// The Lottie import (`crates/engine/src/cmd/lottie.rs`:30-53 at the pin), and the parameter that
 /// names the file it reads and writes beside.
@@ -147,7 +157,8 @@ pub(crate) fn staged(backend: &mut Backend, folder: Option<&Path>, calls: &mut [
     let reaches: Vec<(&str, &Value)> = calls.iter().flat_map(|call| crate::methods::reached(call.0, call.1)).collect();
     let imports: Vec<Value> = reaches.iter().filter(|(reached, _)| *reached == LOTTIE).map(|(_, given)| (*given).clone()).collect();
     let converts = reaches.iter().any(|(reached, given)| converting(reached, given));
-    if imports.is_empty() && !converts {
+    let templated = reaches.iter().any(|(reached, _)| *reached == templates::IMPORT);
+    if imports.is_empty() && !templated && !converts {
         return Ok(Staged::none());
     }
     let (Some(folder), Some(confinement)) = (folder, backend.confinement().cloned()) else { return Ok(Staged::none()) };
@@ -182,6 +193,7 @@ pub(crate) fn staged(backend: &mut Backend, folder: Option<&Path>, calls: &mut [
         }
     }
     let mut sources: Vec<String> = lotties.iter().map(|lottie| lottie.source.clone()).collect();
+    sources.extend(template_files(&reaches));
     if converts {
         vector_files(backend, &confinement, calls, &mut sources);
     }
@@ -214,6 +226,13 @@ pub(crate) fn staged(backend: &mut Backend, folder: Option<&Path>, calls: &mut [
     Ok(staged)
 }
 
+/// The template files the call imports: the `path` of each import of one, as the command reads it,
+/// whatever string a step holds that is not that. Which of them must be read from a copy is
+/// [`staging::stage`]'s to tell, as for every source.
+fn template_files(reaches: &[(&str, &Value)]) -> impl Iterator<Item = String> {
+    reaches.iter().filter(|(reached, _)| *reached == templates::IMPORT).filter_map(|(_, given)| given.get(templates::IMPORT_PATH)?.as_str()).map(str::to_string)
+}
+
 /// Whether a `layer.create` makes shapes from vector footage: its `op` is that one, or a `$`
 /// reference to an earlier step's result, which a batch fills in only as it runs. Any other op writes
 /// nothing beside its source, and one that is not a string is refused by the command.
@@ -238,7 +257,7 @@ const OPENS_A_PROJECT: [&str; 6] = ["file.open", "file.openRecent", "file.revert
 /// such path to `file.importProject` or `file.importAep`, `file.importRecent` imports a recent file
 /// through `file.import`, and `essential.importTemplate` merges a template's project and media. Which
 /// path is a project is the engine's to tell, so the import itself is run to see what it shows.
-const IMPORTS: [&str; 4] = ["file.import", "file.importMultiple", "file.importRecent", "essential.importTemplate"];
+const IMPORTS: [&str; 4] = ["file.import", "file.importMultiple", "file.importRecent", templates::IMPORT];
 
 /// The command that changes the settings, among them the template project `file.newProject` reads.
 const SETTINGS: &str = "prefs.set";
@@ -320,7 +339,76 @@ fn imports_what_needs_a_copy(
         }
         handed.push((import, given));
     }
-    Ok(!handed.is_empty() && reads_in_what_needs_a_copy(backend, confinement, &handed))
+    if handed.is_empty() {
+        return Ok(false);
+    }
+    // Held until the probe has run: dropping it takes its folder, and what the probe made there, away.
+    let _links = Links::hand(folder, confinement, &mut handed)?;
+    Ok(reads_in_what_needs_a_copy(backend, confinement, &handed))
+}
+
+/// A folder of the probe's own in the staged folder, where each template the probe imports is read through
+/// a link of its own. A template's import makes the folders of its media beside the name it is given, on the
+/// disk itself, past the file service the scratch session refuses every write through ([`Probe`]); given the
+/// link, it makes them in this folder, which goes whole, with them, once the probe has run. So the probe
+/// writes nothing beside a template, whether the call reads it from a copy or where it is, and the media an
+/// earlier import wrote beside it are never touched. A process killed while the probe runs leaves the folder,
+/// holding links and empty folders alone, inside the container.
+struct Links {
+    folder: PathBuf,
+}
+
+impl Links {
+    /// Have each template import of `commands` read the file its `path` names, as the command reads it,
+    /// through a link in a new folder of the probe's under `staged`, the app's staged folder. A template the
+    /// confinement does not let the session read, or that is no file, keeps its name, since the import
+    /// refuses it before it makes any folder. `None` when no import reads one.
+    fn hand(staged: &Path, confinement: &Confinement, commands: &mut [(&str, Value)]) -> Result<Option<Self>> {
+        let mut links: Option<Self> = None;
+        for (index, (command, given)) in commands.iter_mut().enumerate() {
+            if *command != templates::IMPORT {
+                continue;
+            }
+            let Some(named) = given.get(templates::IMPORT_PATH).and_then(Value::as_str) else { continue };
+            let Some(target) = confinement.check(named, Access::Read).ok().filter(|target| target.is_file()) else { continue };
+            let Some(name) = Path::new(named).file_name().map(ToOwned::to_owned) else { continue };
+            if links.is_none() {
+                links = Some(Self::new(staged, confinement)?);
+            }
+            let Some(made) = &links else { continue };
+            // Each import has a folder of its own, so two templates of one name keep a link each.
+            let link = made.folder.join(index.to_string()).join(name);
+            link.parent().map_or(Ok(()), std::fs::create_dir).and_then(|()| std::os::unix::fs::symlink(&target, &link)).map_err(|error| cannot_link(&error))?;
+            if let Some(slot) = given.get_mut(templates::IMPORT_PATH) {
+                *slot = Value::from(link.to_string_lossy().into_owned());
+            }
+        }
+        Ok(links)
+    }
+
+    /// A new folder under `staged`, named by this process's id and a count of its own, so no other probe,
+    /// another engine's on the same container among them, takes the same one. It is made only where the
+    /// confinement lets the session write, as every copy is ([`staging::stage`]).
+    fn new(staged: &Path, confinement: &Confinement) -> Result<Self> {
+        static MADE: AtomicU64 = AtomicU64::new(0);
+        let folder = staged.join(format!(".probe-{}-{}", std::process::id(), MADE.fetch_add(1, Ordering::Relaxed)));
+        confinement.check(&folder.to_string_lossy(), Access::Write).map_err(|error| cannot_link(&error))?;
+        std::fs::create_dir_all(staged).and_then(|()| std::fs::create_dir(&folder)).map_err(|error| cannot_link(&error))?;
+        Ok(Self { folder })
+    }
+}
+
+impl Drop for Links {
+    /// The folder holds what the probe made and links, which the removal takes away without following, so the
+    /// templates they lead to stay. A folder the disk will not give up stays as it is.
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.folder);
+    }
+}
+
+/// The refusal of a call whose probe cannot be given a template through a link, in the disk's words.
+fn cannot_link(error: &dyn std::fmt::Display) -> CraftError {
+    CraftError::io(format!("cannot make the link a probe of a template's import reads in the container's staged folder: {error}"))
 }
 
 /// The copy of `source` in `folder` for this call: made the first time the call asks for it and kept in
@@ -340,8 +428,8 @@ fn copy_of(backend: &Backend, folder: &Path, copies: &mut Vec<(String, String)>,
 /// ([`vector_footage_to_copy`]). What a document shows is EffectCraft's to read, so the commands
 /// themselves tell it, run in order on one scratch session ([`scratch`]) that starts from an empty
 /// project, so that what it holds after is what they brought in, and that refuses every write made
-/// through its file service ([`Probe`]): a template's import makes the folders of its media on the disk
-/// itself, where the call's own import makes them too. One session runs them all, since what one does
+/// through its file service ([`Probe`]); a template's import makes the folders of its media on the disk
+/// itself, in the folder the caller hands it its template from ([`Links`]). One session runs them all, since what one does
 /// can turn on an earlier one: `file.importRecent` runs only once there is recent footage, which an
 /// import notes. A command the scratch session refuses reads in nothing the door could tell, and the
 /// next still runs, as the call may still run it.
@@ -577,6 +665,91 @@ mod tests {
         assert_eq!(noted(&probe.writes), vec![file(&inside), kept], "each write is noted");
         assert!(noted(&beneath.written).is_empty(), "no write reached the service");
         assert!(!inside.join("made").exists(), "no folder was made");
+    }
+
+    /// A container the session may write, a bundle it may only read and a folder outside both, inside a
+    /// scratch folder of their own, with the confinement over them.
+    fn roots() -> (tempfile::TempDir, [PathBuf; 3], Confinement) {
+        let dir = tempfile::tempdir().expect("a scratch folder");
+        let real = dir.path().canonicalize().expect("the folder resolves");
+        let roots = [real.join("container"), real.join("bundle"), real.join("outside")];
+        for folder in &roots {
+            std::fs::create_dir_all(folder).expect("a folder");
+        }
+        let [container, bundle, _] = &roots;
+        let confinement = Confinement::new(&[container.clone(), bundle.clone()], std::slice::from_ref(container)).expect("the confinement");
+        (dir, roots, confinement)
+    }
+
+    /// The parameters of a template's import of `path`.
+    fn import_of(path: &Path) -> Value {
+        serde_json::json!({"path": path.display().to_string(), "addToComp": false})
+    }
+
+    /// Each template import the probe runs reads the file its `path` names through a link of its own, two of
+    /// one name included, in a new folder under the staged folder, and the folder goes whole once the probe
+    /// is done with it, the files the links led to staying. A template the session may not read, a path that
+    /// is no file, a link in the container that leads out of it, another command and a call with no template import are handed no link, and a call with no
+    /// link makes no folder.
+    #[test]
+    fn the_probe_reads_each_template_through_a_link_in_a_folder_it_takes_away() {
+        let (_dir, [container, bundle, outside], confinement) = roots();
+        let staged = container.join("staged");
+        let templates = [bundle.join("a").join("card.ectemplate"), bundle.join("b").join("card.ectemplate"), container.join("docs").join("card.ectemplate")];
+        for template in templates.iter().chain([&outside.join("card.ectemplate")]) {
+            std::fs::create_dir_all(template.parent().expect("a folder")).expect("its folder");
+            std::fs::write(template, b"a template").expect("the file");
+        }
+        let escape = container.join("docs").join("escape.ectemplate");
+        std::os::unix::fs::symlink(outside.join("card.ectemplate"), &escape).expect("a link out of the container");
+        let others = [import_of(&outside.join("card.ectemplate")), import_of(&bundle.join("a")), import_of(&templates[0]), import_of(&escape)];
+        let mut commands: Vec<(&str, Value)> = templates.iter().map(|template| (templates::IMPORT, import_of(template))).collect();
+        commands.extend([
+            (templates::IMPORT, others[0].clone()),
+            (templates::IMPORT, others[1].clone()),
+            ("file.importRecent", others[2].clone()),
+            (templates::IMPORT, others[3].clone()),
+        ]);
+        let links = Links::hand(&staged, &confinement, &mut commands).expect("the links are made").expect("a folder for them");
+        assert_eq!(links.folder.parent(), Some(staged.as_path()), "the folder is the probe's own, in the staged folder");
+        let read: Vec<PathBuf> = commands.iter().take(3).map(|(_, given)| PathBuf::from(given["path"].as_str().expect("a path"))).collect();
+        for (link, template) in read.iter().zip(&templates) {
+            assert!(link.starts_with(&links.folder), "{} is read in the probe's folder", template.display());
+            assert_eq!(link.file_name(), template.file_name(), "the link has the template's name");
+            assert_eq!(std::fs::read_link(link).expect("a link"), *template, "the link leads to the file the import names");
+        }
+        assert_ne!(read[0].parent(), read[1].parent(), "two templates of one name each keep a link");
+        let kept: Vec<Value> = commands.iter().skip(3).map(|(_, given)| given.clone()).collect();
+        assert_eq!(
+            kept, others,
+            "a template the session may not read, one a link leads out of the container to, a folder and another command keep their names"
+        );
+        drop(links);
+        assert_eq!(std::fs::read_dir(&staged).expect("the staged folder reads").count(), 0, "the probe's folder is gone");
+        assert!(templates.iter().all(|template| template.is_file()), "the templates the links led to stay");
+        let mut nothing: Vec<(&str, Value)> = vec![("file.import", serde_json::json!({"paths": [templates[0].display().to_string()]}))];
+        assert!(Links::hand(&container.join("unmade"), &confinement, &mut nothing).expect("nothing to make").is_none());
+        assert!(!container.join("unmade").exists(), "no folder is made for a call with no link");
+    }
+
+    /// The probe's folder is made only where the session may write: a staged folder that is a link out of
+    /// the container refuses the call in the confinement's words, and nothing is made outside.
+    #[test]
+    fn no_folder_is_made_for_the_probe_outside_the_write_root() {
+        let (_dir, [container, bundle, outside], confinement) = roots();
+        let staged = container.join("staged");
+        std::os::unix::fs::symlink(&outside, &staged).expect("a link out of the container in the staged folder's place");
+        let template = bundle.join("card.ectemplate");
+        std::fs::write(&template, b"a template").expect("the file");
+        let refused = Links::hand(&staged, &confinement, &mut [(templates::IMPORT, import_of(&template))]).err().expect("the folder is refused");
+        let words = refused.to_string();
+        assert!(
+            matches!(refused, CraftError::Io { .. })
+                && words.contains("cannot make the link a probe of a template's import reads in the container's staged folder: cannot write")
+                && words.contains("it is outside the automation roots"),
+            "{words}"
+        );
+        assert_eq!(std::fs::read_dir(&outside).expect("the folder reads").count(), 0, "nothing was made outside the container");
     }
 
     /// Every string the parameters hold that is the source, at any depth, becomes the copy, and no
