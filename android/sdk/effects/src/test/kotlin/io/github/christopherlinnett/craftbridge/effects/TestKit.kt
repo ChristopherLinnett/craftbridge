@@ -5,7 +5,9 @@ package io.github.christopherlinnett.craftbridge.effects
 
 import io.github.christopherlinnett.craftbridge.core.Engine
 import io.github.christopherlinnett.craftbridge.core.JSONValue
+import io.github.christopherlinnett.craftbridge.ffi.core.FrameBytes
 import io.github.christopherlinnett.craftbridge.ffi.core.NoHandle
+import io.github.christopherlinnett.craftbridge.ffi.core.PixelFormat
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
@@ -15,6 +17,28 @@ import io.github.christopherlinnett.craftbridge.ffi.core.Engine as BoundaryEngin
 /** A core engine that answers nothing: the fake transports stand in for the whole engine, and no
  * host test reaches the core itself. It stands up without the native library. */
 internal fun fakeCore(): Engine = Engine.fromBoundary(BoundaryEngine(NoHandle))
+
+/** A boundary engine that records the frame and preview requests the core's calls hand it, and answers a
+ * frame no picture can be made of, so a test reads the request and needs no Android to convert one. */
+internal class RecordingBoundary : BoundaryEngine(NoHandle) {
+    val frames: MutableList<Pair<String, PixelFormat>> = mutableListOf()
+    val presents: MutableList<String> = mutableListOf()
+
+    override suspend fun frame(
+        params: String,
+        format: PixelFormat,
+    ): FrameBytes {
+        frames.add(params to format)
+        return FrameBytes(1u, 1u, format, ByteArray(0))
+    }
+
+    override suspend fun present(params: String) {
+        presents.add(params)
+    }
+}
+
+/** The engine over a recording boundary: what its typed picture and preview calls ask of the core. */
+internal fun boundaryEngine(boundary: RecordingBoundary): EffectsEngine = EffectsEngine(Engine.fromBoundary(boundary))
 
 /** What the engine was asked, kept for the test to read; each method answers what the test scripted
  * for it, or the same plain reply when nothing was scripted. */

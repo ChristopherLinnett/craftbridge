@@ -15,7 +15,7 @@ import io.github.christopherlinnett.craftbridge.core.InvalidParamsException
 import io.github.christopherlinnett.craftbridge.ffi.core.GpuChoice
 
 /** The side of the square surfaces the checks preview into, in pixels. */
-private const val SURFACE_SIDE = 64
+internal const val SURFACE_SIDE = 64
 
 /** How many presents on an abandoned surface a check makes before it calls the loss unreported. */
 private const val PRESENTS_TO_FIND_A_LOSS = 10
@@ -41,7 +41,7 @@ private val OPAQUE_RED = listOf(255, 0, 0, 255)
  * stand-in for a view's surface, whose buffers the check can read, and which the check abandons by
  * closing it, as an app does when its view goes away.
  */
-private fun reader(): ImageReader = ImageReader.newInstance(SURFACE_SIDE, SURFACE_SIDE, PixelFormat.RGBA_8888, 3)
+internal fun reader(): ImageReader = ImageReader.newInstance(SURFACE_SIDE, SURFACE_SIDE, PixelFormat.RGBA_8888, 3)
 
 /**
  * A surface whose consumer is a [SurfaceTexture] the check holds: the platform's stand-in for a
@@ -58,7 +58,7 @@ private class TextureSurface {
 }
 
 /** The middle pixel of the next buffer a presented frame left at [reader], waiting for it to arrive. */
-private fun middlePixel(reader: ImageReader): List<Int> {
+internal fun middlePixel(reader: ImageReader): List<Int> {
     val until = SystemClock.elapsedRealtime() + WAIT_FOR_FRAME_MILLIS
     while (SystemClock.elapsedRealtime() < until) {
         reader.acquireNextImage()?.use { image ->
@@ -79,7 +79,7 @@ private suspend fun Engine.drawsRedOn(reader: ImageReader) {
 }
 
 /** What a call that must answer [GpuException] answered, which is its failure or the word that it succeeded. */
-private suspend fun answeredGpu(call: suspend () -> Unit): GpuException? = runCatching { call() }.exceptionOrNull() as? GpuException
+internal suspend fun answeredGpu(call: suspend () -> Unit): GpuException? = runCatching { call() }.exceptionOrNull() as? GpuException
 
 /** The engine on the device's GPU with the red comp made, which every preview check starts from. */
 private suspend fun previewing(

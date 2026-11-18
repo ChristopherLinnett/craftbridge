@@ -186,9 +186,15 @@ private suspend fun EffectsEngine.stillInto(
     file.writeBytes(frame(comp = comp, time = 0.0).data)
 }
 
-/** The red, green and blue of the pixel at the middle of [comp]'s first frame, as the engine renders it. */
-private suspend fun EffectsEngine.middleOf(comp: JSONValue): List<Int> {
-    val picture = frame(comp = comp, time = 0.0, format = PixelFormat.RGBA8_STRAIGHT)
+/**
+ * The red, green and blue of the pixel at the middle of [comp]'s frame at [time], as the engine renders it: its
+ * first frame unless told otherwise, the active comp's for no [comp] and the comp's current time for no [time].
+ */
+internal suspend fun EffectsEngine.middleOf(
+    comp: JSONValue?,
+    time: Double? = 0.0,
+): List<Int> {
+    val picture = frame(comp = comp, time = time, format = PixelFormat.RGBA8_STRAIGHT)
     val at = ((picture.height.toInt() / 2) * picture.width.toInt() + picture.width.toInt() / 2) * 4
     return (0 until 3).map { channel -> picture.data[at + channel].toInt() and 0xff }
 }

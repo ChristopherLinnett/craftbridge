@@ -15,7 +15,7 @@ import java.nio.ByteBuffer
 private const val BYTES_PER_PIXEL = 4
 
 /** The side of the square comp the frame checks render. */
-private const val PAIRS_SIDE = 256
+internal const val PAIRS_SIDE = 256
 
 /**
  * A comp whose frame pairs many 8-bit colours with many 8-bit alphas, in straight colour: a ramp from black
@@ -25,7 +25,7 @@ private const val PAIRS_SIDE = 256
  * before the straight frame divides it by alpha, so every colour of its frame times its alpha lands on a
  * byte again and no rounding is ever put to the test.
  */
-private const val PAIRS_COMP =
+internal const val PAIRS_COMP =
     """{"steps":[
         {"command":"file.projectSettings","params":{"bitDepth":16}},
         {"command":"comp.new","params":{"name":"Pairs","width":$PAIRS_SIDE,"height":$PAIRS_SIDE,"duration":1,"frameRate":30}},
@@ -52,10 +52,10 @@ private const val MIN_HALF_WAY = 100
 private const val TRANSPARENT_FRAME = """{"transparent":true}"""
 
 /** The pixels of [this] bitmap as the bytes it holds: premultiplied RGBA, as `copyPixelsToBuffer` copies them. */
-private fun Bitmap.storedBytes(): ByteArray = ByteBuffer.allocate(byteCount).also { copyPixelsToBuffer(it) }.array()
+internal fun Bitmap.storedBytes(): ByteArray = ByteBuffer.allocate(byteCount).also { copyPixelsToBuffer(it) }.array()
 
 /** The premultiplied RGBA bytes of a frame the core answered as premultiplied BGRA: red and blue exchanged. */
-private fun ByteArray.bgraAsRgba(): ByteArray =
+internal fun ByteArray.bgraAsRgba(): ByteArray =
     ByteArray(size).also { rgba ->
         for (at in indices step BYTES_PER_PIXEL) {
             rgba[at] = this[at + 2]
