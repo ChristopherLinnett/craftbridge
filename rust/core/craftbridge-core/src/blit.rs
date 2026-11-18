@@ -22,9 +22,16 @@ pub enum Output {
     /// to the window (`Inherit`): the frame's premultiplied colour is already the frame composited
     /// over black, which is what is written, with alpha 1, so it shows the same either way.
     Opaque,
-    /// The surface reads straight colour with alpha (`CompositeAlphaMode::PostMultiplied`): the frame
-    /// is un-premultiplied before it is written, or every soft edge would be darkened twice.
+    /// The surface reads straight colour with alpha (`CompositeAlphaMode::PostMultiplied` off iOS, where
+    /// [`Output::Premultiplied`] takes that mode): the frame is un-premultiplied before it is written, or
+    /// every soft edge would be darkened twice.
     PostMultiplied,
+    /// The surface reads colour already multiplied by its alpha, as Core Animation reads every
+    /// non-opaque `CAMetalLayer` whatever alpha mode wgpu was told (wgpu's Metal backend only clears the
+    /// layer's opaque flag for `PostMultiplied`): the frame is premultiplied already, so it is written as
+    /// it is. Written straight, a translucent pixel would be added to what is behind it at its full
+    /// colour and show too bright.
+    Premultiplied,
 }
 
 impl Output {
@@ -33,6 +40,7 @@ impl Output {
         match self {
             Self::Opaque => "fs_opaque",
             Self::PostMultiplied => "fs_straight",
+            Self::Premultiplied => "fs_premultiplied",
         }
     }
 }
@@ -79,6 +87,11 @@ fn fs_straight(in: Varying) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);
     }
     return vec4<f32>(min(color.rgb / color.a, vec3<f32>(1.0)), color.a);
+}
+
+@fragment
+fn fs_premultiplied(in: Varying) -> @location(0) vec4<f32> {
+    return textureSample(frame, frame_sampler, in.uv);
 }
 ";
 
@@ -310,7 +323,7 @@ pub(crate) mod tests {
             .unwrap_or_else(|error| panic!("{}", error.emit_to_string(SHADER)));
         let stage_of = |name: &str| module.entry_points.iter().find(|entry| entry.name == name).map(|entry| entry.stage);
         assert_eq!(stage_of(VERTEX_ENTRY), Some(naga::ShaderStage::Vertex));
-        for output in [Output::Opaque, Output::PostMultiplied] {
+        for output in [Output::Opaque, Output::PostMultiplied, Output::Premultiplied] {
             assert_eq!(stage_of(output.entry_point()), Some(naga::ShaderStage::Fragment), "{output:?}");
         }
     }
@@ -517,7 +530,8 @@ pub(crate) mod tests {
     }
 
     /// A frame with soft alpha, premultiplied as the compositor leaves it, reaches an opaque surface as
-    /// itself over black and a post-multiplied one as straight colour with its alpha.
+    /// itself over black, a post-multiplied one as straight colour with its alpha, and a premultiplied one
+    /// as it is.
     #[test]
     fn alpha_follows_the_output() {
         let rig = rig();
@@ -532,6 +546,10 @@ pub(crate) mod tests {
         for px in &straight {
             assert!((i32::from(px[0]) - 128).abs() <= TOLERANCE && (i32::from(px[1]) - 64).abs() <= TOLERANCE && px[2] <= TOLERANCE as u8, "{px:?}");
             assert!((i32::from(px[3]) - 128).abs() <= TOLERANCE, "{px:?}");
+        }
+        let premultiplied = render(&rig, wgpu::TextureFormat::Rgba8Unorm, Output::Premultiplied, &source, (8, 8));
+        for px in &premultiplied {
+            assert_eq!(px, &[64, 32, 0, 128], "a premultiplied surface takes the frame's own bytes");
         }
         // Where the frame has no alpha the post-multiplied picture is clear, and the bars stay opaque black.
         let clear = frame(&rig, 8, 4, |_, _| [0, 0, 0, 0]);

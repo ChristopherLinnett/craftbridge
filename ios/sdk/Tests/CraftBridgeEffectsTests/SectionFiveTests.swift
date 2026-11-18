@@ -118,8 +118,8 @@ private func middle(of card: TemplateInstance, in engine: EffectsEngine) async t
         let (red, green, _) = try await middle(of: card, in: engine)
         #expect(green > 200 && red < 50, "the card shows Sam's photo, not the template's")
 
-        // The frame the preview would show: `preview` onto a layer is the next issue's; `frame` is
-        // this one's, at the card's own size.
+        // The frame the preview would show, at the card's own size: `preview` onto a layer is
+        // PreviewTests'.
         let shot = try await engine.frame(comp: card.comp, at: 1.0, format: .png)
         #expect(shot.width == 160)
         #expect(shot.height == 90)

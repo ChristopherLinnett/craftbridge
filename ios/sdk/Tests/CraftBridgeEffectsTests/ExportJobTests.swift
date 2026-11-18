@@ -4,65 +4,6 @@ import Foundation
 import Testing
 import os
 
-/// An engine started in the app's own folders, with a comp of `seconds` at 30 frames a second to export,
-/// and a folder of its own for each test's output inside `folder`, the cache unless a test names another.
-private struct Rig {
-    let engine: Engine
-    let output: URL
-
-    init(seconds: Int, in folder: URL? = nil) async throws {
-        engine = try startEffectsEngine(folders: .appDefault, gpu: .cpuOnly)
-        let cache = URL(filePath: Folders.appDefault.cache, directoryHint: .isDirectory)
-        output = (folder ?? cache).appending(path: "ExportJobTests-\(UUID().uuidString)", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        let comp: JSONValue = [
-            "name": "Card", "width": 1280, "height": 720, "duration": .number(Double(seconds)), "frameRate": 30,
-        ]
-        for (command, params) in [("comp.new", comp), ("layer.newSolid", ["comp": "Card", "name": "Background"])] {
-            let step: JSONValue = ["command": .string(command), "params": params]
-            _ = try await engine.request(method: "exec", params: try step.jsonText())
-        }
-    }
-
-    /// The export of the comp as a PNG sequence into this rig's folder.
-    var export: JSONValue {
-        [
-            "comp": "Card", "output": .string(output.appending(path: "card.png").path(percentEncoded: false)),
-            "format": "png",
-        ]
-    }
-
-    func finish() async throws {
-        try await engine.shutDown()
-        try FileManager.default.removeItem(at: output)
-    }
-}
-
-/// A progress handler, and a wait that ends at the first report it hears, once the export is rendering,
-/// or once the job has answered, so a job that answers before it reports fails its test rather than
-/// leaving it waiting.
-private final class FirstReport: Sendable {
-    let handler: ProgressHandler
-    private let reports: AsyncStream<Void>
-    private let heard: AsyncStream<Void>.Continuation
-
-    init() {
-        let (reports, heard) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
-        self.reports = reports
-        self.heard = heard
-        handler = { _, _, _ in heard.yield() }
-    }
-
-    func wait(for job: ExportJob) async {
-        let heard = heard
-        Task {
-            _ = try? await job.result
-            heard.finish()
-        }
-        for await _ in reports { return }
-    }
-}
-
 @Suite struct ExportJobTests {
     /// Cancelling the task that awaits an export's result sets the job's cancel token, and the engine
     /// stops the export and answers `Cancelled`.

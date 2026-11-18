@@ -5,14 +5,21 @@
 import CraftBridge
 import CraftBridgeFFI
 import Foundation
+import QuartzCore
 
 extension EffectsEngine {
-    /// Starts an EffectCraft engine over the app's `folders`, asking for the GPU as `gpu` names it.
+    /// Starts an EffectCraft engine over the app's `folders`, asking for the GPU as `gpu` names it, and
+    /// applying `background` to it for as long as it lives: by default the engine gives its GPU up when
+    /// the app enters the background and asks for it again on return (see ``BackgroundController``).
     ///
     /// The start proves it can write where the folders point and loads what they hold — fonts, models,
     /// staged files — so it is awaited rather than run on the caller's thread.
-    public static func start(folders: Folders, gpu: GpuChoice) async throws -> EffectsEngine {
-        EffectsEngine(engine: try startEffectsEngine(folders: folders, gpu: gpu))
+    public static func start(
+        folders: Folders,
+        gpu: GpuChoice,
+        background: BackgroundPolicy = .default
+    ) async throws -> EffectsEngine {
+        EffectsEngine(engine: try startEffectsEngine(folders: folders, gpu: gpu), background: background)
     }
 
     /// Runs the command `command` with `params`, as the engine's `exec` answers it, and returns its reply.
@@ -121,12 +128,49 @@ extension EffectsEngine {
         )
     }
 
+    /// Draws the frame of `comp` — the active composition when left out — at `time` — the current time
+    /// when left out — into `layer`, the app's own `CAMetalLayer`, straight from the GPU. The layer is
+    /// attached the first time, and again whenever the engine let it go, as after the app returned from the
+    /// background; the same layer costs nothing to name on every call.
+    ///
+    /// Show a transparent frame over the app's own views by making the layer non-opaque. The frame waits
+    /// its turn behind a running export, as every call does, so the app shows its last frame meanwhile.
+    ///
+    /// - Throws: ``CraftError/Gpu(detail:)`` when the engine renders on the CPU, has no surface or lost
+    ///   its device or surface (the next call draws again, once a resized layer is configured), and the
+    ///   errors a `frame` of the same request throws.
+    @MainActor
+    public func preview(_ comp: ItemReference? = nil, into layer: CAMetalLayer, at time: Duration? = nil) async throws {
+        try await previewTarget.attach(layer)
+        try await handle.present(params: previewRequest(comp: comp, at: time).jsonText())
+    }
+
+    /// Ends the preview: the engine gives its surface up, and the next ``preview(_:into:at:)`` attaches the
+    /// layer afresh. Ending a preview nobody started is not an error.
+    ///
+    /// - Throws: ``CraftError/Internal(detail:)`` when the engine has been shut down.
+    @MainActor
+    public func endPreview() async throws {
+        try await previewTarget.detach()
+    }
+
+    /// The request `preview` makes of the engine's `present`: the fields of a `frame` request, which are
+    /// the composition and the time in seconds, each left out when the caller left it out.
+    package func previewRequest(comp: ItemReference?, at time: Duration?) -> JSONValue {
+        given([
+            "comp": comp?.jsonValue,
+            "time": time.map { .number(Double($0.components.seconds) + Double($0.components.attoseconds) * 1e-18) },
+        ])
+    }
+
     /// Starts an export through the engine's `export`, answering the ``ExportJob`` that carries it:
     /// the composition `comp` — the active one when left out — written to `output` as `format`, which is
     /// a word the render queue knows a format by, since the export renders through the queue. Leaving
     /// `format` out takes the word of `output`'s extension. `progress` hears what the export reports;
     /// `extra` carries the request's other fields the way `export` takes them — `start`, `end`, `fps`,
-    /// `bitrate`, `hardware`, and the rest — and the engine checks every key.
+    /// `bitrate`, `hardware`, and the rest — and the engine checks every key. The export runs under the
+    /// engine's ``background`` controller, which keeps it out of suspension and cancels it before the
+    /// system stops the app.
     public func export(
         _ comp: ItemReference? = nil,
         to output: URL,
@@ -134,11 +178,22 @@ extension EffectsEngine {
         progress: @escaping ProgressHandler = { _, _, _ in },
         extra: [String: JSONValue] = [:]
     ) async throws -> ExportJob {
-        try job(
-            "export",
-            exportRequest(comp: comp, to: output, format: format, extra: extra),
-            progress: progress
-        )
+        try await job(
+            "export", exportRequest(comp: comp, to: output, format: format, extra: extra), progress: progress)
+    }
+
+    /// Starts `method` of the method table as a job that reports its progress to `progress`, as an export is
+    /// started: every call of the table that reports progress is made through here, so each is started alike
+    /// and handed to the engine's ``background`` controller, which keeps it out of suspension and cancels it
+    /// before the system stops the app. Package-wide so the conformance tests start the corpus's jobs here too.
+    package func job(
+        _ method: String,
+        _ params: JSONValue,
+        progress: @escaping ProgressHandler = { _, _, _ in }
+    ) async throws -> ExportJob {
+        let job = try ExportJob(engine: handle, method: method, params: params, progress: progress)
+        await background.protect(job)
+        return job
     }
 
     /// The request `export` takes, and `template.render` takes under its `output`: the composition

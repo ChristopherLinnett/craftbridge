@@ -389,6 +389,40 @@ private let scenarioFolders = temporaryFolder("runner")
             alone.judge(stoppedAt: nil, statuses: []) == nil, "a call with no fraction to stop at is judged by nothing")
     }
 
+    /// A call the corpus makes that reports progress starts through the engine's one job helper, so the
+    /// background controller keeps it out of suspension as it does an export an app makes.
+    @Test @MainActor func aCallTheCorpusListensToRunsUnderABackgroundTask() async throws {
+        let host = FakeHost()
+        let engine = EffectsEngine(engine: FakeEngine(), host: host)
+        _ = try await Listening(stop: try stopping(at: nil)).run("export", [:], on: engine)
+        #expect(host.begun == [1])
+        #expect(await eventually { host.ended == [1] })
+    }
+
+    /// A stop the listener heard before it held the job is asked of the job as it is handed over, and one it
+    /// heard after is asked at once: neither is lost to the order the engine's report and the caller meet in.
+    @Test(arguments: [true, false]) func aStopIsAskedOfTheJobWhicheverComesFirst(heardFirst: Bool) async throws {
+        let (stream, finish) = AsyncStream<Void>.makeStream()
+        let fake = FakeEngine()
+        fake.answer = { _, _ in
+            for await _ in stream { break }
+            return "null"
+        }
+        let job = try ExportJob(engine: fake, method: "export", params: [:])
+        let hearing = Hearing(stop: try stopping(at: "0.5"))
+        if heardFirst { hearing.hear(done: 160, total: 300) }
+        #expect(!job.isCancelled)
+        hearing.take(job)
+        if !heardFirst {
+            #expect(!job.isCancelled, "nothing has been heard to stop the job at")
+            hearing.hear(done: 160, total: 300)
+        }
+        #expect(job.isCancelled)
+        #expect(hearing.stoppedAt == Report(done: 160, total: 300))
+        finish.yield()
+        _ = try? await job.result
+    }
+
     @Test func theRenderQueueIsAskedForTheStatusOfEachItem() async throws {
         let asked = Requests()
         let listed = FakeEngine(recording: asked)

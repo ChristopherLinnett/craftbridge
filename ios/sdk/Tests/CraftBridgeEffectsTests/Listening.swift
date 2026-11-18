@@ -19,10 +19,42 @@ struct Report: Equatable, Sendable {
     let total: UInt64
 }
 
-/// What the listener heard of a call: the report it stopped the call at, and the job it stops.
-struct Heard: Sendable {
-    var stoppedAt: Report?
-    var job: ExportJob?
+/// What the listener hears of a call, kept under a lock, since the engine's reports and the caller that holds
+/// the job meet here from different threads: the report the listener stopped the call at, and the job it
+/// stops.
+final class Hearing: Sendable {
+    private struct Heard {
+        var stoppedAt: Report?
+        var job: ExportJob?
+    }
+
+    private let stop: Stop
+    private let heard = OSAllocatedUnfairLock(initialState: Heard())
+
+    init(stop: Stop) {
+        self.stop = stop
+    }
+
+    /// The report the listener stopped the call at, if it has.
+    var stoppedAt: Report? { heard.withLock(\.stoppedAt) }
+
+    /// Hears a report: the first one the scenario's fraction is met at stops the job, once there is one.
+    func hear(done: UInt64, total: UInt64) {
+        heard.withLock { heard in
+            if heard.stoppedAt == nil, stop.stops(done: done, total: total) {
+                heard.stoppedAt = Report(done: done, total: total)
+                heard.job?.cancel()
+            }
+        }
+    }
+
+    /// Hands the job to the listener. A stop that came before there was a job to ask is asked of it now.
+    func take(_ job: ExportJob) {
+        heard.withLock { heard in
+            heard.job = job
+            if heard.stoppedAt != nil { job.cancel() }
+        }
+    }
 }
 
 /// How a call that reports progress is listened to, and when it is stopped.
@@ -36,29 +68,18 @@ struct Listening: Sendable {
     /// scenario names is done. A call that stops at a fraction is answered only when its export met the
     /// stop, which ``judge(stoppedAt:statuses:)`` decides from the render queue.
     func run(_ method: String, _ params: JSONValue, on engine: EffectsEngine) async throws -> JSONValue {
-        let state = OSAllocatedUnfairLock(initialState: Heard())
-        let stop = stop
-        // The job is made with the lock held, so the listener, which waits on the lock for its first report,
-        // always finds the job it is to stop: a stop never comes before there is a job to ask.
-        let job = try state.withLock { listening in
-            let job = try engine.job(method, params) { done, total, _ in
-                state.withLock { heard in
-                    if heard.stoppedAt == nil, stop.stops(done: done, total: total) {
-                        heard.stoppedAt = Report(done: done, total: total)
-                        heard.job?.cancel()
-                    }
-                }
-            }
-            listening.job = job
-            return job
-        }
+        let hearing = Hearing(stop: stop)
+        // The job is made, and protected, outside the lock the listener takes at each report: a stop that
+        // comes before the job is handed to the listener is asked of it as it is.
+        let job = try await engine.job(method, params) { done, total, _ in hearing.hear(done: done, total: total) }
+        hearing.take(job)
         let answer: Result<JSONValue, any Error>
         do {
             answer = .success(try await job.result)
         } catch {
             answer = .failure(error)
         }
-        let stoppedAt = state.withLock(\.stoppedAt)
+        let stoppedAt = hearing.stoppedAt
         let statuses = stoppedAt == nil ? [] : try await Self.statuses(on: engine)
         if let stoppedAt {
             let said = JSONValue.array(statuses).shown

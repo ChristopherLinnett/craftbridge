@@ -5,6 +5,7 @@ import CraftBridge
 import CraftBridgeEffects
 import CraftBridgeFFI
 import Foundation
+import os
 
 /// What the engine was asked, in order, kept for the test to read.
 actor Requests {
@@ -43,6 +44,10 @@ final class FakeEngine: Engine, @unchecked Sendable {
     var frameReply = FrameBytes(width: 2, height: 2, format: .png, data: Data())
     /// The line an MCP call answers.
     var mcpReply: String?
+    /// What a GPU suspend and resume throw, when a test sets it.
+    var gpuRefusal: CraftError?
+    /// What a GPU resume answers: nil is a device back, a note is the CPU's reason.
+    var resumeNote: String?
 
     init(recording asked: Requests = Requests()) {
         self.asked = asked
@@ -81,6 +86,17 @@ final class FakeEngine: Engine, @unchecked Sendable {
         await asked.record("mcp", .string(line))
         return mcpReply
     }
+
+    override func suspendGpu() async throws {
+        await asked.record("suspendGpu", .null)
+        if let refusal = gpuRefusal { throw refusal }
+    }
+
+    override func resumeGpu() async throws -> String? {
+        await asked.record("resumeGpu", .null)
+        if let refusal = gpuRefusal { throw refusal }
+        return resumeNote
+    }
 }
 
 /// An effects engine whose every request the fake records in `requests` and answers `"done"`.
@@ -88,4 +104,158 @@ func engine(recording requests: Requests) -> EffectsEngine {
     let fake = FakeEngine(recording: requests)
     fake.answer = { _, _ in "\"done\"" }
     return EffectsEngine(engine: fake)
+}
+
+/// An engine started in `folders`, the app's own unless a test names others, with a comp of `seconds` at
+/// 30 frames a second to export, and a folder of its own for each test's output inside `folder`, the cache
+/// unless a test names another.
+struct Rig {
+    let engine: Engine
+    let output: URL
+
+    init(seconds: Int, in folder: URL? = nil, folders: Folders = .appDefault) async throws {
+        engine = try startEffectsEngine(folders: folders, gpu: .cpuOnly)
+        let cache = URL(filePath: folders.cache, directoryHint: .isDirectory)
+        output = (folder ?? cache).appending(path: "ExportJobTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let comp: JSONValue = [
+            "name": "Card", "width": 1280, "height": 720, "duration": .number(Double(seconds)), "frameRate": 30,
+        ]
+        try await engine.exec([("comp.new", comp), ("layer.newSolid", ["comp": "Card", "name": "Background"])])
+    }
+
+    /// The export of the comp as a PNG sequence into this rig's folder.
+    var export: JSONValue {
+        [
+            "comp": "Card", "output": .string(output.appending(path: "card.png").path(percentEncoded: false)),
+            "format": "png",
+        ]
+    }
+
+    func finish() async throws {
+        try await engine.shutDown()
+        try FileManager.default.removeItem(at: output)
+    }
+}
+
+/// A progress handler, and a wait that ends at the first report it hears, once the export is rendering,
+/// or once the job has answered, so a job that answers before it reports fails its test rather than
+/// leaving it waiting.
+final class FirstReport: Sendable {
+    let handler: ProgressHandler
+    private let reports: AsyncStream<Void>
+    private let heard: AsyncStream<Void>.Continuation
+
+    init() {
+        let (reports, heard) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        self.reports = reports
+        self.heard = heard
+        handler = { _, _, _ in heard.yield() }
+    }
+
+    func wait(for job: ExportJob) async {
+        let heard = heard
+        Task {
+            _ = try? await job.result
+            heard.finish()
+        }
+        for await _ in reports { return }
+    }
+}
+
+/// The system as a test makes it: its own notification centre, which the test posts the app's lifecycle to,
+/// and a background task that is granted, or refused, as the test sets, and recorded either way.
+final class FakeHost: BackgroundHost, Sendable {
+    let notifications = NotificationCenter()
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    private struct State {
+        var grants = true
+        var next = 1
+        var begun: [Int] = []
+        var ended: [Int] = []
+        var expiries: [Int: @Sendable () -> Void] = [:]
+    }
+
+    /// The tokens of the tasks begun, in order.
+    var begun: [Int] { state.withLock { $0.begun } }
+    /// The tokens of the tasks ended, in order.
+    var ended: [Int] { state.withLock { $0.ended } }
+
+    /// Whether the system grants time to the tasks begun from now on.
+    func grant(_ granted: Bool) {
+        state.withLock { $0.grants = granted }
+    }
+
+    /// The system's warning that the app is about to be stopped, for the task `token`.
+    func expire(_ token: Int) {
+        let handler = state.withLock { $0.expiries[token] }
+        handler?()
+    }
+
+    func post(_ name: Notification.Name) {
+        notifications.post(name: name, object: nil)
+    }
+
+    @MainActor func beginTask(named name: String, onExpiry: @escaping @Sendable () -> Void) -> Int? {
+        state.withLock { state in
+            guard state.grants else { return nil }
+            let token = state.next
+            state.next += 1
+            state.begun.append(token)
+            state.expiries[token] = onExpiry
+            return token
+        }
+    }
+
+    @MainActor func endTask(_ token: Int) {
+        state.withLock { $0.ended.append(token) }
+    }
+}
+
+/// Waits, a turn at a time, until `condition` holds or a generous number of turns have passed, for what
+/// the app's notifications set going on the main actor: they are delivered through a task of their own.
+func eventually(_ condition: @MainActor () async -> Bool) async -> Bool {
+    for _ in 0..<2000 {
+        if await condition() { return true }
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    return false
+}
+
+extension Engine {
+    /// Runs the commands in order through the engine's `exec`, the way a test sets a comp up.
+    func exec(_ steps: [(command: String, params: JSONValue)]) async throws {
+        for (command, params) in steps {
+            let step: JSONValue = ["command": .string(command), "params": params]
+            _ = try await request(method: "exec", params: try step.jsonText())
+        }
+    }
+
+    /// A comp `name` of `width` by `height` that is transparent but for one solid of `color` at `opacity` per
+    /// cent: every pixel the solid covers is translucent, so a frame of it differs as a straight frame and
+    /// as a premultiplied one.
+    func veil(_ name: String, width: Int, height: Int, color: String, opacity: Int) async throws {
+        try await exec([
+            ("comp.new", ["name": .string(name), "width": .number(Double(width)), "height": .number(Double(height))]),
+            ("layer.newSolid", ["comp": .string(name), "name": "Veil", "color": .string(color)]),
+            (
+                "prop.set",
+                [
+                    "comp": .string(name), "layer": "Veil", "path": "transform/opacity",
+                    "value": .number(Double(opacity)),
+                ]
+            ),
+        ])
+    }
+}
+
+extension Folders {
+    /// Folders no other test shares, laid out as the corpus's are in a container of their own under the
+    /// simulator's temporary folder, with the test bundle to read: an engine started in the app's own folders
+    /// holds their journal's lock and writes a probe file there, which another test's engine meets while the
+    /// two run side by side.
+    static func isolated() -> Folders {
+        engineFolders(container: temporaryFolder("tests"), bundle: Bundle.main.bundleURL)
+    }
 }
