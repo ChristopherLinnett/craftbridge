@@ -16,6 +16,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
+import io.github.christopherlinnett.craftbridge.ffi.core.Engine as BoundaryEngine
 
 /**
  * The frames of the comp an export renders: small enough to render quickly on a phone's CPU, long
@@ -41,10 +42,21 @@ internal suspend fun onEngine(
     context: Context,
     gpu: GpuChoice = GpuChoice.CPU_ONLY,
     check: suspend (Engine) -> Unit,
+) = onBoundary(context, gpu) { boundary -> check(Engine.fromBoundary(boundary)) }
+
+/**
+ * The same engine, started the same way, with its boundary in hand, for a check that asks the core
+ * something the Kotlin API does not carry, such as the frame in a format only another platform uses.
+ */
+internal suspend fun onBoundary(
+    context: Context,
+    gpu: GpuChoice = GpuChoice.CPU_ONLY,
+    check: suspend (BoundaryEngine) -> Unit,
 ) {
-    val engine = Engine.start(Folders.appDefault(context)) { startEffectsEngine(it, gpu) }
+    lateinit var boundary: BoundaryEngine
+    val engine = Engine.start(Folders.appDefault(context)) { folders -> startEffectsEngine(folders, gpu).also { boundary = it } }
     try {
-        check(engine)
+        check(boundary)
     } finally {
         engine.shutDown()
     }

@@ -10,9 +10,11 @@ mod scratch;
 mod withheld;
 
 use common::{EVERY_FORMAT, Scratch};
-use craftbridge_core::{CraftApp, CraftError, Engine, GpuChoice, GpuDevice, GpuFailure, PixelFormat};
+use craftbridge_core::surface::Swapchain;
+use craftbridge_core::{CraftApp, CraftError, Engine, GpuChoice, GpuDevice, GpuFailure, PixelFormat, Surface};
 use craftbridge_effects::EffectCraftApp;
 use serde_json::{Value, json};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use withheld::assert_withheld_every_way;
 
@@ -973,4 +975,93 @@ fn a_resume_with_no_device_answers_the_cpu_note() {
     assert_eq!(gpu_of_engine(&engine).expect("`info` answers"), note);
     assert!(held(&seen.devices).is_empty(), "no device ever came");
     render(&engine).expect("the CPU renders");
+}
+
+/// A preview surface whose window is already gone: it takes a configuration like any, and every frame
+/// asked of it is lost, so a `present` that gets as far as drawing fails at the surface and no further.
+/// It counts the frames asked of it, which tells a `present` that rendered from one that was refused first.
+struct GoneWindow(Arc<AtomicU32>);
+
+impl Swapchain for GoneWindow {
+    fn capabilities(&self, _: &wgpu::Adapter) -> wgpu::SurfaceCapabilities {
+        wgpu::SurfaceCapabilities {
+            formats: vec![wgpu::TextureFormat::Bgra8Unorm],
+            present_modes: vec![wgpu::PresentMode::Fifo],
+            alpha_modes: vec![wgpu::CompositeAlphaMode::Opaque],
+            ..Default::default()
+        }
+    }
+
+    fn configure(&self, _: &wgpu::Device, _: &wgpu::SurfaceConfiguration) {}
+
+    fn acquire(&self) -> wgpu::CurrentSurfaceTexture {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        wgpu::CurrentSurfaceTexture::Lost
+    }
+
+    fn current_size(&self) -> (u32, u32) {
+        (64, 48)
+    }
+}
+
+/// The app with a comp to preview, the surface on the device it was handed, and the count of frames that
+/// reached the surface. `gpu` chooses whether the app holds the device (a display frame on the GPU) or
+/// only renders on the CPU, the two ways a `present` draws (plan §17); `width` is the comp's, given the
+/// device's texture limit.
+fn previewing(scratch: &Scratch, gpu: bool, width: impl FnOnce(u32) -> u32) -> Result<(EffectCraftApp, Surface, Arc<AtomicU32>), String> {
+    let mut app = scratch.app().map_err(|e| format!("the app starts from prepared folders: {e}"))?;
+    let device = GpuDevice::request(GpuChoice::Preferred);
+    if gpu {
+        app.attach_gpu(&device).map_err(|e| format!("the desktop device attaches: {e}"))?;
+    }
+    let acquired = Arc::new(AtomicU32::new(0));
+    let surface = Surface::new(Box::new(GoneWindow(acquired.clone())), &device).map_err(|e| format!("a surface attaches on the desktop device: {e}"))?;
+    let width = width(surface.device().limits().max_texture_dimension_2d);
+    app.request("run", json!({"steps": [{"command": "comp.new", "params": {"name": "C", "width": width, "height": 6}}]}))
+        .map_err(|e| format!("a comp is made: {e}"))?;
+    Ok((app, surface, acquired))
+}
+
+/// A comp small enough for any device.
+fn small(_: u32) -> u32 {
+    8
+}
+
+#[test]
+fn a_present_renders_the_frame_and_draws_it_into_the_surface_on_the_gpu_and_on_the_cpu() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    for gpu in [true, false] {
+        let (mut app, mut surface, acquired) = previewing(&scratch, gpu, small).expect("the app previews");
+        let lost = app.present(json!({}), &mut surface).expect_err("the window is gone, so the frame cannot be shown");
+        assert!(matches!(lost, CraftError::Gpu { .. }), "a lost window answers `Gpu`, got {lost:?} (gpu attached: {gpu})");
+        assert_eq!(acquired.load(Ordering::SeqCst), 1, "the frame was rendered and drawn up to the surface (gpu attached: {gpu})");
+        // The session is untouched by the surface's loss: it answers on.
+        assert!(app.request("info", json!({})).is_ok(), "the session answers after a lost surface (gpu attached: {gpu})");
+    }
+}
+
+#[test]
+fn a_present_is_refused_as_the_frame_it_asks_for_is_before_anything_is_drawn() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let (mut app, mut surface, acquired) = previewing(&scratch, false, small).expect("the app previews");
+    for params in [json!({"time": 1, "frame": 2}), json!({"extra": 1}), json!({"comp": "Nothing"}), json!({"comp": 77})] {
+        let present = app.present(params.clone(), &mut surface).expect_err("a request the frame refuses");
+        let frame = app.frame(params.clone(), PixelFormat::Rgba8Straight).expect_err("the same request, as a frame");
+        assert_eq!(present, frame, "a present refuses {params} in the words a frame does");
+    }
+    assert_eq!(acquired.load(Ordering::SeqCst), 0, "no refused request reached the surface");
+}
+
+/// A comp wider than the device takes a texture is one the compositor declines on the GPU, and its CPU
+/// frame is fitted to that limit, so its picture still reaches the surface, on the GPU's device and on
+/// the CPU alike (plan §17's edge case): a frame at the comp's own size would be refused at the upload.
+#[test]
+fn a_comp_past_the_devices_texture_limit_previews_from_the_cpu_fitted_to_it() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    for gpu in [true, false] {
+        let (mut app, mut surface, acquired) = previewing(&scratch, gpu, |limit| limit + 16).expect("the app previews");
+        let lost = app.present(json!({}), &mut surface).expect_err("the window is gone, so the frame cannot be shown");
+        assert_eq!(lost, CraftError::gpu("the preview surface was lost; attach a new surface to preview again"), "gpu attached: {gpu}");
+        assert_eq!(acquired.load(Ordering::SeqCst), 1, "the fitted frame was uploaded and drawn up to the surface (gpu attached: {gpu})");
+    }
 }

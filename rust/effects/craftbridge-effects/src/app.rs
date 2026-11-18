@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use craftbridge_core::folders::Folders;
-use craftbridge_core::{CraftApp, CraftError, FrameBytes, GpuDevice, GpuFailure, PixelFormat, Platform, Result};
+use craftbridge_core::{CraftApp, CraftError, FrameBytes, GpuDevice, GpuFailure, PixelFormat, Platform, Result, Surface};
 // The core and the engine both call their type `Confinement`: the core's carries the roots the app's
 // folders make, the engine's checks every access against those same roots. They meet in this file
 // alone, so the engine's is renamed here to keep the two apart.
@@ -13,7 +13,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use crate::hardware::HardwareChoice;
-use crate::requests::RenderRequest;
+use crate::requests::{self, RenderRequest};
 use crate::runner::{self, ListOutputs, Progress};
 use crate::{files, fill, info, mcp, methods, orphans, plugins, properties, replay, session, templates, timings};
 
@@ -32,6 +32,10 @@ pub struct EffectCraftApp {
     /// can name in `info.gpu` the failure that ended it (§17). The engine reads the same notice and
     /// calls `drop_gpu` between two calls once it has a report; the app never polls it.
     gpu_failure: Option<GpuFailure>,
+    /// The compositor on the device last handed to [`CraftApp::attach_gpu`]: what `present` leaves a
+    /// display frame on, which the preview surface blits without a copy through the CPU (§17). It is the
+    /// same device the session's `accel` renders on, a cheap clone of it, and goes where that goes.
+    display: Option<effectcraft_gpu::Gpu>,
     /// The app's staged folder, inside the container, where a source the session may not write beside
     /// is copied to be read ([`crate::staging`]). Not the cache: a saved project names these copies,
     /// and the system may empty the cache while the app is not running.
@@ -74,7 +78,7 @@ impl EffectCraftApp {
         let mut backend = Backend::headless(session::build(platform, folders, &hardware));
         let confinement = EngineConfinement::new(roots.read_roots(), &[roots.write_root().to_path_buf()]).map_err(|error| CraftError::io(error.to_string()))?;
         backend.confine(confinement);
-        Ok(Self { server: McpServer::new(backend), gpu_failure: None, staged: folders.staged.clone(), hardware, _admission: admission })
+        Ok(Self { server: McpServer::new(backend), gpu_failure: None, display: None, staged: folders.staged.clone(), hardware, _admission: admission })
     }
 
     /// The parameters of a call this app answers, with a template the session may not write beside
@@ -185,6 +189,14 @@ impl CraftApp for EffectCraftApp {
         templates::frame(self.server.backend(), &params, format)
     }
 
+    /// Draw one preview frame (plan §14's `present`): the request is a `frame` call's, resolved as a
+    /// `frame` resolves it, and the frame is drawn into the surface the core hands over, on the GPU
+    /// where the app holds one and the project asks for GPU acceleration, and from the CPU's pixels
+    /// otherwise, the same picture either way ([`requests::picture`], §17).
+    fn present(&mut self, params: Value, surface: &mut Surface) -> Result<()> {
+        requests::present(self.server.backend(), self.display.as_ref(), &params, surface)
+    }
+
     /// Answer one line of the MCP transport through the server built at construction, which owns the
     /// session every method reaches. It is not a row of [`METHODS`]: a line is not a method call, so
     /// `request` keeps refusing the name `mcp`.
@@ -215,6 +227,7 @@ impl CraftApp for EffectCraftApp {
             session.accel = None;
             session.accel_note = Some(gpu.summary());
             self.gpu_failure = None;
+            self.display = None;
             return Ok(());
         };
         let accel = effectcraft_gpu::Gpu::new(adapter, device.clone(), queue.clone()).map_err(CraftError::gpu)?;
@@ -232,6 +245,7 @@ impl CraftApp for EffectCraftApp {
         let Some(session) = self.server.backend().session() else {
             return Err(CraftError::gpu("this app's session sits behind a bridge, which holds no GPU to attach"));
         };
+        self.display = Some(accel.clone());
         session.accel = Some(Arc::new(accel));
         session.accel_note = None;
         self.gpu_failure = Some(note);
@@ -243,6 +257,7 @@ impl CraftApp for EffectCraftApp {
     /// retired device (`crates/ui-egui/src/app/gpu.rs`:69-70), so `info.gpu` names it afterwards.
     /// Nothing was attached: nothing to drop — the app keeps answering what it answered before.
     fn drop_gpu(&mut self) {
+        self.display = None;
         let Some(session) = self.server.backend().session() else {
             return;
         };
@@ -292,6 +307,15 @@ mod tests {
         assert_eq!(request_of(&json!({"layer": 1, "outputDir": "/c/fill"})), None, "a fill renders no movie, so it holds no render request");
     }
 
+    /// The app as the host builds it, handed the desktop's own device, and that device.
+    fn on_the_desktop_gpu(scratch: &Scratch) -> (EffectCraftApp, GpuDevice) {
+        let mut app = scratch.app(Platform::Host);
+        let gpu = GpuDevice::request(GpuChoice::Preferred);
+        assert!(gpu.parts().is_some(), "a desktop with no adapter: {}", gpu.summary());
+        app.attach_gpu(&gpu).expect("the desktop device attaches");
+        (app, gpu)
+    }
+
     /// The failure path tells the compositor as well as the core, whichever of wgpu's two callbacks
     /// reports: after the failure, and before any request has dropped the GPU, the compositor's own
     /// context on that device is already retired (`Accelerator::available`, which is its health
@@ -316,16 +340,49 @@ mod tests {
         ];
         for (name, cause) in causes {
             let scratch = Scratch::new(false, None);
-            let mut app = scratch.app(Platform::Host);
-            let gpu = GpuDevice::request(GpuChoice::Preferred);
-            let GpuDevice::Device { device, .. } = &gpu else {
-                panic!("a desktop with no adapter: {}", gpu.summary());
-            };
-            app.attach_gpu(&gpu).expect("the desktop device attaches");
+            let (mut app, gpu) = on_the_desktop_gpu(&scratch);
+            let (_, device, _) = gpu.parts().expect("the desktop device");
             let available = |app: &mut EffectCraftApp| app.server.backend().session().and_then(|session| session.accel.as_ref().map(|accel| accel.available()));
             assert_eq!(available(&mut app), Some(true), "the compositor starts healthy");
             cause(device);
             assert_eq!(available(&mut app), Some(false), "{name}: the failure path retired the compositor's context");
         }
+    }
+
+    /// A preview is one picture whichever compositor draws it: the compositor's display frame while the
+    /// project asks for GPU acceleration, and the CPU's frame once it is on Mercury Software Only, as its
+    /// frames render, and the two hold the same premultiplied pixels — the comp's own alpha, never its
+    /// background colour, which the display frame does not carry (plan §17).
+    #[test]
+    fn a_preview_is_one_picture_on_the_gpu_and_on_the_cpu_and_follows_the_projects_renderer() {
+        let scratch = Scratch::new(false, None);
+        let (mut app, gpu) = on_the_desktop_gpu(&scratch);
+        let max_side = gpu.parts().expect("the desktop device").1.limits().max_texture_dimension_2d;
+        let steps = json!({"steps": [
+            {"command": "comp.new", "params": {"name": "C", "width": 8, "height": 6, "background": "#ffffff"}},
+            {"command": "layer.newSolid", "params": {"comp": 1, "name": "Box", "color": "#ff8040", "width": 4, "height": 2}},
+            {"command": "prop.set", "params": {"layer": "Box", "path": "transform/opacity", "value": 50}}
+        ]});
+        app.request("run", steps).expect("the comp is made");
+        let picture = |app: &mut EffectCraftApp| requests::picture(app.server.backend(), app.display.as_ref(), &json!({}), max_side).expect("a picture");
+
+        let requests::Picture::Display(display) = picture(&mut app) else {
+            panic!("a project on GPU acceleration previews the compositor's display frame");
+        };
+        let on_gpu = app.display.as_ref().and_then(|gpu| gpu.read_display(&display)).expect("the display frame reads back");
+
+        app.request("run", json!({"steps": [{"command": "file.projectSettings", "params": {"renderer": "software"}}]})).expect("the project goes to the CPU");
+        let requests::Picture::Pixels(frame) = picture(&mut app) else {
+            panic!("a project on Mercury Software Only previews from the CPU, as its frames render");
+        };
+        assert_eq!((frame.width, frame.height), (display.width, display.height), "the same size of picture");
+        // The core's own conversion, which the preview's upload makes of the straight pixels, red and blue
+        // exchanged back to the display frame's order.
+        let premultiplied = FrameBytes::new(frame.width, frame.height, PixelFormat::Bgra8Premultiplied, frame.data).expect("the frame converts");
+        let on_cpu: Vec<u8> = premultiplied.data.as_chunks::<4>().0.iter().flat_map(|&[blue, green, red, alpha]| [red, green, blue, alpha]).collect();
+        assert_eq!(on_cpu.get(..4), Some(&[0, 0, 0, 0][..]), "a corner the box leaves is transparent, not the comp's white background");
+        assert_eq!(on_gpu.len(), on_cpu.len());
+        let apart = on_gpu.iter().zip(&on_cpu).map(|(gpu, cpu)| gpu.abs_diff(*cpu)).max();
+        assert!(apart <= Some(1), "the GPU's and the CPU's pictures differ by {apart:?}: {on_gpu:?} against {on_cpu:?}");
     }
 }

@@ -2,9 +2,14 @@
 
 package io.github.christopherlinnett.craftbridge.core
 
+import android.graphics.Bitmap
+import android.hardware.HardwareBuffer
+import android.view.Surface
+import io.github.christopherlinnett.craftbridge.ffi.core.PixelFormat
 import io.github.christopherlinnett.craftbridge.ffi.core.setDeviceCodecs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
@@ -13,6 +18,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.github.christopherlinnett.craftbridge.ffi.core.CancelToken as BoundaryCancelToken
+import io.github.christopherlinnett.craftbridge.ffi.core.CraftException as BoundaryException
 import io.github.christopherlinnett.craftbridge.ffi.core.Engine as BoundaryEngine
 import io.github.christopherlinnett.craftbridge.ffi.core.Folders as BoundaryFolders
 
@@ -27,9 +33,11 @@ import io.github.christopherlinnett.craftbridge.ffi.core.Folders as BoundaryFold
  * the engine itself, as the app would stop it with its own hand, while a [request] the engine has taken
  * runs to its end there and only the wait for its answer stops.
  *
- * What is not here is what an app cannot name yet: the frame and the preview belong with the surfaces
- * that hold them, and `mcp`, `suspendGpu` and `resumeGpu` with the plugin and the background policy
- * that call them, so each comes with the issue that gives it somewhere to be used.
+ * The preview and the frames are here too: [attachPreview] and [present] draw into a [Surface] the app
+ * holds, and [frameBitmap] and [frameHardwareBuffer] answer a rendered frame as the pictures Android
+ * draws with. What is not here is what an app cannot name yet: `mcp` belongs with the plugin that calls
+ * it, and the policy that suspends the GPU when the app goes to the background with the issue that gives
+ * it somewhere to be used.
  */
 public class Engine internal constructor(
     internal val boundary: BoundaryEngine,
@@ -103,6 +111,101 @@ public class Engine internal constructor(
     }
 
     /**
+     * Preview into [surface]: every later [present] draws its frame there, until [detachPreview], another
+     * [attachPreview], or the GPU is given up ([suspendGpu]), which drops the surface with the device.
+     * Attaching replaces the surface the engine previewed before.
+     *
+     * The engine holds the window of the surface, not the [Surface] object, and keeps it until it lets
+     * the preview go, so the app may release its own surface first; once it has, the next [present]
+     * answers [GpuException] and the session is untouched. An app attaches its surface again after
+     * [resumeGpu], and whenever a new surface replaces the old one.
+     *
+     * @throws InvalidParamsException when [surface] is not a live surface, [UnsupportedException] when the
+     * native library that holds the windows is not part of the app, [GpuException] when the engine has no
+     * device to preview on (it renders on the CPU), or the surface cannot become a preview, as one whose
+     * consumer is already gone cannot.
+     */
+    public suspend fun attachPreview(surface: Surface) {
+        attachingWindow(windowOf(surface), NativeSurfaces::release) { window -> mapped { boundary.attachWindow(window) } }
+    }
+
+    /**
+     * Give up the preview surface, if one is attached: [present] answers [GpuException] again until the
+     * app attaches another. Detaching nothing is not an error.
+     *
+     * @throws CraftException when the engine has been shut down.
+     */
+    public suspend fun detachPreview() {
+        mapped { boundary.detachPreview() }
+    }
+
+    /**
+     * Draw one frame into the attached surface and show it. [params] are the preview's own, as JSON text:
+     * the app plugin says which, and for EffectCraft they are the `frame` request's fields, `comp` and
+     * `time` among them, `{}` for the active comp at its current time.
+     *
+     * A surface the app released, destroyed or resized answers [GpuException] and the session is kept: a
+     * resized one is drawn on again by the next call, and a lost one answers every call until the app
+     * attaches another [Surface]. With no surface attached it answers [GpuException] too.
+     *
+     * @throws GpuException for any failure of the surface or the device, [CraftException] for anything
+     * else the engine answers the call with.
+     */
+    public suspend fun present(params: String = "{}") {
+        mapped { boundary.present(params) }
+    }
+
+    /**
+     * Render one frame and answer it as a [Bitmap]: `ARGB_8888`, premultiplied, the pixels the core's
+     * own premultiplied conversion gives (plan §17). [params] are the frame's own, as JSON text, `{}` for
+     * the active comp at its current time. The conversion runs off the caller's thread.
+     *
+     * @throws CraftException when the engine refuses the frame, [InternalErrorException] when the phone
+     * has no memory for the bitmap.
+     */
+    public suspend fun frameBitmap(params: String = "{}"): Bitmap = withContext(Dispatchers.Default) { straightFrame(params).toBitmap() }
+
+    /**
+     * Render one frame and answer it as a [HardwareBuffer]: `RGBA_8888` and premultiplied, which the GPU
+     * and other processes read as it is. The caller closes the buffer. It needs Android 12 (API 31) or
+     * newer, the first release in which a bitmap hands its buffer out.
+     *
+     * @throws UnsupportedException before Android 12, [CraftException] for whatever the engine answers
+     * the call with.
+     */
+    public suspend fun frameHardwareBuffer(params: String = "{}"): HardwareBuffer =
+        withContext(Dispatchers.Default) {
+            val bitmap = straightFrame(params).toBitmap()
+            try {
+                bitmap.toHardwareBuffer()
+            } finally {
+                bitmap.recycle()
+            }
+        }
+
+    /**
+     * Give the GPU up for the background: the engine drops its device and the preview surface, and every
+     * render answers on the CPU until [resumeGpu]. Suspending twice is not an error.
+     *
+     * @throws CraftException when the engine is closed, which cannot give up a device it no longer holds.
+     */
+    public suspend fun suspendGpu() {
+        mapped { boundary.suspendGpu() }
+    }
+
+    /**
+     * Ask for a device again, on return to the foreground. It answers `null` once the engine holds a
+     * device, and the reason there is none when it renders on the CPU, which is no failure. The preview
+     * surface is not back: the app calls [attachPreview] again.
+     *
+     * @throws CraftException for what the engine answers when it cannot take the device.
+     */
+    public suspend fun resumeGpu(): String? = mapped { boundary.resumeGpu() }
+
+    /** The frame as the core's straight RGBA, which Android turns into its own premultiplied pictures. */
+    private suspend fun straightFrame(params: String) = mapped { boundary.frame(params, PixelFormat.RGBA8_STRAIGHT) }
+
+    /**
      * End the engine: its thread finishes, and every later call of this engine answers that it can no
      * longer be answered. An app calls it when it is done with the engine.
      *
@@ -160,3 +263,39 @@ internal suspend fun <R> stopWhenCancelled(
         }
         throw answered
     }
+
+/**
+ * Attach [window] with [attach] and hand its id to [release] whichever way the attach ends: one that
+ * took the window left nothing under the id, and one that failed left the window there, which would
+ * otherwise be held until the process ends, so the id means the same either way.
+ */
+internal inline fun attachingWindow(
+    window: Long,
+    release: (Long) -> Unit,
+    attach: (Long) -> Unit,
+) {
+    try {
+        attach(window)
+    } finally {
+        release(window)
+    }
+}
+
+/**
+ * The id the native library holds the window of [surface] under, which `attachWindow` takes.
+ *
+ * Refusals are the core's, spelt as the core spells the rows they belong to: a surface the platform has
+ * already destroyed names no window, and a build without the native library cannot look one up.
+ */
+internal fun windowOf(surface: Surface): Long {
+    val window =
+        try {
+            NativeSurfaces.acquire(surface)
+        } catch (absent: LinkageError) {
+            failWith(BoundaryException.Unsupported("the native library that holds preview windows is not in this app: ${absent.message}"))
+        }
+    if (window == 0L) {
+        failWith(BoundaryException.InvalidParams("the surface is not a live window to preview on"))
+    }
+    return window
+}

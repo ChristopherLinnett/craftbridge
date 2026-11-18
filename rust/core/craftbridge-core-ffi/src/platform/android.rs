@@ -9,19 +9,54 @@
 use crate::engine::Engine;
 use crate::error::CraftError;
 use crate::platform::{Held, OnSurface, ids::IdTable};
+use craftbridge_core::engine::guarded;
 use craftbridge_core::{CraftError as CoreError, GpuDevice, Surface, SurfaceMaker};
 use ndk::native_window::NativeWindow;
 use std::os::raw::c_void;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The windows the app has handed us and not yet attached or released, each under the id the app holds.
 static WINDOWS: IdTable<NativeWindow> = IdTable::new();
 
-impl Held for NativeWindow {
+/// The app's window as the surface sees it: the window, and the size it last answered with, which it
+/// keeps reporting once its consumer is gone.
+struct AppWindow {
+    window: NativeWindow,
+    /// The width in the high half and the height in the low half of the size the window last reported.
+    last: AtomicU64,
+}
+
+impl AppWindow {
+    fn new(window: NativeWindow) -> Self {
+        let held = Self { window, last: AtomicU64::new(0) };
+        let _ = held.measured();
+        held
+    }
+
+    /// The window's size in pixels now, or `None` once the platform answers the size query with an
+    /// error: that is how an `ANativeWindow` whose buffer queue the app abandoned (the `ImageReader` or
+    /// the view behind the `Surface` released) tells a caller it is gone, where a window that has no
+    /// geometry yet answers zero. A size of zero is no such thing: the core skips the frames of a window
+    /// with no size, which is how a view not yet laid out is told to wait, and a window that is gone must
+    /// not be waited for.
+    fn measured(&self) -> Option<(u32, u32)> {
+        let size = (u32::try_from(self.window.width()).ok()?, u32::try_from(self.window.height()).ok()?);
+        self.last.store((u64::from(size.0) << 32) | u64::from(size.1), Ordering::Relaxed);
+        Some(size)
+    }
+}
+
+impl Held for AppWindow {
     /// The size the window is sized at now: an `ANativeWindow` is always its own size, and one that has
     /// none yet — the app has not given its producer a geometry — is zero, which the core previews
-    /// nothing into until it grows.
+    /// nothing into until it grows. A window that is gone keeps the size it last had, so the present
+    /// that meets the loss reaches the swapchain's acquire, which answers it as lost, instead of reading
+    /// a window of no size, whose frames are skipped and never answered.
     fn pixel_size(&self) -> (u32, u32) {
-        (u32::try_from(self.width()).unwrap_or(0), u32::try_from(self.height()).unwrap_or(0))
+        self.measured().unwrap_or_else(|| {
+            let last = self.last.load(Ordering::Relaxed);
+            (u32::try_from(last >> 32).unwrap_or(0), u32::try_from(last & u64::from(u32::MAX)).unwrap_or(0))
+        })
     }
 }
 
@@ -38,15 +73,22 @@ fn target(window: &NativeWindow) -> wgpu::SurfaceTargetUnsafe {
 /// The preview surface on an app's window: the wgpu surface made from the window's own pointer, on top
 /// of the window itself, which the surface holds — so the surface always reads its pointer from a live
 /// window, and the window ends only when the engine's preview of it does (§20 L6).
-fn preview(gpu: &GpuDevice, window: NativeWindow) -> craftbridge_core::Result<OnSurface<NativeWindow>> {
+fn preview(gpu: &GpuDevice, window: NativeWindow) -> craftbridge_core::Result<OnSurface<AppWindow>> {
     let instance = gpu.instance().ok_or_else(|| CoreError::gpu("there is no device to preview on"))?;
-    // SAFETY: wgpu asks that a raw window handle name a valid window and stay valid until after the
-    // surface is dropped. The pointer is `window`'s, a reference to the window held across the call, and
-    // the `OnSurface` made here drops the surface before that reference. Vulkan also takes one of its own
-    // for the surface's life (`vkCreateAndroidSurfaceKHR` increments the window's reference count).
-    let surface = unsafe { instance.create_surface_unsafe(target(&window)) }
-        .map_err(|failure| CoreError::gpu(format!("the window cannot become a preview surface: {failure}")))?;
-    Ok(OnSurface { surface, holder: window })
+    let refused = |failure: &dyn std::fmt::Display| CoreError::gpu(format!("the window cannot become a preview surface: {failure}"));
+    // wgpu's Vulkan backend panics, rather than answering an error, when `vkCreateAndroidSurfaceKHR`
+    // refuses the window, as it refuses one whose consumer the app has already released or that another
+    // producer holds: the guard turns that refusal into the surface failure it is, in the driver's words.
+    let made = guarded(|| {
+        // SAFETY: wgpu asks that a raw window handle name a valid window and stay valid until after the
+        // surface is dropped. The pointer is `window`'s, a reference to the window held across the call,
+        // and the `OnSurface` made here drops the surface before that reference. Vulkan also takes one of
+        // its own for the surface's life (`vkCreateAndroidSurfaceKHR` increments the window's reference
+        // count).
+        unsafe { instance.create_surface_unsafe(target(&window)) }
+    });
+    let surface = made.map_err(|panicked| refused(&panicked))?.map_err(|failure| refused(&failure))?;
+    Ok(OnSurface { surface, holder: AppWindow::new(window) })
 }
 
 /// The app's one JNI function (plan §20): `NativeSurfaces.acquire(surface)`, the Kotlin
@@ -193,6 +235,59 @@ mod tests {
         let window = reader.window().expect("the reader hands out its window");
         let drew = || assert_eq!(middle_pixel(&reader), [255, 0, 0, 255], "the frame reached the window");
         a_preview_follows_the_gpu(&engine, || pollster::block_on(engine.attach_window(WINDOWS.insert(window.clone()))), drew);
+    }
+
+    /// A window the app abandons — its `ImageReader` released while the engine holds the window — answers
+    /// `Gpu` with the session kept: the platform answers the abandoned queue's size query with an error,
+    /// which would read as a window of no size, whose frames are skipped and so shown as nothing and
+    /// answered `Ok`, were it not told apart. Every present after the loss answers `Gpu`, and a window the
+    /// app attaches in its place draws.
+    #[test]
+    fn an_abandoned_window_answers_gpu_with_the_session_kept_and_a_new_window_draws() {
+        let engine = engine_on_a_device();
+        let reader = window_reader();
+        assert_eq!(pollster::block_on(engine.attach_window(WINDOWS.insert(reader.window().expect("the reader hands out its window")))), Ok(()));
+        assert_eq!(pollster::block_on(engine.present("null".into())), Ok(()));
+        assert_eq!(middle_pixel(&reader), [255, 0, 0, 255], "the window was live and drawn on before it was abandoned");
+
+        drop(reader);
+        let lost = Err(CraftError::gpu("the preview surface was lost; attach a new surface to preview again"));
+        assert_eq!(pollster::block_on(engine.present("null".into())), lost, "the first present on an abandoned window answers `Gpu`");
+        assert_eq!(pollster::block_on(engine.present("null".into())), lost, "and every one after it, until another window is attached");
+        assert_eq!(pollster::block_on(engine.request("echo".into(), "5".into())), Ok("5".to_string()), "the session is kept");
+
+        let second = window_reader();
+        assert_eq!(pollster::block_on(engine.attach_window(WINDOWS.insert(second.window().expect("the second reader hands out its window")))), Ok(()));
+        assert_eq!(pollster::block_on(engine.present("null".into())), Ok(()));
+        assert_eq!(middle_pixel(&second), [255, 0, 0, 255], "a window attached after the loss draws");
+        pollster::block_on(engine.detach_preview()).expect("the detach answers");
+    }
+
+    /// A window whose consumer the app released before attaching it is one Vulkan will not make a surface
+    /// of: the attach answers `Gpu` in the driver's words, never the `Internal` of a caught panic, keeps
+    /// the window under its id for the app to release, and leaves the session and the next window's
+    /// preview as they were.
+    #[test]
+    fn a_window_abandoned_before_its_attach_is_refused_as_gpu_and_the_next_draws() {
+        let engine = engine_on_a_device();
+        let reader = window_reader();
+        let id = WINDOWS.insert(reader.window().expect("the reader hands out its window"));
+        drop(reader);
+        let refused = pollster::block_on(engine.attach_window(id));
+        assert_eq!(
+            refused,
+            Err(CraftError::gpu("the window cannot become a preview surface: AndroidSurface failed: ERROR_NATIVE_WINDOW_IN_USE_KHR")),
+            "an abandoned window is a surface failure"
+        );
+        assert!(WINDOWS.take(id).is_some(), "the refused window is back under its id, for the app's release");
+        assert_eq!(pollster::block_on(engine.present("null".into())), Err(CraftError::gpu("no surface")), "nothing was attached");
+        assert_eq!(pollster::block_on(engine.request("echo".into(), "6".into())), Ok("6".to_string()), "the session is kept");
+
+        let live = window_reader();
+        assert_eq!(pollster::block_on(engine.attach_window(WINDOWS.insert(live.window().expect("the next reader hands out its window")))), Ok(()));
+        assert_eq!(pollster::block_on(engine.present("null".into())), Ok(()));
+        assert_eq!(middle_pixel(&live), [255, 0, 0, 255], "a live window attached after the refusal draws");
+        pollster::block_on(engine.detach_preview()).expect("the detach answers");
     }
 
     /// A frame with soft alpha reaches the window as the blit pass is given it, premultiplied: a CPU
