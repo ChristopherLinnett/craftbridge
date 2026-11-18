@@ -34,48 +34,4 @@ extension EffectsEngine.EffectHelpersCommands {
             extra: extra
         )
     }
-
-    /// Load Plug-ins Through Helper.
-    ///
-    /// The engine describes its parameters as: {path (a file or folder an installed helper accepts, e.g. a folder of .ofx plug-ins for an OpenFX helper; the menu asks for a folder)} → {loaded: [{id, name, category, helper}], errors}
-    ///
-    /// - Parameters:
-    ///   - path: The key `path`: path (a file or folder an installed helper accepts, e.g. a folder of .ofx plug-ins for an OpenFX helper; the menu asks for a folder)
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func load(
-        path: JSONValue,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "effect.helpers.load",
-            [
-                "path": path.jsonValue
-            ],
-            extra: extra
-        )
-    }
-
-    /// Scan for Effect Helpers.
-    ///
-    /// The engine describes its parameters as: {retry?} → {paths, helpers, loaded, errors}: starts the effect helpers installed in helpers/ next to the app, helpers/ in the settings folder and EFFECTCRAFT_HELPER_PATH, and adds their effects; retry turns effects that kept stopping their helper back on
-    ///
-    /// - Parameters:
-    ///   - retry: The key `retry`: retry?
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func scan(
-        retry: JSONValue? = nil,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "effect.helpers.scan",
-            [
-                "retry": retry?.jsonValue
-            ],
-            extra: extra
-        )
-    }
 }

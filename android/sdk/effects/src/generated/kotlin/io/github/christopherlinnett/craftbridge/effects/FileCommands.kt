@@ -497,25 +497,6 @@ public class FileCommands internal constructor(
         )
 
     /**
-     * Auto-Save Now.
-     *
-     * The engine describes its parameters as: {}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun autoSave(
-        vararg namedOnly: NamedArguments,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "file.autoSave",
-            extra,
-        )
-
-    /**
      * Check Output File.
      *
      * The engine describes its parameters as: {path} → {path, blocked, source?: footage|proxy|project, reason?}: whether an export may
@@ -712,31 +693,6 @@ public class FileCommands internal constructor(
         this.engine.command(
             "file.cycleBitDepth",
             extra,
-        )
-
-    /**
-     * Execute File.
-     *
-     * The engine describes its parameters as: {path, confirmed?}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param path The key `path`: path
-     * @param confirmed The key `confirmed`: confirmed?
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun executeFile(
-        vararg namedOnly: NamedArguments,
-        path: JSONValue,
-        confirmed: JSONValue? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "file.executeFile",
-            extra,
-            "path" to path.jsonValue,
-            "confirmed" to confirmed?.jsonValue,
         )
 
     /**
@@ -1185,51 +1141,6 @@ public class FileCommands internal constructor(
         this.engine.command(
             "file.incrementAndSave",
             extra,
-        )
-
-    /**
-     * Install Script File.
-     *
-     * The engine describes its parameters as: {path (.jsx / .js)} → copies it to the Scripts folder; it appears in File ▸ Scripts
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param path The key `path`: path (.jsx / .js)
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun installScript(
-        vararg namedOnly: NamedArguments,
-        path: JSONValue,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "file.installScript",
-            extra,
-            "path" to path.jsonValue,
-        )
-
-    /**
-     * Install ScriptUI Panel.
-     *
-     * The engine describes its parameters as: {path (.jsx / .js)} → copies it to the ScriptUI Panels folder; it appears in the Window
-     *  menu
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param path The key `path`: path (.jsx / .js)
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun installScriptUIPanel(
-        vararg namedOnly: NamedArguments,
-        path: JSONValue,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "file.installScriptUIPanel",
-            extra,
-            "path" to path.jsonValue,
         )
 
     /**
@@ -1912,28 +1823,6 @@ public class FileCommands internal constructor(
         )
 
     /**
-     * Reveal in Finder.
-     *
-     * The engine describes its parameters as: {item?}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param item The key `item`: item?
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun revealInFinder(
-        vararg namedOnly: NamedArguments,
-        item: JSONValue? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "file.revealInFinder",
-            extra,
-            "item" to item?.jsonValue,
-        )
-
-    /**
      * Revert.
      *
      * The engine describes its parameters as: {}
@@ -1949,80 +1838,6 @@ public class FileCommands internal constructor(
     ): JSONValue =
         this.engine.command(
             "file.revert",
-            extra,
-        )
-
-    /**
-     * Run Script File.
-     *
-     * The engine describes its parameters as: {path (.jsx/.js JavaScript, or a .jsonl/.json command script) | name (an installed or
-     *  sample script, see file.scripts.list) | recent: index (File ▸ Scripts ▸ Recent Script Files, 0 = the most recent) | steps:
-     *  [{command, params}]}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param path The key `path`: path (.jsx/.js JavaScript, or a .jsonl/.json command script) | name (an installed or sample script, see
-     *  file.scripts.list) | recent: index (File ▸ Scripts ▸ Recent Script Files, 0 = the most recent) | steps: [{command, params}]
-     * @param name The key `name`: path (.jsx/.js JavaScript, or a .jsonl/.json command script) | name (an installed or sample script, see
-     *  file.scripts.list) | recent: index (File ▸ Scripts ▸ Recent Script Files, 0 = the most recent) | steps: [{command, params}]
-     * @param recent The key `recent`: path (.jsx/.js JavaScript, or a .jsonl/.json command script) | name (an installed or sample script,
-     *  see file.scripts.list) | recent: index (File ▸ Scripts ▸ Recent Script Files, 0 = the most recent) | steps: [{command, params}]
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun runScript(
-        vararg namedOnly: NamedArguments,
-        path: JSONValue? = null,
-        name: JSONValue? = null,
-        recent: JSONValue? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "file.runScript",
-            extra,
-            "path" to path?.jsonValue,
-            "name" to name?.jsonValue,
-            "recent" to recent?.jsonValue,
-        )
-
-    /**
-     * Run Shutdown Scripts.
-     *
-     * The engine describes its parameters as: {} → closes the project, then runs the scripts in Scripts/Shutdown in alphabetical order
-     *  (frontends call it as the app quits; their modal dialogs close as if canceled) → {ran: [name], waiting: [name], failed: [{name,
-     *  error}]}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun runShutdownScripts(
-        vararg namedOnly: NamedArguments,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "file.runShutdownScripts",
-            extra,
-        )
-
-    /**
-     * Run Startup Scripts.
-     *
-     * The engine describes its parameters as: {} → runs the scripts in Scripts/Startup in alphabetical order (frontends call it at
-     *  launch) → {ran: [name], waiting: [name] (in a modal dialog), failed: [{name, error}]}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun runStartupScripts(
-        vararg namedOnly: NamedArguments,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "file.runStartupScripts",
             extra,
         )
 
@@ -2187,28 +2002,6 @@ public class FileCommands internal constructor(
         )
 
     /**
-     * Uninstall Script.
-     *
-     * The engine describes its parameters as: {name (a script at the top of a Scripts folder, not `Folder/File.jsx`)}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param name The key `name`: name (a script at the top of a Scripts folder, not `Folder/File.jsx`)
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun uninstallScript(
-        vararg namedOnly: NamedArguments,
-        name: JSONValue,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "file.uninstallScript",
-            extra,
-            "name" to name.jsonValue,
-        )
-
-    /**
      * Use Proxy.
      *
      * The engine describes its parameters as: {items?|item?, on?}
@@ -2234,31 +2027,5 @@ public class FileCommands internal constructor(
             "items" to items?.jsonValue,
             "item" to item?.jsonValue,
             "on" to on?.jsonValue,
-        )
-
-    /**
-     * Watch Folder.
-     *
-     * The engine describes its parameters as: {folder, stop?: bool} → watches the folder for .ecproj files with queued renders, renders
-     *  them and writes `<project>.status.json`
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param folder The key `folder`: folder
-     * @param stop The key `stop`: stop?: bool
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun watchFolder(
-        vararg namedOnly: NamedArguments,
-        folder: JSONValue,
-        stop: Boolean? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "file.watchFolder",
-            extra,
-            "folder" to folder.jsonValue,
-            "stop" to stop?.jsonValue,
         )
 }

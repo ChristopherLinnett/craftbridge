@@ -15,38 +15,6 @@ public class EffectPluginsCommands internal constructor(
     internal val engine: EffectsEngine,
 ) {
     /**
-     * Install Effect Plug-in.
-     *
-     * The engine describes its parameters as: {path (.wasm plug-in: copied into the Plug-ins folder and loaded on every start) | folder
-     *  (a plug-in bundle: every .wasm goes into the Plug-ins folder and every .jsx becomes a ScriptUI panel), bundle? (the menu: ask
-     *  for a folder)}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param path The key `path`: path (.wasm plug-in: copied into the Plug-ins folder and loaded on every start) | folder (a plug-in
-     *  bundle: every .wasm goes into the Plug-ins folder and every .jsx becomes a ScriptUI panel)
-     * @param folder The key `folder`: path (.wasm plug-in: copied into the Plug-ins folder and loaded on every start) | folder (a plug-in
-     *  bundle: every .wasm goes into the Plug-ins folder and every .jsx becomes a ScriptUI panel)
-     * @param bundle The key `bundle`: bundle? (the menu: ask for a folder)
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun install(
-        vararg namedOnly: NamedArguments,
-        path: JSONValue? = null,
-        folder: JSONValue? = null,
-        bundle: JSONValue? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "effect.plugins.install",
-            extra,
-            "path" to path?.jsonValue,
-            "folder" to folder?.jsonValue,
-            "bundle" to bundle?.jsonValue,
-        )
-
-    /**
      * List Effect Plug-ins.
      *
      * The engine describes its parameters as: {} → {api, wasm, helpers, plugins: [{id, name, category, version, author, source, params,

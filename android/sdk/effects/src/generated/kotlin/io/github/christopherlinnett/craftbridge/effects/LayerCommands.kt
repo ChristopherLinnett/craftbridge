@@ -473,84 +473,6 @@ public class LayerCommands internal constructor(
     }
 
     /**
-     * The values the engine accepts for the key `method` of `layer.newContentAwareFill`.
-     *
-     * @constructor The value of a word, one listed here or one the engine added since; the engine checks it.
-     */
-    @JvmInline
-    public value class NewContentAwareFillMethod(
-        /** The word the engine takes for this value. */
-        public val word: String,
-    ) : JSONRepresentable {
-        /** The value as the engine takes it: its word. */
-        override val jsonValue: JSONValue
-            get() = JSONValue.Text(word)
-
-        public companion object {
-            /** The value `object`. */
-            public val `object`: NewContentAwareFillMethod = NewContentAwareFillMethod("object")
-
-            /** The value `surface`. */
-            public val surface: NewContentAwareFillMethod = NewContentAwareFillMethod("surface")
-
-            /** The value `edgeBlend`. */
-            public val edgeBlend: NewContentAwareFillMethod = NewContentAwareFillMethod("edgeBlend")
-        }
-    }
-
-    /**
-     * The values the engine accepts for the key `range` of `layer.newContentAwareFill`.
-     *
-     * @constructor The value of a word, one listed here or one the engine added since; the engine checks it.
-     */
-    @JvmInline
-    public value class NewContentAwareFillRange(
-        /** The word the engine takes for this value. */
-        public val word: String,
-    ) : JSONRepresentable {
-        /** The value as the engine takes it: its word. */
-        override val jsonValue: JSONValue
-            get() = JSONValue.Text(word)
-
-        public companion object {
-            /** The value `workArea`. */
-            public val workArea: NewContentAwareFillRange = NewContentAwareFillRange("workArea")
-
-            /** The value `entire`. */
-            public val entire: NewContentAwareFillRange = NewContentAwareFillRange("entire")
-        }
-    }
-
-    /**
-     * The values the engine accepts for the key `lightingCorrection` of `layer.newContentAwareFill`.
-     *
-     * @constructor The value of a word, one listed here or one the engine added since; the engine checks it.
-     */
-    @JvmInline
-    public value class NewContentAwareFillLightingCorrection(
-        /** The word the engine takes for this value. */
-        public val word: String,
-    ) : JSONRepresentable {
-        /** The value as the engine takes it: its word. */
-        override val jsonValue: JSONValue
-            get() = JSONValue.Text(word)
-
-        public companion object {
-            /** The value `none`. */
-            public val none: NewContentAwareFillLightingCorrection = NewContentAwareFillLightingCorrection("none")
-
-            /** The value `subtle`. */
-            public val subtle: NewContentAwareFillLightingCorrection = NewContentAwareFillLightingCorrection("subtle")
-
-            /** The value `moderate`. */
-            public val moderate: NewContentAwareFillLightingCorrection = NewContentAwareFillLightingCorrection("moderate")
-
-            /** The value `strong`. */
-            public val strong: NewContentAwareFillLightingCorrection = NewContentAwareFillLightingCorrection("strong")
-        }
-    }
-
-    /**
      * The values the engine accepts for the key `kind` of `layer.newLight`.
      *
      * @constructor The value of a word, one listed here or one the engine added since; the engine checks it.
@@ -2485,53 +2407,6 @@ public class LayerCommands internal constructor(
         )
 
     /**
-     * Content-Aware Fill Layer.
-     *
-     * The engine describes its parameters as: {layer?, method?: object|surface|edgeBlend, range?: workArea|entire, alphaExpansion?
-     *  (px), lightingCorrection?: none|subtle|moderate|strong, referenceLayer?, referenceTime? (s), outputDir?, wait?: bool}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param layer The key `layer`: layer?
-     * @param method The key `method`: method?: object|surface|edgeBlend
-     * @param range The key `range`: range?: workArea|entire
-     * @param alphaExpansion The key `alphaExpansion`: alphaExpansion? (px)
-     * @param lightingCorrection The key `lightingCorrection`: lightingCorrection?: none|subtle|moderate|strong
-     * @param referenceLayer The key `referenceLayer`: referenceLayer?
-     * @param referenceTime The key `referenceTime`: referenceTime? (s)
-     * @param outputDir The key `outputDir`: outputDir?
-     * @param wait The key `wait`: wait?: bool
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun newContentAwareFill(
-        vararg namedOnly: NamedArguments,
-        layer: JSONValue? = null,
-        method: NewContentAwareFillMethod? = null,
-        range: NewContentAwareFillRange? = null,
-        alphaExpansion: Double? = null,
-        lightingCorrection: NewContentAwareFillLightingCorrection? = null,
-        referenceLayer: JSONValue? = null,
-        referenceTime: Double? = null,
-        outputDir: JSONValue? = null,
-        wait: Boolean? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "layer.newContentAwareFill",
-            extra,
-            "layer" to layer?.jsonValue,
-            "method" to method?.jsonValue,
-            "range" to range?.jsonValue,
-            "alphaExpansion" to alphaExpansion?.jsonValue,
-            "lightingCorrection" to lightingCorrection?.jsonValue,
-            "referenceLayer" to referenceLayer?.jsonValue,
-            "referenceTime" to referenceTime?.jsonValue,
-            "outputDir" to outputDir?.jsonValue,
-            "wait" to wait?.jsonValue,
-        )
-
-    /**
      * Light.
      *
      * The engine describes its parameters as: {kind?: Parallel|Spot|Point|Ambient|Environment (default Spot; Environment lights and
@@ -3018,28 +2893,6 @@ public class LayerCommands internal constructor(
     ): JSONValue =
         this.engine.command(
             "layer.openLayer",
-            extra,
-            "layer" to layer?.jsonValue,
-        )
-
-    /**
-     * Open Layer Source.
-     *
-     * The engine describes its parameters as: {layer?}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param layer The key `layer`: layer?
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun openSource(
-        vararg namedOnly: NamedArguments,
-        layer: JSONValue? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "layer.openSource",
             extra,
             "layer" to layer?.jsonValue,
         )

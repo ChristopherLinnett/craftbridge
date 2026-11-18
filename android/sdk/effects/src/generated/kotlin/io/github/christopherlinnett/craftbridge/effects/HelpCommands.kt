@@ -287,25 +287,6 @@ public class HelpCommands internal constructor(
         )
 
     /**
-     * Reveal Logging File.
-     *
-     * The engine describes its parameters as: {}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun revealLogFile(
-        vararg namedOnly: NamedArguments,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "help.revealLogFile",
-            extra,
-        )
-
-    /**
      * Other ArtCraft Apps.
      *
      * The engine describes its parameters as: {app: photocraft|vectorcraft|filmcraft|lightcraft|pdfcraft|designcraft, kind?:

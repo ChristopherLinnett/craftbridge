@@ -61,4 +61,7 @@ mod test_plugin;
 mod timings;
 
 pub use app::EffectCraftApp;
+// The API surface's generator asks the door through this, so the surface marks what the door refuses on
+// every path from the door's own answer and never from a list of its own.
+pub use methods::withheld_outright;
 pub use requests::{CompRef, RenderRequest, Resolution};

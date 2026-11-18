@@ -3,10 +3,8 @@
 
 package io.github.christopherlinnett.craftbridge.effects
 
-import io.github.christopherlinnett.craftbridge.core.JSONRepresentable
 import io.github.christopherlinnett.craftbridge.core.JSONValue
 import io.github.christopherlinnett.craftbridge.core.NamedArguments
-import io.github.christopherlinnett.craftbridge.core.jsonValue
 
 /** The `scriptui` commands. */
 public val EffectsEngine.scriptui: ScriptuiCommands
@@ -16,92 +14,6 @@ public val EffectsEngine.scriptui: ScriptuiCommands
 public class ScriptuiCommands internal constructor(
     internal val engine: EffectsEngine,
 ) {
-    /**
-     * The values the engine accepts for the key `type` of `scriptui.mouse`.
-     *
-     * @constructor The value of a word, one listed here or one the engine added since; the engine checks it.
-     */
-    @JvmInline
-    public value class MouseType(
-        /** The word the engine takes for this value. */
-        public val word: String,
-    ) : JSONRepresentable {
-        /** The value as the engine takes it: its word. */
-        override val jsonValue: JSONValue
-            get() = JSONValue.Text(word)
-
-        public companion object {
-            /** The value `mousedown`. */
-            public val mousedown: MouseType = MouseType("mousedown")
-
-            /** The value `mouseup`. */
-            public val mouseup: MouseType = MouseType("mouseup")
-
-            /** The value `mousemove`. */
-            public val mousemove: MouseType = MouseType("mousemove")
-
-            /** The value `mouseover`. */
-            public val mouseover: MouseType = MouseType("mouseover")
-
-            /** The value `mouseout`. */
-            public val mouseout: MouseType = MouseType("mouseout")
-
-            /** The value `click`. */
-            public val click: MouseType = MouseType("click")
-        }
-    }
-
-    /**
-     * Click Script Window Control.
-     *
-     * The engine describes its parameters as: {window?: id | title, widget: id | "#id" | properties.name | text} (buttons, checkboxes,
-     *  radio buttons, tabs)
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param window The key `window`: window?: id | title
-     * @param widget The key `widget`: widget: id | "#id" | properties.name | text
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun click(
-        vararg namedOnly: NamedArguments,
-        window: JSONValue? = null,
-        widget: JSONValue,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "scriptui.click",
-            extra,
-            "window" to window?.jsonValue,
-            "widget" to widget.jsonValue,
-        )
-
-    /**
-     * Close Script Window.
-     *
-     * The engine describes its parameters as: {window?, result? (a dialog's show() returns it; default 2 = Cancel)}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param window The key `window`: window?
-     * @param result The key `result`: result? (a dialog's show() returns it; default 2 = Cancel)
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun close(
-        vararg namedOnly: NamedArguments,
-        window: JSONValue? = null,
-        result: JSONValue? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "scriptui.close",
-            extra,
-            "window" to window?.jsonValue,
-            "result" to result?.jsonValue,
-        )
-
     /**
      * Script Window Controls.
      *
@@ -145,70 +57,6 @@ public class ScriptuiCommands internal constructor(
         )
 
     /**
-     * Mouse Event on Script Window Control.
-     *
-     * The engine describes its parameters as: {window?, widget, type: mousedown | mouseup | mousemove | mouseover | mouseout | click
-     *  (default), x?, y? (relative to the control; default its centre), button? (0 left, 1 middle, 2 right), buttons? (held: 1 left, 2
-     *  right, 4 middle), detail? (click count), screenX?, screenY?, altKey?, ctrlKey?, metaKey?, shiftKey?} → the script's
-     *  addEventListener listeners on the control and its containers receive a MouseEvent
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param window The key `window`: window?
-     * @param widget The key `widget`: widget
-     * @param type The key `type`: type: mousedown | mouseup | mousemove | mouseover | mouseout | click (default)
-     * @param x The key `x`: x?
-     * @param y The key `y`: y? (relative to the control; default its centre)
-     * @param button The key `button`: button? (0 left, 1 middle, 2 right)
-     * @param buttons The key `buttons`: buttons? (held: 1 left, 2 right, 4 middle)
-     * @param detail The key `detail`: detail? (click count)
-     * @param screenX The key `screenX`: screenX?
-     * @param screenY The key `screenY`: screenY?
-     * @param altKey The key `altKey`: altKey?
-     * @param ctrlKey The key `ctrlKey`: ctrlKey?
-     * @param metaKey The key `metaKey`: metaKey?
-     * @param shiftKey The key `shiftKey`: shiftKey?
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun mouse(
-        vararg namedOnly: NamedArguments,
-        window: JSONValue? = null,
-        widget: JSONValue,
-        type: MouseType,
-        x: JSONValue? = null,
-        y: JSONValue? = null,
-        button: JSONValue? = null,
-        buttons: JSONValue? = null,
-        detail: JSONValue? = null,
-        screenX: JSONValue? = null,
-        screenY: JSONValue? = null,
-        altKey: JSONValue? = null,
-        ctrlKey: JSONValue? = null,
-        metaKey: JSONValue? = null,
-        shiftKey: JSONValue? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "scriptui.mouse",
-            extra,
-            "window" to window?.jsonValue,
-            "widget" to widget.jsonValue,
-            "type" to type.jsonValue,
-            "x" to x?.jsonValue,
-            "y" to y?.jsonValue,
-            "button" to button?.jsonValue,
-            "buttons" to buttons?.jsonValue,
-            "detail" to detail?.jsonValue,
-            "screenX" to screenX?.jsonValue,
-            "screenY" to screenY?.jsonValue,
-            "altKey" to altKey?.jsonValue,
-            "ctrlKey" to ctrlKey?.jsonValue,
-            "metaKey" to metaKey?.jsonValue,
-            "shiftKey" to shiftKey?.jsonValue,
-        )
-
-    /**
      * Resize Script Window.
      *
      * The engine describes its parameters as: {window?, size: [width, height] (pixels)} → the window takes the size, lays itself out
@@ -232,38 +80,5 @@ public class ScriptuiCommands internal constructor(
             extra,
             "window" to window?.jsonValue,
             "size" to size.jsonValue,
-        )
-
-    /**
-     * Set Script Window Control.
-     *
-     * The engine describes its parameters as: {window?, widget, value: text | number | bool | item index | item text, changing?: bool
-     *  (a live update: each keystroke / slider step; fires onChanging only)} (edit text, sliders, checkboxes, lists) → fires onChanging
-     *  / onChange
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param window The key `window`: window?
-     * @param widget The key `widget`: widget
-     * @param value The key `value`: value: text | number | bool | item index | item text
-     * @param changing The key `changing`: changing?: bool (a live update: each keystroke / slider step; fires onChanging only)
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun set(
-        vararg namedOnly: NamedArguments,
-        window: JSONValue? = null,
-        widget: JSONValue,
-        value: JSONValue,
-        changing: Boolean? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "scriptui.set",
-            extra,
-            "window" to window?.jsonValue,
-            "widget" to widget.jsonValue,
-            "value" to value.jsonValue,
-            "changing" to changing?.jsonValue,
         )
 }

@@ -1,5 +1,5 @@
 //! The Swift facade: one file for each command namespace, with a typed `async throws` method for each
-//! command, in the shape the plan's API generator design gives:
+//! command an app can call ([`crate::facade`]), in the shape the plan's API generator design gives:
 //!
 //! ```swift
 //! extension EffectsEngine.LayerCommands {

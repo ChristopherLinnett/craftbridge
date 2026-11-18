@@ -1,13 +1,16 @@
 //! The API surface: every command and tool of the pinned engine, with each command's keys typed by
-//! [`crate::types`] and each entry marked refused if the confined engine refuses it ([`crate::refused`]),
-//! as the JSON `generated/api-surface.json` holds.
+//! [`crate::types`], each entry marked refused if the confined engine refuses it ([`crate::refused`]),
+//! and each command marked withheld if the plugin's own door refuses it whatever it is given, as the
+//! JSON `generated/api-surface.json` holds.
 //!
 //! Everything is read from EffectCraft's own registry through its public functions, never from its
 //! sources: `command_specs` for the commands, `params_schema` for the keys a command takes and which of
 //! them are required, and the automation crate's tool catalogue. The refusal marks are read the same
 //! way — through the refusal itself, which EffectCraft answers publicly for a command or a tool it
-//! withholds while confined — never from a list of refused names, which EffectCraft keeps private. The
-//! output is a pure function of the pinned engine and the pin, so a regeneration is byte for byte the
+//! withholds while confined — never from a list of refused names, which EffectCraft keeps private; and
+//! the plugin's mark is its door's own answer (`craftbridge_effects::withheld_outright`), never a list
+//! kept here. The door withholds no tool by name: it reads the commands a tool call runs. The output is
+//! a pure function of the pinned engine, the plugin and the pin, so a regeneration is byte for byte the
 //! file that was committed.
 
 use crate::model::{Command, Key, Surface, Tool};
@@ -47,7 +50,8 @@ pub(crate) fn commands() -> Result<Vec<Command>, String> {
     commands_of(command_specs())
 }
 
-/// The commands of the given registry, by id, each marked as the confined engine answers it.
+/// The commands of the given registry, by id, each marked as the confined engine and the plugin's door
+/// answer it.
 fn commands_of(specs: &[CommandSpec]) -> Result<Vec<Command>, String> {
     let confinement = crate::refused::confinement()?;
     let mut commands = specs.iter().map(|spec| command_of(spec, &confinement)).collect::<Vec<_>>();
@@ -82,6 +86,7 @@ fn command_of(spec: &CommandSpec, confinement: &Confinement) -> Command {
         params: spec.params.to_string(),
         journal: spec.journal,
         refused_under_confinement: crate::refused::command_refused(confinement, spec.id),
+        withheld_by_plugin: craftbridge_effects::withheld_outright(spec.id),
         keys: keys_of(spec),
     }
 }
@@ -178,6 +183,19 @@ mod tests {
         }
     }
 
+    /// The plugin's mark is its door's own answer for each command, and the door withholds some command
+    /// of the pin outright, so a mark that read nothing fails here; which commands those are is the
+    /// door's to pin (`craftbridge_effects`' own tests), never a list kept here.
+    #[test]
+    fn the_plugin_marks_what_its_door_refuses_whatever_it_is_given() {
+        let surface = surface();
+        for command in &surface.commands {
+            assert_eq!(command.withheld_by_plugin, craftbridge_effects::withheld_outright(&command.id), "`{}`", command.id);
+        }
+        assert!(surface.commands.iter().any(|command| command.withheld_by_plugin), "the door withholds no command of the pin");
+        assert!(!command(&surface, "file.exportTimeline").withheld_by_plugin, "a call that renders nothing passes the door");
+    }
+
     /// At this pin the one tool a headless app could call that the confinement refuses is `script_ui`:
     /// every other refused tool is `bridgeOnly` besides, and a headless engine never lets an app near
     /// one in the first place.
@@ -217,7 +235,7 @@ mod tests {
             .and_then(Value::as_array)
             .and_then(|commands| commands.iter().find(|c| c.get("id") == Some(&json!("layer.newText"))))
             .unwrap();
-        for field in ["id", "label", "params", "keys", "journal", "refusedUnderConfinement"] {
+        for field in ["id", "label", "params", "keys", "journal", "refusedUnderConfinement", "withheldByPlugin"] {
             assert!(command.get(field).is_some(), "layer.newText lacks {field}");
         }
         for key in command.get("keys").and_then(Value::as_array).unwrap() {

@@ -134,29 +134,4 @@ extension EffectsEngine.RenderCommands {
             extra: extra
         )
     }
-
-    /// Save Current Preview.
-    ///
-    /// The engine describes its parameters as: {comp?, path}
-    ///
-    /// - Parameters:
-    ///   - comp: The key `comp`: comp?
-    ///   - path: The key `path`: path
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func saveCurrentPreview(
-        comp: JSONValue? = nil,
-        path: JSONValue,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "render.saveCurrentPreview",
-            [
-                "comp": comp?.jsonValue,
-                "path": path.jsonValue,
-            ],
-            extra: extra
-        )
-    }
 }

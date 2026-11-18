@@ -17,84 +17,6 @@ public class ContentFillCommands internal constructor(
     internal val engine: EffectsEngine,
 ) {
     /**
-     * The values the engine accepts for the key `method` of `contentFill.generate`.
-     *
-     * @constructor The value of a word, one listed here or one the engine added since; the engine checks it.
-     */
-    @JvmInline
-    public value class GenerateMethod(
-        /** The word the engine takes for this value. */
-        public val word: String,
-    ) : JSONRepresentable {
-        /** The value as the engine takes it: its word. */
-        override val jsonValue: JSONValue
-            get() = JSONValue.Text(word)
-
-        public companion object {
-            /** The value `object`. */
-            public val `object`: GenerateMethod = GenerateMethod("object")
-
-            /** The value `surface`. */
-            public val surface: GenerateMethod = GenerateMethod("surface")
-
-            /** The value `edgeBlend`. */
-            public val edgeBlend: GenerateMethod = GenerateMethod("edgeBlend")
-        }
-    }
-
-    /**
-     * The values the engine accepts for the key `range` of `contentFill.generate`.
-     *
-     * @constructor The value of a word, one listed here or one the engine added since; the engine checks it.
-     */
-    @JvmInline
-    public value class GenerateRange(
-        /** The word the engine takes for this value. */
-        public val word: String,
-    ) : JSONRepresentable {
-        /** The value as the engine takes it: its word. */
-        override val jsonValue: JSONValue
-            get() = JSONValue.Text(word)
-
-        public companion object {
-            /** The value `workArea`. */
-            public val workArea: GenerateRange = GenerateRange("workArea")
-
-            /** The value `entire`. */
-            public val entire: GenerateRange = GenerateRange("entire")
-        }
-    }
-
-    /**
-     * The values the engine accepts for the key `lightingCorrection` of `contentFill.generate`.
-     *
-     * @constructor The value of a word, one listed here or one the engine added since; the engine checks it.
-     */
-    @JvmInline
-    public value class GenerateLightingCorrection(
-        /** The word the engine takes for this value. */
-        public val word: String,
-    ) : JSONRepresentable {
-        /** The value as the engine takes it: its word. */
-        override val jsonValue: JSONValue
-            get() = JSONValue.Text(word)
-
-        public companion object {
-            /** The value `none`. */
-            public val none: GenerateLightingCorrection = GenerateLightingCorrection("none")
-
-            /** The value `subtle`. */
-            public val subtle: GenerateLightingCorrection = GenerateLightingCorrection("subtle")
-
-            /** The value `moderate`. */
-            public val moderate: GenerateLightingCorrection = GenerateLightingCorrection("moderate")
-
-            /** The value `strong`. */
-            public val strong: GenerateLightingCorrection = GenerateLightingCorrection("strong")
-        }
-    }
-
-    /**
      * The values the engine accepts for the key `method` of `contentFill.set`.
      *
      * @constructor The value of a word, one listed here or one the engine added since; the engine checks it.
@@ -171,53 +93,6 @@ public class ContentFillCommands internal constructor(
             public val strong: SetLightingCorrection = SetLightingCorrection("strong")
         }
     }
-
-    /**
-     * Generate Fill Layer.
-     *
-     * The engine describes its parameters as: {layer?, method?: object|surface|edgeBlend, range?: workArea|entire, alphaExpansion?
-     *  (px), lightingCorrection?: none|subtle|moderate|strong, referenceLayer?, referenceTime? (s), outputDir?, wait?: bool}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param layer The key `layer`: layer?
-     * @param method The key `method`: method?: object|surface|edgeBlend
-     * @param range The key `range`: range?: workArea|entire
-     * @param alphaExpansion The key `alphaExpansion`: alphaExpansion? (px)
-     * @param lightingCorrection The key `lightingCorrection`: lightingCorrection?: none|subtle|moderate|strong
-     * @param referenceLayer The key `referenceLayer`: referenceLayer?
-     * @param referenceTime The key `referenceTime`: referenceTime? (s)
-     * @param outputDir The key `outputDir`: outputDir?
-     * @param wait The key `wait`: wait?: bool
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun generate(
-        vararg namedOnly: NamedArguments,
-        layer: JSONValue? = null,
-        method: GenerateMethod? = null,
-        range: GenerateRange? = null,
-        alphaExpansion: Double? = null,
-        lightingCorrection: GenerateLightingCorrection? = null,
-        referenceLayer: JSONValue? = null,
-        referenceTime: Double? = null,
-        outputDir: JSONValue? = null,
-        wait: Boolean? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "contentFill.generate",
-            extra,
-            "layer" to layer?.jsonValue,
-            "method" to method?.jsonValue,
-            "range" to range?.jsonValue,
-            "alphaExpansion" to alphaExpansion?.jsonValue,
-            "lightingCorrection" to lightingCorrection?.jsonValue,
-            "referenceLayer" to referenceLayer?.jsonValue,
-            "referenceTime" to referenceTime?.jsonValue,
-            "outputDir" to outputDir?.jsonValue,
-            "wait" to wait?.jsonValue,
-        )
 
     /**
      * Content-Aware Fill Settings.

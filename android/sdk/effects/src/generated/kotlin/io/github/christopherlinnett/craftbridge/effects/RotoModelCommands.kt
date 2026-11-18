@@ -15,31 +15,6 @@ public class RotoModelCommands internal constructor(
     internal val engine: EffectsEngine,
 ) {
     /**
-     * Download Roto Brush Model.
-     *
-     * The engine describes its parameters as: {id, wait?} — the official weights, verified (desktop; uses the system curl)
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param id The key `id`: id
-     * @param wait The key `wait`: wait?
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun download(
-        vararg namedOnly: NamedArguments,
-        id: JSONValue,
-        wait: JSONValue? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "roto.model.download",
-            extra,
-            "id" to id.jsonValue,
-            "wait" to wait?.jsonValue,
-        )
-
-    /**
      * Install Roto Brush Model.
      *
      * The engine describes its parameters as: {path: weights file, id?, wait?} — verified against the registry's SHA-256

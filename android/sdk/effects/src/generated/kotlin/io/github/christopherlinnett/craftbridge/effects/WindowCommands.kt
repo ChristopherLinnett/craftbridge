@@ -230,26 +230,6 @@ public class WindowCommands internal constructor(
         )
 
     /**
-     * Restore ScriptUI Panels.
-     *
-     * The engine describes its parameters as: {} → reopens the ScriptUI panels open when EffectCraft last quit (frontends call it at
-     *  launch) → {opened: [name], failed: [{name, error}]}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun restoreScriptPanels(
-        vararg namedOnly: NamedArguments,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "window.restoreScriptPanels",
-            extra,
-        )
-
-    /**
      * Save Changes to this Workspace.
      *
      * The engine describes its parameters as: {}
@@ -286,30 +266,6 @@ public class WindowCommands internal constructor(
     ): JSONValue =
         this.engine.command(
             "window.saveWorkspaceAs",
-            extra,
-            "name" to name.jsonValue,
-        )
-
-    /**
-     * ScriptUI Panel.
-     *
-     * The engine describes its parameters as: {name (a script in the ScriptUI Panels folder, e.g. `Layer Tools.jsx`, or
-     *  `Folder/Panel.jsx` in a subfolder)} → opens it as a dockable panel
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param name The key `name`: name (a script in the ScriptUI Panels folder, e.g. `Layer Tools.jsx`, or `Folder/Panel.jsx` in a
-     *  subfolder)
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun scriptPanel(
-        vararg namedOnly: NamedArguments,
-        name: JSONValue,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "window.scriptPanel",
             extra,
             "name" to name.jsonValue,
         )

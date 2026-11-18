@@ -140,29 +140,4 @@ public class RenderCommands internal constructor(
             "output" to output?.jsonValue,
             "format" to format?.jsonValue,
         )
-
-    /**
-     * Save Current Preview.
-     *
-     * The engine describes its parameters as: {comp?, path}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param comp The key `comp`: comp?
-     * @param path The key `path`: path
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun saveCurrentPreview(
-        vararg namedOnly: NamedArguments,
-        comp: JSONValue? = null,
-        path: JSONValue,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "render.saveCurrentPreview",
-            extra,
-            "comp" to comp?.jsonValue,
-            "path" to path.jsonValue,
-        )
 }

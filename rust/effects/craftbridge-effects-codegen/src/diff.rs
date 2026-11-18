@@ -8,7 +8,8 @@
 //! source. Where the rule leaves a case open it is decided the way that protects apps: a doubtful change
 //! breaks. Every rule is a function below, named for the change it judges.
 //!
-//! - A removed command or key, or a removed tool an app can call (below): the app calls what is gone.
+//! - A removed command or tool an app can call (below), or a removed key of one: the app calls what is
+//!   gone.
 //! - A key that is new and required, or that became required: the app's call omits it.
 //! - A key whose type changed, in either direction: the facade's parameter has another type, so a call
 //!   written for the old one no longer compiles (`json` to `bool` narrows what is accepted; `bool` to
@@ -23,22 +24,23 @@
 //! - A tool an app can call whose input schema changed other than by a new optional property, an
 //!   optional property that was required, or a description: the app's input is no longer one the tool
 //!   takes.
-//! - A command or tool that became refused under confinement (`refusedUnderConfinement`), or a tool that
-//!   became `bridgeOnly`: CraftBridge runs the engine headless and always confined, so it can call
-//!   neither what a headless engine hides nor what the confinement refuses — yet an app written against
+//! - A command or tool that became refused under confinement (`refusedUnderConfinement`), a command the
+//!   plugin's door came to withhold (`withheldByPlugin`), or a tool that became `bridgeOnly`: CraftBridge
+//!   runs the engine headless, always confined and behind the plugin's door, so it can call neither what
+//!   a headless engine hides nor what the confinement or the door refuses — yet an app written against
 //!   the old surface could call the entry until it was taken away.
 //!
-//! A tool that was `bridgeOnly` or refused is none an app can call, and no facade gives it a method, so
-//! nothing else that becomes of it breaks an app. A refused command is not so: both facades keep its
-//! typed method, which an app may have written a call to, so its removal and every change to its keys
-//! break that call's build as they break any command's, and only its refusal is judged by the mark.
+//! An entry so marked in the old surface is none an app can call ([`Command::callable`],
+//! [`Tool::callable`]): neither facade gives it a method, so an app written against the old facade wrote
+//! no call to it, and nothing that becomes of it breaks an app — its removal, a change to its keys or its
+//! input, its release, or another mark. Its changes are still listed.
 //!
 //! Everything else is compatible and still listed: a new command, a new optional key wherever it stands, a
 //! new enum word, a key that became optional, a new tool, a changed label, `journal` flag, `params` text or
-//! description, a refusal that was lifted — a changed `params` text is not listed beside a command whose
-//! keys changed, since it is the very text those changes came from. A new enum word stays compatible only
-//! while the facades give an enum key a type no Swift `switch` or Kotlin `when` covers exhaustively, and a
-//! new optional key before another only while every Kotlin call names its arguments.
+//! description, a refusal or a withholding that was lifted — a changed `params` text is not listed beside a
+//! command whose keys changed, since it is the very text those changes came from. A new enum word stays
+//! compatible only while the facades give an enum key a type no Swift `switch` or Kotlin `when` covers
+//! exhaustively, and a new optional key before another only while every Kotlin call names its arguments.
 
 use crate::model::{Command, Key, Surface, Tool};
 use serde_json::{Map, Value};
@@ -93,27 +95,44 @@ pub(crate) fn compare(old: &Surface, new: &Surface) -> Vec<Change> {
     // a field the surface gains then stops the build until the diff judges it. The header (the app, the
     // engine's version, the pin) names the two surfaces, not their API, so it is no change an app sees.
     let Surface { app: _, engine_version: _, pin: _, commands: _, tools: _ } = old;
-    let mut changes = Vec::new();
-    let (old_commands, new_commands) = (by(&old.commands, |command| &command.id), by(&new.commands, |command| &command.id));
-    for (id, pair) in pairs(&old_commands, &new_commands) {
-        match pair {
-            (Some(_), None) => changes.push(Change::presence(Kind::Command, id, Verb::Removed, true)),
-            (None, Some(_)) => changes.push(Change::presence(Kind::Command, id, Verb::Added, false)),
-            (Some(before), Some(after)) => compare_command(before, after, &mut changes),
-            (None, None) => {}
-        }
-    }
-    let (old_tools, new_tools) = (by(&old.tools, |tool| &tool.name), by(&new.tools, |tool| &tool.name));
-    for (name, pair) in pairs(&old_tools, &new_tools) {
-        match pair {
-            (Some(before), None) => changes.push(Change::presence(Kind::Tool, name, Verb::Removed, callable(before))),
-            (None, Some(_)) => changes.push(Change::presence(Kind::Tool, name, Verb::Added, false)),
-            (Some(before), Some(after)) => compare_tool(before, after, &mut changes),
-            (None, None) => {}
-        }
-    }
+    let commands = Entries::<Command> { kind: Kind::Command, name: |command| &command.id, callable: Command::callable, compare: compare_command };
+    let tools = Entries::<Tool> { kind: Kind::Tool, name: |tool| &tool.name, callable: Tool::callable, compare: compare_tool };
+    let mut changes = commands.changes(&old.commands, &new.commands);
+    changes.extend(tools.changes(&old.tools, &new.tools));
     changes.sort();
     changes
+}
+
+/// How the diff reads one kind of entry, a command or a tool: its name, whether an app can call it, and
+/// what changed between its two sides.
+struct Entries<T> {
+    kind: Kind,
+    name: fn(&T) -> &String,
+    callable: fn(&T) -> bool,
+    compare: fn(&T, &T) -> Vec<Change>,
+}
+
+impl<T> Entries<T> {
+    /// Every entry either side has that was added, removed or changed, each change judged on its own and
+    /// then for an app written against the old surface: an entry no app could call there breaks no app,
+    /// whatever becomes of it (module docs), and each of its changes is still listed.
+    fn changes(&self, old: &[T], new: &[T]) -> Vec<Change> {
+        let (old, new) = (by(old, self.name), by(new, self.name));
+        let mut changes = Vec::new();
+        for (subject, pair) in pairs(&old, &new) {
+            let found = match pair {
+                (Some(_), None) => vec![Change::presence(self.kind, subject, Verb::Removed, true)],
+                (None, Some(_)) => vec![Change::presence(self.kind, subject, Verb::Added, false)],
+                (Some(before), Some(after)) => (self.compare)(before, after),
+                (None, None) => Vec::new(),
+            };
+            // An entry only the new surface has breaks nothing of its own, so it is judged as one an app
+            // could call: nothing is taken from what it says.
+            let called = pair.0.is_none_or(self.callable);
+            changes.extend(found.into_iter().map(|change| Change { breaking: called && change.breaking, ..change }));
+        }
+        changes
+    }
 }
 
 /// Does any change break an app?
@@ -132,25 +151,24 @@ fn pairs<'a, T>(old: &BTreeMap<&'a str, &'a T>, new: &BTreeMap<&'a str, &'a T>) 
     names.into_iter().map(|name| (name, (old.get(name).copied(), new.get(name).copied()))).collect()
 }
 
-fn compare_command(old: &Command, new: &Command, changes: &mut Vec<Change>) {
-    // A refused command keeps its typed method in both facades, so every rule on its keys judges it as it
-    // judges any command's (module docs); only the refusal itself is judged by the mark, below.
-    let Command { id: _, label: _, params: _, journal: _, refused_under_confinement: _, keys: _ } = old;
-    let before = changes.len();
+/// What changed of a command both surfaces have, each change judged as it breaks an app that calls it.
+fn compare_command(old: &Command, new: &Command) -> Vec<Change> {
+    let Command { id: _, label: _, params: _, journal: _, refused_under_confinement: _, withheld_by_plugin: _, keys: _ } = old;
+    let mut changes = Vec::new();
     let (old_keys, new_keys) = (by(&old.keys, |key| &key.name), by(&new.keys, |key| &key.name));
     for (name, pair) in pairs(&old_keys, &new_keys) {
         let subject = format!("{}:{name}", old.id);
         match pair {
             (Some(_), None) => changes.push(Change::presence(Kind::Key, &subject, Verb::Removed, true)),
             (None, Some(key)) => changes.push(Change::presence(Kind::Key, &subject, Verb::Added, key.required)),
-            (Some(before), Some(after)) => compare_key(&subject, before, after, changes),
+            (Some(before), Some(after)) => compare_key(&subject, before, after, &mut changes),
             (None, None) => {}
         }
     }
     if let Some(detail) = reordered(&old.keys, &new.keys) {
         changes.push(Change::changed(Kind::Command, &old.id, detail, true));
     }
-    let keys_changed = changes.len() > before;
+    let keys_changed = !changes.is_empty();
     for (what, was, is) in [("label", &old.label, &new.label), ("params", &old.params, &new.params)] {
         // The `params` text is where the keys come from, so it changes whenever they do.
         if was != is && !(what == "params" && keys_changed) {
@@ -158,8 +176,9 @@ fn compare_command(old: &Command, new: &Command, changes: &mut Vec<Change>) {
         }
     }
     changes.extend(flipped(Kind::Command, &old.id, "journal", (old.journal, new.journal), false));
-    let called = !old.refused_under_confinement;
-    changes.extend(flipped(Kind::Command, &old.id, "refusedUnderConfinement", (old.refused_under_confinement, new.refused_under_confinement), called));
+    changes.extend(flipped(Kind::Command, &old.id, "refusedUnderConfinement", (old.refused_under_confinement, new.refused_under_confinement), true));
+    changes.extend(flipped(Kind::Command, &old.id, "withheldByPlugin", (old.withheld_by_plugin, new.withheld_by_plugin), true));
+    changes
 }
 
 fn compare_key(subject: &str, old: &Key, new: &Key, changes: &mut Vec<Change>) {
@@ -214,33 +233,28 @@ fn names_of(keys: &[Key]) -> Vec<&str> {
 }
 
 /// A flag of a command or tool, named as the surface spells it, if it flipped, breaking an app as
-/// `breaking` says. A flag that withholds the entry from apps (`bridgeOnly`, `refusedUnderConfinement`)
-/// breaks exactly when an app could call the entry before: becoming set takes away a call the app made,
-/// and ceasing to be set only frees one. Any other flag (`journal`) changes nothing a call is typed by.
+/// `breaking` says. A flag that keeps the entry from apps (`bridgeOnly`, `refusedUnderConfinement`,
+/// `withheldByPlugin`) breaks: on an entry an app could call it can only become set, which takes away
+/// the call, and an entry no app could call breaks nothing whatever its flags do ([`Entries::changes`]).
+/// Any other flag (`journal`) changes nothing a call is typed by.
 fn flipped(kind: Kind, subject: &str, flag: &str, (was, is): (bool, bool), breaking: bool) -> Option<Change> {
     (was != is).then(|| Change::changed(kind, subject, format!("{flag} {was} -> {is}"), breaking))
 }
 
-/// Can an app call the tool? CraftBridge runs the engine headless and always confined: a headless
-/// engine hides and refuses every `bridgeOnly` tool, which needs the desktop app's control channel, and
-/// the confinement answers every refused tool with its refusal before the tool runs.
-fn callable(tool: &Tool) -> bool {
-    !(tool.bridge_only || tool.refused_under_confinement)
-}
-
-/// A tool no app can call breaks no app, whatever becomes of it; its changes are still listed.
-fn compare_tool(old: &Tool, new: &Tool, changes: &mut Vec<Change>) {
+/// What changed of a tool both surfaces have, each change judged as it breaks an app that calls it.
+fn compare_tool(old: &Tool, new: &Tool) -> Vec<Change> {
     let Tool { name: _, description: _, bridge_only: _, refused_under_confinement: _, input_schema: _ } = old;
     let subject = old.name.as_str();
-    let called = callable(old);
+    let mut changes = Vec::new();
     if old.description != new.description {
         changes.push(Change::changed(Kind::Tool, subject, "description".to_string(), false));
     }
-    changes.extend(flipped(Kind::Tool, subject, "bridgeOnly", (old.bridge_only, new.bridge_only), called));
-    changes.extend(flipped(Kind::Tool, subject, "refusedUnderConfinement", (old.refused_under_confinement, new.refused_under_confinement), called));
+    changes.extend(flipped(Kind::Tool, subject, "bridgeOnly", (old.bridge_only, new.bridge_only), true));
+    changes.extend(flipped(Kind::Tool, subject, "refusedUnderConfinement", (old.refused_under_confinement, new.refused_under_confinement), true));
     for (detail, breaking) in schema_changes(&old.input_schema, &new.input_schema) {
-        changes.push(Change::changed(Kind::Tool, subject, format!("input {detail}"), called && breaking));
+        changes.push(Change::changed(Kind::Tool, subject, format!("input {detail}"), breaking));
     }
+    changes
 }
 
 /// How a tool's input schema changed, each change with whether it breaks a caller. Prose (`description`)
@@ -378,21 +392,28 @@ mod tests {
 
     /// The changes between a surface of one command and the same surface with `edit` applied to it.
     fn one_command(edit: impl FnOnce(&mut Command)) -> Vec<Change> {
-        command_changes(false, edit)
+        command_changes(|_| {}, edit)
     }
 
-    /// A surface of [`sample_command`] alone, marked refused under confinement or not.
-    fn sample_surface(refused: bool) -> Surface {
-        Surface::of(vec![Command { refused_under_confinement: refused, ..sample_command() }], vec![])
+    /// A surface of [`sample_command`] alone, with `mark` set on it.
+    fn sample_surface(mark: fn(&mut Command)) -> Surface {
+        let mut command = sample_command();
+        mark(&mut command);
+        Surface::of(vec![command], vec![])
     }
 
-    /// [`one_command`] with the command marked refused under confinement on both sides, or not.
-    fn command_changes(refused: bool, edit: impl FnOnce(&mut Command)) -> Vec<Change> {
-        let old = sample_surface(refused);
+    /// [`one_command`] with `mark` set on the command on both sides.
+    fn command_changes(mark: fn(&mut Command), edit: impl FnOnce(&mut Command)) -> Vec<Change> {
+        let old = sample_surface(mark);
         let mut new = old.clone();
         edit(new.commands.first_mut().unwrap());
         compare(&old, &new)
     }
+
+    /// Each mark that keeps a command from apps, alone and both together: the confinement's refusal, the
+    /// plugin's withholding.
+    const COMMAND_MARKS: [fn(&mut Command); 3] =
+        [|c| c.refused_under_confinement = true, |c| c.withheld_by_plugin = true, |c| (c.refused_under_confinement, c.withheld_by_plugin) = (true, true)];
 
     /// The key at `at` of the command being edited.
     fn key_at(command: &mut Command, at: usize) -> &mut Key {
@@ -596,30 +617,37 @@ mod tests {
     }
 
     #[test]
-    fn a_command_or_tool_that_became_refused_breaks_and_one_released_does_not() {
-        // Becoming refused takes away a call the app made, as becoming `bridgeOnly` does: the flip is
-        // judged on what the app could call before, both ways, for both kinds of entry.
+    fn a_command_or_tool_that_became_refused_or_withheld_breaks_and_one_released_does_not() {
+        // Becoming refused or withheld takes away a call the app made, as becoming `bridgeOnly` does:
+        // each flip is judged on what the app could call before, both ways, for both kinds of entry.
         assert_eq!(only(&one_command(|c| c.refused_under_confinement = true)), ("a.b", Verb::Changed, "refusedUnderConfinement false -> true", true));
+        assert_eq!(only(&one_command(|c| c.withheld_by_plugin = true)), ("a.b", Verb::Changed, "withheldByPlugin false -> true", true));
         assert_eq!(only(&one_tool(|t| t.refused_under_confinement = true)), ("t", Verb::Changed, "refusedUnderConfinement false -> true", true));
-        let old = Surface::of(vec![Command::of("a.b", "A label", vec![])], vec![Tool::of("t", json!({}))]);
+        let old = Surface::of(vec![Command::of("a.b", "A label", vec![]), Command::of("a.c", "A label", vec![])], vec![Tool::of("t", json!({}))]);
         let mut refused = old.clone();
         refused.commands.first_mut().unwrap().refused_under_confinement = true;
+        refused.commands.last_mut().unwrap().withheld_by_plugin = true;
         refused.tools.first_mut().unwrap().refused_under_confinement = true;
         let released = compare(&refused, &old);
         assert_eq!(
             released.iter().map(|change| (change.subject.as_str(), change.detail.as_str(), change.breaking)).collect::<Vec<_>>(),
-            [("a.b", "refusedUnderConfinement true -> false", false), ("t", "refusedUnderConfinement true -> false", false)],
-            "ceasing to be refused only frees a call"
+            [
+                ("a.b", "refusedUnderConfinement true -> false", false),
+                ("a.c", "withheldByPlugin true -> false", false),
+                ("t", "refusedUnderConfinement true -> false", false)
+            ],
+            "ceasing to be refused or withheld only frees a call"
         );
     }
 
-    /// Both facades keep a refused command's typed method, so whatever breaks a call written to it breaks
-    /// it whether or not the engine refuses the call: each edit judges a refused command exactly as it
-    /// judges the same command open to apps.
+    /// Neither facade gives a command no app can call a method, so nothing that becomes of it breaks an
+    /// app, whichever mark keeps it from apps: each edit that breaks a command an app can call, and the
+    /// command's removal, is still listed for it, in the same words, and breaks nothing. So does the
+    /// other mark, which takes away no call it had.
     #[test]
-    fn a_refused_command_breaks_as_any_command_does() {
+    fn nothing_that_becomes_of_a_command_no_app_can_call_breaks() {
         type Edit = fn(&mut Command);
-        let edits: [(Edit, bool); 8] = [
+        let edits: [(Edit, bool); 9] = [
             (|c| drop(c.keys.remove(0)), true),
             (|c| c.keys.push(Key::raw("three", true, "bool", None)), true),
             (|c| key_at(c, 0).required = true, true),
@@ -627,16 +655,28 @@ mod tests {
             (|c| *key_at(c, 2) = Key::raw("mode", false, "enum", Some(&["on"])), true),
             (|c| key_at(c, 2).values = None, true),
             (|c| c.keys.swap(0, 1), true),
+            (|c| key_at(c, 2).values = Some(vec!["on".to_string(), "off".to_string(), "auto".to_string()]), false),
             (|c| c.label = "Another label".to_string(), false),
         ];
+        let listed =
+            |changes: &[Change]| changes.iter().map(|change| (change.kind, change.subject.clone(), change.verb, change.detail.clone())).collect::<Vec<_>>();
         for (edit, breaking) in edits {
-            let callable = command_changes(false, edit);
+            let callable = one_command(edit);
             assert_eq!(is_breaking(&callable), breaking, "{callable:?}");
-            assert_eq!(command_changes(true, edit), callable);
+            for mark in COMMAND_MARKS {
+                let uncallable = command_changes(mark, edit);
+                assert!(!callable.is_empty() && listed(&uncallable) == listed(&callable), "{uncallable:?} lists {callable:?}");
+                assert!(!is_breaking(&uncallable), "{uncallable:?}");
+            }
         }
-        let removed = |refused| compare(&sample_surface(refused), &Surface::of(vec![], vec![]));
-        assert_eq!(only(&removed(true)), ("a.b", Verb::Removed, "", true), "its method is gone from both facades");
-        assert_eq!(removed(true), removed(false));
+        let gone = Surface::of(vec![], vec![]);
+        assert_eq!(only(&compare(&sample_surface(|_| {}), &gone)), ("a.b", Verb::Removed, "", true), "a command an app can call");
+        for mark in COMMAND_MARKS {
+            assert_eq!(only(&compare(&sample_surface(mark), &gone)), ("a.b", Verb::Removed, "", false), "it had no method to lose");
+            for other in COMMAND_MARKS {
+                assert!(!is_breaking(&command_changes(mark, other)), "another mark takes no call away");
+            }
+        }
     }
 
     #[test]

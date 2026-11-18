@@ -18,31 +18,6 @@ extension EffectsEngine {
 }
 
 extension EffectsEngine.FaceModelCommands {
-    /// Download Face Tracking Model.
-    ///
-    /// The engine describes its parameters as: {id, wait?} — the official model, verified (desktop; uses the system curl)
-    ///
-    /// - Parameters:
-    ///   - id: The key `id`: id
-    ///   - wait: The key `wait`: wait?
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func download(
-        id: JSONValue,
-        wait: JSONValue? = nil,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "face.model.download",
-            [
-                "id": id.jsonValue,
-                "wait": wait?.jsonValue,
-            ],
-            extra: extra
-        )
-    }
-
     /// Install Face Tracking Model.
     ///
     /// The engine describes its parameters as: {path: model file, id?, wait?} — verified against the registry's SHA-256

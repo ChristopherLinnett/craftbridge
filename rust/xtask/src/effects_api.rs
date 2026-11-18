@@ -124,15 +124,18 @@ mod tests {
     #[test]
     fn a_surface_that_lost_a_command_is_a_breaking_change_to_the_real_codegen() {
         let root = crate::repo_root();
-        let surface: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(root.join(SURFACE_FILE)).unwrap()).unwrap();
-        let mut smaller = surface.clone();
-        let commands = smaller.get_mut("commands").and_then(serde_json::Value::as_array_mut).expect("the surface lists its commands");
-        commands.pop().expect("the surface holds a command to remove");
+        let smaller: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(root.join(SURFACE_FILE)).unwrap()).unwrap();
+        // The command lost is one no mark keeps from apps, which is what the schema's defaults leave it: the
+        // loss of a command the confined engine or the plugin refuses breaks no app, so whichever command a
+        // pin happens to list must not decide what this test expects.
+        let mut surface = smaller.clone();
+        let commands = surface.get_mut("commands").and_then(serde_json::Value::as_array_mut).expect("the surface lists its commands");
+        commands.push(serde_json::json!({"id": "probe.lost", "label": "Lost", "params": "{}", "journal": false, "keys": []}));
         let scratch = crate::scratch::Scratch::new("surface-diff");
         scratch.write("old.json", serde_json::to_string(&surface).unwrap());
         scratch.write("new.json", serde_json::to_string(&smaller).unwrap());
         let found = diff(&root, &scratch.0.join("old.json"), &scratch.0.join("new.json")).unwrap();
-        assert!(found.breaking, "a removed command breaks an app: {}", found.report);
+        assert!(found.breaking && found.report.contains("probe.lost"), "the loss of a command an app can call breaks it: {}", found.report);
         let same = diff(&root, &scratch.0.join("old.json"), &scratch.0.join("old.json")).unwrap();
         assert!(!same.breaking && same.report.contains("0 added, 0 removed, 0 changed"), "{}", same.report);
     }

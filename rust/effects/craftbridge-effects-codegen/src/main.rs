@@ -148,16 +148,16 @@ struct Emitter {
 const SWIFT: Emitter = Emitter { check: swift::check, files: swift::files };
 const KOTLIN: Emitter = Emitter { check: kotlin::check, files: kotlin::files };
 
-/// Write one facade of every command into `out_dir`, saying what it holds.
+/// Write one facade of every command an app can call into `out_dir`, saying what it holds.
 fn write_facade(emitter: &Emitter, out_dir: &Path) -> Result<String, String> {
-    let commands = surface::commands()?;
-    let namespaces = facade::plan(&commands)?;
+    let namespaces = facade::plan(&surface::commands()?)?;
     (emitter.check)(&namespaces)?;
     let files = (emitter.files)(&namespaces);
     for (name, text) in &files {
         write_into(out_dir, name, text)?;
     }
-    Ok(format!("{} holds {} files with {} methods", out_dir.display(), files.len(), commands.len()))
+    let methods: usize = namespaces.iter().map(|namespace| namespace.methods.len()).sum();
+    Ok(format!("{} holds {} files with {methods} methods", out_dir.display(), files.len()))
 }
 
 /// Write the engine's version and pin constants into `out_dir`.
@@ -196,7 +196,7 @@ mod tests {
             for file in ["LayerCommands", "LayerMaskCommands"] {
                 assert!(names.contains(&format!("{file}.{extension}")), "{names:?}");
             }
-            assert!(done.contains(&format!("{} files", names.len())), "{done}");
+            assert!(done.contains(&format!("{} files with {} methods", names.len(), facade::callable_at_the_pin())), "{done}");
             let text = std::fs::read_to_string(out.join(format!("RenderQueueCommands.{extension}"))).unwrap();
             assert!(text.contains(call), "{text}");
             let _ = std::fs::remove_dir_all(&out);
@@ -357,40 +357,46 @@ mod tests {
     }
 
     #[test]
-    fn a_change_to_a_refused_tool_exits_0_and_the_same_change_to_a_callable_one_exits_2() {
+    fn a_change_to_a_refused_entry_exits_0_and_the_same_change_to_a_callable_one_exits_2() {
         type Edit = fn(&mut model::Surface);
-        let mark_command: Edit = |s| first_command(s).refused_under_confinement = true;
-        let mark_tool: Edit = |s| s.tools.first_mut().unwrap().refused_under_confinement = true;
-        // Each edit falls on the first tool, open to apps in the fixture: the same edit on that tool once
-        // the confinement refuses it, on both sides, is no call an app loses.
-        let tool_edits: [(&str, Edit); 3] = [
-            ("tool-removed", |s| drop(s.tools.remove(0))),
-            ("tool-input-changed", |s| s.tools.first_mut().unwrap().input_schema = serde_json::json!({})),
-            ("tool-input-required", |s| s.tools.first_mut().unwrap().input_schema["required"] = serde_json::json!(["x"])),
+        type Marks<'a> = &'a [(&'a str, Edit)];
+        // Each mark that keeps the fixture's first command, or its first tool, from apps.
+        let command_marks: [(&str, Edit); 2] =
+            [("refused", |s| first_command(s).refused_under_confinement = true), ("withheld", |s| first_command(s).withheld_by_plugin = true)];
+        let tool_marks: [(&str, Edit); 1] = [("refused", |s| s.tools.first_mut().unwrap().refused_under_confinement = true)];
+        // Each edit falls on that first entry, open to apps in the fixture: the same edit on it once a
+        // mark keeps it from apps, on both sides, is no call an app loses, since no facade offers one.
+        let command_edits: [(&str, Edit); 5] = [
+            ("marks-command-removed", |s| drop(s.commands.remove(0))),
+            ("marks-key-removed", |s| drop(first_command(s).keys.remove(1))),
+            ("marks-key-required", |s| first_command(s).keys.first_mut().unwrap().required = true),
+            ("marks-key-retyped", |s| first_command(s).keys.first_mut().unwrap().key_type = "json".to_string()),
+            ("marks-keys-reordered", |s| first_command(s).keys.swap(0, 1)),
         ];
-        for (name, edit) in tool_edits {
-            assert!(exit_of_diff(name, edit) == ExitCode::from(BREAKING), "{name} on a callable tool");
-            let refused_and_edited = |s: &mut model::Surface| {
-                mark_tool(s);
-                edit(s);
-            };
-            assert!(exit_of_change(name, mark_tool, refused_and_edited) == ExitCode::SUCCESS, "{name} on a refused tool");
+        let tool_edits: [(&str, Edit); 3] = [
+            ("marks-tool-removed", |s| drop(s.tools.remove(0))),
+            ("marks-tool-input-changed", |s| s.tools.first_mut().unwrap().input_schema = serde_json::json!({})),
+            ("marks-tool-input-required", |s| s.tools.first_mut().unwrap().input_schema["required"] = serde_json::json!(["x"])),
+        ];
+        let kinds: [(Marks, Marks); 2] = [(&command_marks, &command_edits), (&tool_marks, &tool_edits)];
+        for (marks, edits) in kinds {
+            for &(name, edit) in edits {
+                assert!(exit_of_diff(name, edit) == ExitCode::from(BREAKING), "{name} on a callable entry");
+                for &(mark_name, mark) in marks {
+                    let marked_and_edited = move |s: &mut model::Surface| {
+                        mark(s);
+                        edit(s);
+                    };
+                    assert!(exit_of_change(name, mark, marked_and_edited) == ExitCode::SUCCESS, "{name} on a {mark_name} entry");
+                }
+            }
+            for &(mark_name, mark) in marks {
+                // Becoming refused or withheld takes a call away, whatever else stays: exit 2, like any
+                // other breaking move; being released only frees a call: exit 0.
+                assert!(exit_of_change("marks-set", |_| {}, mark) == ExitCode::from(BREAKING), "an entry became {mark_name}");
+                assert!(exit_of_change("marks-lifted", mark, |_| {}) == ExitCode::SUCCESS, "a {mark_name} entry is callable again");
+            }
         }
-        // Becoming refused takes a call away, whatever else stays: exit 2, like any other breaking move.
-        assert!(exit_of_change("command-refused", |_| {}, mark_command) == ExitCode::from(BREAKING), "a command became refused");
-        assert!(exit_of_change("tool-refused", |_| {}, mark_tool) == ExitCode::from(BREAKING), "a tool became refused");
-        // A refusal lifted only frees a call: exit 0.
-        assert!(exit_of_change("command-released", mark_command, |_| {}) == ExitCode::SUCCESS, "a command is callable again");
-        assert!(exit_of_change("tool-released", mark_tool, |_| {}) == ExitCode::SUCCESS, "a tool is callable again");
-        // A refused command keeps its typed method in both facades, so losing it or one of its keys fails
-        // the build of an app that wrote a call to it: exit 2, as for any command.
-        let refused_and_keyless = |s: &mut model::Surface| {
-            mark_command(s);
-            drop(first_command(s).keys.remove(1));
-        };
-        assert!(exit_of_change("refused-key-removed", mark_command, refused_and_keyless) == ExitCode::from(BREAKING), "a refused command's key");
-        let mark_last_command: Edit = |s| s.commands.last_mut().unwrap().refused_under_confinement = true;
-        assert!(exit_of_change("refused-command-removed", mark_last_command, |s| drop(s.commands.pop())) == ExitCode::from(BREAKING), "a refused command");
     }
 
     #[test]

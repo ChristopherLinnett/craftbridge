@@ -341,23 +341,6 @@ extension EffectsEngine.FileCommands {
         )
     }
 
-    /// Auto-Save Now.
-    ///
-    /// The engine describes its parameters as: {}
-    ///
-    /// - Parameter extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func autoSave(
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "file.autoSave",
-            [:],
-            extra: extra
-        )
-    }
-
     /// Check Output File.
     ///
     /// The engine describes its parameters as: {path} → {path, blocked, source?: footage|proxy|project, reason?}: whether an export may be written to path (it may not replace a file the project reads)
@@ -542,31 +525,6 @@ extension EffectsEngine.FileCommands {
         try await self.engine.command(
             "file.cycleBitDepth",
             [:],
-            extra: extra
-        )
-    }
-
-    /// Execute File.
-    ///
-    /// The engine describes its parameters as: {path, confirmed?}
-    ///
-    /// - Parameters:
-    ///   - path: The key `path`: path
-    ///   - confirmed: The key `confirmed`: confirmed?
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func executeFile(
-        path: JSONValue,
-        confirmed: JSONValue? = nil,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "file.executeFile",
-            [
-                "path": path.jsonValue,
-                "confirmed": confirmed?.jsonValue,
-            ],
             extra: extra
         )
     }
@@ -986,50 +944,6 @@ extension EffectsEngine.FileCommands {
         try await self.engine.command(
             "file.incrementAndSave",
             [:],
-            extra: extra
-        )
-    }
-
-    /// Install Script File.
-    ///
-    /// The engine describes its parameters as: {path (.jsx / .js)} → copies it to the Scripts folder; it appears in File ▸ Scripts
-    ///
-    /// - Parameters:
-    ///   - path: The key `path`: path (.jsx / .js)
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func installScript(
-        path: JSONValue,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "file.installScript",
-            [
-                "path": path.jsonValue
-            ],
-            extra: extra
-        )
-    }
-
-    /// Install ScriptUI Panel.
-    ///
-    /// The engine describes its parameters as: {path (.jsx / .js)} → copies it to the ScriptUI Panels folder; it appears in the Window menu
-    ///
-    /// - Parameters:
-    ///   - path: The key `path`: path (.jsx / .js)
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func installScriptUIPanel(
-        path: JSONValue,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "file.installScriptUIPanel",
-            [
-                "path": path.jsonValue
-            ],
             extra: extra
         )
     }
@@ -1681,28 +1595,6 @@ extension EffectsEngine.FileCommands {
         )
     }
 
-    /// Reveal in Finder.
-    ///
-    /// The engine describes its parameters as: {item?}
-    ///
-    /// - Parameters:
-    ///   - item: The key `item`: item?
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func revealInFinder(
-        item: JSONValue? = nil,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "file.revealInFinder",
-            [
-                "item": item?.jsonValue
-            ],
-            extra: extra
-        )
-    }
-
     /// Revert.
     ///
     /// The engine describes its parameters as: {}
@@ -1715,68 +1607,6 @@ extension EffectsEngine.FileCommands {
     ) async throws -> JSONValue {
         try await self.engine.command(
             "file.revert",
-            [:],
-            extra: extra
-        )
-    }
-
-    /// Run Script File.
-    ///
-    /// The engine describes its parameters as: {path (.jsx/.js JavaScript, or a .jsonl/.json command script) | name (an installed or sample script, see file.scripts.list) | recent: index (File ▸ Scripts ▸ Recent Script Files, 0 = the most recent) | steps: [{command, params}]}
-    ///
-    /// - Parameters:
-    ///   - path: The key `path`: path (.jsx/.js JavaScript, or a .jsonl/.json command script) | name (an installed or sample script, see file.scripts.list) | recent: index (File ▸ Scripts ▸ Recent Script Files, 0 = the most recent) | steps: [{command, params}]
-    ///   - name: The key `name`: path (.jsx/.js JavaScript, or a .jsonl/.json command script) | name (an installed or sample script, see file.scripts.list) | recent: index (File ▸ Scripts ▸ Recent Script Files, 0 = the most recent) | steps: [{command, params}]
-    ///   - recent: The key `recent`: path (.jsx/.js JavaScript, or a .jsonl/.json command script) | name (an installed or sample script, see file.scripts.list) | recent: index (File ▸ Scripts ▸ Recent Script Files, 0 = the most recent) | steps: [{command, params}]
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func runScript(
-        path: JSONValue? = nil,
-        name: JSONValue? = nil,
-        recent: JSONValue? = nil,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "file.runScript",
-            [
-                "path": path?.jsonValue,
-                "name": name?.jsonValue,
-                "recent": recent?.jsonValue,
-            ],
-            extra: extra
-        )
-    }
-
-    /// Run Shutdown Scripts.
-    ///
-    /// The engine describes its parameters as: {} → closes the project, then runs the scripts in Scripts/Shutdown in alphabetical order (frontends call it as the app quits; their modal dialogs close as if canceled) → {ran: [name], waiting: [name], failed: [{name, error}]}
-    ///
-    /// - Parameter extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func runShutdownScripts(
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "file.runShutdownScripts",
-            [:],
-            extra: extra
-        )
-    }
-
-    /// Run Startup Scripts.
-    ///
-    /// The engine describes its parameters as: {} → runs the scripts in Scripts/Startup in alphabetical order (frontends call it at launch) → {ran: [name], waiting: [name] (in a modal dialog), failed: [{name, error}]}
-    ///
-    /// - Parameter extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func runStartupScripts(
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "file.runStartupScripts",
             [:],
             extra: extra
         )
@@ -1940,28 +1770,6 @@ extension EffectsEngine.FileCommands {
         )
     }
 
-    /// Uninstall Script.
-    ///
-    /// The engine describes its parameters as: {name (a script at the top of a Scripts folder, not `Folder/File.jsx`)}
-    ///
-    /// - Parameters:
-    ///   - name: The key `name`: name (a script at the top of a Scripts folder, not `Folder/File.jsx`)
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func uninstallScript(
-        name: JSONValue,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "file.uninstallScript",
-            [
-                "name": name.jsonValue
-            ],
-            extra: extra
-        )
-    }
-
     /// Use Proxy.
     ///
     /// The engine describes its parameters as: {items?|item?, on?}
@@ -1985,31 +1793,6 @@ extension EffectsEngine.FileCommands {
                 "items": items?.jsonValue,
                 "item": item?.jsonValue,
                 "on": on?.jsonValue,
-            ],
-            extra: extra
-        )
-    }
-
-    /// Watch Folder.
-    ///
-    /// The engine describes its parameters as: {folder, stop?: bool} → watches the folder for .ecproj files with queued renders, renders them and writes `<project>.status.json`
-    ///
-    /// - Parameters:
-    ///   - folder: The key `folder`: folder
-    ///   - stop: The key `stop`: stop?: bool
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func watchFolder(
-        folder: JSONValue,
-        stop: Bool? = nil,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "file.watchFolder",
-            [
-                "folder": folder.jsonValue,
-                "stop": stop?.jsonValue,
             ],
             extra: extra
         )

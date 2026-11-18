@@ -1205,28 +1205,6 @@ public class RenderQueueCommands internal constructor(
         )
 
     /**
-     * Render.
-     *
-     * The engine describes its parameters as: {wait?: bool (default true; the UI renders in the background)}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param wait The key `wait`: wait?: bool (default true; the UI renders in the background)
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun render(
-        vararg namedOnly: NamedArguments,
-        wait: Boolean? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "renderQueue.render",
-            extra,
-            "wait" to wait?.jsonValue,
-        )
-
-    /**
      * Save Template.
      *
      * The engine describes its parameters as: {kind: renderSettings|outputModule, name, item?|index? (save from this item), from?:

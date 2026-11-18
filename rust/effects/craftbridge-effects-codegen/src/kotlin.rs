@@ -1,5 +1,5 @@
-//! The Kotlin facade: one file for each command namespace, with a typed `suspend fun` for each command,
-//! in the shape the plan's API generator design gives:
+//! The Kotlin facade: one file for each command namespace, with a typed `suspend fun` for each command an
+//! app can call ([`crate::facade`]), in the shape the plan's API generator design gives:
 //!
 //! ```kotlin
 //! public val EffectsEngine.layer: LayerCommands
@@ -744,7 +744,7 @@ mod tests {
     fn every_namespace_and_command_at_the_pin_is_emitted_once() {
         let emitted = crate::facade::assert_pin_emitted_once(files, "    public suspend fun ");
         let methods: usize = emitted.iter().map(|(_, text)| text.matches("(\n        vararg namedOnly: NamedArguments,\n").count()).sum();
-        assert_eq!(methods, crate::surface::commands().unwrap().len(), "every method takes its arguments by name");
+        assert_eq!(methods, crate::facade::callable_at_the_pin(), "every method takes its arguments by name");
         for (_, text) in &emitted {
             assert!(!text.contains("!!") && !text.contains("TODO(") && !text.contains("enum class"), "{text}");
             assert!(library_calls(text).is_empty(), "{:?}", library_calls(text));

@@ -18,6 +18,7 @@
           "params": { "type": "string" },
           "journal": { "type": "boolean" },
           "refusedUnderConfinement": { "type": "boolean" },
+          "withheldByPlugin": { "type": "boolean" },
           "keys": {
             "type": "array",
             "items": {

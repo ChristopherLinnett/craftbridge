@@ -18,34 +18,6 @@ extension EffectsEngine {
 }
 
 extension EffectsEngine.LibraryCommands {
-    /// Install Plug-in.
-    ///
-    /// The engine describes its parameters as: {id, version?, wait?} — downloads the release, checks its SHA-256 against the catalog, loads it
-    ///
-    /// - Parameters:
-    ///   - id: The key `id`: id
-    ///   - version: The key `version`: version?
-    ///   - wait: The key `wait`: wait?
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func install(
-        id: JSONValue,
-        version: JSONValue? = nil,
-        wait: JSONValue? = nil,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "library.install",
-            [
-                "id": id.jsonValue,
-                "version": version?.jsonValue,
-                "wait": wait?.jsonValue,
-            ],
-            extra: extra
-        )
-    }
-
     /// Plug-in Library.
     ///
     /// The engine describes its parameters as: {query?, tag?, installed?: bool} → {catalog, fetched, packages: [{id, name, author, description, license, repo, tags, latest, effects, installed, updateAvailable, needsNewerApp, loaded, restartNeeded, video, previewed, unlisted?}], tags, busy, error, folder, available}
@@ -74,23 +46,6 @@ extension EffectsEngine.LibraryCommands {
         )
     }
 
-    /// Load Installed Plug-ins.
-    ///
-    /// The engine describes its parameters as: {} → {loaded, errors} (the app runs it at start-up)
-    ///
-    /// - Parameter extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func loadInstalled(
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "library.loadInstalled",
-            [:],
-            extra: extra
-        )
-    }
-
     /// Missing Effects in the Plug-in Library.
     ///
     /// The engine describes its parameters as: {} → {effects: [{effect, packages: [package id]}]} — effects the project uses that aren't installed, and the catalog packages that provide them
@@ -104,106 +59,6 @@ extension EffectsEngine.LibraryCommands {
         try await self.engine.command(
             "library.missing",
             [:],
-            extra: extra
-        )
-    }
-
-    /// Preview Plug-in.
-    ///
-    /// The engine describes its parameters as: {id, version?, wait?} → {id, version, width, height, fps, frames, changes, animated, effect: manifest} — downloads the release (checked like an install) and renders its effect on a sample frame at default settings, without installing it
-    ///
-    /// - Parameters:
-    ///   - id: The key `id`: id
-    ///   - version: The key `version`: version?
-    ///   - wait: The key `wait`: wait?
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func preview(
-        id: JSONValue,
-        version: JSONValue? = nil,
-        wait: JSONValue? = nil,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "library.preview",
-            [
-                "id": id.jsonValue,
-                "version": version?.jsonValue,
-                "wait": wait?.jsonValue,
-            ],
-            extra: extra
-        )
-    }
-
-    /// Refresh Plug-in Catalog.
-    ///
-    /// The engine describes its parameters as: {catalog?: https:// or file:// URL of an index.json (default: the community catalog), wait?}
-    ///
-    /// - Parameters:
-    ///   - catalog: The key `catalog`: catalog?: https:// or file:// URL of an index.json (default: the community catalog)
-    ///   - wait: The key `wait`: wait?
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func refresh(
-        catalog: JSONValue? = nil,
-        wait: JSONValue? = nil,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "library.refresh",
-            [
-                "catalog": catalog?.jsonValue,
-                "wait": wait?.jsonValue,
-            ],
-            extra: extra
-        )
-    }
-
-    /// Remove Plug-in.
-    ///
-    /// The engine describes its parameters as: {id} — its effects stay registered until the next start
-    ///
-    /// - Parameters:
-    ///   - id: The key `id`: id
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func uninstall(
-        id: JSONValue,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "library.uninstall",
-            [
-                "id": id.jsonValue
-            ],
-            extra: extra
-        )
-    }
-
-    /// Update Plug-ins.
-    ///
-    /// The engine describes its parameters as: {id? (default: every package with an update), wait?}
-    ///
-    /// - Parameters:
-    ///   - id: The key `id`: id? (default: every package with an update)
-    ///   - wait: The key `wait`: wait?
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func update(
-        id: JSONValue? = nil,
-        wait: JSONValue? = nil,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "library.update",
-            [
-                "id": id?.jsonValue,
-                "wait": wait?.jsonValue,
-            ],
             extra: extra
         )
     }

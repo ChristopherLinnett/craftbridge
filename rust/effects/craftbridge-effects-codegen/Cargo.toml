@@ -11,6 +11,9 @@ publish.workspace = true
 [dependencies]
 effectcraft-engine.workspace = true
 effectcraft-automation.workspace = true
+# A host tool may depend on anything. The surface marks each command the plugin's own door refuses on
+# every path, asked of that door, so no second list of what it withholds is kept here (plan §21).
+craftbridge-effects.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
