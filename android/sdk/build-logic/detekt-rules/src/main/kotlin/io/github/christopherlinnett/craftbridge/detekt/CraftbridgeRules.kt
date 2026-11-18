@@ -21,14 +21,20 @@ import dev.detekt.core.suppressors.isSuppressedBy
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.components.KaDiagnosticCheckerFilter
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
+import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolVisibility
 import org.jetbrains.kotlin.analysis.api.types.symbol
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.psi.KtAnnotated
 import org.jetbrains.kotlin.psi.KtAnnotationEntry
+import org.jetbrains.kotlin.psi.KtCallableDeclaration
 import org.jetbrains.kotlin.psi.KtDeclaration
 import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.psi.KtNamedFunction
 import org.jetbrains.kotlin.psi.KtPostfixExpression
+import org.jetbrains.kotlin.psi.KtProperty
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -355,3 +361,98 @@ class GateRuleSuppression(
         val aliases: Set<String>,
     )
 }
+
+/**
+ * A public call written by hand never takes the name of a public call that generated code declares on the
+ * same type (AGENTS.md §9): neither a command namespace's word on the type it hangs off, nor a command's
+ * name on a namespace's type. Kotlin itself refuses one form of the clash alone, an extension property
+ * that a member property of the same name shadows; a member function beside a namespace's property
+ * (`fun script(…)` on `EffectsEngine`), or an extension beside a command method with other parameters
+ * (`fun TemplatesCommands.list()`), compiles, and a call reaches whichever the compiler ranks first, so
+ * `engine.templates.open(…)` would stop being the one call its name says it is.
+ *
+ * Which calls a type has, its members and the extensions of it its package declares, is the compiler's own
+ * answer, however the type is spelt; what is generated is told by where a declaration sits, the module's
+ * generated folder, which the convention plugin writes into the config each run is given. A call the
+ * module keeps to itself (`internal`, `private`) is nobody else's to reach, so only public ones count.
+ */
+class GeneratedNameTaken internal constructor(
+    config: Config,
+    private val generatedPath: ((String) -> Boolean)?,
+) : Rule(config, "a public call written by hand takes no name of a public call generated on the same type"),
+    RequiresAnalysisApi {
+    constructor(config: Config) : this(config, null)
+
+    // Read when a file is judged, as the package rule reads its packages: a run without it is wired wrong.
+    private val generatedFolder: String by config("")
+
+    override fun visitNamedFunction(function: KtNamedFunction) {
+        super.visitNamedFunction(function)
+        check(function)
+    }
+
+    override fun visitProperty(property: KtProperty) {
+        super.visitProperty(property)
+        check(property)
+    }
+
+    private fun isGenerated(path: String): Boolean =
+        generatedPath?.invoke(path) ?: underFolder(
+            generatedFolder.ifEmpty {
+                error("GeneratedNameTaken has no generatedFolder: craftbridge.android.library writes the module's generated folder")
+            },
+            path,
+        )
+
+    private fun check(declaration: KtCallableDeclaration) {
+        val name = declaration.nameAsName ?: return
+        if (isGenerated(declaration.containingKtFile.virtualFilePath)) {
+            return
+        }
+        val taken =
+            analyze(declaration) {
+                val written = declaration.symbol as? KaCallableSymbol
+                // The type the call is reached on: an extension's receiver, a member's class.
+                val owner =
+                    when {
+                        written == null || written.visibility != KaSymbolVisibility.PUBLIC -> null
+                        written.isExtension -> written.receiverParameter?.returnType?.symbol
+                        else -> written.containingDeclaration
+                    } as? KaClassSymbol
+                val ownerId = owner?.classId
+                if (owner == null || ownerId == null) {
+                    emptyList()
+                } else {
+                    val extensions =
+                        findTopLevelCallables(ownerId.packageFqName, name).filter { candidate ->
+                            candidate.isExtension && (candidate.receiverParameter?.returnType?.symbol as? KaClassSymbol)?.classId == ownerId
+                        }
+                    (owner.declaredMemberScope.callables(name) + extensions)
+                        .filter { generated ->
+                            generated.visibility == KaSymbolVisibility.PUBLIC &&
+                                generated.psi
+                                    ?.containingFile
+                                    ?.virtualFile
+                                    ?.path
+                                    ?.let(::isGenerated) == true
+                        }.map { ownerId.asFqNameString() }
+                        .toList()
+                }
+            }
+        taken.firstOrNull()?.let { type ->
+            report(
+                Finding(
+                    Entity.from(declaration),
+                    "`$name` is a public call the generated facade already gives `$type`: a call written by hand takes a " +
+                        "name of its own, or a call that belongs to a namespace extends that namespace's type (AGENTS.md §9)",
+                ),
+            )
+        }
+    }
+}
+
+/** Does `path` sit inside `folder`? A sibling whose name only starts the same is outside it. */
+internal fun underFolder(
+    folder: String,
+    path: String,
+): Boolean = path.startsWith("${folder.trimEnd('/')}/")

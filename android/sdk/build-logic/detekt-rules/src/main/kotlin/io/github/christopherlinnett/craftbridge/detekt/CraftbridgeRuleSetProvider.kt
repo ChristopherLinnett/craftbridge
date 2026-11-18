@@ -27,6 +27,7 @@ class CraftbridgeRuleSetProvider : RuleSetProvider {
                 ::FileWideSuppression,
                 ::GateRuleSuppression,
                 ::ErrorSuppression,
+                ::GeneratedNameTaken,
             ),
         )
 

@@ -10,9 +10,10 @@ import org.gradle.api.tasks.TaskAction
 /**
  * Writes the per-module part of the module's detekt config: the package its files must declare, which
  * the plugin derives from the module's own namespace — a module can no more change what it is checked
- * against than rename itself — and the module's own folder, from which the JNI rule reads a file's
- * source set. Everything else detekt is told lives once, in the profiles under
- * build-logic/detekt-rules/profiles, which each run merges with one of these files.
+ * against than rename itself — the module's own folder, from which the JNI rule reads a file's source
+ * set, and its generated folder, from which the naming rule tells the generated facade from written code.
+ * Everything else detekt is told lives once, in the profiles under build-logic/detekt-rules/profiles,
+ * which each run merges with one of these files.
  */
 abstract class CraftbridgeDetektConfig : DefaultTask() {
     /** The package the module's written code declares: its namespace. */
@@ -30,6 +31,10 @@ abstract class CraftbridgeDetektConfig : DefaultTask() {
     @get:Input
     abstract val moduleDirectory: Property<String>
 
+    /** The module's generated Kotlin folder, named the same way: what sits below it the generator wrote. */
+    @get:Input
+    abstract val generatedFolder: Property<String>
+
     @get:OutputFile
     abstract val writtenConfig: RegularFileProperty
 
@@ -40,9 +45,15 @@ abstract class CraftbridgeDetektConfig : DefaultTask() {
     fun write() {
         // A single-quoted YAML scalar holds any text once its own quote is doubled.
         fun quoted(value: String) = "'" + value.replace("'", "''") + "'"
-        // The JNI rule reads only written code, so only the written file says where the module is.
-        val jni = "  ExternalOutsidePlatformFolder:\n    moduleDirectory: ${quoted(moduleDirectory.get())}\n"
-        for ((file, expected, more) in listOf(Triple(writtenConfig, writtenPackage, jni), Triple(bindingsConfig, bindingsPackage, ""))) {
+        // The JNI and naming rules read only written code, so only the written file says where the module
+        // and its generated folder are.
+        val written =
+            "  ExternalOutsidePlatformFolder:\n    moduleDirectory: ${quoted(moduleDirectory.get())}\n" +
+                "  GeneratedNameTaken:\n    generatedFolder: ${quoted(generatedFolder.get())}\n"
+        for ((file, expected, more) in listOf(
+            Triple(writtenConfig, writtenPackage, written),
+            Triple(bindingsConfig, bindingsPackage, ""),
+        )) {
             file.get().asFile.apply {
                 parentFile.mkdirs()
                 writeText(

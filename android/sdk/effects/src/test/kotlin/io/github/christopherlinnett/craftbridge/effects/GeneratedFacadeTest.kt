@@ -7,66 +7,19 @@ package io.github.christopherlinnett.craftbridge.effects
 import io.github.christopherlinnett.craftbridge.core.JSONValue
 import io.github.christopherlinnett.craftbridge.core.Vec2
 import io.github.christopherlinnett.craftbridge.core.jsonValue
-import kotlin.coroutines.Continuation
-import kotlin.coroutines.CoroutineContext
-import kotlin.coroutines.EmptyCoroutineContext
-import kotlin.coroutines.startCoroutine
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-/** What the engine was asked, kept for the test to read. */
-private class Asked {
-    val all: MutableList<Pair<String, JSONValue>> = mutableListOf()
-
-    fun record(
-        method: String,
-        params: JSONValue,
-    ): JSONValue {
-        all.add(method to params)
-        return JSONValue.Text("done")
-    }
-}
-
-/** Awaiting a call that cannot suspend: every fake engine here answers on the spot, so the call has
- * finished before `startCoroutine` returns and the outcome is already here — no runner beyond the
- * coroutine machinery the standard library itself carries. */
-private fun await(call: suspend () -> JSONValue): Result<JSONValue> {
-    var outcome: Result<JSONValue>? = null
-    call.startCoroutine(
-        object : Continuation<JSONValue> {
-            override val context: CoroutineContext = EmptyCoroutineContext
-
-            override fun resumeWith(result: Result<JSONValue>) {
-                outcome = result
-            }
-        },
-    )
-    return outcome ?: Result.failure(IllegalStateException("the call did not finish on the spot"))
-}
-
 private class Refused : RuntimeException("the engine refused the call")
 
-/** The envelope the transport carries every call in: the command id and its params, in one Object. */
-private fun exec(
-    command: String,
-    params: JSONValue,
-) = JSONValue.Object(
-    mapOf(
-        "command" to JSONValue.Text(command),
-        "params" to params,
-    ),
-)
-
 class GeneratedFacadeTest {
-    private fun engineFor(asked: Asked): EffectsEngine = EffectsEngine { method, params -> asked.record(method, params) }
-
     @Test
     fun aTypedCallSendsTheCommandWithItsKeysAsJSON() {
         val asked = Asked()
         val reply =
             await {
-                engineFor(asked).layer.newText(
+                fakeEngine(asked).layer.newText(
                     text = "Hello".jsonValue,
                     position = Vec2(10.0, 20.0),
                     extra = mapOf("unknownKey" to true.jsonValue),
@@ -92,7 +45,7 @@ class GeneratedFacadeTest {
     @Test
     fun aKeyLeftOutIsNotSent() {
         val asked = Asked()
-        await { engineFor(asked).layer.newText() }
+        await { fakeEngine(asked).layer.newText() }
         val expected = exec("layer.newText", JSONValue.Object(emptyMap()))
         assertEquals(expected, asked.all.first().second)
     }
@@ -101,7 +54,7 @@ class GeneratedFacadeTest {
     fun aTypedKeyIsNotReplacedByAnExtraOne() {
         val asked = Asked()
         await {
-            engineFor(asked).layer.newText(
+            fakeEngine(asked).layer.newText(
                 text = "typed".jsonValue,
                 extra = mapOf("text" to "stray".jsonValue, "other" to JSONValue.Number(1.0)),
             )
@@ -123,7 +76,7 @@ class GeneratedFacadeTest {
     fun aNestedNamespaceIsReachedThroughItsParent() {
         val asked = Asked()
         await {
-            engineFor(asked).layer.mask.motionBlur(
+            fakeEngine(asked).layer.mask.motionBlur(
                 layer = JSONValue.Number(3.0),
                 mask = "Mask 1".jsonValue,
                 mode = LayerMaskCommands.MotionBlurMode.sameAsLayer,
@@ -146,7 +99,7 @@ class GeneratedFacadeTest {
     @Test
     fun aReservedWordIsAKeyAllTheSame() {
         val asked = Asked()
-        await { engineFor(asked).footage.overlayEdit(`in` = 2.0) }
+        await { fakeEngine(asked).footage.overlayEdit(`in` = 2.0) }
         val expected = exec("footage.overlayEdit", JSONValue.Object(mapOf("in" to JSONValue.Number(2.0))))
         assertEquals(expected, asked.all.first().second)
     }
@@ -154,7 +107,7 @@ class GeneratedFacadeTest {
     @Test
     fun aCommandAndTheNamespaceBelowItKeepTheirIdsNames() {
         val asked = Asked()
-        val engine = engineFor(asked)
+        val engine = fakeEngine(asked)
         await { engine.edit.history(steps = 2.0) }
         await { engine.edit.history.list() }
         val expected =
@@ -168,14 +121,14 @@ class GeneratedFacadeTest {
     @Test
     fun aNamespaceNamedFromADigitTakesItsParentsName() {
         val asked = Asked()
-        await { engineFor(asked).view.view3d.front() }
+        await { fakeEngine(asked).view.view3d.front() }
         val expected = exec("view.3d.front", JSONValue.Object(emptyMap()))
         assertEquals(expected, asked.all.first().second)
     }
 
     @Test
     fun anErrorFromTheEngineComesBackAsTheCallsOwnFailure() {
-        val refusing = EffectsEngine { _, _ -> throw Refused() }
+        val refusing = EffectsEngine(fakeCore()) { _, _ -> throw Refused() }
         val outcome = await { refusing.layer.newText() }
         assertTrue(outcome.exceptionOrNull() is Refused, "$outcome")
     }
