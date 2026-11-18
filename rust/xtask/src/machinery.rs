@@ -80,6 +80,8 @@ const MACHINERY: &[&str] = &[
     "tools/oracle.sh",
     "tools/ios-device-test.sh",
     "tools/device-tests.tsv",
+    // The app the runner wraps a Swift package's test bundle in to run its Swift Testing suite on the phone.
+    "tools/ios-test-host.swift",
     // The builds of the native library: the XCFramework the Swift stages build and link against, and the
     // Android libraries the Android stage packages from `jniLibs`.
     "tools/build-xcframework.sh",

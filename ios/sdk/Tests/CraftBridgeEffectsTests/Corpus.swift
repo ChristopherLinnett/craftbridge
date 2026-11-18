@@ -38,12 +38,18 @@ private func names<Key: CaseIterable & CodingKey>(_ keys: Key.Type) -> Set<Strin
 }
 
 extension Corpus {
-    /// The corpus file the desktop runner reads, found from where the compiler read this source, which is
-    /// the repository on the machine that builds the tests, the simulator's host.
-    static let file = URL(filePath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .deletingLastPathComponent().deletingLastPathComponent()
-        .appending(path: "conformance/effects/corpus.toml")
+    /// The corpus file the desktop runner reads. On a phone it is the copy the device runner puts inside the
+    /// app (`conformance/effects` at the bundle's root), since the machine that built the tests is not there;
+    /// everywhere else it is found from where the compiler read this source, which is the repository on the
+    /// machine that builds the tests, the simulator's host.
+    static let file: URL = {
+        let bundled = Bundle.main.bundleURL.appending(path: "conformance/effects/corpus.toml")
+        if FileManager.default.fileExists(atPath: bundled.path(percentEncoded: false)) { return bundled }
+        return URL(filePath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "conformance/effects/corpus.toml")
+    }()
 }
 
 /// Which sides run a scenario.

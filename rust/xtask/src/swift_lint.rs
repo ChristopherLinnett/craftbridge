@@ -46,10 +46,16 @@
 //!   so one the compiler names a generic parameter of one of the package's own modules — the `Self` a
 //!   `where` clause narrows among them — passes though nothing declares it, while an alias the check
 //!   cannot read, as one from a module that ships without its source or a C header's `typedef`, still fails;
-//! * everywhere, a SwiftLint command, which switches SwiftLint's rules off, a swift-format ignore that
-//!   switches every rule off, reaches beyond one function or property, or gives no reason, and the test
-//!   frameworks swift-format exempts from its never-crash rules: XCTest anywhere, Swift Testing outside a
-//!   test target.
+//! * a SwiftLint command, which switches SwiftLint's rules off;
+//! * in every Swift file the rules' walk lists, which swift-format reads, what would cut swift-format's reading
+//!   short: a swift-format ignore that switches every rule off, reaches beyond one function or property, or
+//!   gives no reason, and the test frameworks swift-format exempts from its never-crash rules: XCTest
+//!   anywhere, Swift Testing outside a test target.
+//!
+//! The rules but the last are rules for the Swift that ships, the Swift under the folder the package sits in
+//! (`ios/`), which SwiftLint reads too: the device runner's host in `tools/` is no part of the package, plays a
+//! test binary's part, and is outside the bans on `exit` and on pointer APIs (AGENTS.md §10). swift-format
+//! reads the host, so the last rule reads it as well, through the same server, as code no build compiles.
 //!
 //! Test code is SwiftPM's answer — the files `swift package describe` puts in a test target — and a Platform
 //! folder is a component of the path the repository names the file by: neither is a pattern over an absolute
@@ -261,7 +267,10 @@ pub(crate) fn run(root: &Path) -> ExitCode {
 /// Read every listed Swift file as the stage's rules say, `canonical` the repository's resolved path and
 /// `targets` the package as SwiftPM describes it.
 fn check(root: &Path, canonical: &Path, targets: &[crate::direction::SwiftTarget]) -> Result<Vec<String>, String> {
-    let files = crate::files::listed(root, "swift")?;
+    // Every file swift-format reads is read for what would cut its reading short; the Swift that ships, under
+    // the package's folder, for every rule.
+    let listed = crate::files::listed(root, "swift")?;
+    let files: Vec<String> = listed.iter().filter(|file| in_the_packages_platform(file)).cloned().collect();
     if files.is_empty() {
         return Err("no Swift files for the linter to read".to_string());
     }
@@ -272,9 +281,11 @@ fn check(root: &Path, canonical: &Path, targets: &[crate::direction::SwiftTarget
     // A binary target is a module too, but one built from no source of ours, so nothing says what it declares.
     let modules: BTreeSet<String> = targets.iter().filter(|target| !target.sources.is_empty()).map(|target| target.name.clone()).collect();
     let mut texts = Vec::new();
-    for file in &files {
+    for file in &listed {
         let text = std::fs::read_to_string(canonical.join(file)).map_err(|error| format!("cannot read {file}: {error}"))?;
-        findings.extend(swiftlint_commands(file, &text));
+        if in_the_packages_platform(file) {
+            findings.extend(swiftlint_commands(file, &text));
+        }
         texts.push(text);
     }
     // Where the server's answer can differ between builds: the same token sits at the same place in each
@@ -291,7 +302,7 @@ fn check(root: &Path, canonical: &Path, targets: &[crate::direction::SwiftTarget
         // manifest above all. Opened while the server is still loading a package that links a binary target
         // with C headers, the manifest stalls the server's semantic service, which then answers every file
         // with its syntax alone, and a type name read that way is no name the checks resolve.
-        let (built, unbuilt): (Vec<_>, Vec<_>) = files.iter().zip(&texts).partition(|(file, _)| compiled.contains(file.as_str()));
+        let (built, unbuilt): (Vec<_>, Vec<_>) = listed.iter().zip(&texts).partition(|(file, _)| compiled.contains(file.as_str()));
         for opened in [built, unbuilt] {
             for (file, text) in opened {
                 let path = canonical.join(file);
@@ -309,11 +320,17 @@ fn check(root: &Path, canonical: &Path, targets: &[crate::direction::SwiftTarget
                 prepared.push((*file, uri.clone()));
             }
         }
-        let members = server.pointer_alias_names(&read);
+        // Only the Swift that ships names the aliases its uses are judged by: an alias of the host's is no name
+        // the package's Swift can mean.
+        let shipping: Vec<(&str, String)> = read.iter().filter(|(file, _)| in_the_packages_platform(file)).cloned().collect();
+        let members = server.pointer_alias_names(&shipping);
         for (file, uri) in &read {
             let document = server.document(uri)?;
             findings.extend(ignore_directives(file, &document));
             findings.extend(test_framework_uses(file, &document, tests.contains(*file)));
+            if !in_the_packages_platform(file) {
+                continue;
+            }
             if !tests.contains(*file) {
                 if !exempt(file, POSTFIX_BANG) {
                     findings.extend(postfix_bangs(file, &document));
@@ -489,8 +506,8 @@ fn ignore_directives(file: &str, document: &Document) -> Vec<Finding> {
 }
 
 /// The doors swift-format would let test code through: it exempts from its never-crash rules a whole file
-/// that imports XCTest and every function marked `@Test`. So XCTest is refused everywhere (new tests use
-/// Swift Testing), and Swift Testing outside the files SwiftPM compiles into a test target. An `import` in
+/// that imports XCTest and every function marked `@Test`. So XCTest is refused in every file swift-format reads
+/// (new tests use Swift Testing), and Swift Testing outside the files SwiftPM compiles into a test target. An `import` in
 /// any form (`@testable`, `public`, `import class XCTest.XCTestCase`, spread over lines) is the keyword and
 /// the module the first name after its kind keyword names.
 fn test_framework_uses(file: &str, document: &Document, test: bool) -> Vec<Finding> {
@@ -569,6 +586,14 @@ fn names_pointer(name: &str) -> bool {
     (name.contains("Unsafe") && name.ends_with("Pointer"))
         || name.contains("withUnsafe")
         || matches!(name, "Unmanaged" | "OpaquePointer" | "unsafeBitCast" | "unsafeDowncast")
+}
+
+/// Is `file` in the platform folder the package sits in (`ios/`), the Swift that ships, which every rule of the
+/// stage reads? The code folders' other Swift, the device runner's test host in `tools/`, is no part of the
+/// package and no build of it compiles it: the runner builds it alone, and swift-format reads it, so the stage
+/// reads it only for what would cut that reading short.
+fn in_the_packages_platform(file: &str) -> bool {
+    Path::new(PACKAGE).parent().is_some_and(|platform| Path::new(file).starts_with(platform))
 }
 
 /// Whether a file, as the repository names it, sits under a folder named `Platform`.
@@ -1727,6 +1752,14 @@ mod tests {
             "let a = 1\nabort() // swiftlint:disable:this all\n  // SwiftLint:disable all\n// swiftlint mentioned\n// swiftlint:enable all\n",
         );
         assert_eq!(found.iter().map(|(_, line, column, _)| (*line, *column)).collect::<Vec<_>>(), [(2, 12), (3, 6), (5, 4)]);
+    }
+
+    #[test]
+    fn the_stage_reads_the_swift_of_the_folder_the_package_sits_in_and_no_other() {
+        assert!(in_the_packages_platform("ios/sdk/Sources/CraftBridge/Bytes.swift"));
+        assert!(in_the_packages_platform("ios/samples/App/App.swift"));
+        assert!(!in_the_packages_platform("tools/ios-test-host.swift"));
+        assert!(!in_the_packages_platform("iosx/sdk/Sources/CraftBridge/Bytes.swift"));
     }
 
     #[test]
