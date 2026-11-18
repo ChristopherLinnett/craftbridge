@@ -38,7 +38,7 @@ use filmcraft_isobmff::SampleEntry;
 use ndk::hardware_buffer::{HardwareBuffer, HardwareBufferUsage, LockedPlaneInfo};
 use ndk::hardware_buffer_format::HardwareBufferFormat;
 use ndk::media::image_reader::{AcquireResult, Image, ImageFormat, ImageReader};
-use ndk::media::media_codec::{DequeuedInputBufferResult, DequeuedOutputBufferInfoResult, InputBuffer, MediaCodec, MediaCodecDirection};
+use ndk::media::media_codec::{DequeuedInputBufferResult, DequeuedOutputBufferInfoResult, InputBuffer, MediaCodec, MediaCodecDirection, OutputBuffer};
 use ndk::media::media_format::MediaFormat;
 
 use crate::biplanar::{self, Crop, Depth, Locked, Plane, Strided};
@@ -47,7 +47,7 @@ use crate::mediacodec_input::{self, BACKEND_MIMES, CodecInfo, ReaderFormat};
 use crate::order::{HardwareDecoder, RawDecoder};
 
 /// A failed call, with what failed.
-type Failure = String;
+pub(crate) type Failure = String;
 
 /// The backend's name, which [`crate::register`] reports and every decoder's name starts with.
 pub(crate) const BACKEND: &str = "MediaCodec";
@@ -55,18 +55,29 @@ pub(crate) const BACKEND: &str = "MediaCodec";
 /// Makes the codec a decoder decodes a MIME type with, and makes it again after one that failed to flush:
 /// [`hardware_codec`], bar in a test that feeds another of the device's decoders exactly as the hardware one
 /// is fed.
-type MakeCodec = fn(&str) -> std::result::Result<MediaCodec, Failure>;
+pub(crate) type MakeCodec = fn(&str) -> std::result::Result<MediaCodec, Failure>;
 
 /// How long a wait for the codec or the image reader may take before the decoder gives up on it: far
 /// longer than any decoder takes to start or to hand back a picture, and short enough that a stalled one
-/// is an error the software decoder answers.
-const STALL: Duration = Duration::from_secs(5);
+/// is an error the software decoder answers. An encoder, whose calls are the same codec's, waits no longer.
+pub(crate) const STALL: Duration = Duration::from_secs(5);
 
 /// How long one wait for an input buffer, or for a picture, lasts before it looks again.
-const POLL: Duration = Duration::from_millis(10);
+pub(crate) const POLL: Duration = Duration::from_millis(10);
 
 /// `AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM`.
-const END_OF_STREAM: u32 = 4;
+pub(crate) const END_OF_STREAM: u32 = 4;
+
+/// `AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG`, set on the buffers carrying the codec's own parameter sets.
+pub(crate) const CODEC_CONFIG: u32 = 2;
+
+/// The `MediaFormat` keys the decoder and the encoders both set, by their names there (`KEY_MIME`,
+/// `KEY_WIDTH`, `KEY_HEIGHT`, `KEY_BIT_RATE`, `KEY_COLOR_FORMAT`).
+pub(crate) const MIME: &str = "mime";
+pub(crate) const WIDTH: &str = "width";
+pub(crate) const HEIGHT: &str = "height";
+pub(crate) const BIT_RATE: &str = "bitrate";
+pub(crate) const COLOR_FORMAT: &str = "color-format";
 
 /// The pictures the image reader holds at once. A picture is read and released before the next is taken, so
 /// the codec never waits for a free one; the margin keeps a slow release from stalling it.
@@ -76,8 +87,9 @@ const IMAGES: i32 = 4;
 /// buffers the codec allocates for them are ones the CPU can read.
 const READ_USAGE: HardwareBufferUsage = HardwareBufferUsage::CPU_READ_OFTEN;
 
-/// Turns a failed NDK call into the decoder's error.
-fn step<T, E: std::fmt::Debug>(result: std::result::Result<T, E>, call: &str) -> std::result::Result<T, Failure> {
+/// Turns a failed NDK call into the codec's error, worded for whichever of the decoder and the encoder made
+/// it: both call through here.
+pub(crate) fn step<T, E: std::fmt::Debug>(result: std::result::Result<T, E>, call: &str) -> std::result::Result<T, Failure> {
     result.map_err(|error| format!("{call} failed ({error:?})"))
 }
 
@@ -94,6 +106,14 @@ pub(crate) fn set_device_codecs(codecs: Vec<CodecInfo>) {
     *DEVICE_CODECS.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(codecs);
 }
 
+/// The first of `names` the platform can create, in the device's own order; an error naming what is missing,
+/// which is one wording for the decoders and the encoders alike.
+fn creatable(names: &[&str], mime: &str, what: &str) -> std::result::Result<MediaCodec, Failure> {
+    names.iter().find_map(|name| MediaCodec::from_codec_name(name)).ok_or_else(|| {
+        if names.is_empty() { format!("this device has no {what} for {mime}") } else { format!("none of this device's {what}s for {mime} could be created") }
+    })
+}
+
 /// The first of the device's hardware decoders for `mime`, in the device's own order, that the platform
 /// creates; an error naming why there is none.
 fn hardware_codec(mime: &str) -> std::result::Result<MediaCodec, Failure> {
@@ -103,14 +123,20 @@ fn hardware_codec(mime: &str) -> std::result::Result<MediaCodec, Failure> {
 
 /// [`hardware_codec`] from a given codec list.
 fn listed_hardware_codec(mime: &str, codecs: &[CodecInfo]) -> std::result::Result<MediaCodec, Failure> {
-    let names = mediacodec_input::hardware_decoders(codecs, mime);
-    names.iter().find_map(|name| MediaCodec::from_codec_name(name)).ok_or_else(|| {
-        if names.is_empty() {
-            format!("this device has no hardware decoder for {mime}")
-        } else {
-            format!("none of this device's hardware decoders for {mime} could be created")
-        }
-    })
+    creatable(&mediacodec_input::hardware_decoders(codecs, mime), mime, "hardware decoder")
+}
+
+/// The first of the device's hardware encoders for `mime`, in the device's own order, that the platform
+/// creates; an error naming why there is none. The export starts one exactly where the device's own answer
+/// names one, and declines the movie where it does not (plan §18).
+pub(crate) fn hardware_encoder(mime: &str) -> std::result::Result<MediaCodec, Failure> {
+    let codecs = DEVICE_CODECS.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+    listed_hardware_encoder(mime, codecs.as_deref().ok_or("the device's codec list was not given")?)
+}
+
+/// [`hardware_encoder`] from a given codec list.
+pub(crate) fn listed_hardware_encoder(mime: &str, codecs: &[CodecInfo]) -> std::result::Result<MediaCodec, Failure> {
+    creatable(&mediacodec_input::hardware_encoders(codecs, mime), mime, "hardware encoder")
 }
 
 /// Whether this device has a hardware decoder for `mime`. It does not promise a decoder will start
@@ -144,25 +170,66 @@ struct Pipeline {
 // SAFETY: see the type's documentation.
 unsafe impl Send for Pipeline {}
 
+/// What a binding call gives, or `nothing` as the codec's error where it panics instead.
+///
+/// The bindings panic where the platform answers a buffer or a format with null, as it does once the codec
+/// has failed (a decoder that cannot decode the stream's profile, an encoder that died). The failure lands on
+/// the codec's own thread, so it can come after the buffer was dequeued, and the NDK has no state to ask
+/// first; the bindings' `MediaCodec::input_buffer` and `output_buffer` answer `None` instead, but only by the
+/// buffer's index, which `InputBuffer` and `OutputBuffer` keep to themselves. Catching the panic is what is
+/// left, and it makes the failure the codec's error, never a crash.
+pub(crate) fn caught<T>(call: impl FnOnce() -> T, nothing: &str) -> std::result::Result<T, Failure> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)).map_err(|_| nothing.to_string())
+}
+
+/// The memory of the input buffer the codec handed out, which the caller fills before queueing it.
+pub(crate) fn input_memory<'a>(input: &'a mut InputBuffer<'_>) -> std::result::Result<&'a mut [std::mem::MaybeUninit<u8>], Failure> {
+    caught(move || input.buffer_mut(), "the codec gave no input buffer memory")
+}
+
+/// A copy of what the codec wrote into an output buffer it handed out ([`mediacodec_output::written`]).
+pub(crate) fn output_bytes(output: &OutputBuffer<'_>) -> std::result::Result<Vec<u8>, Failure> {
+    let info = output.info();
+    let buffer = caught(|| output.buffer(), "the codec gave no output buffer memory")?;
+    crate::mediacodec_output::written(buffer, info.offset(), info.size()).map(<[u8]>::to_vec)
+}
+
 /// Copies `data` into the input buffer the codec handed out.
-fn fill(input: &mut InputBuffer<'_>, data: &[u8]) -> std::result::Result<(), Failure> {
-    // `buffer_mut` panics when `AMediaCodec_getInputBuffer` gives no memory, as it does once the codec has
-    // failed (a decoder that cannot decode the stream's profile). The failure lands on the codec's own thread,
-    // so it can come after the buffer was dequeued, and the NDK has no state to ask first; the bindings'
-    // `MediaCodec::input_buffer` answers `None` instead, but only by the buffer's index, which `InputBuffer`
-    // keeps to itself. Catching the panic is what is left, and it makes the failure the decoder's error, never
-    // a crash.
-    let input = &mut *input;
-    let room = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-        let input = input;
-        input.buffer_mut()
-    }))
-    .map_err(|_| "the decoder gave no input buffer memory")?;
-    let (target, _) = room.split_at_mut_checked(data.len()).ok_or("the sample is larger than the decoder's input buffer")?;
+pub(crate) fn fill(input: &mut InputBuffer<'_>, data: &[u8]) -> std::result::Result<(), Failure> {
+    let room = input_memory(input)?;
+    let (target, _) = room.split_at_mut_checked(data.len()).ok_or("the sample is larger than the input buffer the codec handed out")?;
     for (to, from) in target.iter_mut().zip(data) {
         to.write(*from);
     }
     Ok(())
+}
+
+/// Queues one sample: waits up to [`STALL`] for an input buffer, lets `write` fill it and say how many bytes
+/// it wrote, and queues them at `time` with `flags`. While the codec wants no input, `look` gets a turn to
+/// take what has already come out, because a codec that is not read stops taking input.
+pub(crate) fn queue_one(
+    codec: &MediaCodec,
+    time: u64,
+    flags: u32,
+    write: impl FnOnce(&mut InputBuffer<'_>) -> std::result::Result<usize, Failure>,
+    mut look: impl FnMut() -> std::result::Result<(), Failure>,
+) -> std::result::Result<(), Failure> {
+    let deadline = Instant::now() + STALL;
+    loop {
+        match step(codec.dequeue_input_buffer(POLL), "waiting for an input buffer")? {
+            DequeuedInputBufferResult::Buffer(mut input) => {
+                let size = write(&mut input)?;
+                step(codec.queue_input_buffer(input, 0, size, time, flags), "queueing the sample")?;
+                return Ok(());
+            }
+            DequeuedInputBufferResult::TryAgainLater => {
+                look()?;
+                if Instant::now() >= deadline {
+                    return Err("the codec took no input".into());
+                }
+            }
+        }
+    }
 }
 
 /// The image format the NDK makes a reader of `format` with. The P010 one is the HAL format of that name,
@@ -191,10 +258,10 @@ impl Pipeline {
         let reader = image_reader(width, height, layout.depth)?;
         let window = step(reader.window(), "getting the image reader's surface")?;
         let mut format = MediaFormat::new();
-        format.set_str("mime", mime);
-        format.set_i32("width", width);
-        format.set_i32("height", height);
-        format.set_i32("color-format", mediacodec_input::color_format(mediacodec_input::reader_format(layout.depth)));
+        format.set_str(MIME, mime);
+        format.set_i32(WIDTH, width);
+        format.set_i32(HEIGHT, height);
+        format.set_i32(COLOR_FORMAT, mediacodec_input::color_format(mediacodec_input::reader_format(layout.depth)));
         for (key, data) in config {
             format.set_buffer(key, data);
         }
@@ -208,23 +275,17 @@ impl Pipeline {
     /// buffer, which it returns: the codec takes no input until its output is read.
     fn queue(&self, data: &[u8], time: u64, end: bool, layout: &Layout) -> std::result::Result<Vec<(i64, VideoFrame)>, Failure> {
         let mut pictures = Vec::new();
-        let deadline = Instant::now() + STALL;
-        loop {
-            match step(self.codec.dequeue_input_buffer(POLL), "waiting for an input buffer")? {
-                DequeuedInputBufferResult::Buffer(mut input) => {
-                    fill(&mut input, data)?;
-                    let flags = if end { END_OF_STREAM } else { 0 };
-                    step(self.codec.queue_input_buffer(input, 0, data.len(), time, flags), "queueing the sample")?;
-                    return Ok(pictures);
-                }
-                DequeuedInputBufferResult::TryAgainLater => {
-                    pictures.extend(self.pictures(Duration::ZERO, layout)?.0);
-                    if Instant::now() >= deadline {
-                        return Err("the decoder took no input".into());
-                    }
-                }
-            }
-        }
+        queue_one(
+            &self.codec,
+            time,
+            if end { END_OF_STREAM } else { 0 },
+            |input| fill(input, data).map(|()| data.len()),
+            || {
+                pictures.extend(self.pictures(Duration::ZERO, layout)?.0);
+                Ok(())
+            },
+        )?;
+        Ok(pictures)
     }
 
     /// Discards every sample and picture the codec holds, for the codec to take the stream again from a
@@ -425,7 +486,7 @@ impl RawDecoder<DecodedFrame> for RawCodec {
         // until it is flushed, which is how a run ends and keeps the one codec; a codec that failed while
         // draining is never used again: the next run gets a codec of its own, whatever this drain answers.
         let drained = match &self.pipeline {
-            Some(pipeline) => mediacodec_input::until_the_end(STALL, || pipeline.queue(&[], 0, true, &layout), || pipeline.pictures(POLL, &layout)),
+            Some(pipeline) => mediacodec_input::until_the_end(STALL, "decoder", || pipeline.queue(&[], 0, true, &layout), || pipeline.pictures(POLL, &layout)),
             None => Ok(Vec::new()),
         };
         match drained {
@@ -937,7 +998,7 @@ pub(crate) mod tests {
         let pipeline = Pipeline::start(any_codec(H264_MIME).unwrap(), H264_MIME, &layout, &config).unwrap();
         let DequeuedInputBufferResult::Buffer(mut input) = pipeline.codec.dequeue_input_buffer(STALL).unwrap() else { panic!("no input buffer") };
         pipeline.codec.stop().unwrap();
-        assert_eq!(fill(&mut input, &[0, 0, 0, 1]), Err("the decoder gave no input buffer memory".to_string()));
+        assert_eq!(fill(&mut input, &[0, 0, 0, 1]), Err("the codec gave no input buffer memory".to_string()));
     }
 
     /// Stops `raw`'s codec, if it has one, as a codec that fails on its own thread is stopped: every call a drain

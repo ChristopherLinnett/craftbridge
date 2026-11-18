@@ -6,6 +6,10 @@
 pub(crate) mod audioconverter;
 #[cfg(target_os = "android")]
 pub(crate) mod mediacodec;
+#[cfg(target_os = "android")]
+pub(crate) mod mediacodec_aac;
+#[cfg(target_os = "android")]
+pub(crate) mod mediacodec_encoder;
 #[cfg(target_os = "ios")]
 pub(crate) mod videotoolbox;
 #[cfg(target_vendor = "apple")]
