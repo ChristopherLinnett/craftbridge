@@ -108,7 +108,7 @@ extension EffectsEngine {
         transparent: Bool = false,
         format: PixelFormat = .rgba8Straight
     ) async throws -> FrameBytes {
-        try await handle.frame(
+        try await frame(
             params: given([
                 "comp": comp?.jsonValue,
                 "time": time?.jsonValue,
@@ -116,7 +116,7 @@ extension EffectsEngine {
                 "maxSide": maxSide?.jsonValue,
                 "scale": scale?.jsonValue,
                 "transparent": .bool(transparent),
-            ]).jsonText(),
+            ]),
             format: format
         )
     }
@@ -134,10 +134,9 @@ extension EffectsEngine {
         progress: @escaping ProgressHandler = { _, _, _ in },
         extra: [String: JSONValue] = [:]
     ) async throws -> ExportJob {
-        try ExportJob(
-            engine: handle,
-            method: "export",
-            params: exportRequest(comp: comp, to: output, format: format, extra: extra),
+        try job(
+            "export",
+            exportRequest(comp: comp, to: output, format: format, extra: extra),
             progress: progress
         )
     }

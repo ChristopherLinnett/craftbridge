@@ -18,7 +18,12 @@
 #                            cancel_at, a fraction of its frames, is where the listener stops it, and the
 #                            call must not finish before that stop reaches it: the desktop runner holds the
 #                            export at that point until it does, whatever the machine's speed, and fails the
-#                            step of a call it held nowhere, as a fill, or whose stop never came)
+#                            step of a call it held nowhere, as a fill, or whose stop never came. A runner
+#                            that reaches the engine only through the SDK, as a phone's does, has no exporter
+#                            to hold: it stops the call at the first beat past the fraction and fails the step
+#                            unless the render queue says an export of the call met the stop (`UserStopped`,
+#                            where one that rendered every frame first is `Done`), so a call it cannot hold is
+#                            named a race and never passed)
 #                            kind = "frame": params, format = "png" | "rgba8", out
 #                            kind = "mcp": every line of stdin, each reply printed
 #   [[scenario.expect]]      step, output, pointer (RFC 6901), equals or length: a value in a JSON document
@@ -45,7 +50,10 @@
 #
 # In a comparison `reference` is the file the oracle wrote and `actual` the one the plug-in wrote. A scenario
 # that runs on one side alone, on the oracle while the plug-in cannot answer it yet or on the plug-in where
-# the command line has nothing to compare, compares that side's own files, so both are its own.
+# the command line has nothing to compare, compares that side's own files, so both are its own. A runner
+# with no oracle, as a phone's, checks that each file a comparison names is there and holds something, and
+# makes the one comparison that needs no oracle: a `pixels` comparison in a scenario whose steps ask for
+# the GPU, which it holds against the same steps made on the CPU, as the oracle renders them.
 #
 # The values below are the pinned revision's (tools/update-upstream.sh moves it); a pin update that
 # changes one is rechecked against the new revision's command line, never edited to pass.
@@ -769,8 +777,11 @@ sides = "plugin"
 # have been there. The listener answers at its first tenth-of-a-second beat past half the frames, and the
 # desktop runner holds the export at the first frames that reach half, asking again until the plug-in's
 # stop has come, so the exporter always meets that stop with frames left to render and removes the file it
-# opened: the folder holds the control's file alone, however fast or slow the machine is. Sixty frames leave
-# a whole batch of at most 16 after the one that passes half, so the stop is always met before the last.
+# opened: the folder holds the control's file alone, however fast or slow the machine is. Three hundred
+# frames leave a whole batch of at most 16 after the one that passes half, so the stop is always met before
+# the last. The export is the demo's whole length at half size, and not a short one, for the runners that
+# cannot hold an export: the engine's beat then sees it progress by a small part of its frames, so the stop
+# they make at the first beat past half meets an export with most of its second half still to render.
 [[scenario.step]]
 [[scenario.step.call]]
 kind = "request"
@@ -779,7 +790,7 @@ params = { steps = [{ command = "file.openDemoProject" }] }
 [[scenario.step.call]]
 kind = "request"
 method = "export"
-params = { output = "<container>/control.mp4", format = "h264", end = 2, resolution = "quarter" }
+params = { output = "<container>/control.mp4", format = "h264", resolution = "half" }
 progress = {}
 [[scenario.step]]
 [[scenario.step.call]]
@@ -789,7 +800,7 @@ params = { steps = [{ command = "file.openDemoProject" }] }
 [[scenario.step.call]]
 kind = "request"
 method = "export"
-params = { output = "<container>/cancelled.mp4", format = "h264", end = 2, resolution = "quarter" }
+params = { output = "<container>/cancelled.mp4", format = "h264", resolution = "half" }
 progress = { cancel_at = 0.5 }
 [[scenario.expect]]
 step = 0
