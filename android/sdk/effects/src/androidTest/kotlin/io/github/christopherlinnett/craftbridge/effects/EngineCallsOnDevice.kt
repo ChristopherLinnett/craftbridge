@@ -33,13 +33,16 @@ private const val CANCEL_FRAMES = 3_000
 /** How long a check waits for an export to report itself rendering before giving up on it. */
 private const val WAIT_FOR_RENDER = 120_000L
 
-/** The engine every engine check starts, ended again however the checks it runs end. */
+/**
+ * The engine every engine check starts, through the SDK's own start, which hands the device's codec list over
+ * first, and ended again however the checks it runs end.
+ */
 internal suspend fun onEngine(
     context: Context,
     gpu: GpuChoice = GpuChoice.CPU_ONLY,
     check: suspend (Engine) -> Unit,
 ) {
-    val engine = Engine.fromBoundary(startEffectsEngine(Folders.appDefault(context).toFfi(), gpu))
+    val engine = Engine.start(Folders.appDefault(context)) { startEffectsEngine(it, gpu) }
     try {
         check(engine)
     } finally {

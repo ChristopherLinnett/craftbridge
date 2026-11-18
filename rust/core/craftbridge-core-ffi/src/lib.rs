@@ -28,6 +28,7 @@
 
 mod blocking;
 mod cancel;
+mod codecs;
 mod crossing;
 mod engine;
 mod error;
@@ -41,6 +42,7 @@ mod recovery;
 mod surface_tests;
 
 pub use cancel::CancelToken;
+pub use codecs::{CodecInfo, set_device_codecs};
 pub use crossing::{MAX_ANSWER_BYTES, MAX_FRAME_BYTES, MAX_MCP_LINE_BYTES};
 pub use engine::Engine;
 pub use error::{CraftError, craft_error_message};

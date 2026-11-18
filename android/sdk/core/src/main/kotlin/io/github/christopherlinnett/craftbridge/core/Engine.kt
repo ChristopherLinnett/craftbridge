@@ -2,6 +2,7 @@
 
 package io.github.christopherlinnett.craftbridge.core
 
+import io.github.christopherlinnett.craftbridge.ffi.core.setDeviceCodecs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
@@ -13,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.github.christopherlinnett.craftbridge.ffi.core.CancelToken as BoundaryCancelToken
 import io.github.christopherlinnett.craftbridge.ffi.core.Engine as BoundaryEngine
+import io.github.christopherlinnett.craftbridge.ffi.core.Folders as BoundaryFolders
 
 /**
  * One engine, called as Kotlin coroutines: [request] for the calls that answer at once,
@@ -35,9 +37,28 @@ public class Engine internal constructor(
     public companion object {
         /**
          * The engine a Craft app plugin started through its own native boundary, as the core's calls
-         * take it. A plugin's own start calls this; an app is handed an engine and names no boundary.
+         * take it. A plugin's own start goes through [start], which calls this once it has handed the
+         * device's codec list over: an engine started without the list decodes every stream in software.
+         * An app is handed an engine and names no boundary.
          */
         public fun fromBoundary(boundary: BoundaryEngine): Engine = Engine(boundary)
+
+        /**
+         * Start an engine in [folders] through a Craft app plugin's own native start, [begin], which is handed the
+         * folders as the boundary takes them. The device's codec list is read and handed over first, since the
+         * start registers the hardware decoders from it: an engine started without it decodes every stream in
+         * software, and its `info` says `hardwareDecoding` is false. A plugin's own start calls this; an app is
+         * handed an engine and names no boundary.
+         *
+         * @throws CraftException for whatever [begin] refuses the start with.
+         */
+        public fun start(
+            folders: Folders,
+            begin: (BoundaryFolders) -> BoundaryEngine,
+        ): Engine {
+            setDeviceCodecs(deviceCodecs())
+            return fromBoundary(mapped { begin(folders.toFfi()) })
+        }
     }
 
     /**

@@ -10,6 +10,8 @@ use filmcraft_codecs::hw::{NalCodec, NalStreamInfo, StreamInfo};
 use filmcraft_isobmff::SampleEntry;
 
 use crate::biplanar::{Crop, Depth, Plane, Strided};
+// Re-exported: the Android decoder and its encoders name the codec list's entry through this module.
+pub(crate) use crate::codec_list::CodecInfo;
 use crate::layout::{self, Codec, Layout};
 
 /// What every NAL unit of an Annex B byte stream starts with.
@@ -144,23 +146,6 @@ pub(crate) fn codec_time(pts: i64) -> Result<u64, &'static str> {
 /// The presentation time of the picture MediaCodec gives `time`, which [`codec_time`] made.
 pub(crate) fn stream_time(time: i64) -> i64 {
     time.saturating_sub(TIME_OFFSET)
-}
-
-/// One entry of the device's codec list, `MediaCodecList(MediaCodecList.REGULAR_CODECS)`, with what its
-/// `MediaCodecInfo` answers. The regular codecs are the ones the platform's own lookup by type chooses from;
-/// the others work only with special surfaces, secure-only or tunnelled-only ones, and an image reader's
-/// surface is neither.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CodecInfo {
-    /// `getName()`: the name the codec is created by.
-    pub name: String,
-    /// `getSupportedTypes()`: the MIME types the codec takes.
-    pub types: Vec<String>,
-    /// `isEncoder()`.
-    pub encoder: bool,
-    /// `isHardwareAccelerated()` (API 29, the SDK's minSdk): the platform's own answer to whether the codec
-    /// runs in hardware.
-    pub hardware_accelerated: bool,
 }
 
 /// The device's hardware decoders for `mime`, in the order the device lists them. A decoder counts as
