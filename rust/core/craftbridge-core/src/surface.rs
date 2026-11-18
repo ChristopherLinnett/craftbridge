@@ -467,8 +467,9 @@ mod tests {
         assert_eq!(surface.present(&rig.device, &rig.queue, &frame(&rig)), Err(outdated));
         assert_eq!(scripted.configured(), [(320, 240), (640, 480), (240, 320)], "one configuration per size");
         assert_eq!(scripted.acquired(), 0, "a present that finds a resize does not draw");
-        // The platform's choice, from what the script offers: post-multiplied BGRA, as the host takes it.
-        let choice = Choice { format: wgpu::TextureFormat::Bgra8Unorm, alpha_mode: wgpu::CompositeAlphaMode::PostMultiplied, output: Output::PostMultiplied };
+        // The platform's own choice from what the script offers, by the rule the attach uses: the
+        // tests above pin that rule for each platform, and this one that attaching applies it.
+        let choice = Choice::from_capabilities(Platform::current(), &scripted.capabilities(&rig.adapter)).expect("the script offers the platform's format");
         assert_eq!(surface.choice(), choice);
     }
 
