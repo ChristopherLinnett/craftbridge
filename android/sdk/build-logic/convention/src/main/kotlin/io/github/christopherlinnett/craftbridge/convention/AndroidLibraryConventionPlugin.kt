@@ -1,6 +1,7 @@
 package io.github.christopherlinnett.craftbridge.convention
 
 import com.android.build.api.dsl.LibraryExtension
+import io.github.christopherlinnett.craftbridge.testcount.TestCountVerification
 import org.gradle.api.GradleException
 import org.gradle.api.JavaVersion
 import org.gradle.api.Plugin
@@ -137,7 +138,12 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
             // so the tests run on that version or the build fails, never on one nobody read.
             dependencies.addProvider("testImplementation", catalogLibrary("kotlin-test-testng"))
             dependencies.addProvider("testImplementation", catalogLibrary("testng"))
-            tasks.withType<Test>().configureEach { useTestNG() }
+            // Each unit test task then runs on TestNG, named there with TestNG's own reporter, and answers
+            // for what its run was: the tests it compiles are compared with the tests TestNG reports it ran,
+            // by the one definition in build-logic's build `shared`, so a test the run silently skips fails
+            // the module by name.
+            TestCountVerification.install(this)
+            tasks.withType<Test>().configureEach { TestCountVerification.verify(this) }
 
             // AGP 9 compiles Kotlin itself and registers this extension for it.
             extensions.configure<KotlinAndroidProjectExtension> {

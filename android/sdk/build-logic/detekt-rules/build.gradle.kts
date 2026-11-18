@@ -5,9 +5,11 @@
 // any module ships.
 
 // The one definition of the licence listing that `gateToolLicences` below prints, shared with
-// `runtimeLicences`: code of the build `licence-listing`, on build-logic's root build-script classpath
-// (../build.gradle.kts), because a build script cannot load a project of its own build.
+// `runtimeLicences`, and of the written-against-run test count wired below, shared with every module:
+// code of the build `shared`, on build-logic's root build-script classpath (../build.gradle.kts),
+// because a build script cannot load a project of its own build.
 import io.github.christopherlinnett.craftbridge.licences.LicenceListing
+import io.github.christopherlinnett.craftbridge.testcount.TestCountVerification
 
 // Kotlin at the version Gradle itself embeds, as kotlin-dsl compiles the convention plugins, without the
 // Gradle-plugin tooling kotlin-dsl adds: this project is a jar of detekt rules, not a Gradle plugin.
@@ -44,7 +46,17 @@ dependencies {
     // The binding drags a TestNG of its own along transitively, so the TestNG is named beside it, as
     // `craftbridge.android.library` names it for every module: the catalog's, strict.
     testImplementation(libs.testng)
+    // The written-against-run count's own tests run here, with the rules' other tests: the count is
+    // gate machinery of the build `shared`, and its tests are gate tests — counted, as every test here is.
+    testImplementation("io.github.christopherlinnett.craftbridge.build:shared")
 }
+
+// The rules' own tests are counted written against run by the same one definition the modules' unit
+// tests are counted with: a rule's test that TestNG never runs would leave that rule untested while the
+// stage reads green, which is what the count exists to name, for the gate's own tests as much as for any
+// module's. Its verifier registers here, in the build file's own body, before the test task is
+// configured: Gradle takes no new task from inside a task's configuration.
+TestCountVerification.install(project)
 
 tasks.test {
     // The framework is named, not left to kotlin-test's default binding; useTestNG also points
@@ -52,6 +64,7 @@ tasks.test {
     useTestNG()
     // The profiles say which rules run, and a test reads them: a change to one runs the tests again.
     inputs.dir("profiles")
+    TestCountVerification.verify(this)
 }
 
 // The gate's own tooling, resolved for the licence check: `cargo xtask rules` asks Gradle
