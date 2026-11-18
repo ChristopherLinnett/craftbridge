@@ -2,7 +2,8 @@
 //! name — the toolchain's targets and the catalog's Android pins — as `key=value` lines, and
 //! `cargo xtask swift-builds` prints the Swift package's shipping builds — a configuration and an
 //! `xcodebuild` destination, and the architectures to build it for, for every Apple slice the toolchain
-//! file names — as `configuration<TAB>destination<TAB>architectures` lines. `tools/ci.sh` and
+//! file names — as `configuration<TAB>destination<TAB>architectures` lines, and `cargo xtask swift-suite`
+//! the one of those the Swift Testing suite runs on, in the same shape. `tools/ci.sh` and
 //! `tools/doctor.sh` read every pin through these commands and read no pin by text themselves, and the
 //! XCFramework is built for the same slices (`crate::xcframework`).
 //!
@@ -12,8 +13,9 @@
 //! spelling of each value and misread or stop on every other.
 //!
 //! This is the one reader of both files: of the toolchain file's channel and targets, and its Apple slices — the rows below
-//! say what the Swift checks read the sources as (`rust/xtask/src/swift_lint.rs`) and what the
-//! `swift_build` stage compiles, so the list of slices the package ships for exists exactly once — and of
+//! say what the Swift checks read the sources as (`rust/xtask/src/swift_lint.rs`), what the `swift_build`
+//! stage compiles, and on which of those destinations the Swift Testing suite runs, so the list of slices
+//! the package ships for exists exactly once — and of
 //! the catalog, whose pins the doctor checks and whose libraries and plugins the licence check reads
 //! (`rust/xtask/src/licences.rs`).
 
@@ -36,6 +38,12 @@ pub(crate) const CATALOG_PINS: [&str; 4] = ["android-compileSdk", "android-minSd
 /// The configurations the Swift package ships as: the Debug a developer builds, and the Release a library
 /// is shipped in. An `#if !DEBUG` compiles code no Debug build sees, so both ship.
 const SWIFT_CONFIGURATIONS: [&str; 2] = ["Debug", "Release"];
+
+/// The configuration the Swift Testing suite runs in: the one a developer and `swift test` run it in.
+/// `swift_build` compiles the test targets in both configurations, so the Release build of every `#if`
+/// branch is still compiled; running the suite twice a gate would exercise the same native library twice,
+/// at the suite's whole cost again, to test the same code with the optimiser on.
+const SWIFT_TEST_CONFIGURATION: &str = "Debug";
 
 /// One Apple slice: the Rust target that names it, the architecture and environment its Swift target
 /// triple is built from, the SDK `xcrun` names, how a message names it, and the destination `xcodebuild`
@@ -173,18 +181,57 @@ fn swift_builds(root: &Path) -> Result<Vec<String>, String> {
     let slices = apple_slices(root)?;
     let mut lines: Vec<String> = Vec::new();
     for slice in &slices {
-        let mut architectures: Vec<&str> = Vec::new();
-        for same in slices.iter().filter(|same| same.destination == slice.destination) {
-            if !architectures.contains(&same.architecture) {
-                architectures.push(same.architecture);
-            }
-        }
         for configuration in SWIFT_CONFIGURATIONS {
-            let line = format!("{configuration}\t{}\t{}", slice.destination, architectures.join(" "));
+            let line = build_line(configuration, slice, &slices);
             if !lines.contains(&line) {
                 lines.push(line);
             }
         }
+    }
+    Ok(lines)
+}
+
+/// One destination's build line, read from the table: the configuration, the destination the table gives
+/// the slice, and the architectures of every slice that shares that destination, which a build takes as
+/// `ARCHS` because a generic destination builds them all.
+fn build_line(configuration: &str, slice: &Slice, slices: &[&Slice]) -> String {
+    let mut architectures: Vec<&str> = Vec::new();
+    for same in slices.iter().filter(|same| same.destination == slice.destination) {
+        if !architectures.contains(&same.architecture) {
+            architectures.push(same.architecture);
+        }
+    }
+    format!("{configuration}\t{}\t{}", slice.destination, architectures.join(" "))
+}
+
+/// Is this slice a simulator's? Its row's environment, which its Swift target triple is built from, is
+/// `-simulator`, and a device's row has none — the Intel simulator's Rust target, `x86_64-apple-ios`,
+/// spells none either — so the table says which slices a suite may run on without a second list naming
+/// them.
+fn is_simulator(slice: &Slice) -> bool {
+    slice.environment == "-simulator"
+}
+
+/// The build the Swift Testing suite runs on: the simulator build of [`swift_builds`], in the
+/// configuration the suite runs in. The destination is the table's own, so the stage that runs the suite
+/// reads its destination from the one list and holds none of its own; it makes that destination concrete
+/// with a simulator the machine already has, which is the machine's to have and not the gate's to name. A
+/// toolchain that lists no simulator slice leaves the suite with no destination to run on, which stops the
+/// stage rather than letting it pass having run nothing: a phone is no destination for the gate, whose
+/// corpus on a phone is a device acceptance run (plan §28).
+fn swift_suite(root: &Path) -> Result<Vec<String>, String> {
+    let slices = apple_slices(root)?;
+    let mut lines: Vec<String> = Vec::new();
+    for slice in &slices {
+        if is_simulator(slice) {
+            let line = build_line(SWIFT_TEST_CONFIGURATION, slice, &slices);
+            if !lines.contains(&line) {
+                lines.push(line);
+            }
+        }
+    }
+    if lines.is_empty() {
+        return Err(format!("{TOOLCHAIN}: names no simulator target, so the Swift Testing suite has no destination to run on (rust/xtask/src/pins.rs)"));
     }
     Ok(lines)
 }
@@ -197,6 +244,11 @@ pub(crate) fn run(root: &Path) -> ExitCode {
 /// `cargo xtask swift-builds`: the Swift package's shipping builds.
 pub(crate) fn builds(root: &Path) -> ExitCode {
     crate::report::print_lines(swift_builds(root), "swift-builds")
+}
+
+/// `cargo xtask swift-suite`: the build the Swift Testing suite runs on.
+pub(crate) fn suite(root: &Path) -> ExitCode {
+    crate::report::print_lines(swift_suite(root), "swift-suite")
 }
 
 #[cfg(test)]
@@ -304,6 +356,33 @@ mod tests {
                 "Release\tgeneric/platform=iOS Simulator\tarm64 x86_64"
             ],
             "one destination is built once, for every architecture the toolchain names for it"
+        );
+    }
+
+    #[test]
+    fn the_suite_runs_on_the_simulator_build_the_table_lists() {
+        let canonical = scratch_with(TOOLCHAIN_BASIC, CATALOG_BASIC, "suite-canonical");
+        let suite = swift_suite(&canonical.0).unwrap();
+        assert_eq!(suite, ["Debug\tgeneric/platform=iOS Simulator\tarm64"], "the device build runs no suite: the gate has no phone");
+        for line in &suite {
+            assert!(swift_builds(&canonical.0).unwrap().contains(line), "the suite runs on a build the table lists, never on one of its own: {line}");
+        }
+        // The Intel simulator shares the arm64 one's destination, so the one line names both its
+        // architectures, exactly as the build line of that destination does.
+        let intel =
+            scratch_with(&TOOLCHAIN_BASIC.replace("aarch64-apple-ios-sim", "aarch64-apple-ios-sim\", \"x86_64-apple-ios"), CATALOG_BASIC, "suite-intel");
+        assert_eq!(swift_suite(&intel.0).unwrap(), ["Debug\tgeneric/platform=iOS Simulator\tarm64 x86_64"]);
+        // A toolchain of device slices alone leaves the suite with nowhere to run, which is refused rather
+        // than a stage that passes having run nothing.
+        let device_only = scratch_with("[toolchain]\ntargets = [\"aarch64-apple-ios\"]\n", CATALOG_BASIC, "suite-device-only");
+        assert_eq!(
+            swift_suite(&device_only.0).unwrap_err(),
+            format!("{TOOLCHAIN}: names no simulator target, so the Swift Testing suite has no destination to run on (rust/xtask/src/pins.rs)")
+        );
+        assert_eq!(
+            swift_suite(&crate::repo_root()).unwrap(),
+            ["Debug\tgeneric/platform=iOS Simulator\tarm64"],
+            "the tree's own toolchain runs the suite on the arm64 simulator, and on one destination only"
         );
     }
 

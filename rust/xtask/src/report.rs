@@ -36,6 +36,18 @@ pub(crate) fn print_lines(lines: Result<Vec<String>, String>, command: &str) -> 
     }
 }
 
+/// The exit of a command whose work is a program it ran: that program's own status, so the script that
+/// started the command reads the program's success or failure as its own. A program a signal ended has no
+/// status, and which signal it was says who ended it — the system killing it, somebody at the terminal —
+/// so that is said, as [`failed`] says it.
+pub(crate) fn exit_of(command: &str, program: &str, status: std::process::ExitStatus) -> std::process::ExitCode {
+    match status.code() {
+        Some(0) => std::process::ExitCode::SUCCESS,
+        Some(code) => std::process::ExitCode::from(code.clamp(1, 255) as u8),
+        None => failed(command, format!("{program} was ended by {status}")),
+    }
+}
+
 /// Path as the repository expects to see it in a message: relative to the root, `/` separated, so a
 /// report from another machine's checkout points at the same file. A tool may hand back the root's
 /// resolved path (Cargo does, for a checkout reached through a symbolic link such as macOS's `/var`), so

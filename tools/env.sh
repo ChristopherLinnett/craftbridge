@@ -277,6 +277,10 @@ craftbridge_xtask_build() {
 # fetch cache is not a source, and no build reads it.
 export CRAFTBRIDGE_UPSTREAM_CACHE="${CRAFTBRIDGE_UPSTREAM_CACHE:-$HOME/.cache/craftbridge/upstream/effectcraft}"
 
+# Where the runs that share this machine's iPhone simulators take turns on them (`cargo xtask simulator`,
+# rust/xtask/src/simulator.rs): outside every checkout, so a run in one worktree sees the runs in another.
+export CRAFTBRIDGE_SIMULATOR_LOCKS="${CRAFTBRIDGE_SIMULATOR_LOCKS:-$HOME/.cache/craftbridge/simulators}"
+
 # The Xcode release the iOS build is made and tested with.
 export CRAFTBRIDGE_XCODE="26.6"
 
