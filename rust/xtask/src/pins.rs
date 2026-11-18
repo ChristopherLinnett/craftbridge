@@ -3,7 +3,9 @@
 //! `cargo xtask swift-builds` prints the Swift package's shipping builds — a configuration and an
 //! `xcodebuild` destination, and the architectures to build it for, for every Apple slice the toolchain
 //! file names — as `configuration<TAB>destination<TAB>architectures` lines, and `cargo xtask swift-suite`
-//! the one of those the Swift Testing suite runs on, in the same shape. `tools/ci.sh` and
+//! the one of those the Swift Testing suite runs on, in the same shape. `cargo xtask swift-products`
+//! prints the package's library products, one name per line, as its manifest lists them, which the
+//! `swift_build` stage builds the way an app extension links them. `tools/ci.sh` and
 //! `tools/doctor.sh` read every pin through these commands and read no pin by text themselves, and the
 //! XCFramework is built for the same slices (`crate::xcframework`).
 //!
@@ -251,6 +253,50 @@ pub(crate) fn suite(root: &Path) -> ExitCode {
     crate::report::print_lines(swift_suite(root), "swift-suite")
 }
 
+/// The Swift package's library products, in the manifest's order: what an app links, and what its own
+/// extension may link too. `swift_build` builds each of them the way an extension links it, and names
+/// them through this command so no stage holds a second list of what the package ships.
+fn swift_products(root: &Path) -> Result<Vec<String>, String> {
+    let package = crate::direction::dump_package(&root.join("ios").join("sdk"), crate::direction::FILE)?
+        .ok_or_else(|| format!("{}: no Swift package to list products of", crate::direction::FILE))?;
+    library_names(&package)
+}
+
+/// The kinds of product SwiftPM writes that are no library, so no extension links them.
+const OTHER_PRODUCT_KINDS: &[&str] = &["executable", "plugin", "test", "macro", "snippet"];
+
+/// The names of the library products of a dumped package: a library of any kind — automatic, static or
+/// dynamic — ships as a library whoever links it, an extension included. SwiftPM writes a product's type
+/// as a table tagged by its one kind, `{"library": ["automatic"]}` beside `{"executable": null}`. A product
+/// whose type is written any other way — no kind, several, or one SwiftPM does not write — is refused by
+/// name rather than skipped: a library this reader failed to recognise would be left out of the extension
+/// builds with nothing to say so.
+fn library_names(package: &serde_json::Value) -> Result<Vec<String>, String> {
+    let file = crate::direction::FILE;
+    let mut names = Vec::new();
+    for product in package.get("products").and_then(serde_json::Value::as_array).into_iter().flatten() {
+        let name = product.get("name").and_then(serde_json::Value::as_str).unwrap_or_default();
+        let kind = product.get("type").and_then(serde_json::Value::as_object).filter(|kinds| kinds.len() == 1).and_then(|kinds| kinds.keys().next());
+        match kind.map(String::as_str) {
+            Some("library") if name.is_empty() => return Err(format!("{file}: a library product has no name to build")),
+            Some("library") => names.push(name.to_string()),
+            Some(other) if OTHER_PRODUCT_KINDS.contains(&other) => {}
+            _ => {
+                return Err(format!(
+                    "{file}: product `{name}` has a type this reader does not know, so it cannot tell whether an extension links it: {}",
+                    product.get("type").unwrap_or(&serde_json::Value::Null)
+                ));
+            }
+        }
+    }
+    Ok(names)
+}
+
+/// `cargo xtask swift-products`: the Swift package's library products, as its manifest lists them.
+pub(crate) fn products(root: &Path) -> ExitCode {
+    crate::report::print_lines(swift_products(root), "swift-products")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,5 +473,80 @@ mod tests {
         assert_eq!(toolchain_channel(&scratch_with(TOOLCHAIN_OTHER_FORM, CATALOG_BASIC, "pins-channel-form").0).unwrap(), "1.99.1");
         let no_channel = scratch_with("[toolchain]\ntargets = [\"aarch64-apple-ios\"]\n", CATALOG_BASIC, "pins-channel-missing");
         assert_eq!(toolchain_channel(&no_channel.0).unwrap_err(), format!("{TOOLCHAIN}: names no channel for the build to run in"));
+    }
+
+    /// The shape `swift package dump-package` prints its products in: automatic, static and dynamic
+    /// libraries, an executable, a plugin.
+    const PRODUCTS: &str = r#"{"products": [
+        {"name": "CraftBridge", "type": {"library": ["automatic"]}},
+        {"name": "CraftBridgeStatic", "type": {"library": ["static"]}},
+        {"name": "Tool", "type": {"executable": null}},
+        {"name": "Plug", "type": {"plugin": null}},
+        {"name": "CraftBridgeDynamic", "type": {"library": ["dynamic"]}}
+    ]}"#;
+
+    /// A library of any kind is a library whoever links it, so every kind reads as one; an executable and
+    /// a plugin are no library.
+    #[test]
+    fn library_products_are_read_however_the_manifest_writes_them() {
+        let package: serde_json::Value = serde_json::from_str(PRODUCTS).unwrap();
+        assert_eq!(library_names(&package).unwrap(), ["CraftBridge", "CraftBridgeStatic", "CraftBridgeDynamic"]);
+    }
+
+    /// A product typed in a shape SwiftPM does not write — the plain word, no type, an empty table, two
+    /// kinds in one, a kind of no name this reader knows, a known one in a case SwiftPM does not write — is refused by name, in these words, as is a
+    /// library with no name: a skipped one would be a library the extension builds leave out.
+    #[test]
+    fn a_product_the_reader_cannot_place_is_refused_by_name() {
+        let unknown = |name: &str, kind: &str| {
+            format!(
+                "{}: product `{name}` has a type this reader does not know, so it cannot tell whether an extension links it: {kind}",
+                crate::direction::FILE
+            )
+        };
+        let unnamed = format!("{}: a library product has no name to build", crate::direction::FILE);
+        for (product, message) in [
+            (r#"{"name": "Plain", "type": "library"}"#, unknown("Plain", r#""library""#)),
+            (r#"{"name": "NoType"}"#, unknown("NoType", "null")),
+            (r#"{"name": "Empty", "type": {}}"#, unknown("Empty", "{}")),
+            (
+                r#"{"name": "Mixed", "type": {"library": ["automatic"], "executable": null}}"#,
+                unknown("Mixed", r#"{"executable":null,"library":["automatic"]}"#),
+            ),
+            (r#"{"name": "Tools", "type": {"executable": null, "plugin": null}}"#, unknown("Tools", r#"{"executable":null,"plugin":null}"#)),
+            (r#"{"name": "Odd", "type": {"framework": null}}"#, unknown("Odd", r#"{"framework":null}"#)),
+            (r#"{"name": "Cased", "type": {"Library": ["automatic"]}}"#, unknown("Cased", r#"{"Library":["automatic"]}"#)),
+            (r#"{"name": "Shouted", "type": {"EXECUTABLE": null}}"#, unknown("Shouted", r#"{"EXECUTABLE":null}"#)),
+            (r#"{"name": "", "type": {"library": ["automatic"]}}"#, unnamed.clone()),
+            (r#"{"type": {"library": ["static"]}}"#, unnamed),
+        ] {
+            let package: serde_json::Value = serde_json::from_str(&format!(r#"{{"products": [{product}]}}"#)).unwrap();
+            assert_eq!(library_names(&package).unwrap_err(), message, "{product}");
+        }
+    }
+
+    /// SwiftPM's own dump of a manifest, not a fixture of it: every library product the manifest lists is
+    /// read, of each kind and in its order, and a product of another kind is not, so a library added to the
+    /// manifest joins the list with no other edit; a manifest that lists none gives an empty list, which the
+    /// stage refuses rather than building nothing. SwiftPM dumps the manifest alone, so the targets it names
+    /// need no sources and the list stands before any build of the package.
+    #[test]
+    #[cfg_attr(not(target_os = "macos"), ignore = "asks SwiftPM through xcrun, which only macOS has")]
+    fn the_products_are_what_swiftpm_dumps_of_the_manifest() {
+        let manifest = |products: &str| {
+            format!(
+                "// swift-tools-version: 6.0\nimport PackageDescription\nlet package = Package(\n    name: \"CraftBridge\",\n    products: [{products}],\n    targets: [.target(name: \"CraftBridge\"), .target(name: \"CraftBridgeEffects\", dependencies: [\"CraftBridge\"]), .executableTarget(name: \"Tool\")]\n)\n"
+            )
+        };
+        let scratch = crate::scratch::Scratch::new("swift-products");
+        scratch.write(
+            crate::direction::FILE,
+            manifest(
+                ".library(name: \"CraftBridge\", targets: [\"CraftBridge\"]), .executable(name: \"Tool\", targets: [\"Tool\"]), .library(name: \"CraftBridgeEffects\", type: .static, targets: [\"CraftBridgeEffects\"]), .library(name: \"CraftBridgeAdded\", type: .dynamic, targets: [\"CraftBridgeEffects\"])",
+            ),
+        );
+        assert_eq!(swift_products(&scratch.0).unwrap(), ["CraftBridge", "CraftBridgeEffects", "CraftBridgeAdded"]);
+        scratch.write(crate::direction::FILE, manifest(""));
+        assert_eq!(swift_products(&scratch.0).unwrap(), Vec::<String>::new());
     }
 }

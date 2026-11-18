@@ -5,7 +5,8 @@
 //! lists its stages read, `cargo xtask files <kind>`; the pins the doctor and the gate read,
 //! `cargo xtask pins`, the Swift package's builds `cargo xtask swift-builds`, and the one of those the
 //! Swift Testing suite runs on, `cargo xtask swift-suite`, and the iPhone simulator it runs on, shared
-//! with every other run on the machine, `cargo xtask simulator -- <program>…`; the Swift stage's formatter check,
+//! with every other run on the machine, `cargo xtask simulator -- <program>…`; the package's library products,
+//! which an app's own extension links too, `cargo xtask swift-products`; the Swift stage's formatter check,
 //! `cargo xtask swift-format`, and its check of the names hand-written Swift gives beside generated Swift,
 //! `cargo xtask swift-api <graphs>…`; the XCFramework `tools/build-xcframework.sh` builds,
 //! `cargo xtask xcframework`; and for `tools/build-android.sh`, the native library the SDK ships,
@@ -248,6 +249,7 @@ fn dispatch(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
         ["elf-alignment", readelf, libraries @ ..] => elf_alignment::run(readelf, libraries),
         ["swift-builds"] => pins::builds(&root),
         ["swift-suite"] => pins::suite(&root),
+        ["swift-products"] => pins::products(&root),
         ["simulator", "--", program @ ..] => simulator::run(program),
         ["xcframework"] => xcframework::run(&root),
         ["sdk-library"] => layers::run_sdk_library(),
@@ -283,6 +285,7 @@ fn usage() {
     eprintln!("       cargo xtask elf-alignment <llvm-readelf> <library>...   (every library aligned to 16 KB pages)");
     eprintln!("       cargo xtask swift-builds   (every build the Swift package ships: a configuration, a destination and its architectures per line)");
     eprintln!("       cargo xtask swift-suite   (the build the Swift Testing suite runs on, read from that same table)");
+    eprintln!("       cargo xtask swift-products   (the Swift package's library products, as its manifest lists them: what an app's extension links)");
     eprintln!(
         "       cargo xtask simulator -- <program> <argument>...   (the program on one of the machine's iPhone simulators, its id where an argument says {{simulator}})"
     );
