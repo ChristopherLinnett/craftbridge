@@ -165,7 +165,9 @@ pub(crate) enum Call {
 #[serde(deny_unknown_fields)]
 pub(crate) struct Progress {
     /// The fraction of the frames done at which the listener answers `false` to stop the call; the call
-    /// runs to its end without one.
+    /// runs to its end without one. The call's export is held at that point until the stop reaches it
+    /// ([`crate::hold`]), so the stop never meets a call that has already finished, and a call whose export
+    /// that stop did not release from there fails its step.
     #[serde(default)]
     pub(crate) cancel_at: Option<f64>,
 }

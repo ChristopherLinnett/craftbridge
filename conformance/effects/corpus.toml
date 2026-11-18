@@ -15,7 +15,10 @@
 #                            (the app is handed the machine's GPU)
 #   [[scenario.step.call]]   kind = "request": method, params, files (a parameter read from a file), progress
 #                            (the call is one that reports progress, as `export` and `template.render` are;
-#                            cancel_at, a fraction of its frames, is where the listener stops it)
+#                            cancel_at, a fraction of its frames, is where the listener stops it, and the
+#                            call must not finish before that stop reaches it: the desktop runner holds the
+#                            export at that point until it does, whatever the machine's speed, and fails the
+#                            step of a call it held nowhere, as a fill, or whose stop never came)
 #                            kind = "frame": params, format = "png" | "rgba8", out
 #                            kind = "mcp": every line of stdin, each reply printed
 #   [[scenario.expect]]      step, output, pointer (RFC 6901), equals or length: a value in a JSON document
@@ -763,11 +766,11 @@ title = "cancel an export at 50 %: Cancelled, and no output file left"
 sides = "plugin"
 # The command line stops a render only by its process being killed, so there is no oracle to compare. The
 # first step is the same export left alone, which writes its file: what the cancelled one leaves out would
-# have been there. The exporter renders frames in batches of at most 16 and looks for a stop after each,
-# and the listener answers at its first tenth-of-a-second beat past half the frames. A stop the exporter
-# meets only after its last batch finds the file written, and the engine then removes it with every other
-# file the cancelled export listed, so the folder holds the control's file alone either way. Sixty frames
-# leave a whole batch after the one that passes half, and a batch at a quarter of the size takes many beats.
+# have been there. The listener answers at its first tenth-of-a-second beat past half the frames, and the
+# desktop runner holds the export at the first frames that reach half, asking again until the plug-in's
+# stop has come, so the exporter always meets that stop with frames left to render and removes the file it
+# opened: the folder holds the control's file alone, however fast or slow the machine is. Sixty frames leave
+# a whole batch of at most 16 after the one that passes half, so the stop is always met before the last.
 [[scenario.step]]
 [[scenario.step.call]]
 kind = "request"

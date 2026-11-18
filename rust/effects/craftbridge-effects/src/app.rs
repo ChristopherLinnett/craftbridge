@@ -9,6 +9,7 @@ use craftbridge_core::{CraftApp, CraftError, FrameBytes, GpuDevice, GpuFailure, 
 // alone, so the engine's is renamed here to keep the two apart.
 use effectcraft_automation::confine::Confinement as EngineConfinement;
 use effectcraft_automation::{Backend, McpServer};
+use effectcraft_engine::render_queue::Exporter;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -57,10 +58,23 @@ impl EffectCraftApp {
         Self::for_platform(Platform::current(), folders)
     }
 
+    /// [`Self::new`], with the session's exporter handed to `wrap` and the exporter it answers used in
+    /// its place. A host tool that has to decide when an export may finish (a conformance runner that
+    /// must stop one part-way, whatever the machine's speed) can only do that from inside the exporter,
+    /// the one place a render's progress is answered while the render is running.
+    pub fn with_exporter(folders: &Folders, wrap: impl FnOnce(Arc<dyn Exporter>) -> Arc<dyn Exporter>) -> Result<Self> {
+        Self::assemble(Platform::current(), folders, wrap)
+    }
+
     /// The app as `platform` builds it: [`Self::new`] for this build's own platform, and for the
     /// tests the same construction with another platform's plug-in policy (§19), so the policy of
     /// each platform is pinned on the host through the app's own door and confinement.
     pub(crate) fn for_platform(platform: Platform, folders: &Folders) -> Result<Self> {
+        Self::assemble(platform, folders, |exporter| exporter)
+    }
+
+    /// The construction of [`Self::for_platform`], with the session's exporter passed through `wrap`.
+    fn assemble(platform: Platform, folders: &Folders, wrap: impl FnOnce(Arc<dyn Exporter>) -> Arc<dyn Exporter>) -> Result<Self> {
         let roots = folders.prepare()?;
         // A long write the system killed leaves its temporary file beside the file it was writing,
         // and no journal could list that file: its name is drawn as the write starts, later than
@@ -75,7 +89,9 @@ impl EffectCraftApp {
         // The session's exporter reads this choice while an export is being answered; the app starts
         // it with nothing chosen, and `request_with_progress` sets it for the length of one call.
         let hardware = HardwareChoice::default();
-        let mut backend = Backend::headless(session::build(platform, folders, &hardware));
+        let mut session = session::build(platform, folders, &hardware);
+        session.exporter = session.exporter.map(wrap);
+        let mut backend = Backend::headless(session);
         let confinement = EngineConfinement::new(roots.read_roots(), &[roots.write_root().to_path_buf()]).map_err(|error| CraftError::io(error.to_string()))?;
         backend.confine(confinement);
         Ok(Self { server: McpServer::new(backend), gpu_failure: None, display: None, staged: folders.staged.clone(), hardware, _admission: admission })
@@ -384,5 +400,37 @@ mod tests {
         assert_eq!(on_gpu.len(), on_cpu.len());
         let apart = on_gpu.iter().zip(&on_cpu).map(|(gpu, cpu)| gpu.abs_diff(*cpu)).max();
         assert!(apart <= Some(1), "the GPU's and the CPU's pictures differ by {apart:?}: {on_gpu:?} against {on_cpu:?}");
+    }
+
+    /// The exporter a caller wraps is the one the session exports through, and the wrapper's answer is used
+    /// as it is: a wrapper that records its jobs sees the export, and one that refuses it is what answers.
+    #[test]
+    fn the_exporter_a_host_wraps_is_the_one_the_session_exports_through() {
+        use effectcraft_engine::project::render_queue::{OutputFormat, RenderSettings};
+        use effectcraft_engine::render_queue::{ExportJob, ExportResult};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Refusing(Arc<dyn Exporter>, Arc<AtomicUsize>);
+        impl Exporter for Refusing {
+            fn formats(&self) -> Vec<OutputFormat> {
+                self.0.formats()
+            }
+            fn supports_skip_existing(&self, settings: &RenderSettings) -> bool {
+                self.0.supports_skip_existing(settings)
+            }
+            fn export(&self, _: &ExportJob, _: &mut dyn FnMut(u64, u64) -> bool) -> std::result::Result<ExportResult, String> {
+                self.1.fetch_add(1, Ordering::SeqCst);
+                Err("the wrapper answers".into())
+            }
+        }
+        let scratch = Scratch::new(false, None);
+        let seen = Arc::new(AtomicUsize::new(0));
+        let mut app = EffectCraftApp::with_exporter(&scratch.folders, |inner| Arc::new(Refusing(inner, seen.clone()))).expect("the app starts");
+        let comp = json!({"steps": [{"command": "comp.new", "params": {"width": 8, "height": 6, "duration": 0.2, "frameRate": 10}}]});
+        app.request("run", comp).expect("the composition is made");
+        let out = scratch.folders.container.join("x.png");
+        let refused = app.request_with_progress("export", json!({"output": out, "format": "png"}), &mut |_, _, _| true, &mut |_| Ok(())).unwrap_err();
+        assert_eq!(seen.load(Ordering::SeqCst), 1, "the export reached the wrapper once");
+        assert!(refused.to_string().contains("the wrapper answers"), "{refused}");
     }
 }
