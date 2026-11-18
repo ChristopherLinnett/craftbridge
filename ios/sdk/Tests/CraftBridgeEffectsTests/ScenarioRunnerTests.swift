@@ -376,13 +376,19 @@ private let scenarioFolders = temporaryFolder("runner")
             listening.judge(stoppedAt: at, statuses: ["Unqueued", "Done"])
                 == #"the stop came at 160 of 300 frames, and the render queue says ["Unqueued","Done"], "#
                 + #"with no export "UserStopped": every frame was rendered before the stop reached the export, "#
-                + "so the export won the race, which the simulator has no way to hold"
+                + "so the export won the race, which the SDK has no way to hold"
         )
         #expect(listening.judge(stoppedAt: at, statuses: []) != nil, "a queue with no item says no export met it")
         #expect(
             listening.judge(stoppedAt: nil, statuses: ["UserStopped"])
                 == "the call answered before its export reached 0.5 of its frames, so no stop reached it: "
-                + "the export won the race, which the simulator has no way to hold"
+                + "the export won the race, which the SDK has no way to hold"
+        )
+        #expect(
+            Listening(stop: try stopping(at: "1")).judge(stoppedAt: nil, statuses: [])
+                == "the call answered before its export reached 1 of its frames, so no stop reached it: "
+                + "the export won the race, which the SDK has no way to hold",
+            "the fraction is named as the JSON it is"
         )
         let alone = Listening(stop: try stopping(at: nil))
         #expect(

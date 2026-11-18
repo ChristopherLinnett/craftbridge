@@ -8,19 +8,30 @@ import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import kotlinx.coroutines.runBlocking
+import java.util.regex.PatternSyntaxException
 
 /** The tag every line of a device run is written under, for whoever is reading with `logcat`. */
-private const val LOG_TAG = "CraftBridge"
+internal const val LOG_TAG = "CraftBridge"
 
-/** One check on a device, with the name it is reported under. */
+/** One check on a device, with the name it is reported under, and the id of the corpus scenario it runs, if it runs one. */
 internal class Case(
     internal val name: String,
+    internal val scenario: String? = null,
     internal val check: suspend (Context) -> Unit,
 )
 
-/** Every check, in the order it runs: the folders first, since every engine starts in them. */
-private val cases: List<Case> =
-    folderChecks + engineChecks + wordsChecks + hardwareDecodingChecks + frameChecks + previewChecks + apiChecks + typedCallChecks
+/**
+ * Every check, in the order it runs: the folders first, since every engine starts in them. The corpus's
+ * checks are named by the scenarios the corpus holds, which are read from the test APK's assets, so they are
+ * made once the app is there to read them. The checks are listed here by hand, so the count of the corpus's
+ * scenarios is judged on this list, the one the run makes, and comes last.
+ */
+private fun cases(context: Context): List<Case> {
+    val checks =
+        folderChecks + engineChecks + wordsChecks + hardwareDecodingChecks + frameChecks + previewChecks + apiChecks + typedCallChecks +
+            selectionChecks + corpusModelChecks + scenarioRunnerChecks + conformanceChecks(context) + plugInPolicyChecks
+    return checks + scenarioCountCheck(checks)
+}
 
 /**
  * The words of the instrumentation test protocol, which `am instrument -r` prints and every reader of a
@@ -39,6 +50,50 @@ private const val STARTED = 1
 private const val PASSED = 0
 private const val FAILED = -2
 
+/**
+ * The run argument that narrows a run to the checks whose name matches the regular expression it holds
+ * (`am instrument -e only "T22|T24"`), for whoever is working on some checks and does not want to wait for the
+ * rest. Without it every check runs.
+ */
+private const val ONLY_KEY = "only"
+
+/**
+ * The checks a run makes: [all] of them, or with [only] those whose name the regular expression matches. A
+ * pattern that is no regular expression, or that matches no check's name, is one check that fails saying so,
+ * since a run that made no check would end `OK`, which reads as every check passing.
+ */
+internal fun chosen(
+    all: List<Case>,
+    only: String?,
+): List<Case> {
+    if (only == null) {
+        return all
+    }
+    val asked = "the checks `-e $ONLY_KEY $only` names"
+    val pattern = runCatching { Regex(only) }.getOrElse { refused -> return listOf(Case(asked) { throw refused }) }
+    return all.filter { case -> pattern.containsMatchIn(case.name) }.ifEmpty { listOf(Case(asked) { error("no check's name matches it") }) }
+}
+
+/** The checks of how a run is narrowed. */
+internal val selectionChecks: List<Case> =
+    listOf(
+        Case(
+            "`-e only` narrows a run to the checks it matches, and a pattern that matches none or is no pattern fails the run",
+        ) { context ->
+            val all = listOf("alpha one", "beta", "alpha two").map { name -> Case(name) {} }
+            agreed(chosen(all, null).map { it.name }, all.map { it.name }, "a run with no pattern")
+            agreed(chosen(all, "^alpha").map { it.name }, listOf("alpha one", "alpha two"), "the checks a pattern matches")
+            val none = chosen(all, "no such check").single()
+            agreed(none.name, "the checks `-e only no such check` names", "the one check of a pattern that matches none")
+            val unmatched = runCatching { none.check(context) }.exceptionOrNull()
+            agreed(unmatched?.message, "no check's name matches it", "why a pattern that matches none fails")
+            val broken = chosen(all, "[").single()
+            agreed(broken.name, "the checks `-e only [` names", "the one check of a pattern that is no regular expression")
+            val refused = runCatching { broken.check(context) }.exceptionOrNull()
+            require(refused is PatternSyntaxException) { "a pattern that is no regular expression failed with $refused" }
+        },
+    )
+
 /** The key the run's end puts its failures under, for whoever reads the run's last report. */
 private const val ERROR_KEY = "Error"
 
@@ -53,8 +108,11 @@ private const val ERROR_KEY = "Error"
  * check of a cancel cancels a real coroutine.
  */
 public class CraftBridgeInstrumentation : Instrumentation() {
+    private var only: String? = null
+
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
+        only = arguments?.getString(ONLY_KEY)
         // The platform calls only onCreate; onStart runs on the thread this starts. That thread is
         // where a check blocks on an engine, so the app's own main thread stays free while one runs.
         start()
@@ -63,19 +121,20 @@ public class CraftBridgeInstrumentation : Instrumentation() {
     override fun onStart() {
         super.onStart()
         val failures = mutableListOf<String>()
+        val cases = chosen(cases(targetContext), only)
         for ((index, case) in cases.withIndex()) {
             Log.i(LOG_TAG, "checking: ${case.name}")
             // An empty line, since `am instrument` prints every key of a report that has no line at all.
-            sendStatus(STARTED, report(case, index, ""))
+            sendStatus(STARTED, report(case, index, cases.size, ""))
             val refused = runCatching { runBlocking { case.check(targetContext) } }.exceptionOrNull()
             if (refused == null) {
-                sendStatus(PASSED, report(case, index, "PASS  ${case.name}\n"))
+                sendStatus(PASSED, report(case, index, cases.size, "PASS  ${case.name}\n"))
             } else {
                 failures += "${case.name}: ${refused.message}"
                 Log.e(LOG_TAG, "failed:  ${case.name}", refused)
                 sendStatus(
                     FAILED,
-                    report(case, index, "FAIL  ${case.name}: ${refused.message}\n").apply {
+                    report(case, index, cases.size, "FAIL  ${case.name}: ${refused.message}\n").apply {
                         putString(STACK_KEY, refused.stackTraceToString())
                     },
                 )
@@ -109,6 +168,7 @@ public class CraftBridgeInstrumentation : Instrumentation() {
     private fun report(
         case: Case,
         index: Int,
+        total: Int,
         line: String,
     ): Bundle =
         Bundle().apply {
@@ -116,7 +176,7 @@ public class CraftBridgeInstrumentation : Instrumentation() {
             putString(CLASS_KEY, CraftBridgeInstrumentation::class.java.name)
             putString(TEST_KEY, case.name)
             putInt(CURRENT_KEY, index + 1)
-            putInt(TOTAL_KEY, cases.size)
+            putInt(TOTAL_KEY, total)
             putString(Instrumentation.REPORT_KEY_STREAMRESULT, line)
         }
 }

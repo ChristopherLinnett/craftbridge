@@ -29,8 +29,8 @@ class QualityConventionPlugin : Plugin<Project> {
             // The repository's one .editorconfig, named so its rules reach ktlint as an input of every
             // Spotless task. ktlint still merges any other .editorconfig between a file and this one, so
             // the gate refuses every other copy (`cargo xtask rules`, machinery), which is what keeps the
-            // style in this file alone. The build sits at android/sdk.
-            val editorConfig = rootDir.resolve("../../.editorconfig")
+            // style in this file alone.
+            val editorConfig = repositoryRoot.resolve(".editorconfig")
             // A copy that sat there while ktlint ran is no input of the task, so Gradle would replay that
             // run's verdict, from this checkout or from the machine's build cache, after the copy is gone.
             // Every Spotless task therefore runs every time and stores nothing: ktlint reads the tree as it

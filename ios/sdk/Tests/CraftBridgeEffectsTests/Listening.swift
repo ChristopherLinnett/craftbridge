@@ -103,10 +103,10 @@ struct Listening: Sendable {
     /// the call must have been stopped there, and an export of it must have met the stop.
     func judge(stoppedAt: Report?, statuses: [JSONValue]) -> String? {
         guard let cancelAt = stop.cancelAt else { return nil }
-        let race = "the export won the race, which the simulator has no way to hold"
+        let race = "the export won the race, which the SDK has no way to hold"
         guard let stoppedAt else {
-            return "the call answered before its export reached \(cancelAt) of its frames, so no stop reached it: "
-                + race
+            return "the call answered before its export reached \(JSONValue.number(cancelAt).shown) of its frames, "
+                + "so no stop reached it: \(race)"
         }
         guard statuses.contains(Self.stopped) else {
             return "the stop came at \(stoppedAt.done) of \(stoppedAt.total) frames, and the render queue says "
