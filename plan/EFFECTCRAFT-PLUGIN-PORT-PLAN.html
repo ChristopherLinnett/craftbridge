@@ -1309,7 +1309,7 @@ pub fn craft_error_message(error: CraftError) -&gt; String;   // the words an er
 <tr>
 <td><code>tools/<wbr>ios-device-test.sh</code>, <code>tools/<wbr>device-tests.tsv</code></td>
 <td>NEW</td>
-<td>QA-3: the runner of the device proofs: it wraps a package&#39;s test binaries in an app signed with the identity and profile the environment names, runs each on the acceptance iPhone through <code>xcrun devicectl</code> and reports each binary&#39;s result; the table names the tests it does not run as they stand, each with its reason, and the child a test that reruns itself has run in a launch of its own</td>
+<td>QA-3: the runner of the device proofs: it wraps a package&#39;s test binaries in an app signed with the identity and profile the environment names, runs each on the acceptance iPhone through <code>xcrun devicectl</code> and reports each binary&#39;s result, each app started stopped, as for a debugger, and resumed once it runs, since FrontBoard&#39;s process-launch watchdog ends a foreground app that has not finished launching 20 s after it started (<code>0x8BADF00D</code> in the phone&#39;s crash report), which a test binary, never starting UIKit, never does; the table names the tests it does not run as they stand, each with its reason, and the child a test that reruns itself has run in a launch of its own</td>
 </tr>
 <tr>
 <td><code>.github/<wbr>workflows/<wbr>ci.yml</code></td>

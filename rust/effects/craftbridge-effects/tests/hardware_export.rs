@@ -4,16 +4,23 @@
 //! writes exactly what it writes without it. A device without the encoder declines the option, which the
 //! same tests hold to the same bytes as the software export.
 //!
-//! Runs where VideoToolbox does: on a Mac and in the iOS Simulator. The helpers answer `Result` and leave
-//! the unwrapping to the `#[test]` functions, as everywhere else in this repository.
+//! Runs where VideoToolbox does: on a Mac, in the iOS Simulator and on an iPhone. Every export writes to the
+//! run's output the most memory it held, as the platform reports it, so a run on an iPhone shows what an
+//! export holds beside the app's limit; so do the two tests that make the most exports in one app, whose own
+//! peak shows whether what one export holds outlives it. The helpers answer `Result` and leave the
+//! unwrapping to the `#[test]` functions, as everywhere else in this repository.
 
 #![cfg(target_vendor = "apple")]
 
 mod scratch;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::thread::JoinHandle;
+use std::time::Duration;
 
-use craftbridge_core::{CraftApp, CraftError};
+use craftbridge_core::{CraftApp, CraftError, available_memory};
 use craftbridge_effects::EffectCraftApp;
 use craftbridge_media::{ColourCodes, HardwareEncoder, RateControl, VideoCodec, VideoSpec};
 use effectcraft_engine::project::ItemId;
@@ -51,7 +58,88 @@ fn exec(app: &mut EffectCraftApp, command: &str, params: Value) -> Result<Value,
 }
 
 fn export(app: &mut EffectCraftApp, request: Value) -> Result<Value, CraftError> {
-    app.request_with_progress("export", request, &mut |_, _, _| true, &mut |_| Ok(()))
+    // The output's file and the folder it is in, which tell one test's exports apart.
+    let output: Vec<_> = Path::new(request.get("output").and_then(Value::as_str).unwrap_or_default()).iter().collect();
+    let named: PathBuf = output.iter().skip(output.len().saturating_sub(2)).collect();
+    measured(&format!("the export to {}", named.display()), || app.request_with_progress("export", request, &mut |_, _, _| true, &mut |_| Ok(())))
+}
+
+/// How often the watch below reads the platform's figure: a frame's render and encode hold their buffers
+/// for longer than this, so what they hold shows, and one read of the figure costs a call into the system.
+const SAMPLE_EVERY: Duration = Duration::from_millis(2);
+
+/// The platform's figure for what the app may still allocate (`available_memory()`, which on an iPhone is
+/// `os_proc_available_memory()`), read every [`SAMPLE_EVERY`] on a thread of its own from the watch's
+/// start until it finishes or is dropped. The figure falls by what the app holds, so its lowest point against its
+/// value at the start is the most the app held at once on top of what it held then.
+struct Watch {
+    start: Option<u64>,
+    lowest: Arc<AtomicU64>,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Watch {
+    fn start() -> Self {
+        let start = available_memory();
+        let (lowest, stop) = (Arc::new(AtomicU64::new(start.unwrap_or(u64::MAX))), Arc::new(AtomicBool::new(false)));
+        let (reads, stops) = (Arc::clone(&lowest), Arc::clone(&stop));
+        let thread = std::thread::spawn(move || {
+            while !stops.load(Ordering::SeqCst) {
+                if let Some(now) = available_memory() {
+                    reads.fetch_min(now, Ordering::SeqCst);
+                }
+                std::thread::sleep(SAMPLE_EVERY);
+            }
+        });
+        Self { start, lowest, stop, thread: Some(thread) }
+    }
+
+    /// The figure at the start and its lowest point since, once the watch has stopped; `None` where the
+    /// platform gives no figure (a Mac, the iOS Simulator).
+    fn finish(mut self) -> Option<(u64, u64)> {
+        self.stop_reading();
+        if let Some(now) = available_memory() {
+            self.lowest.fetch_min(now, Ordering::SeqCst);
+        }
+        Some((self.start?, self.lowest.load(Ordering::SeqCst)))
+    }
+
+    fn stop_reading(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+impl Drop for Watch {
+    /// A test that fails mid-way leaves no thread reading behind it.
+    fn drop(&mut self) {
+        self.stop_reading();
+    }
+}
+
+/// `body`, with the most memory it held at once written to the run's output under `what`, so a device run
+/// shows each export's peak and the app's room beside it. The figure is 0 for an app at the system's limit
+/// for it, so a lowest point above 0 is an app that stayed under its limit throughout.
+fn measured<R>(what: &str, body: impl FnOnce() -> R) -> R {
+    let watch = Watch::start();
+    let answer = body();
+    match watch.finish() {
+        None => eprintln!("{what}: the platform gives no memory figure"),
+        Some((start, lowest)) => {
+            let mib = |bytes: u64| bytes >> 20;
+            eprintln!(
+                "{what}: peak {} MiB, the app's room at least {} MiB of the {} MiB at the start",
+                mib(start.saturating_sub(lowest)),
+                mib(lowest),
+                mib(start)
+            );
+            assert!(lowest > 0, "{what} reached the app's memory limit");
+        }
+    }
+    answer
 }
 
 /// Whether this device encodes `codec` in hardware, which the tests meet with the bytes they hold the option
@@ -156,36 +244,40 @@ fn both_ways(request: impl Fn(&Path) -> Value) -> Result<(Vec<(String, Vec<u8>)>
 
 #[test]
 fn every_other_format_is_written_as_it_is_without_the_option() {
-    // Every format of the render queue's but the two the option encodes, the other MP4 movie among them.
-    for (format, file) in [
-        ("av1", "out.mp4"),
-        ("prores", "out.mov"),
-        ("uncompressed", "out.mov"),
-        ("webm", "out.webm"),
-        ("png", "out.png"),
-        ("jpeg", "out.jpg"),
-        ("tiff", "out.tif"),
-        ("exr", "out.exr"),
-        ("tga", "out.tga"),
-        ("gif", "out.gif"),
-        ("wav", "out.wav"),
-        ("aiff", "out.aif"),
-    ] {
-        let (plain, option) = both_ways(|folder| small(format, &folder.join(file))).unwrap();
-        assert!(!plain.is_empty(), "{format} wrote something");
-        assert_eq!(plain, option, "{format}");
-    }
+    measured("every_other_format_is_written_as_it_is_without_the_option", || {
+        // Every format of the render queue's but the two the option encodes, the other MP4 movie among them.
+        for (format, file) in [
+            ("av1", "out.mp4"),
+            ("prores", "out.mov"),
+            ("uncompressed", "out.mov"),
+            ("webm", "out.webm"),
+            ("png", "out.png"),
+            ("jpeg", "out.jpg"),
+            ("tiff", "out.tif"),
+            ("exr", "out.exr"),
+            ("tga", "out.tga"),
+            ("gif", "out.gif"),
+            ("wav", "out.wav"),
+            ("aiff", "out.aif"),
+        ] {
+            let (plain, option) = both_ways(|folder| small(format, &folder.join(file))).unwrap();
+            assert!(!plain.is_empty(), "{format} wrote something");
+            assert_eq!(plain, option, "{format}");
+        }
+    });
 }
 
 #[test]
 fn a_movie_the_hardware_does_not_reproduce_stays_with_effectcrafts_encoders() {
-    // HEVC at Main 10 and at a chosen level are what the hardware encoder does not take, so the job is the
-    // software one.
-    for (key, value) in [("profile", "main10"), ("level", "4.1")] {
-        let (plain, option) = both_ways(|folder| with(small("hevc", &folder.join("out.mp4")), key, json!(value))).unwrap();
-        assert!(!plain.is_empty());
-        assert_eq!(plain, option, "{key} {value}");
-    }
+    measured("a_movie_the_hardware_does_not_reproduce_stays_with_effectcrafts_encoders", || {
+        // HEVC at Main 10 and at a chosen level are what the hardware encoder does not take, so the job is
+        // the software one.
+        for (key, value) in [("profile", "main10"), ("level", "4.1")] {
+            let (plain, option) = both_ways(|folder| with(small("hevc", &folder.join("out.mp4")), key, json!(value))).unwrap();
+            assert!(!plain.is_empty());
+            assert_eq!(plain, option, "{key} {value}");
+        }
+    });
 }
 
 #[test]

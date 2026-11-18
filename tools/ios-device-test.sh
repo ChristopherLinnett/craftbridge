@@ -4,10 +4,11 @@
 #   tools/ios-device-test.sh <package>… [-- <test harness flags>]
 #
 # Each test binary is built for aarch64-apple-ios, wrapped in an app, signed, installed, launched with
-# `xcrun devicectl`, its output captured, and uninstalled. The harness flags (a filter, `--nocapture`,
-# `--ignored`) reach the app as launch arguments with no `--` before them: devicectl would pass that `--`
-# to the app too, and the harness then reads every later word as a test name filter. The runner always
-# passes `--test-threads=1`, so pass none.
+# `xcrun devicectl` (started stopped and then resumed, so the system's 20-second allowance for an app's launch,
+# which a test binary never completes, does not end a long run: see `launch`), its output captured, and
+# uninstalled. The harness flags (a filter, `--nocapture`, `--ignored`) reach the app as launch arguments with
+# no `--` before them: devicectl would pass that `--` to the app too, and the harness then reads every later
+# word as a test name filter. The runner always passes `--test-threads=1`, so pass none.
 #
 # What the phone and the signing take comes from the environment, never from the repository:
 #   CRAFTBRIDGE_DEVICE_ID              the CoreDevice identifier of the phone (`xcrun devicectl list devices`)
@@ -16,8 +17,8 @@
 #   CRAFTBRIDGE_DEVICE_LOGS            where each launch's output is kept (default: a new folder under $TMPDIR)
 # The tests are built as the gate builds, so a switch the gate refuses (tools/env.sh) is refused here too.
 #
-# A binary the system kills when it runs whole (an app has a memory limit a test binary's whole run can pass)
-# is finished one test per launch: the tests with no result in the whole run's output each get an app launch
+# A binary the system ends before its harness does when it runs whole (past the app's memory limit, say) is
+# finished one test per launch: the tests with no result in the whole run's output each get an app launch
 # of their own, and one the system kills alone is a failure. The tests tools/device-tests.tsv names are not
 # run as they stand, each for its reason there; a test that reruns itself in a child process has the child
 # run in a launch of its own instead. A launch that runs past its limit is ended like a killed one, so a test
@@ -98,6 +99,8 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/craftbridge-device-work.XXXXXX")"
 logs="${CRAFTBRIDGE_DEVICE_LOGS:-$(mktemp -d "${TMPDIR:-/tmp}/craftbridge-device-logs.XXXXXX")}"
 mkdir -p "$logs"
 installed=""
+# The installed app's executable as the phone names it, from the end of its path: `<bundle folder>/<executable>`.
+installed_executable=""
 launch_status=0
 
 # An app still on the phone when the run ends, however it ends, is uninstalled.
@@ -126,10 +129,60 @@ test_log() {
   printf '%s/%s.%s.%s' "$logs" "$1" "$(printf '%s' "$2" | tr -c 'A-Za-z0-9_' '-')" "$3"
 }
 
+# The process ids the phone lists for the installed app's executable, one a line, from the phone's own list of
+# its processes; fails when the phone does not answer.
+app_processes() {
+  xcrun devicectl device info processes --device "$device" --json-output "$work/processes.json" >/dev/null 2>&1 </dev/null &&
+    jq -r --arg executable "/$installed_executable" \
+      '.result.runningProcesses[] | select(.executable | endswith($executable)) | .processIdentifier' "$work/processes.json"
+}
+
+# Resumes the app a launch started, for as long as the launch's devicectl, `<devicectl pid>`, waits on it:
+# every process the phone lists for the app is resumed (one whose resume fails is tried again at the next
+# read), and the list is read every second until one is resumed and every five seconds after. The list cannot
+# tell the launch's own process from another of the app's: the phone may start another process of an app just
+# after it ends, which stays listed for seconds, and one a failed launch left stopped stays listed until this
+# launch's `--terminate-existing` ends it. Either may be listed alone before the launch's own process shows,
+# and the first may show only after a list read before the launch; so resuming only the one process found, or
+# stopping at the first resume or the first output (devicectl writes lines of its own into the log before the
+# app starts), would leave the app stopped until the launch limit. Resuming the others too harms nothing, since
+# each has ended, runs on, or is ended by `--terminate-existing`. Each resume's output goes to `<log>.resume`.
+# `resume_app <devicectl pid> <log>` fails when no process of the app could be resumed in 60 reads of the
+# list, or the launch ended with none resumed.
+resume_app() {
+  local launcher="$1" log="$2" reads=0 resumed="" pid pause
+  while kill -0 "$launcher" 2>/dev/null; do
+    if [ -z "$resumed" ] && [ "$reads" -ge 60 ]; then
+      return 1
+    fi
+    reads=$((reads + 1))
+    for pid in $(app_processes || true); do
+      case "$resumed " in *" $pid "*) continue ;; esac
+      if xcrun devicectl device process resume --device "$device" --pid "$pid" >>"$log.resume" 2>&1 </dev/null; then
+        resumed+=" $pid"
+      fi
+    done
+    pause=1
+    [ -z "$resumed" ] || pause=5
+    while [ "$pause" -gt 0 ] && kill -0 "$launcher" 2>/dev/null; do
+      sleep 1
+      pause=$((pause - 1))
+    done
+  done
+  [ -n "$resumed" ]
+}
+
 # One app launch of the wrapped test binary: `launch <log> <environment word>… -- <harness argument>…`, each
 # environment word NAME=value. The output, the console of the app, goes to the log.
+#
+# The app starts stopped, as for a debugger, and is resumed once it runs. FrontBoard ends a foreground app that
+# has not finished launching 20 seconds after it started (its process-launch watchdog, 0x8BADF00D in the
+# phone's crash report), and a test binary never finishes launching, since it never starts UIKit, so after a
+# plain launch FrontBoard ends every run longer than that mid-test, whatever its tests do; a launch that waits
+# for a debugger is not held to that allowance. The app still runs in the foreground, where it may use the GPU and
+# the hardware encoders, as an app's export does.
 launch() {
-  local log="$1" word
+  local log="$1" word console
   local -a environment=()
   shift
   while [ "$1" != -- ]; do
@@ -140,7 +193,24 @@ launch() {
   shift
   launch_status=0
   env ${environment[@]+"${environment[@]}"} xcrun devicectl device process launch --console --terminate-existing \
-    --timeout "$launch_limit" --device "$device" "$installed" "$@" >"$log" 2>&1 </dev/null || launch_status=$?
+    --start-stopped --timeout "$launch_limit" --device "$device" "$installed" "$@" >"$log" 2>&1 </dev/null &
+  console=$!
+  rm -f "$log.resume"
+  if resume_app "$console" "$log"; then
+    wait "$console" || launch_status=$?
+  else
+    # An app never resumed would wait, stopped, until the launch limit, so its launch ends here and counts as
+    # one whose app never got going; the next launch's `--terminate-existing`, or the uninstall, ends the app.
+    kill -KILL "$console" 2>/dev/null || true
+    # Without the shell's own line that it killed the job, which says nothing the log does not.
+    wait "$console" 2>/dev/null || true
+    launch_status=1
+    {
+      [ ! -f "$log.resume" ] || cat "$log.resume"
+      echo "ios-device-test: the app, started stopped, was never resumed"
+    } >>"$log"
+  fi
+  rm -f "$log.resume"
   # The console ends each line with a carriage return, which no line of the harness's output should keep.
   tr -d '\r' <"$log" >"$log.lf" && mv "$log.lf" "$log"
 }
@@ -198,6 +268,7 @@ install_app() {
     die "cannot install $name on the phone. $phone_hint"
   fi
   installed="$bundle"
+  installed_executable="${app##*/}/$name"
 }
 
 # The counts of a harness's last `test result:` line in a log, `passed failed`, or nothing when it has none
@@ -210,8 +281,8 @@ result_of() {
 # line of verdict and sets `passed` and `failed` for the caller.
 run_binary() {
   local package="$1" binary="$2" executable="$3" name
-  local universe filtered all_selected log result row kind test child environment
-  local -a skips=() selected=() launches=() children=() children_env=() child_environment=()
+  local universe filtered all_selected log result row kind test other child environment
+  local -a skips=() selected=() launches=() alone=() children=() children_env=() child_environment=()
   name="$package-${binary//_/-}"
   passed=0
   failed=0
@@ -275,7 +346,16 @@ run_binary() {
       done
       for test in ${launches[@]+"${launches[@]}"}; do
         log="$(test_log "$name" "$test" log)"
-        launched started "$name did not start $test" "$log" -- --test-threads=1 ${harness_flags[@]+"${harness_flags[@]}"} --exact "$test"
+        # With `--exact` the caller's filters and every `--skip` match whole names, so a filter that is the whole
+        # name of another test would run that test beside this one: a selected one would be counted twice, and one
+        # the table leaves out would run where it cannot. Each of those is skipped by its name, so the launch runs
+        # this test alone.
+        alone=(${skips[@]+"${skips[@]}"})
+        for other in "${selected[@]}"; do
+          [ "$other" = "$test" ] || alone+=(--skip "$other")
+        done
+        launched started "$name did not start $test" "$log" -- --test-threads=1 ${harness_flags[@]+"${harness_flags[@]}"} \
+          ${alone[@]+"${alone[@]}"} --exact "$test"
         result="$(result_of "$log")"
         if [ -z "$result" ]; then
           echo "  FAILED $test: the app ended before its harness did, run alone (killed by the system, or past the launch limit): see $log"
