@@ -42,10 +42,13 @@
 
 use std::borrow::Cow;
 
-use craftbridge_core::{CraftError, FrameBytes, PixelFormat, Result};
+use craftbridge_core::{CraftError, FrameBytes, PixelFormat, Result, Surface};
 use effectcraft_automation::{Backend, Error};
 use effectcraft_engine::EngineError;
+use effectcraft_engine::project::ItemId;
 use effectcraft_engine::project::render_queue::OutputFormat;
+use effectcraft_gpu::{DisplayFrame, Gpu};
+use effectcraft_render::RenderOpts;
 use effectcraft_time::Tick;
 use serde_json::Value;
 use serde_json::map::Map;
@@ -380,6 +383,40 @@ pub(crate) fn frame(backend: &mut Backend, params: &Value, format: PixelFormat) 
     FrameRequest::parse(params)?.frame(backend, format)
 }
 
+/// Draw the frame `params` ask for into the preview `surface` (plan §17): the request of a `frame` call,
+/// resolved the same way, so a refusal of it is the `frame` call's, and drawn as [`picture`] makes it.
+/// `gpu` is the compositor's device when the app holds one.
+pub(crate) fn present(backend: &mut Backend, gpu: Option<&Gpu>, params: &Value, surface: &mut Surface) -> Result<()> {
+    match picture(backend, gpu, params, surface.device().limits().max_texture_dimension_2d)? {
+        Picture::Display(display) => surface.present(&display.texture)?,
+        Picture::Pixels(frame) => surface.present_frame(&frame)?,
+    };
+    Ok(())
+}
+
+/// What a preview draws of a frame: the compositor's display frame where it renders on the GPU, which
+/// the surface blits without a copy through the CPU, or the CPU's straight pixels, which the core
+/// uploads premultiplied, as the blit reads every frame (plan §17).
+pub(crate) enum Picture {
+    Display(DisplayFrame),
+    Pixels(FrameBytes),
+}
+
+/// The picture of the frame `params` ask for, the same whichever compositor makes it.
+///
+/// The comp is rendered with its own alpha, as the display frame keeps it, whatever `transparent` says:
+/// the core shows a frame's alpha over black, or, on a surface that composites it, over the app's own
+/// views, so a frame composited over the comp's background on the CPU alone would show that colour only
+/// when the GPU declined the frame. It is rendered at the comp's own size, whatever `maxSide` or `scale`
+/// say, since the blit scales it to the surface, and no larger than `max_side`, the device's texture
+/// limit, which a CPU frame is uploaded under: a comp too large for the device is one the GPU declines,
+/// and its picture still reaches the surface. The GPU renders it when the project asks for GPU
+/// acceleration, as EffectCraft's viewer asks the renderer's own accelerator before it renders a display
+/// frame; a project on Mercury Software Only previews from the CPU, as its frames render.
+pub(crate) fn picture(backend: &mut Backend, gpu: Option<&Gpu>, params: &Value, max_side: u32) -> Result<Picture> {
+    FrameRequest::parse(params)?.resolve(backend)?.picture(backend, gpu, max_side)
+}
+
 /// The moment a frame is rendered at.
 enum Moment {
     /// The active comp's current time.
@@ -491,24 +528,49 @@ fn side_of_scale(factor: f64, info: &Value) -> u32 {
 }
 
 impl Resolved {
-    /// Render the frame: as a PNG through the backend's own `render_with`, the path of the command
-    /// line's `render-frame`, or as raw pixels through the session's `render_rgba8_alpha`, which that
-    /// call renders its PNG from. Both resolve the comp and the time the same way.
-    fn render(&self, backend: &mut Backend, format: PixelFormat) -> Result<FrameBytes> {
-        let Self { comp, time, max_side, transparent } = self;
-        let comp = comp.as_ref();
-        if format == PixelFormat::Png {
-            let rendered = backend.render_with(comp, *time, *max_side, *transparent).map_err(render_failed)?;
-            return FrameBytes::new(rendered.width, rendered.height, format, rendered.png);
-        }
+    /// The comp the request names and the moment it asks for, both settled the one way every render and
+    /// every preview of this request settles them: the comp through the session, whose refusal of one
+    /// that is not there is the command line's own words, and no time meaning the comp's current one.
+    fn comp_and_time(&self, backend: &mut Backend) -> Result<(ItemId, Tick)> {
+        let comp = self.comp.as_ref();
         let session = backend.session().ok_or_else(|| CraftError::internal("`frame`: the session is not headless"))?;
         let id = match session.resolve_comp(comp) {
             Ok(id) => id,
             Err(unresolved) => return Err(missing_comp(backend, comp, unresolved)),
         };
-        let at = time.map_or_else(|| session.time(), Tick::from_seconds_f64);
-        let (width, height, pixels) = session.render_rgba8_alpha(id, at, *max_side, *transparent).map_err(|error| render_failed(Error::from(error)))?;
+        Ok((id, self.time.map_or_else(|| session.time(), Tick::from_seconds_f64)))
+    }
+
+    /// Render the frame: as a PNG through the backend's own `render_with`, the path of the command
+    /// line's `render-frame`, or as raw pixels through the session's `render_rgba8_alpha`, which that
+    /// call renders its PNG from. Both resolve the comp and the time the same way.
+    fn render(&self, backend: &mut Backend, format: PixelFormat) -> Result<FrameBytes> {
+        if format == PixelFormat::Png {
+            let rendered = backend.render_with(self.comp.as_ref(), self.time, self.max_side, self.transparent).map_err(render_failed)?;
+            return FrameBytes::new(rendered.width, rendered.height, format, rendered.png);
+        }
+        let (id, at) = self.comp_and_time(backend)?;
+        let session = backend.session().ok_or_else(|| CraftError::internal("`frame`: the session is not headless"))?;
+        let (width, height, pixels) = session.render_rgba8_alpha(id, at, self.max_side, self.transparent).map_err(|error| render_failed(Error::from(error)))?;
         FrameBytes::new(width, height, format, pixels)
+    }
+
+    /// The preview's [`Picture`] of the frame, as [`picture`] says: the display frame the compositor
+    /// leaves on the GPU, through the renderer the session's own frames render with, or, where the
+    /// project or the app has no GPU for it or the compositor declines the frame, the CPU's.
+    fn picture(&self, backend: &mut Backend, gpu: Option<&Gpu>, max_side: u32) -> Result<Picture> {
+        let (id, at) = self.comp_and_time(backend)?;
+        let session = backend.session().ok_or_else(|| CraftError::internal("`present`: the session is not headless"))?;
+        // `Auto` is the backend the session's own frames render with (`render_rgba8_alpha`), under which
+        // the renderer offers its accelerator only when the project asks for GPU acceleration.
+        let renderer = session.renderer(RenderOpts { backend: effectcraft_render::Backend::Auto, ..RenderOpts::default() });
+        if renderer.active_accel().is_some()
+            && let Some(display) = gpu.and_then(|gpu| gpu.render_display(&renderer, id, at))
+        {
+            return Ok(Picture::Display(display));
+        }
+        let (width, height, pixels) = session.render_rgba8_alpha(id, at, max_side, true).map_err(|error| render_failed(Error::from(error)))?;
+        Ok(Picture::Pixels(FrameBytes::new(width, height, PixelFormat::Rgba8Straight, pixels)?))
     }
 }
 

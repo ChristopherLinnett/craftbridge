@@ -112,3 +112,10 @@ internal inline fun <R> mapped(call: () -> R): R =
     } catch (refused: BoundaryException) {
         throw refused.asCoreException(craftErrorMessage(refused))
     }
+
+/**
+ * Fail with [failure] as the core words it: the failures the Kotlin side finds itself — a surface that
+ * is no window, a phone without the memory for a picture — are the rows of the table too, and are made
+ * the way the boundary's are, so their sentence is the core's and no second copy of it is written here.
+ */
+internal fun failWith(failure: BoundaryException): Nothing = mapped { throw failure }

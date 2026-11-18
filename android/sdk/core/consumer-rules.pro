@@ -21,3 +21,9 @@
 # it sees no code reading, though JNA reads it by reflection. Only the annotation is kept: JNA never asks
 # a structure's class by name, and one no code reaches may still go.
 -keep,allowobfuscation,allowshrinking @com.sun.jna.Structure$FieldOrder class *
+
+# The JVM finds a native function by the name of its class and of the function, so the one JNI class keeps
+# its name and its two native methods keep theirs, which R8 would otherwise rename or drop as unreferenced.
+-keep class io.github.christopherlinnett.craftbridge.core.NativeSurfaces {
+    native <methods>;
+}
