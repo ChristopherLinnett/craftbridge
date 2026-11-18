@@ -30,4 +30,4 @@
 
 **Edge cases.** A comp larger than the device's texture limit: the compositor renders on the CPU for that comp (its existing decline path), and its preview frame is fitted to the limit. A preview during an export: waits (L3); the app shows its last frame.
 
-**Tests.** Desktop: the blit pass against a reference image; CPU and GPU `frame` outputs equal within the compositor's own GPU tolerance. Simulator and emulator: `present` into an offscreen layer and surface, read back. Devices: V3.
+**Tests.** Desktop: the blit pass against a reference image; CPU and GPU `frame` outputs equal within the compositor's own GPU tolerance. Simulator and emulator: `present` into an offscreen layer and surface, read back. Devices: V4.

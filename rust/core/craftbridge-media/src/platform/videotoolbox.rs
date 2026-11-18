@@ -423,15 +423,12 @@ pub(crate) fn decoder(entry: &SampleEntry, stream: &StreamInfo) -> Result<VtDeco
 /// the same pictures.
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-    use std::io::Cursor;
-
     use filmcraft_codecs::hw::hw_stats;
     use filmcraft_codecs::{CodecError, VideoDecoder, make_video_decoder, software_video_decoder};
 
     use super::*;
-    use crate::fixtures::{self, Stream, counters, text};
-    use crate::{ColourCodes, HardwareEncoder, Movie, RateControl, VideoCodec, VideoSpec, Yuv420};
+    use crate::HardwareEncoder;
+    use crate::fixtures::{self, Branch, Stream, counters};
 
     /// The type of a stream of `codec` as CoreMedia names it: its four-character code.
     fn kind(codec: Codec) -> String {
@@ -452,26 +449,6 @@ mod tests {
 
     fn codec_of(entry: &SampleEntry) -> Codec {
         Layout::for_stream(&fixtures::stream(entry)).unwrap().codec
-    }
-
-    /// Which way a test's stream went on this device.
-    enum Branch {
-        /// The device's hardware decoder took it, through a session of its own: the decoder's name.
-        Hardware(String),
-        /// Its start was refused on a device with no hardware decoder for its codec, so the factory declined
-        /// it and FilmCraft's registry opened it with the software decoder: why the start was refused.
-        Declined(String),
-    }
-
-    impl Branch {
-        /// What a test says of `stream` on this branch, having compared `compared` pictures.
-        fn says(&self, stream: &str, compared: usize) -> String {
-            let pictures = format!("{compared} pictures, each the software decoder's");
-            match self {
-                Self::Hardware(decoder) => format!("{stream}: hardware, {decoder}: {pictures}"),
-                Self::Declined(why) => format!("{stream}: declined ({why}), so FilmCraft's registry opened it with the software decoder: {pictures}"),
-            }
-        }
     }
 
     /// The decoder a test compares `entry`'s stream through, and its branch: the device's hardware decoder, in a
@@ -495,46 +472,11 @@ mod tests {
         (through_registry, Branch::Declined(why))
     }
 
-    /// Holds the front pictures of `ours` and `theirs` to each other while both have one, `before` pictures
-    /// having been compared already: how many it compared. A picture that differs is named, not printed, since
-    /// a large one prints as megabytes.
-    fn same_so_far(name: &str, ours: &mut VecDeque<DecodedFrame>, theirs: &mut VecDeque<DecodedFrame>, before: usize) -> usize {
-        let mut compared = 0;
-        while let (Some(mine), Some(reference)) = (ours.front(), theirs.front()) {
-            let same = text(std::slice::from_ref(mine)) == text(std::slice::from_ref(reference));
-            assert!(same, "{name}: picture {}, at {}, is not the software decoder's", before + compared, reference.pts);
-            ours.pop_front();
-            theirs.pop_front();
-            compared += 1;
-        }
-        compared
-    }
-
-    /// Feeds `samples` to `decoder` and to a new software decoder for `entry` alike, and holds each of `decoder`'s
-    /// pictures to the software decoder's in turn, as they come, so a long stream is never held whole: how many
-    /// it compared, which is every picture each gave.
-    fn compared_with_software(name: &str, decoder: &mut dyn VideoDecoder, entry: &SampleEntry, samples: &[(i64, Vec<u8>)]) -> usize {
-        let mut software = software_video_decoder(entry).unwrap();
-        let (mut ours, mut theirs) = (VecDeque::new(), VecDeque::new());
-        let mut compared = 0;
-        for (pts, sample) in samples {
-            ours.extend(decoder.decode(sample, *pts).unwrap());
-            theirs.extend(software.decode(sample, *pts).unwrap());
-            compared += same_so_far(name, &mut ours, &mut theirs, compared);
-        }
-        ours.extend(decoder.flush());
-        theirs.extend(software.flush());
-        compared += same_so_far(name, &mut ours, &mut theirs, compared);
-        let counts = (compared + ours.len(), compared + theirs.len());
-        assert_eq!(counts.0, counts.1, "{name}: the device's pictures, and the software decoder's");
-        compared
-    }
-
     /// The pictures of `stream` on this device, frame by frame against the software decoder's: the branch it
     /// took, which [`settle`] says and holds to the device's.
     fn check(stream: &Stream) -> Branch {
         let (mut decoder, branch) = on_this_device(&stream.entry);
-        let compared = compared_with_software(stream.name, decoder.as_mut(), &stream.entry, &stream.samples);
+        let compared = fixtures::compared_with_software(stream.name, decoder.as_mut(), &stream.entry, &stream.samples);
         settle(stream, &branch, compared);
         branch
     }
@@ -553,18 +495,6 @@ mod tests {
         };
         assert_eq!(taken, hardware.as_deref(), "{}: the branch is the device's for the codec", stream.name);
         eprintln!("{}", branch.says(stream.name, compared));
-    }
-
-    #[test]
-    fn each_branch_is_said_in_its_own_words() {
-        assert_eq!(
-            Branch::Hardware("VideoToolbox HEVC".into()).says("HEVC", 12),
-            "HEVC: hardware, VideoToolbox HEVC: 12 pictures, each the software decoder's"
-        );
-        assert_eq!(
-            Branch::Declined("unsupported codec: no session".into()).says("AV1", 6),
-            "AV1: declined (unsupported codec: no session), so FilmCraft's registry opened it with the software decoder: 6 pictures, each the software decoder's"
-        );
     }
 
     #[test]
@@ -629,7 +559,7 @@ mod tests {
                 decoder.decode(sample, *pts).unwrap();
             }
             decoder.reset();
-            let compared = compared_with_software(from_the_cra.name, decoder.as_mut(), &stream.entry, &from_the_cra.samples);
+            let compared = fixtures::compared_with_software(from_the_cra.name, decoder.as_mut(), &stream.entry, &from_the_cra.samples);
             assert_eq!(compared, from_the_cra.samples.len() - 1, "after samples {before:?}: every picture from the CRA on but its RASL picture");
             settle(&from_the_cra, &branch, compared);
         }
@@ -644,69 +574,27 @@ mod tests {
         }
     }
 
-    /// The pictures of T23's footage: 1080 by 1080, the running example's size (plan §5).
-    const T23_SIDE: usize = 1080;
-    /// The running example's 6 seconds at 30 frames a second.
-    const T23_FRAMES: u64 = 180;
-
-    /// `plane`, `width` samples wide, scaled to `side` by `side` samples by taking the nearest one.
-    fn scaled(plane: &[u8], width: usize, side: usize) -> Vec<u8> {
-        let height = plane.len() / width;
-        (0..side * side).map(|at| plane[(at / side) * height / side * width + (at % side) * width / side]).collect()
-    }
-
-    /// T23's footage: the running example's movie (plan §5) as a phone's hardware export writes it, by the
-    /// device's hardware encoder and [`Movie`]: 1080 by 1080 at 30 frames a second for 6 seconds, H.264 at
-    /// 10 Mbit/s with a key frame every 2 seconds, tagged BT.709. Its pictures are the HEVC stream's of the set,
-    /// in turn, scaled up to the size, so they move and every plane varies. `None` on the Simulator when its Mac
-    /// lends it no H.264 encoder; a phone has one.
+    /// T23's footage, made by the device's hardware encoder. `None` on the Simulator when its Mac lends it no
+    /// H.264 encoder; a phone has one.
     fn running_example_footage() -> Option<Stream> {
-        let spec = VideoSpec {
-            codec: VideoCodec::H264,
-            width: T23_SIDE as u32,
-            height: T23_SIDE as u32,
-            rate_num: 30,
-            rate_den: 1,
-            rate_control: RateControl::Bitrate { kbps: 10_000 },
-            keyframe_interval: 60,
-            colour: ColourCodes { primaries: 1, transfer: 1, matrix: 1 },
-        };
-        let encoder = match HardwareEncoder::start(spec) {
-            Ok(encoder) => encoder,
+        match fixtures::running_example_footage(HardwareEncoder::start) {
+            Ok(footage) => Some(footage),
             Err(error) if cfg!(target_abi = "sim") => {
                 eprintln!("T23: the Simulator's Mac lends it no H.264 encoder to make the footage with ({error})");
-                return None;
+                None
             }
             Err(error) => panic!("a phone has a hardware H.264 encoder: {error}"),
-        };
-        let source = fixtures::hevc();
-        let pictures: Vec<Yuv420> = fixtures::pictures(software_video_decoder(&source.entry).unwrap().as_mut(), &source.samples)
-            .iter()
-            .map(|picture| {
-                let [y, u, v] = [0, 1, 2].map(|plane| fixtures::eight_bit_plane(picture, plane));
-                let chroma = T23_SIDE / 2;
-                Yuv420 { y: scaled(y.0, y.1, T23_SIDE), u: scaled(u.0, u.1, chroma), v: scaled(v.0, v.1, chroma) }
-            })
-            .collect();
-        let mut movie = Movie::new(encoder, Cursor::new(Vec::new()), spec, T23_FRAMES, None).unwrap();
-        for (index, picture) in (0..T23_FRAMES).zip(pictures.iter().cycle()) {
-            movie.push_frame(index, picture.clone()).unwrap();
         }
-        let bytes = movie.finish().unwrap().out.into_inner();
-        let file = filmcraft_isobmff::open(bytes.clone()).unwrap();
-        let track = file.tracks.first().unwrap();
-        let samples = track.samples.iter().enumerate().map(|(at, sample)| (sample.pts, file.read_sample(&bytes, 0, at).unwrap())).collect();
-        Some(Stream { name: "T23, the running example's footage", entry: track.entries.first().unwrap().clone(), samples })
     }
 
     #[test]
     fn t23_the_running_examples_footage_gives_the_pictures_the_software_decoder_gives() {
         let _counters = counters();
         let Some(footage) = running_example_footage() else { return };
-        assert_eq!(footage.samples.len() as u64, T23_FRAMES);
+        assert_eq!(footage.samples.len() as u64, fixtures::T23_FRAMES);
         let (mut decoder, branch) = on_this_device(&footage.entry);
-        let compared = compared_with_software(footage.name, decoder.as_mut(), &footage.entry, &footage.samples);
-        assert_eq!(compared as u64, T23_FRAMES, "every frame");
+        let compared = fixtures::compared_with_software(footage.name, decoder.as_mut(), &footage.entry, &footage.samples);
+        assert_eq!(compared as u64, fixtures::T23_FRAMES, "every frame");
         settle(&footage, &branch, compared);
     }
 }
