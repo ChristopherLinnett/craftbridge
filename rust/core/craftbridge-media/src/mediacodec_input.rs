@@ -171,10 +171,24 @@ pub struct CodecInfo {
 /// whatever the list ranks first for it, which can be a software codec (on the API 29 emulator, which lists
 /// no hardware H.264 decoder, it is), so the pick is made here, never taken from the default.
 pub(crate) fn hardware_decoders<'a>(codecs: &'a [CodecInfo], mime: &str) -> Vec<&'a str> {
+    hardware_codecs(codecs, mime, false)
+}
+
+/// The device's hardware encoders for `mime`, in the order the device lists them, which is what the
+/// hardware export encodes with (plan §18). The rule is the decoders' own, the platform's
+/// `isHardwareAccelerated()` answer and never the name, for the same kind of reason: what the export is
+/// here for is what the device's silicon does better, and a software encoder is what EffectCraft's own
+/// encoders already are, so a device whose answer lists none leaves the export to EffectCraft rather than
+/// encoding the movie twice in the same software.
+pub(crate) fn hardware_encoders<'a>(codecs: &'a [CodecInfo], mime: &str) -> Vec<&'a str> {
+    hardware_codecs(codecs, mime, true)
+}
+
+fn hardware_codecs<'a>(codecs: &'a [CodecInfo], mime: &str, encoder: bool) -> Vec<&'a str> {
     // MIME types compare without regard to case (RFC 2045, section 5.1), as the platform's own lookup by type
     // compares them.
     let takes = |codec: &CodecInfo| codec.types.iter().any(|kind| kind.eq_ignore_ascii_case(mime));
-    codecs.iter().filter(|codec| !codec.encoder && codec.hardware_accelerated && takes(codec)).map(|codec| codec.name.as_str()).collect()
+    codecs.iter().filter(|codec| codec.encoder == encoder && codec.hardware_accelerated && takes(codec)).map(|codec| codec.name.as_str()).collect()
 }
 
 /// The keys of the codec-specific data MediaCodec starts a decoder with.
@@ -234,6 +248,7 @@ pub(crate) fn annex_b(info: &NalStreamInfo, sample: &[u8]) -> Result<Vec<u8>, &'
 /// short. Every failure of a drain is decided here, so the host tests pin them all.
 pub(crate) fn until_the_end<T>(
     stall: Duration,
+    who: &str,
     queue_the_end: impl FnOnce() -> Result<Vec<T>, String>,
     mut read: impl FnMut() -> Result<(Vec<T>, bool), String>,
 ) -> Result<Vec<T>, String> {
@@ -246,7 +261,7 @@ pub(crate) fn until_the_end<T>(
             return Ok(pictures);
         }
         if Instant::now() >= deadline {
-            return Err("the decoder never ended the stream".into());
+            return Err(format!("the {who} never ended the stream"));
         }
     }
 }
@@ -432,6 +447,24 @@ mod tests {
     }
 
     #[test]
+    fn the_hardware_encoders_are_the_ones_the_platform_says_are_hardware_accelerated_in_the_devices_order() {
+        let list = [
+            codec("c2.android.avc.decoder", &["video/avc"], false, false),
+            codec("c2.android.avc.encoder", &["video/avc"], true, false),
+            codec("c2.vendor.avc.encoder", &["video/avc", "video/hevc"], true, true),
+            codec("c2.android.hevc.decoder", &["video/hevc"], false, false),
+            codec("c2.vendor.hevc.encoder", &["Video/HEVC"], true, true),
+            codec("c2.android.aac.encoder", &["audio/mp4a-latm"], true, false),
+        ];
+        // Only the platform's answer counts, and only of codecs that encode: the decoders and the software
+        // encoder are left out although the device lists them first for the type, as it does its decoders.
+        assert_eq!(hardware_encoders(&list, "video/avc"), ["c2.vendor.avc.encoder"]);
+        assert_eq!(hardware_encoders(&list, "video/hevc"), ["c2.vendor.avc.encoder", "c2.vendor.hevc.encoder"], "in the list's order, a type's case aside");
+        assert_eq!(hardware_encoders(&list, "audio/mp4a-latm"), Vec::<&str>::new(), "the AAC encoder is software by the platform's answer");
+        assert_eq!(hardware_encoders(&[], "video/avc"), Vec::<&str>::new(), "a device with no list encodes none in hardware");
+    }
+
+    #[test]
     fn every_parameter_set_follows_a_start_code_in_record_order_in_the_buffer_androids_table_gives_it() {
         // H.264: the SPS is csd-0 and the PPS csd-1.
         let entry = avc_entry();
@@ -512,13 +545,13 @@ mod tests {
     fn a_drain_gives_what_the_end_and_each_read_gives_until_the_stream_ends_and_every_failure_is_an_error() {
         let long = Duration::from_secs(3600);
         let mut reads = [(vec![2], false), (Vec::new(), false), (vec![3, 4], true)].into_iter();
-        assert_eq!(until_the_end(long, || Ok(vec![1]), || Ok(reads.next().unwrap())), Ok(vec![1, 2, 3, 4]), "every picture, in order, then the end");
+        assert_eq!(until_the_end(long, "decoder", || Ok(vec![1]), || Ok(reads.next().unwrap())), Ok(vec![1, 2, 3, 4]), "every picture, in order, then the end");
         // An end read in time is the end, however late the clock is by then; with no end in time, the pictures
         // read so far are not the stream's whole tail.
-        assert_eq!(until_the_end(Duration::ZERO, || Ok(vec![]), || Ok((vec![5], true))), Ok(vec![5]));
-        assert_eq!(until_the_end(Duration::ZERO, || Ok(vec![]), || Ok((vec![6], false))), Err("the decoder never ended the stream".into()));
+        assert_eq!(until_the_end(Duration::ZERO, "decoder", || Ok(vec![]), || Ok((vec![5], true))), Ok(vec![5]));
+        assert_eq!(until_the_end(Duration::ZERO, "decoder", || Ok(vec![]), || Ok((vec![6], false))), Err("the decoder never ended the stream".into()));
         let failed = "waiting for a picture failed (ErrorUnknown)";
-        assert_eq!(until_the_end(long, || Ok(vec![]), || Err::<(Vec<u8>, bool), _>(failed.into())), Err(failed.into()));
+        assert_eq!(until_the_end(long, "decoder", || Ok(vec![]), || Err::<(Vec<u8>, bool), _>(failed.into())), Err(failed.into()));
         // A codec that cannot take the end is not read from.
         let refused = "waiting for an input buffer failed (ErrorUnknown)";
         let mut reads_made = 0;
@@ -526,7 +559,7 @@ mod tests {
             reads_made += 1;
             Ok((vec![7], true))
         };
-        assert_eq!(until_the_end(long, || Err(refused.into()), read), Err(refused.into()));
+        assert_eq!(until_the_end(long, "decoder", || Err(refused.into()), read), Err(refused.into()));
         assert_eq!(reads_made, 0, "no read after a refused end");
         // The time allowed runs from the end being queued, however long the queue took: a codec that waited for
         // an input buffer still has all of it to end the stream.
@@ -535,6 +568,6 @@ mod tests {
             Ok(Vec::new())
         };
         let mut slow_reads = [(vec![8], false), (vec![9], true)].into_iter();
-        assert_eq!(until_the_end(Duration::from_millis(200), slow_queue, || Ok(slow_reads.next().unwrap())), Ok(vec![8, 9]));
+        assert_eq!(until_the_end(Duration::from_millis(200), "decoder", slow_queue, || Ok(slow_reads.next().unwrap())), Ok(vec![8, 9]));
     }
 }

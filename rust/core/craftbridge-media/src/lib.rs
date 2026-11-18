@@ -2,26 +2,31 @@
 //!
 //! The decoders, VideoToolbox on iOS and MediaCodec on Android, are registered through FilmCraft's public
 //! decoder registry so the software decoders stay the fallback. The encoders, VideoToolbox and AudioToolbox
-//! on Apple platforms, feed [`Movie`], which writes the MP4; a platform without them answers
-//! [`EncodeError::Unavailable`], and its caller encodes another way. Platform code lives in `platform/`.
+//! on Apple platforms and MediaCodec on Android, feed [`Movie`], which writes the MP4; a platform without
+//! them answers [`EncodeError::Unavailable`], and its caller encodes another way. Platform code lives in
+//! `platform/`.
 
 mod aac;
 #[cfg(any(target_os = "ios", target_os = "android", test))]
 mod biplanar;
 mod encode;
+#[cfg(test)]
+mod encodetests;
 mod fallback;
 mod hardware;
 #[cfg(any(target_os = "ios", target_os = "android", test))]
 mod layout;
 #[cfg(any(target_os = "android", test))]
 mod mediacodec_input;
+#[cfg(any(target_os = "android", test))]
+mod mediacodec_output;
 mod movie;
 #[cfg(any(target_os = "ios", target_os = "android", test))]
 mod order;
 #[cfg(any(target_vendor = "apple", target_os = "android"))]
 #[allow(unsafe_code)]
 mod platform;
-#[cfg(any(target_vendor = "apple", test))]
+#[cfg(any(target_vendor = "apple", target_os = "android", test))]
 mod settings;
 
 use filmcraft_codecs::hw::{StreamInfo, hardware_decoding, note_hw_declined, set_hardware_decoding, set_hw_backend};
