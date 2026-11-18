@@ -1,10 +1,11 @@
 use crate::command::output_of;
+use crate::live::live_processes;
 use crate::poll::POLL;
 use std::io::Read;
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 /// Longest a group is given to end once it has been killed: a kill ends a process at once, so a group
@@ -29,9 +30,11 @@ const GUARD: &str = "read -r held; kill -s KILL 0";
 /// kill, sends no second. The sweeper leads a process group of its own, which no kill of the guard's group
 /// reaches, so it asks its shell for no job control, which dash and zsh, either of which `/bin/sh` may be,
 /// refuse without a terminal. A kill fails once the group is gone, or, on macOS, holds only processes that
-/// have exited: stopping there keeps every kill on this group, whose id stays its own while any process of it
-/// is left. For the same reason this program stops a group's sweeper before it reaps the group's guard, whose
-/// id, the group's, is free to be another's once the guard is reaped.
+/// have exited (Linux signals a zombie, so there a kill fails only once every process of the group has been
+/// reaped, as the system does for a group whose program is gone): stopping there keeps every kill on this
+/// group, whose id stays its own while any process of it is left. For the same reason this program stops a
+/// group's sweeper before it reaps the group's guard, whose id, the group's, is free to be another's once the
+/// guard is reaped.
 fn sweeper_script(group: u32) -> String {
     format!("read -r held; while kill -s KILL -- -{group}; do sleep {}; done", POLL.as_secs_f64())
 }
@@ -39,33 +42,29 @@ fn sweeper_script(group: u32) -> String {
 /// Send `signal` to every process in the group `group` leads, as a terminal sends Ctrl-C. A group with
 /// nothing left alive in it is as gone as one that no longer exists: the signal has no one to reach,
 /// and that is no failure. Only a group that still holds a live process the signal did not reach is
-/// one, and the system's own words are the error. Nothing here panics: a [`Group`]'s `Drop` stops it
-/// through here while a failure unwinds, where a panic would abort the whole suite.
+/// one. The shell's own `kill` sends it, as the watchers' scripts do, because a standalone `kill` reads
+/// a small negative number as a signal on Linux; a refusal is told apart from a group that is gone by
+/// the group's live processes, never by the words either gives. Nothing here panics: a [`Group`]'s
+/// `Drop` stops it through here while a failure unwinds, where a panic would abort the whole suite.
 pub fn signal_group(group: u32, signal: &str) -> Result<(), String> {
-    let sent = output_of(Command::new("kill").args(["-s", signal, "--", &format!("-{group}")]))?;
+    // `kill` reads the group 0 as the sender's own and 1 as every process it may signal, and a number past the
+    // largest process id as whatever a shell makes of it: none of them is the one group asked for.
+    if !i32::try_from(group).is_ok_and(|group| group > 1) {
+        return Err(format!("{group} is no process group a signal can be sent to alone"));
+    }
+    let sent = output_of(Command::new(SCRIPT_SHELL).args(["-c", "kill -s \"$1\" -- \"-$2\"", SCRIPT_SHELL, signal, &group.to_string()]))?;
     if sent.status.success() || !group_has_live_process(group)? {
         return Ok(());
     }
-    Err(String::from_utf8_lossy(&sent.stderr).trim().to_string())
+    Err(format!("could not send {signal} to the process group {group}: {}", String::from_utf8_lossy(&sent.stderr).trim()))
 }
 
-/// Does the process group `group` hold a process that has not yet exited? `kill` answers "No such
-/// process" for a group that is gone, but macOS refuses a group whose every process has exited and
-/// not yet been reaped as "Operation not permitted", since its kernel signals no zombie. `pgrep -g`,
-/// which matches no zombie either, says which of the two a refusal was by its exit status alone: 0
-/// for a match, 1 for none, anything else for a `pgrep` that could not tell, which judges nothing.
+/// Does the process group `group` hold a process that has not yet exited? A group whose every process has
+/// exited and not yet been reaped holds none, though a signal to it is refused on macOS, whose kernel
+/// signals no zombie, and accepted on Linux, whose kernel does: the platform's own record of its
+/// processes says which are alive ([`live_processes`]), so neither answer of `kill` stands for the group.
 pub fn group_has_live_process(group: u32) -> Result<bool, String> {
-    let found = pgrep(group)?;
-    match found.status.code() {
-        Some(0) => Ok(true),
-        Some(1) => Ok(false),
-        _ => Err(format!("pgrep could not search the group {group}: {}", String::from_utf8_lossy(&found.stderr).trim())),
-    }
-}
-
-/// `pgrep -g group`: the group's live processes, one id a line, and whether it found any.
-fn pgrep(group: u32) -> Result<Output, String> {
-    output_of(Command::new("pgrep").args(["-g", &group.to_string()]))
+    Ok(!live_processes(group)?.is_empty())
 }
 
 /// Stop the whole group `leader` leads, and answer once no process of it is left alive and `leader` has
@@ -132,7 +131,7 @@ impl Group {
             // Read only to learn whether its watcher has gone, which must never wait.
             end.set_nonblocking(true)?;
         }
-        let (process, guard, sweeper) = guarded([WATCHER_SHELL; 2], command, reads)?;
+        let (process, guard, sweeper) = guarded([SCRIPT_SHELL; 2], command, reads)?;
         Ok(Self { process, guard, sweeper, held, stopped: false })
     }
 
@@ -193,8 +192,8 @@ fn has_gone(held: &UnixStream) -> std::io::Result<bool> {
     }
 }
 
-/// The shell a group's watchers run in.
-const WATCHER_SHELL: &str = "/bin/sh";
+/// The shell the crate's scripts run in: a group's watchers, and the signal [`signal_group`] sends.
+const SCRIPT_SHELL: &str = "/bin/sh";
 
 /// A socket for each of a group's watchers, the guard's and then the sweeper's: this program's ends, which
 /// it holds and never writes, and the ends the watchers read.
@@ -283,7 +282,7 @@ mod tests {
 
     /// The live processes of the group `group`.
     fn pids_of(group: u32) -> Vec<String> {
-        String::from_utf8_lossy(&pgrep(group).unwrap().stdout).lines().map(str::to_string).collect()
+        live_processes(group).unwrap().iter().map(u32::to_string).collect()
     }
 
     /// Scripts that outlast every test, each with the number of processes it runs once it has started them
@@ -315,7 +314,7 @@ mod tests {
     /// what an ended program started; the sweeper must then end by itself, the group being gone.
     fn ended_by_its_watchers(script: &str, count: usize) -> bool {
         let (held, reads) = sockets().unwrap();
-        let (mut process, mut guard, mut sweeper) = guarded([WATCHER_SHELL; 2], Command::new("sh").args(["-c", script]), reads).unwrap();
+        let (mut process, mut guard, mut sweeper) = guarded([SCRIPT_SHELL; 2], Command::new("sh").args(["-c", script]), reads).unwrap();
         let group = guard.id();
         wait_for_processes(group, count, script);
         drop(held);
@@ -334,12 +333,16 @@ mod tests {
     /// A process group is signalled quietly and correctly whatever state it is in: a live one is killed, one
     /// whose every process has exited but not been reaped (which macOS refuses as "Operation not
     /// permitted", a zombie taking no signal) and one that is gone altogether are no failure, and say
-    /// nothing; a live one the signal did not reach is a failure, in `kill`'s own words.
+    /// nothing; a live one the signal did not reach is a failure, naming the signal and the group.
     #[test]
     fn a_group_is_killed_when_alive_and_left_quietly_when_gone() {
         let mut live = leader("sleep", &[OUTLASTING]);
         let unsent = signal_group(live.id(), "NOSUCHSIGNAL");
-        assert!(unsent.as_ref().is_err_and(|words| words.contains("NOSUCHSIGNAL")), "a live group no signal reached is a failure, in kill's words: {unsent:?}");
+        let named = format!("could not send NOSUCHSIGNAL to the process group {}: ", live.id());
+        assert!(
+            unsent.as_ref().is_err_and(|words| words.starts_with(&named)),
+            "a live group no signal reached is a failure, naming the signal and the group: {unsent:?}"
+        );
         assert_eq!(live.try_wait().unwrap(), None, "and the group it did not reach lives on");
         signal_group(live.id(), "KILL").unwrap();
         assert!(!live.wait().unwrap().success(), "the live group's leader was killed");
@@ -349,6 +352,42 @@ mod tests {
         let mut exited = exited;
         exited.wait().unwrap();
         assert_eq!(signal_group(exited.id(), "KILL"), Ok(()), "and so is one whose processes were all reaped");
+    }
+
+    /// A number that names no one group is refused before anything is sent: `kill` would read 0 as this
+    /// program's own group and 1 as every process it may signal. The signal is 0, which reaches no process, so
+    /// the test does no harm should the refusal go.
+    #[test]
+    fn a_number_that_names_no_one_group_is_refused() {
+        let past_every_id = u32::try_from(i32::MAX).unwrap() + 1;
+        for group in [0, 1, past_every_id, u32::MAX] {
+            assert_eq!(signal_group(group, "0"), Err(format!("{group} is no process group a signal can be sent to alone")));
+        }
+    }
+
+    /// An exited process that has not been reaped, a zombie, is no live process of its group, whether it is the
+    /// group's only one or sits beside one that lives: the platform's record counts the live one alone, and
+    /// the group is gone once that one is killed, though a zombie keeps its place until its parent reaps it.
+    #[test]
+    fn a_zombie_is_no_live_process_of_its_group() {
+        let exited = leader("true", &[]);
+        assert!(poll_until(STUCK_AFTER, || state_of(exited.id()).starts_with('Z')), "gave up waiting for the group's only process to exit");
+        assert_eq!(live_processes(exited.id()), Ok(Vec::new()), "a group of a zombie alone holds no live process");
+        assert_eq!(group_has_live_process(exited.id()), Ok(false));
+        let mut exited = exited;
+        exited.wait().unwrap();
+        assert_eq!(group_has_live_process(exited.id()), Ok(false), "and nor does one that was reaped");
+        let script = format!("sleep {OUTLASTING} & exit 0");
+        let mut beside = leader("sh", &["-c", &script]);
+        let group = beside.id();
+        assert!(poll_until(STUCK_AFTER, || state_of(group).starts_with('Z')), "gave up waiting for the group's leader to exit");
+        let live = live_processes(group).unwrap();
+        assert_eq!(live.len(), 1, "the zombie leader beside the live child is no second live process: {live:?}");
+        assert!(!live.contains(&group), "the exited leader was counted as alive");
+        assert_eq!(group_has_live_process(group), Ok(true), "the live child keeps its group alive");
+        signal_group(group, "KILL").unwrap();
+        assert!(poll_until(STUCK_AFTER, || !group_has_live_process(group).unwrap()), "the live child outlived the kill");
+        beside.wait().unwrap();
     }
 
     /// Stopping a group leaves no process of it alive and its leader reaped, whatever the leader runs: a
@@ -457,7 +496,7 @@ mod tests {
     #[test]
     fn a_watcher_that_cannot_start_fails_the_group_before_its_process_runs() {
         let missing = "/craftbridge-no-such-shell";
-        for (shells, name) in [([missing, WATCHER_SHELL], GUARD_NAME), ([WATCHER_SHELL, missing], SWEEPER_NAME)] {
+        for (shells, name) in [([missing, SCRIPT_SHELL], GUARD_NAME), ([SCRIPT_SHELL, missing], SWEEPER_NAME)] {
             // What the process writes is read to the end of the pipe once the command, which holds its own end, is
             // dropped: a process that was started has written by then, and one never started has not, with no
             // wait for either.
@@ -491,7 +530,7 @@ mod tests {
             end.set_nonblocking(true).unwrap();
         }
         let mut command = Command::new("/craftbridge-no-such-binary");
-        assert!(guarded([WATCHER_SHELL; 2], &mut command, reads).is_err(), "a step that cannot start is an error");
+        assert!(guarded([SCRIPT_SHELL; 2], &mut command, reads).is_err(), "a step that cannot start is an error");
         let gone = poll_until(STUCK_AFTER, || held.iter().all(|end| has_gone(end).unwrap()));
         assert!(gone, "a watcher was still waiting after the step that could not start had failed: its end of the socket never closed");
     }
@@ -504,7 +543,9 @@ mod tests {
     #[test]
     fn a_group_whose_process_ends_on_its_own_leaves_the_group_behind_it() {
         let marker = std::env::temp_dir().join(format!("craftbridge-process-leftover-{}", std::process::id()));
-        let script = format!("sleep {OUTLASTING} & echo $! > '{}'", marker.display());
+        // The id is written beside the marker and moved onto it, so the marker is there only once it holds the
+        // whole id: a file the shell has made and not yet written would read as no id.
+        let script = format!("sleep {OUTLASTING} & echo $! > '{0}.partial' && mv '{0}.partial' '{0}'", marker.display());
         let mut ended = Group::spawn(Command::new("sh").args(["-c", &script])).unwrap();
         let group = ended.id();
         assert!(poll_until(STUCK_AFTER, || marker.is_file()), "the step never wrote the id of what it left running");
@@ -513,7 +554,8 @@ mod tests {
         assert!(poll_until(STUCK_AFTER, || ended.try_wait().unwrap().is_some()), "the step never ended");
         drop(ended);
         let state = state_of(leftover);
-        assert!(state.starts_with('S') || state.starts_with('R'), "a step that ended on its own stopped its group anyway: the process it left is {state:?}");
+        // Running, sleeping or waiting on the disk are all alive: only a process killed is gone, or a zombie.
+        assert!(!state.is_empty() && !state.starts_with('Z'), "a step that ended on its own stopped its group anyway: the process it left is {state:?}");
         signal_group(group, "KILL").unwrap();
     }
 

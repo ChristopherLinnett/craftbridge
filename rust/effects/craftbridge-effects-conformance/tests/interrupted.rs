@@ -57,7 +57,7 @@ fn a_runner_that_ends_while_a_step_runs_leaves_nothing_of_the_step_running() {
             runner.kill().expect("kill the runner");
         }
         let ended_by = runner.wait().expect("reap the runner");
-        // A `pgrep` that cannot tell keeps the wait going: the test's own failed look is not the group's exit,
+        // A look that cannot tell keeps the wait going: the test's own failed look is not the group's exit,
         // and the next look is one poll away. Whoever is left when the bound is reached is named in the
         // failure, because a wait's timeout alone says nothing about what ran on, which is what a triage needs.
         let gone = poll_until(GONE_WITHIN, || !group_has_live_process(group).unwrap_or(true));

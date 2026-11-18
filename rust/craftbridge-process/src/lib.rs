@@ -10,12 +10,14 @@
 //! in a child started with a changed environment, the only way a test can meet variables its own process
 //! must not carry while other tests run beside it. The code lives here once, so a fix reaches every tool
 //! that stops a group and every test that starts a child. The crate depends on no CraftBridge crate and
-//! holds no `unsafe`: the system's `kill`, `pgrep` and `sh` do the signalling, as a shell does.
+//! holds no `unsafe`: the shell's own `kill` does the signalling, as a shell does, and the platform's own record
+//! of its processes, `/proc` on Linux and `pgrep` elsewhere, says which of a group's are alive.
 
 #![forbid(unsafe_code)]
 
 mod command;
 mod group;
+mod live;
 mod poll;
 mod rerun;
 
