@@ -29,6 +29,10 @@
 "org.jetbrains.kotlinx:kotlinx-coroutines-bom" = "Apache-2.0"
 "org.jetbrains.kotlinx:kotlinx-coroutines-core" = "Apache-2.0"
 "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm" = "Apache-2.0"
+# Reads the conformance corpus, which is TOML, in the instrumented checks alone (android/sdk/effects); nothing
+# that ships carries it. The jar bundles the ANTLR runtime it parses with, which is BSD-3-Clause, and
+# both licences are on the allowlist.
+"org.tomlj:tomlj" = "Apache-2.0"
 # The detekt analyser the gate runs (plan D-28) and the pieces the build's own rules compile and test
 # against, with every module their resolution pulls in — read off each module's own POM. They run in the
 # build and in the rules' tests; nothing here ships inside an AAR.

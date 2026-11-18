@@ -14,6 +14,9 @@ import org.jetbrains.kotlin.gradle.dsl.ExplicitApiMode
 import org.jetbrains.kotlin.gradle.dsl.KotlinAndroidProjectExtension
 import org.jetbrains.kotlin.gradle.tasks.AbstractKotlinCompile
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
+import java.io.File
+import java.nio.file.Path
+import java.nio.file.Paths
 
 /**
  * The Lint checks no module runs: checks that only report that a newer version of something
@@ -44,6 +47,14 @@ private val agpCompilerArgs = setOf("-Xuse-inline-scopes-numbers")
  * written code, its tests and the command facade beside the bindings keep the mode whole.
  */
 private const val QUIET_ERROR_SUPPRESSION = "-Xdont-warn-on-error-suppression"
+
+/**
+ * The conformance data the repository keeps for this module's Craft app, `conformance/<module>`, which
+ * every platform's runner reads (AGENTS §1), or none when the repository holds none for the module. The
+ * module's instrumented-test APK packs it as its assets from where it is, so the one corpus is never
+ * copied or generated into the repository, and the library itself never ships it.
+ */
+private fun Project.conformanceFolder(): File? = repositoryRoot.resolve("conformance/$name").canonicalFile.takeIf { it.isDirectory }
 
 /**
  * The Android library setup every CraftBridge module shares: SDK levels, Java and Kotlin rules,
@@ -107,6 +118,15 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                     .getByName("main")
                     .kotlin.directories
                     .add(GENERATED_KOTLIN)
+                // The one corpus is the instrumented checks' assets and nothing else's: the check on source
+                // folders below lets this one folder be outside the module, as the assets of this source
+                // set alone.
+                conformanceFolder()?.let { corpus ->
+                    sourceSets
+                        .getByName("androidTest")
+                        .assets.directories
+                        .add(corpus.path)
+                }
             }
 
             // Every module's unit tests run on TestNG, through kotlin-test's binding to it: kotlin-test
@@ -169,6 +189,18 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                 // no entry in the project graph and no licence trail. Android's source sets are read
                 // back, as the folder names it stores for every kind of source it packs: AGP 9 compiles
                 // Kotlin itself from them, and Kotlin's own source-set DSL is deprecated in their favour.
+                val corpus = conformanceFolder()?.toPath()
+
+                // An absolute folder name is a path of its own; a relative one belongs to the module.
+                // `File(projectDir, name)` would fold a leading `/` into a relative path and hide the
+                // first case.
+                fun folderOf(declared: String): Path =
+                    Paths
+                        .get(declared)
+                        .let { path -> if (path.isAbsolute) path else projectDir.toPath().resolve(path) }
+                        .toFile()
+                        .canonicalFile
+                        .toPath()
                 val roots =
                     android.sourceSets.flatMap { set ->
                         listOf(
@@ -184,23 +216,15 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                             set.jniLibs,
                             set.shaders,
                             set.mlModels,
-                        ).flatMap { kind -> kind.directories }
+                        ).flatMap { kind ->
+                            // The corpus is the one folder outside the module that a source set may name, and
+                            // only the instrumented checks' assets: named by `main`, or as any other kind of
+                            // source, it would be packed into what ships.
+                            val packedInTests = set.name == "androidTest" && kind === set.assets
+                            kind.directories.map(::folderOf).filterNot { packedInTests && it == corpus }
+                        }
                     }
-                val outside =
-                    roots
-                        // An absolute folder name is a path of its own; a relative one belongs to the
-                        // module. `File(projectDir, name)` would fold a leading `/` into a relative
-                        // path and hide the first case.
-                        .map { root ->
-                            java.nio.file.Paths
-                                .get(root)
-                                .let { declared ->
-                                    if (declared.isAbsolute) declared else projectDir.toPath().resolve(declared)
-                                }.toFile()
-                                .canonicalFile
-                                .toPath()
-                        }.distinct()
-                        .filterNot { it.startsWith(projectDir.canonicalFile.toPath()) }
+                val outside = roots.distinct().filterNot { it.startsWith(projectDir.canonicalFile.toPath()) }
                 if (outside.isNotEmpty()) {
                     throw GradleException(
                         "$path builds from ${outside.joinToString()}, outside its own folder: a module's code, resources and native libraries live in the module",

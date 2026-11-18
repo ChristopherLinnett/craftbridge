@@ -25,6 +25,8 @@ jna = "5.18.1"
 kotlinx-coroutines = "1.10.2"
 # The JSON parser and printer the engine's text requests are read with and written with.
 kotlinx-serialization = "1.11.0"
+# The TOML reader the conformance corpus's instrumented checks parse it with.
+tomlj = "2.2.0"
 
 [plugins]
 android-library = { id = "com.android.library", version.ref = "agp" }
@@ -58,3 +60,6 @@ kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-c
 # The engine speaks JSON text; the plugin module reads and writes it with kotlinx's own parser rather
 # than a hand-written one. The json artifact brings the serialization core it is built on, at its own version.
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+# Reads `conformance/effects/corpus.toml`, the one file every runner reads, in the instrumented checks alone: it
+# is an `androidTestImplementation`, so no library module ships it. It bundles the ANTLR runtime it parses with.
+tomlj = { module = "org.tomlj:tomlj", version.ref = "tomlj" }
