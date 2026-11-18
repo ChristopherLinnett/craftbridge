@@ -353,10 +353,11 @@ stage_swift_build() {
 # simulator` chooses and shares one at a time with every other run on the machine
 # (rust/xtask/src/simulator.rs): the stage creates no device, boots an iPhone simulator only when none is
 # running, waits its turn when another run is testing on the simulator it chose, and shuts down only one
-# it booted, once nothing uses it; and its test runner takes a sandbox of its own, so a run of the suite
-# started by hand on the same simulator never meets this one's files. The suite runs in the one
-# configuration that command names, the one a developer and `swift test` run it in. The Simulator is
-# macOS's own, so the hosted macOS job runs this stage on the runner's simulator.
+# whose boot began under a run of it, never one somebody else had booted, once nothing uses it; and its
+# test runner takes a sandbox of its own, so a run of the suite started by hand on the same simulator
+# never meets this one's files. The suite runs in the one configuration that command names, the one a
+# developer and `swift test` run it in. The Simulator is macOS's own, so the hosted macOS job runs this
+# stage on the runner's simulator.
 stage_swift_test() {
   local suites configuration destination architectures status=0
   xcframework || return 1

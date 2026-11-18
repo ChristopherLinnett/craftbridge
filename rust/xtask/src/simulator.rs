@@ -6,7 +6,7 @@
 //! an agent's own test run — so nothing here creates, erases or renames one. A run takes one that is
 //! running already when there is one, and boots one only when none is: the newest iOS runtime's, so the
 //! choice never rests on the order `simctl` happens to list its runtimes in. It shuts down only a
-//! simulator a run of this command booted, and only once nothing uses it: no run of this command holds
+//! simulator whose boot a run of this command caused, itself or through its program, and only once nothing uses it: no run of this command holds
 //! it, no run started without a lock names it in its arguments, and no package's tests run in it,
 //! whoever started them.
 //!
@@ -18,11 +18,18 @@
 //! unless given one of their own, as the `swift_test` stage gives them — and the engine's export journal
 //! there lets one process hold it at a time. A run that finds its chosen simulator held waits for its turn; what it looked at before waiting is
 //! stale once the lock is its own — the simulator may have been booted, tested on and shut down meanwhile
-//! — so it looks at the state again under the lock, and boots a simulator it finds stopped itself. The
-//! same lock file says when a run of this command booted the simulator, as `simctl` records the boot
-//! (`lastBootedAt`): the run holding the lock at the shutdown decision shuts it down, so a simulator
-//! somebody else has booted is left to them. A run that takes no lock — `xcodebuild` started by hand,
-//! which boots its destination itself — shows twice over.
+//! — so it looks at the state again under the lock, and boots a simulator it finds stopped itself.
+//! Under the lock no other run of this command boots the simulator or shuts it down, so every boot it has
+//! while the run holds it is the runs' but one: the boot that was running already when the run looked,
+//! which somebody else made and is left to them. A boot made since is the run's own — its `simctl`'s, which
+//! boots the simulator again if it went down between the look and the wait for its boot, or its program's
+//! — or one made by whoever booted the simulator again after the boot it found had ended, and so the
+//! run's as one it found stopped. The same lock file says, with the boot `simctl` records
+//! (`lastBootedAt`), that a run of this command caused the boot the simulator has: the run holding the
+//! lock at the shutdown decision shuts it down, and a boot a run left running for another's use is the
+//! runs' when the next run finds that very boot. A run that takes no lock — `xcodebuild` started by hand,
+//! which boots its destination itself, and shuts down when it ends a simulator it booted — shows twice
+//! over.
 //! While its tests run they show in the simulator: a Swift package's tests run in Xcode's test runner,
 //! `xctest`, a job of the device's own launchd. And from the moment it starts it shows in the machine's
 //! processes, because such a run carries the simulator's id in its own arguments — what
@@ -56,9 +63,32 @@ const PGREP: &str = "pgrep";
 /// id in its own arguments for as long as the device is booted, so it says the device is up, not used.
 const LAUNCHD: &str = "launchd_sim";
 
-/// What a simulator's lock file holds while the boot `simctl` records at `at` was a run of this command's.
+/// What a simulator's lock file holds while its boot, which `simctl` records at `at`, is one a run of this
+/// command caused. The words are the file's, read back by `boot_of_a_run`.
 fn booted_by_a_run(at: &str) -> String {
     format!("booted at {at}\n")
+}
+
+/// The boot a lock file's words say a run of this command caused, `None` when they say none.
+fn boot_of_a_run(said: &str) -> Option<&str> {
+    said.strip_prefix("booted at ")?.strip_suffix('\n')
+}
+
+/// The boot somebody else made: `running`, the boot the simulator had when a run holding its lock looked at
+/// it (or that beat the run's own `simctl boot`), unless a run of this command caused that boot. A run
+/// did when the simulator was stopped and the run booted it (`running` is `None`), and when `said`, the
+/// lock file, names that very boot as one a run left running for another's use.
+fn theirs<'a>(running: Option<&'a str>, said: &str) -> Option<&'a str> {
+    running.filter(|at| boot_of_a_run(said) != Some(*at))
+}
+
+/// What the lock file says while the simulator runs at `at` under a run that found `theirs` running: a
+/// boot a run caused, unless it is that one. A boot other than the one the run found is one made while
+/// the run held the lock, which no other run of this command can make — so it is not compared with the
+/// boot the run itself made, and the run's own `simctl` or program booting the simulator again keeps it the
+/// runs'.
+fn said_while_running(theirs: Option<&str>, at: &str) -> String {
+    if theirs == Some(at) { String::new() } else { booted_by_a_run(at) }
 }
 
 /// One of the machine's iPhone simulators, as `simctl` lists it.
@@ -88,16 +118,19 @@ fn naming_the_simulator<'a>(arguments: &'a [&'a str]) -> Result<(&'a str, &'a [&
 }
 
 /// Take a simulator, run the program on it, and leave the simulator as the runs on the machine need it.
-/// The simulator is left behind even when the program could not start, so a run that booted one never
-/// leaves it running for want of a program.
+/// The simulator is left behind even when it did not finish booting or the program could not start, so a
+/// run that booted one never leaves it running for want of a program.
 fn on_simulator(program: &str, arguments: &[&str]) -> Result<ExitCode, String> {
     let locks = locks_folder()?;
     std::fs::create_dir_all(&locks).map_err(|error| format!("could not create {}: {error}", locks.display()))?;
-    let (device, using) = take(&locks)?;
-    println!("simulator: the suite runs on {} ({})", device.name, device.udid);
-    let ran = Command::new(program).args(with_simulator(arguments, &device.udid)).status();
-    let left = leave(&locks, &device, using);
-    let status = ran.map_err(|error| format!("could not run {program}: {error}"))?;
+    let (device, theirs, using) = take(&locks)?;
+    let marker = lock_file(&locks, &device);
+    let ran = ready(&marker, &device, theirs.as_deref()).and_then(|()| {
+        println!("simulator: the suite runs on {} ({})", device.name, device.udid);
+        Command::new(program).args(with_simulator(arguments, &device.udid)).status().map_err(|error| format!("could not run {program}: {error}"))
+    });
+    let left = leave(&marker, &device, theirs.as_deref(), using);
+    let status = ran?;
     left?;
     Ok(crate::report::exit_of("simulator", program, status))
 }
@@ -107,11 +140,12 @@ fn on_simulator(program: &str, arguments: &[&str]) -> Result<ExitCode, String> {
 /// when it is this run's turn. Another run may have booted, tested on and shut down a listed running
 /// simulator while this one waited, so under the lock the state is looked at again: a simulator found
 /// stopped is booted here, which no other run of this command can be doing at the same time because it
-/// is this run that holds the simulator's lock — so the boot is this run's to record, and to undo.
-fn take(locks: &Path) -> Result<(Device, File), String> {
+/// is this run that holds the simulator's lock — so the boot is this run's to record, and to undo. Taken
+/// with it is the boot somebody else had made, running when this run looked, which stays theirs.
+fn take(locks: &Path) -> Result<(Device, Option<String>, File), String> {
     loop {
         let device = choose(&listing()?)?;
-        let marker = locks.join(format!("{}.lock", device.udid));
+        let marker = lock_file(locks, &device);
         if busy_with_it(&marker)? {
             println!("simulator: the suite waits for {} ({}): another run is testing on it", device.name, device.udid);
         }
@@ -120,13 +154,41 @@ fn take(locks: &Path) -> Result<(Device, File), String> {
         if simulator(&listed, &device.udid).is_none() {
             continue; // the simulator is gone, its runtime deleted while this run waited for it
         }
-        if booted_at(&listed, &device.udid).is_none() && boot(&device)? {
-            let at = booted_at(&listing()?, &device.udid).unwrap_or_default();
-            std::fs::write(&marker, booted_by_a_run(&at)).map_err(|error| format!("could not write {}: {error}", marker.display()))?;
-        }
-        wait_until_booted(&device)?;
-        return Ok((device, using));
+        let running = match booted_at(&listed, &device.udid) {
+            Some(at) => Some(at),
+            None => boot(&device)?,
+        };
+        let said = std::fs::read_to_string(&marker).unwrap_or_default();
+        return Ok((device, theirs(running.as_deref(), &said).map(str::to_string), using));
     }
+}
+
+/// The simulator's lock file, in the folder of the locks.
+fn lock_file(locks: &Path, device: &Device) -> PathBuf {
+    locks.join(format!("{}.lock", device.udid))
+}
+
+/// Make the taken simulator ready for the program. The lock file says whose its boot is as soon as it runs,
+/// since a run killed while it waits for the boot never lets go of the simulator, and leaves it running with
+/// only the file to tell the next run it is the runs'; and again once it has finished booting, since
+/// `simctl bootstatus -b` boots the simulator again if it went down meanwhile.
+fn ready(marker: &Path, device: &Device, theirs: Option<&str>) -> Result<(), String> {
+    record(marker, device, theirs)?;
+    wait_until_booted(device)?;
+    record(marker, device, theirs)
+}
+
+/// Say in the simulator's lock file whose the boot it has now is, when it is running.
+fn record(marker: &Path, device: &Device, theirs: Option<&str>) -> Result<(), String> {
+    match booted_at(&listing()?, &device.udid) {
+        Some(at) => say(marker, &said_while_running(theirs, &at)),
+        None => Ok(()),
+    }
+}
+
+/// Write the simulator's lock file.
+fn say(marker: &Path, words: &str) -> Result<(), String> {
+    std::fs::write(marker, words).map_err(|error| format!("could not write {}: {error}", marker.display()))
 }
 
 /// Whether another run is testing on this simulator: its lock file exists and someone holds it. A run
@@ -227,16 +289,16 @@ fn booted_at(listing: &Value, udid: &str) -> Option<String> {
         .map(|device| device.get("lastBootedAt").and_then(Value::as_str).unwrap_or_default().to_string())
 }
 
-/// Boot the simulator: `true` when this run booted it, `false` when another run booted it first, which
-/// is no failure, since the simulator is then running as this run needs it. Only a run that takes no lock
-/// can do that, an `xcodebuild` booting its destination, so the simulator is that run's.
-fn boot(device: &Device) -> Result<bool, String> {
+/// Boot the simulator: `None` when this run booted it, and the boot `simctl` records when another run
+/// booted it first, which is no failure, since the simulator is then running as this run needs it. Only a
+/// run that takes no lock can do that, an `xcodebuild` booting its destination, so that boot is that run's.
+fn boot(device: &Device) -> Result<Option<String>, String> {
     let output = Command::new("xcrun").args(["simctl", "boot", &device.udid]).output().map_err(|error| format!("could not run xcrun simctl boot: {error}"))?;
     if output.status.success() {
-        return Ok(true);
+        return Ok(None);
     }
-    if booted_at(&listing()?, &device.udid).is_some() {
-        return Ok(false);
+    if let Some(at) = booted_at(&listing()?, &device.udid) {
+        return Ok(Some(at));
     }
     Err(format!("the iPhone simulator {} ({}) would not boot: {}", device.name, device.udid, String::from_utf8_lossy(&output.stderr).trim()))
 }
@@ -251,20 +313,21 @@ fn wait_until_booted(device: &Device) -> Result<(), String> {
     if status.success() { Ok(()) } else { Err(format!("the iPhone simulator {} ({}) did not finish booting", device.name, device.udid)) }
 }
 
-/// Let go of the simulator, and shut it down when a run of this command booted the boot it still has and
-/// nothing uses it: no run started without a lock names it in its arguments, and no test of anybody's
-/// runs in it. This run has held the simulator's lock whole since it took it — `_using` is that hold,
-/// dropped only as this ends — so no run of this command is on the simulator through these looks and the
-/// shutdown, and a run waiting for its turn takes the lock only once this has shut the simulator down or
-/// decided to leave it running.
-fn leave(locks: &Path, device: &Device, _using: File) -> Result<(), String> {
+/// Let go of the simulator, and shut it down when its boot is the runs' — any but `theirs`, the boot
+/// somebody else had made when this run looked — and nothing uses it: no run started without a lock names
+/// it in its arguments, and no test of anybody's runs in it. This run has held the simulator's lock whole
+/// since it took it — `_using` is that hold, dropped only as this ends — so no run of this command is on
+/// the simulator through these looks and the shutdown, and a run waiting for its turn takes the lock only
+/// once this has shut the simulator down or decided to leave it running, with the file saying whose boot
+/// it left.
+fn leave(marker: &Path, device: &Device, theirs: Option<&str>, _using: File) -> Result<(), String> {
     let Some(at) = booted_at(&listing()?, &device.udid) else {
         println!("simulator: {} is shut down already: something else shut it down", device.name);
         return Ok(());
     };
-    let marker = locks.join(format!("{}.lock", device.udid));
-    let said = std::fs::read_to_string(&marker).map_err(|error| format!("could not read {}: {error}", marker.display()))?;
-    if said != booted_by_a_run(&at) {
+    let said = said_while_running(theirs, &at);
+    say(marker, &said)?;
+    if boot_of_a_run(&said).is_none() {
         println!("simulator: {} is left running, as it was found: no run of the suite booted it", device.name);
         return Ok(());
     }
@@ -450,6 +513,41 @@ mod tests {
         assert_eq!(without_launchd(&["4242".to_string()], &[]), ["4242".to_string()]);
     }
 
+    /// What one run's lock file says while it holds the simulator, at each boot the simulator may have.
+    #[test]
+    fn every_boot_under_a_runs_lock_is_the_runs_but_the_one_somebody_else_had_made() {
+        // Found stopped, so booted by the run: the run's, and still the run's at another boot when it ends,
+        // since it went down and its own `bootstatus -b` or program booted it again.
+        assert_eq!(theirs(None, "booted at T0\n"), None);
+        assert_eq!(said_while_running(None, "T1"), "booted at T1\n");
+        assert_eq!(said_while_running(None, "T2"), "booted at T2\n", "booted again while the run held it");
+        // Found running with a boot no run caused, a hand-started run's, whatever the file said before: theirs.
+        for said in ["", "booted at T0\n", "garbled", "booted at T1"] {
+            assert_eq!(theirs(Some("T1"), said), Some("T1"), "{said:?}");
+        }
+        assert_eq!(said_while_running(Some("T1"), "T1"), "", "a hand-started run's boot is left to it");
+        // That boot went down and the simulator was booted again while the run held it: the run's.
+        assert_eq!(said_while_running(Some("T1"), "T2"), "booted at T2\n", "a boot made under the run's lock, after the one it found");
+        // Found running with the boot a run left running for another's use: the runs'.
+        assert_eq!(theirs(Some("T1"), "booted at T1\n"), None);
+    }
+
+    /// The lock file across runs, each run taking the simulator as the last one left it.
+    #[test]
+    fn a_boot_left_running_passes_to_the_next_run_and_one_somebody_else_made_never_does() {
+        let next = |running: &str, said: &str| said_while_running(theirs(Some(running), said), running);
+        // A run boots it, at T1, and leaves it running for a hand-started run that names it: the next run
+        // finds that boot, takes it as the runs', and shuts it down once nothing uses it.
+        let left = said_while_running(None, "T1");
+        assert_eq!(next("T1", &left), "booted at T1\n");
+        // After that shutdown somebody else boots it, at T2: no run's, then or in any run after.
+        let found = next("T2", &left);
+        assert_eq!(found, "");
+        assert_eq!(next("T2", &found), "");
+        // Two runs back to back: the second finds it stopped, whatever the first left in the file.
+        assert_eq!(said_while_running(theirs(None, &left), "T3"), "booted at T3\n");
+    }
+
     #[test]
     fn a_simulator_has_its_boot_while_it_is_booted_or_booting() {
         let mut listing = machine(&["OLD"]);
@@ -459,7 +557,7 @@ mod tests {
         listing["devices"]["ios-26-10"][2]["state"] = json!("Booting");
         assert_eq!(booted_at(&listing, "NEW").as_deref(), Some(""), "booting, before simctl records the time");
         assert_eq!(booted_at(&listing, "NOSUCH"), None);
-        // A run's record of its boot holds only for that boot: one made since is somebody else's.
+        // A record holds for the one boot it names: another boot a later run finds running is not a run's.
         assert_ne!(booted_by_a_run("2026-11-18T14:19:05Z"), booted_by_a_run("2026-11-18T15:02:11Z"));
     }
 
