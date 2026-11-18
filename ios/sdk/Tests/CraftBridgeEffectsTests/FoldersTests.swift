@@ -3,7 +3,18 @@ import CraftBridgeFFI
 import Foundation
 import Testing
 
-@Suite struct FoldersTests {
+/// The suite that starts engines in the app's own folders: `.appDefault` is what these tests are about, so
+/// these are the engines that may not move to isolated folders. They run one at a time here, and the suite
+/// holds those folders against every other run of the suite on the simulator while they do.
+@Suite(.serialized, AppsFoldersLock()) struct FoldersTests {
+    /// The suite's tests run inside its hold on the app's own folders, which another run's waits for: a
+    /// second open of the folder finds it held.
+    @Test func theSuiteHoldsTheAppsFoldersWhileItsTestsRun() throws {
+        let other = try openedFolder(AppsFoldersLock.folder)
+        defer { release(other) }
+        #expect(try !lockedAtOnce(other, AppsFoldersLock.folder), "another run could start in the app's folders now")
+    }
+
     /// Every folder is the sandbox's own folder for its kind of file, and the folder the engine writes
     /// inside is the sandbox itself, which holds every folder it writes and every folder an app writes in.
     @Test func theDefaultFoldersAreTheSandboxsFolderForEachKindOfFile() {
@@ -58,5 +69,18 @@ import Testing
         }
         let outside = "the cache folder \(folders.cache) is outside the container \(folders.container)"
         #expect(detail == outside + ": the engine writes only inside its container")
+    }
+
+    /// The engine writes anywhere in the app's sandbox, so an app exports into `Documents`, which the Files
+    /// app shows for an app that shares it, as well as into its `Library`. The engine starts in
+    /// `.appDefault` because an export reaching the app's documents is exactly what its write root being
+    /// the sandbox is on test for.
+    @Test func anExportGoesIntoTheAppsDocuments() async throws {
+        let rig = try await Rig(seconds: 1, in: .documentsDirectory, folders: .appDefault)
+        let job = try ExportJob(engine: rig.engine, method: "export", params: rig.export)
+        await #expect(throws: Never.self) { try await job.result }
+        let written = try FileManager.default.contentsOfDirectory(atPath: rig.output.path(percentEncoded: false))
+        #expect(written.contains { $0.hasSuffix(".png") }, "the export wrote \(written)")
+        try await rig.finish()
     }
 }

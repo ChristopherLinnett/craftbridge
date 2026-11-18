@@ -11,7 +11,10 @@ import Metal
 import QuartzCore
 import Testing
 
-@Suite @MainActor struct CoreAnimationAlphaTests {
+/// The container of this suite's engine, removed when the suite ends.
+private let alphaFolders = "alpha"
+
+@Suite(Removing(name: alphaFolders)) @MainActor struct CoreAnimationAlphaTests {
     private static let side = 16
 
     /// The middle pixel (blue, green, red, alpha) of Core Animation's own composition of `content` over
@@ -67,7 +70,7 @@ import Testing
     }
 
     @Test func aTranslucentFrameIsComposedOverTheAppsViewsAsATranslucentPixel() async throws {
-        let engine = try startEffectsEngine(folders: .isolated(), gpu: .preferred)
+        let engine = try startEffectsEngine(folders: .isolated(alphaFolders), gpu: .preferred)
         try await engine.veil("Veil", width: 64, height: 64, color: "#ff0000", opacity: 50)
         let layer = CAMetalLayer()
         layer.contentsScale = 1

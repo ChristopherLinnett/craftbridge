@@ -50,9 +50,15 @@ private func middle(of card: TemplateInstance, in engine: EffectsEngine) async t
     return (pixel[0], pixel[1], pixel[2])
 }
 
-@Suite struct SectionFiveTests {
+/// The engine's folders for the walk, a container of the run's own, removed when the suite ends; the walk's
+/// files sit inside it, where the engine may write. The name is one, so the making and the removing cannot
+/// drift apart.
+private let walkFoldersName = "sectionfive"
+private let walkFolders = Folders.isolated(walkFoldersName)
+
+@Suite(Removing(name: walkFoldersName)) struct SectionFiveTests {
     @Test func theCallsOfSectionFiveRunOnTheSimulator() async throws {
-        let engine = try await EffectsEngine.start(folders: .appDefault, gpu: .preferred)
+        let engine = try await EffectsEngine.start(folders: walkFolders, gpu: .preferred)
 
         // One call proves the handle answers: the engine can list its fonts.
         let fonts = try await engine.exec("text.fonts")
@@ -63,9 +69,7 @@ private func middle(of card: TemplateInstance, in engine: EffectsEngine) async t
         #expect(home["families"] != nil)
 
         // The running example in small, as the corpus's card scenario steps it.
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ios1c-\(UUID().uuidString)", conformingTo: .directory)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = URL(filePath: walkFolders.container, directoryHint: .isDirectory)
         let sam = dir.appendingPathComponent("sam.png")
         let ann = dir.appendingPathComponent("ann.png")
         let movie = dir.appendingPathComponent("card.mp4")

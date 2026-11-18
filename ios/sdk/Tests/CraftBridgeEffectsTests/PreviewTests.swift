@@ -15,9 +15,12 @@ private let outdated = CraftError.Gpu(
     detail: "the preview surface changed size or format; it is configured again, so the next frame draws")
 private let noSurface = CraftError.Gpu(detail: "no surface")
 
+/// The containers of this suite's engines, removed when the suite ends.
+private let previewFolders = "preview"
+
 /// An engine on the GPU, whose active comp is a translucent veil to preview.
 private func started() async throws -> Engine {
-    let engine = try startEffectsEngine(folders: .isolated(), gpu: .preferred)
+    let engine = try startEffectsEngine(folders: .isolated(previewFolders), gpu: .preferred)
     try await engine.veil("Veil", width: 64, height: 36, color: "#c84d21", opacity: 50)
     return engine
 }
@@ -52,7 +55,7 @@ private func words(_ call: () async throws -> Void) async -> String {
     }
 }
 
-@Suite @MainActor struct PreviewTests {
+@Suite(Removing(name: previewFolders)) @MainActor struct PreviewTests {
     @Test func aPreviewDrawsOnTheAppsLayer() async throws {
         let engine = try await started()
         let target = layer()

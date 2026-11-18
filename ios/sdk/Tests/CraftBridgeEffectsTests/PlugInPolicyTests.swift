@@ -11,10 +11,14 @@ import CraftBridgeFFI
 import Foundation
 import Testing
 
-/// Where the app's bundle, its container and the folder outside both are made.
-private let appFolders = temporaryFolder("t24")
+/// The name these folders are made under and removed under together, so the making and the removing
+/// cannot drift apart.
+private let appFoldersName = "t24"
 
-@Suite(Removing(folder: appFolders)) struct PlugInPolicyTests {
+/// Where the app's bundle, its container and the folder outside both are made.
+private let appFolders = runFolder(appFoldersName)
+
+@Suite(Removing(name: appFoldersName)) struct PlugInPolicyTests {
     /// The sentence the engine refuses a module from outside the bundle's plug-in folder with, after the
     /// path.
     static let outsideTheBundle =
