@@ -10,6 +10,7 @@
 //! parameters it rewrote is written again in the script the replay runs.
 
 use std::borrow::Cow;
+use std::path::Path;
 
 use craftbridge_core::{CraftError, Result};
 use effectcraft_automation::Backend;
@@ -27,8 +28,9 @@ type Found = (usize, String, Value, Option<&'static str>);
 /// `replay`: `{script, keepGoing?}`, answering the report EffectCraft's replay makes — what the command
 /// line prints with `--json`. A script whose steps fail is an answer, `ok: false` with the first
 /// failure named, as it is the command line's report; a script a check refuses is an error, and runs
-/// nothing.
-pub(crate) fn replay(backend: &mut Backend, params: &Value) -> Result<Value> {
+/// nothing. A line that would write beside a source in a folder the session may not write reads a
+/// copy in `folder`, the app's staged folder.
+pub(crate) fn replay(backend: &mut Backend, folder: &Path, params: &Value) -> Result<Value> {
     let obj = object_params(params, "replay")?;
     reject_unknown(&obj, "replay", &["script", "keepGoing"])?;
     let script = string_param(&obj, "script", "replay")?.ok_or_else(|| CraftError::invalid_params("`replay`: needs a `script`"))?;
@@ -39,7 +41,7 @@ pub(crate) fn replay(backend: &mut Backend, params: &Value) -> Result<Value> {
     }
     let mut calls: Vec<(&str, &mut Value)> =
         found.iter_mut().filter(|(.., at)| at.is_some()).map(|(_, command, step_params, _)| (command.as_str(), step_params)).collect();
-    let staged = imports::staged(backend, &mut calls)?;
+    let staged = imports::staged(backend, Some(folder), &mut calls)?;
     let script = if staged.rewritten() { Cow::Owned(rewritten(script, &found)) } else { Cow::Borrowed(script) };
     let session = backend.session().ok_or_else(|| CraftError::internal("`replay`: the backend holds no session"))?;
     let report = replay::run(session, &script, &options);

@@ -10,12 +10,11 @@ use craftbridge_core::{CraftApp, CraftError, FrameBytes, GpuDevice, GpuFailure, 
 use effectcraft_automation::confine::Confinement as EngineConfinement;
 use effectcraft_automation::{Backend, McpServer};
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::hardware::HardwareChoice;
 use crate::requests::RenderRequest;
 use crate::runner::{self, ListOutputs, Progress};
-use crate::staging;
 use crate::{files, fill, info, mcp, methods, orphans, plugins, properties, replay, session, templates, timings};
 
 /// A hosted EffectCraft session: the MCP server built at construction, which owns the headless
@@ -86,27 +85,36 @@ impl EffectCraftApp {
     }
 }
 
-/// One method's answer: the backend the session sits behind, and the parameters the call carried.
-type Method = fn(&mut Backend, &Value) -> Result<Value>;
+/// One method's answer, by what it is handed. Every method is handed the backend the session sits
+/// behind and the parameters the call carried; a method that runs the commands the app names is handed
+/// the app's staged folder too, where the door puts the copy a command that writes beside its source
+/// reads ([`crate::imports`]). Each row of [`METHODS`] says which kind its method is, so the folder
+/// reaches a method as a parameter of the call answering it, and by no other way.
+enum Method {
+    /// A method that runs only commands of the plugin's own choosing, none of which the door copies for.
+    Own(fn(&mut Backend, &Value) -> Result<Value>),
+    /// A method that runs the commands the app names.
+    Commands(fn(&mut Backend, &Path, &Value) -> Result<Value>),
+}
 
 /// The methods of the plan's §14 table `request` answers, by name. It is the one list of them: the
 /// dispatch reads it, and the refusal of every other name recites it, so the refusal names what
 /// `request` answers truly whatever a build adds to it.
 const METHODS: [(&str, Method); 14] = [
-    ("info", info::info),
-    ("commands", methods::commands),
-    ("exec", methods::exec),
-    ("run", methods::run),
-    ("props", properties::props),
-    ("get", properties::get),
-    ("set", properties::set),
-    ("open", files::open),
-    ("save", files::save),
-    ("saveAs", files::save_as),
-    ("new", files::new),
-    ("replay", replay::replay),
-    ("timings", timings::timings),
-    ("template.open", templates::open),
+    ("info", Method::Own(info::info)),
+    ("commands", Method::Own(methods::commands)),
+    ("exec", Method::Commands(methods::exec)),
+    ("run", Method::Commands(methods::run)),
+    ("props", Method::Own(properties::props)),
+    ("get", Method::Own(properties::get)),
+    ("set", Method::Own(properties::set)),
+    ("open", Method::Own(files::open)),
+    ("save", Method::Own(files::save)),
+    ("saveAs", Method::Own(files::save_as)),
+    ("new", Method::Own(files::new)),
+    ("replay", Method::Commands(replay::replay)),
+    ("timings", Method::Own(timings::timings)),
+    ("template.open", Method::Own(templates::open)),
 ];
 
 /// One method that runs long enough to report progress: the backend, the parameters, the listener
@@ -137,9 +145,11 @@ impl CraftApp for EffectCraftApp {
     fn request(&mut self, method: &str, params: Value) -> Result<Value> {
         match METHODS.iter().find(|(name, _)| *name == method) {
             Some((_, answer)) => {
-                let _staged = staging::scope(&self.staged);
                 let params = self.staged(method, params)?;
-                answer(self.server.backend(), &params)
+                match answer {
+                    Method::Own(answer) => answer(self.server.backend(), &params),
+                    Method::Commands(answer) => answer(self.server.backend(), &self.staged, &params),
+                }
             }
             None => Err(CraftError::unsupported(not_answered(method, "request", METHODS.iter().map(|(name, _)| *name)))),
         }
@@ -158,7 +168,6 @@ impl CraftApp for EffectCraftApp {
     ) -> Result<Value> {
         match PROGRESS_METHODS.iter().find(|(name, ..)| *name == method) {
             Some((_, answer, request_of)) => {
-                let _staged = staging::scope(&self.staged);
                 let params = self.staged(method, params)?;
                 let _chosen = self.hardware.scope(request_of(&params).is_some_and(RenderRequest::chooses_hardware));
                 answer(self.server.backend(), &params, on_progress, list_outputs)
@@ -172,7 +181,6 @@ impl CraftApp for EffectCraftApp {
     /// `render-frame --template` renders it. It has no row in [`METHODS`], so `request` keeps refusing
     /// the name.
     fn frame(&mut self, params: Value, format: PixelFormat) -> Result<FrameBytes> {
-        let _staged = staging::scope(&self.staged);
         let params = self.staged(templates::FRAME, params)?;
         templates::frame(self.server.backend(), &params, format)
     }
@@ -181,8 +189,7 @@ impl CraftApp for EffectCraftApp {
     /// session every method reaches. It is not a row of [`METHODS`]: a line is not a method call, so
     /// `request` keeps refusing the name `mcp`.
     fn mcp(&mut self, line: &str) -> Option<String> {
-        let _staged = staging::scope(&self.staged);
-        mcp::answer(&mut self.server, line)
+        mcp::answer(&mut self.server, &self.staged, line)
     }
 
     /// Take the device the core built (§17). A device is handed to EffectCraft's own

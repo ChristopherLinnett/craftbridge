@@ -56,9 +56,9 @@ pub(crate) fn export(backend: &mut Backend, params: &Value, on_progress: Progres
         // The request is the only item the render may write, so every item the project had already
         // ticked for rendering is taken off first, as the command line's `render` takes them off.
         for index in 1..=session(backend)?.project.render_queue.len() {
-            execute(backend, "renderQueue.setRender", object([("index", Value::from(index)), ("render", Value::Bool(false))]), None)?;
+            execute(backend, None, "renderQueue.setRender", object([("index", Value::from(index)), ("render", Value::Bool(false))]), None)?;
         }
-        execute(backend, "renderQueue.add", queued, None)?;
+        execute(backend, None, "renderQueue.add", queued, None)?;
     }
     let attempted: Vec<u64> = session(backend)?.project.render_queue.iter().filter(|item| item.is_queued()).map(|item| item.id).collect();
     // The file names are known only now: the render writes `card_00000.png` on for a PNG sequence asked

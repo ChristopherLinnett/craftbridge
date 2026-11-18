@@ -282,7 +282,7 @@ fn prepare(backend: &mut Backend, call: &Call) -> Result<SetUp> {
     if !call.values.is_empty() {
         preflight(backend, &call.template, &call.values)?;
     }
-    let imported = execute(backend, IMPORT, import_params(&call.template), None)?;
+    let imported = execute(backend, None, IMPORT, import_params(&call.template), None)?;
     let source =
         imported.get("comp").and_then(Value::as_u64).ok_or_else(|| CraftError::command_failed(IMPORT, "template import did not return a composition", None))?;
     let comp = instantiate(backend, source, &call.values, true)?;
@@ -294,7 +294,7 @@ fn prepare(backend: &mut Backend, call: &Call) -> Result<SetUp> {
 /// (`{comp, layer, font}`), among the compositions the import brought in: the project's own layers are
 /// not the template's to warn about.
 fn missing_fonts(backend: &mut Backend, items: &[u64]) -> Result<Vec<Value>> {
-    let found = execute(backend, "file.findMissing", object([("what", Value::from("fonts"))]), None)?;
+    let found = execute(backend, None, "file.findMissing", object([("what", Value::from("fonts"))]), None)?;
     let fonts = found.get("fonts").and_then(Value::as_array).into_iter().flatten();
     Ok(fonts.filter(|font| font.get("comp").and_then(Value::as_u64).is_some_and(|comp| items.contains(&comp))).cloned().collect())
 }
@@ -331,7 +331,7 @@ fn preflight(backend: &mut Backend, path: &str, values: &Map<String, Value>) -> 
 /// own name, for `[compName]` outputs; and set each value on the instance. The scratch run
 /// (`import_media` false) cannot import files, so a media control's file is left to the real run.
 fn instantiate(backend: &mut Backend, source: u64, values: &Map<String, Value>, import_media: bool) -> Result<u64> {
-    let run = |backend: &mut Backend, command: &str, params: Value| execute(backend, command, params, None);
+    let run = |backend: &mut Backend, command: &str, params: Value| execute(backend, None, command, params, None);
     let duplicate = run(backend, "project.duplicate", object([("items", Value::from(vec![source]))]))?;
     let parent = duplicate
         .get("items")
@@ -400,7 +400,7 @@ fn name_wrapper(backend: &mut Backend, source: u64, parent: u64, instance: u64) 
 /// Import the file a media control is given as footage and answer its item, naming the control in
 /// every failure, as the command line does.
 fn import_footage(backend: &mut Backend, control: &str, path: &str) -> Result<u64> {
-    let imported = execute(backend, "file.import", object([("paths", Value::from(vec![path]))]), None)?;
+    let imported = execute(backend, None, "file.import", object([("paths", Value::from(vec![path]))]), None)?;
     if let Some(error) = imported.get("errors").and_then(Value::as_array).and_then(|errors| errors.first()) {
         return Err(CraftError::command_failed("file.import", format!("control `{control}`: cannot import {path}: {error}"), None));
     }

@@ -12,6 +12,7 @@
 //! arguments written again where the tool reads them.
 
 use std::borrow::Cow;
+use std::path::Path;
 
 use effectcraft_automation::server::call_result;
 use effectcraft_automation::{Error, McpServer, tools};
@@ -59,15 +60,18 @@ enum Shape {
 }
 
 /// Answer one line as the server does, with the one difference that a message reaching a withheld
-/// command is refused, and each tool reply's font listings are trimmed.
-pub(crate) fn answer(server: &mut McpServer, line: &str) -> Option<String> {
-    answer_with(server, line, filtered)
+/// command is refused, and each tool reply's font listings are trimmed. A command a tool call runs
+/// that would write beside a source in a folder the session may not write reads a copy in `folder`,
+/// the app's staged folder.
+pub(crate) fn answer(server: &mut McpServer, folder: &Path, line: &str) -> Option<String> {
+    answer_with(server, Some(folder), line, filtered)
 }
 
-/// [`answer`] with the listing filter given, so a test can hand it the face list a phone would.
-fn answer_with(server: &mut McpServer, line: &str, filter: Filter) -> Option<String> {
+/// [`answer`] with the listing filter given, so a test can hand it the face list a phone would, and
+/// with no staged folder for a server no app holds.
+fn answer_with(server: &mut McpServer, folder: Option<&Path>, line: &str, filter: Filter) -> Option<String> {
     match serde_json::from_str::<Value>(line.trim()) {
-        Ok(message) if !line.trim().is_empty() => handle(server, &message, filter).map(|reply| reply.to_string()),
+        Ok(message) if !line.trim().is_empty() => handle(server, folder, &message, filter).map(|reply| reply.to_string()),
         _ => server.handle_line(line),
     }
 }
@@ -75,27 +79,27 @@ fn answer_with(server: &mut McpServer, line: &str, filter: Filter) -> Option<Str
 /// Answer a message as the server does, a batch message by message. The server assembles a batch's
 /// replies the same way: notifications answer nothing, and a batch that answers nothing is not
 /// answered.
-fn handle(server: &mut McpServer, message: &Value, filter: Filter) -> Option<Value> {
+fn handle(server: &mut McpServer, folder: Option<&Path>, message: &Value, filter: Filter) -> Option<Value> {
     match message {
         Value::Array(batch) if !batch.is_empty() => {
-            let replies: Vec<Value> = batch.iter().filter_map(|inner| handle(server, inner, filter)).collect();
+            let replies: Vec<Value> = batch.iter().filter_map(|inner| handle(server, folder, inner, filter)).collect();
             (!replies.is_empty()).then_some(Value::Array(replies))
         }
         _ => match withheld_in(message) {
             Some(words) => refusal(message, words),
-            None => handle_staged(server, message, filter),
+            None => handle_staged(server, folder, message, filter),
         },
     }
 }
 
-/// Answer a message the door lets through, its commands first handed the copy of each file they
-/// would write beside where the session may not write ([`imports::staged`]): a copy that cannot be
-/// made is a failed tool call in the disk's words, and what the door leaves for after the call is
-/// done once the server has answered.
-fn handle_staged(server: &mut McpServer, message: &Value, filter: Filter) -> Option<Value> {
+/// Answer a message the door lets through, its commands first handed the copy in `folder` of each
+/// file they would write beside where the session may not write ([`imports::staged`]): a copy that
+/// cannot be made is a failed tool call in the disk's words, and what the door leaves for after the
+/// call is done once the server has answered.
+fn handle_staged(server: &mut McpServer, folder: Option<&Path>, message: &Value, filter: Filter) -> Option<Value> {
     let Some(mut commands) = commands_in(message) else { return server.handle(message).map(|reply| listed(message, reply, filter)) };
     let mut calls: Vec<(&str, &mut Value)> = commands.steps.iter_mut().flatten().map(|(command, params)| (command.as_str(), params)).collect();
-    let staged = match imports::staged(server.backend(), &mut calls) {
+    let staged = match imports::staged(server.backend(), folder, &mut calls) {
         Ok(staged) => staged,
         Err(error) => return refusal(message, error.to_string()),
     };
@@ -275,7 +279,7 @@ pub(crate) mod tests {
 
     /// The listing the server answers a line with, read from the reply at `pointer`.
     fn listing_through(filter: Filter, request: &Value, pointer: &str) -> Value {
-        let reply = answer_with(&mut server(), &request.to_string(), filter).unwrap_or_default();
+        let reply = answer_with(&mut server(), None, &request.to_string(), filter).unwrap_or_default();
         let reply: Value = serde_json::from_str(&reply).unwrap_or(Value::Null);
         answer_of(&reply).pointer(pointer).cloned().unwrap_or(Value::Null)
     }
@@ -339,7 +343,7 @@ pub(crate) mod tests {
     #[test]
     fn a_batch_of_lines_is_trimmed_message_by_message() {
         let lines = json!([call("list_fonts", json!({})), call("list_fonts", json!({}))]);
-        let reply = answer_with(&mut server(), &lines.to_string(), filtered_by_the_bundled_list).unwrap_or_default();
+        let reply = answer_with(&mut server(), None, &lines.to_string(), filtered_by_the_bundled_list).unwrap_or_default();
         let replies: Vec<Value> = serde_json::from_str(&reply).unwrap_or_default();
         assert_eq!(replies.len(), 2);
         for reply in &replies {
