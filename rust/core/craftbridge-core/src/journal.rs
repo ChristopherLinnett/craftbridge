@@ -1237,7 +1237,7 @@ mod tests {
     use crate::app::CraftApp;
     use crate::cancel::CancelToken;
     use crate::engine::Engine;
-    use crate::gpu::GpuChoice;
+    use crate::gpu::{GpuChoice, Platform};
     use crate::testing::Gate;
     use serde_json::json;
     use std::sync::Arc;
@@ -1342,10 +1342,161 @@ mod tests {
     /// Run `program` with `args` to its end. Other tests hold journals' locks meanwhile, and the process
     /// keeps a copy of each lock's handle until it runs its program; this process lets go of a lock by
     /// unlocking it ([`Hold`]), so that copy keeps none.
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "android")))]
     fn run_program(program: &str, args: &[&std::ffi::OsStr]) -> io::Result<()> {
         let status = std::process::Command::new(program).args(args).status()?;
         if status.success() { Ok(()) } else { Err(io::Error::other(format!("{program} answered {status}"))) }
+    }
+
+    /// Whether a refusal of a special file is what this platform's security policy is known to give:
+    /// Android's, which denies a shell run (`adb shell`, as the device runs are) a fifo, which an app
+    /// may make in its own data folder, and denies the shell and every app a hard link (AOSP
+    /// `system/sepolicy`: `untrusted_app_all.te` allows an app's fifo, `app_neverallows.te` forbids
+    /// its hard links). Everywhere else a refusal is a real failure, so a test never goes unrun on a
+    /// machine that allows what it needs.
+    fn refusal_is_expected(platform: Platform, error: &io::Error) -> bool {
+        platform == Platform::Android && error.kind() == io::ErrorKind::PermissionDenied
+    }
+
+    /// Say on `said` that the running test is skipped, and why. The harness names each test's thread
+    /// after the test, so the line names it without the test spelling its own name. The line goes in
+    /// one write: `adb shell` carries it and the harness's own output on two streams, and a line
+    /// written in pieces reaches the reader split by the harness's words.
+    fn say_skipped(said: &mut dyn Write, why: &str) -> io::Result<()> {
+        said.write_all(format!("SKIPPED {}: {why}\n", thread::current().name().unwrap_or("a test")).as_bytes())
+    }
+
+    /// [`say_skipped`] on stderr, straight through the handle the harness does not capture, so a
+    /// run's output shows every skipped test and its reason.
+    fn skipped(why: &str) -> io::Result<()> {
+        say_skipped(&mut io::stderr(), why)
+    }
+
+    /// What making a special file gave the running test: the file's maker, or `None` once the test
+    /// has said on `said` that it is skipped and why. Any other error is the test's own.
+    fn unless_refused<T>(platform: Platform, made: io::Result<T>, said: &mut dyn Write) -> io::Result<Option<T>> {
+        match made {
+            Ok(made) => Ok(Some(made)),
+            Err(error) if refusal_is_expected(platform, &error) => {
+                say_skipped(said, &format!("the platform's security policy refused the special file it needs ({error})"))?;
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// [`unless_refused`] for this platform, saying a skip on stderr.
+    fn skipped_if_refused<T>(made: io::Result<T>) -> io::Result<Option<T>> {
+        unless_refused(Platform::current(), made, &mut io::stderr())
+    }
+
+    /// Make a fifo at `path`. On Android, where a refusal skips, by the system call, whose error number
+    /// tells the policy's refusal from a fault of the test's own (a folder that is not there, a name
+    /// already taken): the `mkfifo` program ends in the same failure for each.
+    #[cfg(target_os = "android")]
+    fn make_fifo(path: &Path) -> io::Result<()> {
+        use rustix::fs::{CWD, Mode, mkfifoat};
+        mkfifoat(CWD, path, Mode::RUSR | Mode::WUSR).map_err(io::Error::from)
+    }
+
+    /// Make a fifo at `path` with the `mkfifo` program, where a refusal is always the test's failure.
+    #[cfg(all(unix, not(target_os = "android")))]
+    fn make_fifo(path: &Path) -> io::Result<()> {
+        run_program("mkfifo", &[path.as_os_str()])
+    }
+
+    /// What was written, each write apart, so a test sees a line handed over in pieces.
+    #[derive(Default)]
+    struct Writes(Vec<Vec<u8>>);
+
+    impl Write for Writes {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.push(bytes.to_vec());
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Only Android's refusal of a special file skips a test, and it says why, in one write; the same
+    /// refusal anywhere else, and any other error on Android, is the test's failure, and a file that
+    /// was made is never skipped.
+    #[test]
+    fn a_special_file_is_skipped_only_where_the_platform_refuses_it() -> Test {
+        for platform in [Platform::Ios, Platform::Android, Platform::Host] {
+            let mut said = Writes::default();
+            assert_eq!(unless_refused(platform, Ok(7), &mut said)?, Some(7), "{platform:?} skipped a file that was made");
+            assert!(said.0.is_empty(), "{platform:?} said something of a file that was made");
+            for kind in [io::ErrorKind::PermissionDenied, io::ErrorKind::NotFound, io::ErrorKind::Other] {
+                let outcome = unless_refused::<()>(platform, Err(io::Error::from(kind)), &mut said);
+                let skipped = platform == Platform::Android && kind == io::ErrorKind::PermissionDenied;
+                assert_eq!(matches!(outcome, Ok(None)), skipped, "{platform:?} {kind:?}: {outcome:?}");
+                assert_eq!(outcome.is_err(), !skipped, "{platform:?} {kind:?} neither skipped nor failed");
+            }
+            let said = said.0.into_iter().map(String::from_utf8).collect::<std::result::Result<Vec<_>, _>>()?;
+            let reason = format!(
+                "SKIPPED {}: the platform's security policy refused the special file it needs (permission denied)\n",
+                thread::current().name().unwrap_or("a test")
+            );
+            assert_eq!(said, if platform == Platform::Android { vec![reason] } else { Vec::new() }, "{platform:?}");
+        }
+        Ok(())
+    }
+
+    /// A skip reaches the run's own stderr, past the harness's capture of a test's output, which no
+    /// test sees from inside. So a child of this binary says one, as the harness runs it by default
+    /// (captured), and the parent reads the child's two streams. (An iPhone starts no process.)
+    #[cfg(not(target_os = "ios"))]
+    #[test]
+    fn a_skip_is_said_on_stderr_past_the_harnesss_capture() -> Test {
+        let mut child = std::process::Command::new(std::env::current_exe()?);
+        child.args(["--exact", CHILD_THAT_SKIPS, "--ignored", "--test-threads=1"]);
+        let output = craftbridge_process::output_of(&mut child)?;
+        let (said, out) = (String::from_utf8_lossy(&output.stderr), String::from_utf8_lossy(&output.stdout));
+        assert!(output.status.success(), "the child failed:\n{out}\n{said}");
+        assert!(out.contains("running 1 test"), "the name {CHILD_THAT_SKIPS} ran no test:\n{out}");
+        assert_eq!(said.lines().collect::<Vec<_>>(), [format!("SKIPPED {CHILD_THAT_SKIPS}: a reason said to be read")], "stderr");
+        assert!(!out.contains("SKIPPED"), "the skip went to stdout:\n{out}");
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "ios"))]
+    const CHILD_THAT_SKIPS: &str = "journal::tests::child_that_skips";
+
+    #[cfg(not(target_os = "ios"))]
+    #[test]
+    #[ignore = "run by a_skip_is_said_on_stderr_past_the_harnesss_capture, which reads what it says"]
+    fn child_that_skips() -> Test {
+        Ok(skipped("a reason said to be read")?)
+    }
+
+    /// On a desktop the fifo and the hard link the skipping tests need are made, so none of those
+    /// tests is skipped there. (An iPhone starts no `mkfifo`, so its run leaves out the tests that do.)
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    #[test]
+    fn a_desktop_makes_the_special_files_the_skipping_tests_need() -> Test {
+        let sand = Sandbox::new()?;
+        sand.write_journal(&[]);
+        make_fifo(&sand.folders.config.join("fifo"))?;
+        fs::hard_link(sand.file(), sand.folders.config.join("link"))?;
+        Ok(())
+    }
+
+    /// A fifo that cannot be made for a fault of the test's own, a folder that is not there or a name
+    /// already taken, is never an error Android's refusal is told by, so it fails the test there too.
+    /// (An iPhone starts no `mkfifo`.)
+    #[cfg(all(unix, not(target_os = "ios")))]
+    #[test]
+    fn a_fifo_the_test_itself_cannot_make_is_never_taken_for_a_refusal() -> Test {
+        let sand = Sandbox::new()?;
+        let taken = sand.put("taken", b"a file");
+        for path in [sand.folders.container.join("missing/fifo"), taken] {
+            let error = make_fifo(&path).err().ok_or("the fifo was made")?;
+            assert!(!refusal_is_expected(Platform::Android, &error), "{}: {error}", path.display());
+        }
+        Ok(())
     }
 
     /// An entry as a run that listed `path` (below the container) with nothing there leaves it.
@@ -1370,7 +1521,8 @@ mod tests {
     }
 
     /// Whether the permissions hold this user back: they do not hold back root, which reads and
-    /// writes whatever its mode, so a test of a disk that refuses cannot be made that way for it.
+    /// writes whatever its mode, so a test of a disk that refuses cannot be made that way for it, and
+    /// the test that asked is said to be skipped.
     #[cfg(unix)]
     fn permissions_hold(sand: &Sandbox) -> std::result::Result<bool, io::Error> {
         use std::os::unix::fs::PermissionsExt;
@@ -1379,6 +1531,9 @@ mod tests {
         fs::set_permissions(&probe, fs::Permissions::from_mode(0o000))?;
         let held = fs::read(&probe).is_err();
         fs::remove_file(&probe)?;
+        if !held {
+            skipped("the permissions do not hold this user back (root)")?;
+        }
         Ok(held)
     }
 
@@ -1430,6 +1585,32 @@ mod tests {
         assert_eq!(fs::read(&never_reached)?, b"last week's other movie", "a finished file the export never touched was deleted");
         assert_eq!(engine.recovery().untouched, [sand.real("second.mp4")]);
         assert!(!sand.file().exists());
+        Ok(())
+    }
+
+    /// The file that was at a listed path is told from one written there since by its size and by its
+    /// modification time, each alone: a rewrite of as many bytes by its later time, and one within the
+    /// grain of the disk's clock, which on a phone gives two writes in a row one time, by its size; the
+    /// same bytes at the same time are the listed file, which stays. The times are set rather than
+    /// waited for, so no clock's grain decides the test.
+    #[test]
+    fn a_rewrite_of_a_listed_file_is_told_by_its_size_or_its_modification_time_alone() -> Test {
+        let listed = b"last week's movie";
+        let at = UNIX_EPOCH + std::time::Duration::from_secs(1_800_000_000);
+        let later = at + std::time::Duration::from_secs(1);
+        let same_size = listed.to_ascii_uppercase();
+        for (written, when, deleted) in [(&listed[..], at, false), (&same_size[..], later, true), (&listed[..4], at, true)] {
+            let sand = Sandbox::new()?;
+            let card = sand.put("card.mp4", listed);
+            File::options().write(true).open(&card)?.set_modified(at)?;
+            let mut export = sand.journal().pending();
+            export.list(std::slice::from_ref(&card))?;
+            fs::write(&card, written)?;
+            File::options().write(true).open(&card)?.set_modified(when)?;
+            export.killed();
+            let engine = sand.start()?;
+            assert_eq!(card.exists(), !deleted, "{} bytes at {when:?}: {:?}", written.len(), engine.recovery());
+        }
         Ok(())
     }
 
@@ -1783,6 +1964,14 @@ mod tests {
     /// What an export that finishes writes at the path it lists.
     #[cfg(unix)]
     const FINISHED: &[u8] = b"the finished movie";
+
+    /// What a later run that is killed writes over [`FINISHED`]. A file is told from the one that was
+    /// listed by its size and modification time, and a phone's clock ticks too coarsely to tell two
+    /// writes a test makes in a row apart, so the size must differ.
+    #[cfg(unix)]
+    const PARTIAL_OVER_FINISHED: &[u8] = b"half a newer movie, cut short";
+    #[cfg(unix)]
+    const _: () = assert!(PARTIAL_OVER_FINISHED.len() != FINISHED.len());
 
     /// How the export that lists the path again ends.
     #[cfg(unix)]
@@ -2836,7 +3025,7 @@ mod tests {
             let mut killed = sand.journal().pending();
             killed.list(std::slice::from_ref(&card))?;
             if wrote {
-                fs::write(&card, b"half a newer movie")?;
+                fs::write(&card, PARTIAL_OVER_FINISHED)?;
             }
             killed.killed();
             set_mode(&shelf, 0o600)?;
@@ -2864,7 +3053,7 @@ mod tests {
         }
         let mut killed = sand.journal().pending();
         killed.list(std::slice::from_ref(&card))?;
-        fs::write(&card, b"half a newer movie")?;
+        fs::write(&card, PARTIAL_OVER_FINISHED)?;
         killed.killed();
         set_mode(&sand.file(), 0o000)?;
         sand.start()?;
@@ -2873,7 +3062,7 @@ mod tests {
         }
         let later = sand.start()?;
         let recovery = later.recovery();
-        assert_eq!(fs::read(&card)?, b"half a newer movie", "{recovery:?}");
+        assert_eq!(fs::read(&card)?, PARTIAL_OVER_FINISHED, "{recovery:?}");
         assert_eq!(fs::read(&frame)?, FINISHED, "a finished file was deleted: {recovery:?}");
         assert!(recovery.removed.is_empty(), "{recovery:?}");
         assert_eq!(recovery.journal.first(), Some(&yields_to_exports(&sand.real("card.mp4"), 1)), "{recovery:?}");
@@ -3083,18 +3272,24 @@ mod tests {
         Ok(())
     }
 
+    /// A sandbox, the writer that frees its start's read of the journal, and the start.
+    #[cfg(unix)]
+    type BlockedStart = (Sandbox, fs::File, thread::JoinHandle<std::result::Result<Recovery, CraftError>>);
+
     /// A fresh sandbox whose start is held mid-read, for a test that wants to run while a start of its
     /// own holds the journal's lock: the journal is a pipe the start waits to read, which slows the
     /// start itself and nothing else. Opening the returned writer returns once the start has opened
     /// the pipe to read, which it does after taking the lock; whatever the test does next runs while
     /// the start holds the lock and has dealt with nothing. Writing to the writer ends the read, and
     /// joining the start answers what it dealt with.
+    /// `None` where the platform refuses the fifo, with the skip said ([`unless_refused`]).
     #[cfg(unix)]
-    fn start_blocked_reading_the_journal() -> std::result::Result<(Sandbox, fs::File, thread::JoinHandle<std::result::Result<Recovery, CraftError>>), io::Error>
-    {
+    fn start_blocked_reading_the_journal() -> io::Result<Option<BlockedStart>> {
         let pipes = TempDir::new()?;
         let pipe = pipes.path().join("journal");
-        run_program("mkfifo", &[pipe.as_os_str()])?;
+        if skipped_if_refused(make_fifo(&pipe))?.is_none() {
+            return Ok(None);
+        }
         let sand = Sandbox::new()?;
         std::os::unix::fs::symlink(&pipe, sand.file())?;
         let start = thread::spawn({
@@ -3103,7 +3298,7 @@ mod tests {
         });
         // Both ends of the pipe are open by the time this returns, so the pipe's own scratch folder
         // can go: the read carries on through the open handles.
-        fs::OpenOptions::new().write(true).open(&pipe).map(|writer| (sand, writer, start))
+        fs::OpenOptions::new().write(true).open(&pipe).map(|writer| Some((sand, writer, start)))
     }
 
     /// A start holds the journal's lock from before it reads the journal until it has dealt with it, so
@@ -3112,7 +3307,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_start_holds_the_journals_lock_while_it_deals_with_the_journal() -> Test {
-        let (sand, mut writer, start) = start_blocked_reading_the_journal()?;
+        let Some((sand, mut writer, start)) = start_blocked_reading_the_journal()? else {
+            return Ok(());
+        };
         let free_while_reading = lock_is_free(&sand);
         writer.write_all(br#"{"outputs": []}"#)?;
         drop(writer);
@@ -3131,7 +3328,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn an_export_lists_only_after_a_start_has_read_the_journal() -> Test {
-        let (sand, mut writer, start) = start_blocked_reading_the_journal()?;
+        let Some((sand, mut writer, start)) = start_blocked_reading_the_journal()? else {
+            return Ok(());
+        };
         sand.put("stale.mp4", b"a killed run left this");
         let (sent, listed) = mpsc::channel();
         let export = thread::spawn({
@@ -3327,7 +3526,9 @@ mod tests {
         sand.write_journal(&[entry("old.mp4")]);
         let before = fs::read(sand.file())?;
         let old = sand.folders.config.join("old-journal");
-        fs::hard_link(sand.file(), &old)?;
+        if skipped_if_refused(fs::hard_link(sand.file(), &old))?.is_none() {
+            return Ok(());
+        }
 
         let (mut first, mut second) = (sand.journal().pending(), sand.journal().pending());
         first.list(&[sand.folders.container.join("new.mp4")])?;

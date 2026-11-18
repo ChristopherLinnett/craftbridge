@@ -638,6 +638,7 @@ dependencies = [
  "objc2-core-text",
  "oneshot",
  "pollster",
+ "rustix",
  "serde_json",
  "tempfile",
  "wgpu",

@@ -40,5 +40,11 @@ libc.workspace = true
 [dev-dependencies]
 craftbridge-process.workspace = true
 
+# The fifo the journal's lock tests make on Android, made by the system call: its error number tells the
+# adb shell's refusal of a fifo, which skips those tests, from a fault of the test's own, which the
+# `mkfifo` program's exit status cannot. Elsewhere a refusal skips nothing, so the program makes it there.
+[target.'cfg(target_os = "android")'.dev-dependencies]
+rustix = { workspace = true, features = ["fs"] }
+
 [lints]
 workspace = true
