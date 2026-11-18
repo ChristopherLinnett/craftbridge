@@ -1,7 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["core/*", "effects/*", "craftbridge-process", "uniffi-bindgen", "xtask"]
-# Host tools build only when named, so a plain `cargo build` builds the libraries.
+# Exactly the crates the layer table (rust/xtask/src/layers.rs) says ship, which `cargo xtask rules` holds
+# this list to: host tools build only when named, so a plain `cargo build` builds the libraries, and the
+# gate's phone-target runs, which lint the default members, read every crate an app links.
 default-members = ["core/*", "effects/craftbridge-effects", "effects/craftbridge-effects-ffi"]
 
 [workspace.package]
