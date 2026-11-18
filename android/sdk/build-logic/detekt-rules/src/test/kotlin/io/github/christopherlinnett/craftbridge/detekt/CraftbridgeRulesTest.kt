@@ -603,7 +603,7 @@ class UnrunTestTest {
     }
 
     @Test
-    fun `under the test over its class a member's own ignore switches nothing, and an ignored class carrying a test is refused`() {
+    fun `under the test over its class a member's own ignore switches nothing, and an ignored class holding tests is refused`() {
         // TestNG reads a member's `@Ignore` only beside the member's own `@Test`: under the class's, the
         // member runs, so a `Unit` one passes and a getter drops for its return, not for the `@Ignore`.
         val runs = snippet("@Test\nclass A {\n    @Ignore\n    fun runs() {}\n}")
@@ -612,12 +612,10 @@ class UnrunTestTest {
         val dropped = lint(getter)
         assertFindings(1, dropped, getter)
         assertTrue("returns the property's value" in dropped.single().message, dropped.single().message)
-        // The `@Test` an `@Ignore` switches off is read over every other class whose `@Test` says the same,
-        // so a class carrying both is refused even when it holds no test itself.
+        // The `@Ignore` switches off the class it sits over and no other, so a class carrying both and
+        // holding no test is switched to no test: nothing runs unseen, and the class passes.
         val empty = snippet("@Ignore\n@Test\nclass A")
-        val silencing = lint(empty)
-        assertFindings(1, silencing, empty)
-        assertTrue("says the same" in silencing.single().message, silencing.single().message)
+        assertFindings(0, lint(empty), empty)
         // Each method is a test of its own: a `var`'s getter and public setter, and each accessor's own `@Test`.
         for ((body, count) in listOf(
             "@Ignore\n@Test\nclass A {\n    var v = 1\n}" to 2,

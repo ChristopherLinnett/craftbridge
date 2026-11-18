@@ -132,8 +132,11 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
             // Every module's unit tests run on TestNG, through kotlin-test's binding to it: kotlin-test
             // binds to JUnit 4 by default, whose EPL-1.0 is on no branch of the allowlist (AGENTS §8), and
             // Gradle's default runner discovers no test the TestNG binding marks, so the framework and
-            // its binding are chosen here together, once for every module.
+            // its binding are chosen here together, once for every module. The binding drags a TestNG of
+            // its own along transitively, so the TestNG is named beside it, as the catalog names it: strict,
+            // so the tests run on that version or the build fails, never on one nobody read.
             dependencies.addProvider("testImplementation", catalogLibrary("kotlin-test-testng"))
+            dependencies.addProvider("testImplementation", catalogLibrary("testng"))
             tasks.withType<Test>().configureEach { useTestNG() }
 
             // AGP 9 compiles Kotlin itself and registers this extension for it.

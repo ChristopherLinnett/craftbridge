@@ -41,6 +41,9 @@ dependencies {
     testImplementation(libs.detekt.test)
     testImplementation(libs.detekt.core)
     testImplementation(libs.kotlin.test.testng)
+    // The binding drags a TestNG of its own along transitively, so the TestNG is named beside it, as
+    // `craftbridge.android.library` names it for every module: the catalog's, strict.
+    testImplementation(libs.testng)
 }
 
 tasks.test {
