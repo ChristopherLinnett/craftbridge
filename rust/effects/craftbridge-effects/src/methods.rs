@@ -6,6 +6,7 @@
 //! answer identically (the acceptance of plan §28 T1 to T3).
 
 use std::borrow::Cow;
+use std::path::Path;
 
 use craftbridge_core::{CraftError, Result};
 use effectcraft_automation::tools::{self, Reply};
@@ -28,17 +29,19 @@ pub(crate) fn commands(backend: &mut Backend, params: &Value) -> Result<Value> {
     tool_json(backend, "list_commands", &arguments)
 }
 
-/// `exec`: run one command through the door and answer its result.
-pub(crate) fn exec(backend: &mut Backend, params: &Value) -> Result<Value> {
+/// `exec`: run one command through the door, which may hand it a copy in `folder`, the app's staged
+/// folder, and answer its result.
+pub(crate) fn exec(backend: &mut Backend, folder: &Path, params: &Value) -> Result<Value> {
     let obj = object_params(params, "exec")?;
     reject_unknown(&obj, "exec", &["command", "params"])?;
     let command = string_param(&obj, "command", "exec")?.ok_or_else(|| CraftError::invalid_params("`exec`: needs a `command`"))?;
-    execute(backend, command, step_params(&obj), None)
+    execute(backend, Some(folder), command, step_params(&obj), None)
 }
 
-/// `run`: run the steps in order and answer `[{command, result}]`, failing at the first step that
-/// fails with its index, as the command line numbers them from zero.
-pub(crate) fn run(backend: &mut Backend, params: &Value) -> Result<Value> {
+/// `run`: run the steps in order through the door, as `exec` runs one, and answer
+/// `[{command, result}]`, failing at the first step that fails with its index, as the command line
+/// numbers them from zero.
+pub(crate) fn run(backend: &mut Backend, folder: &Path, params: &Value) -> Result<Value> {
     let obj = object_params(params, "run")?;
     reject_unknown(&obj, "run", &["steps"])?;
     let steps = obj.get("steps").and_then(Value::as_array).ok_or_else(|| CraftError::invalid_params("`run`: needs a `steps` array"))?;
@@ -57,7 +60,7 @@ pub(crate) fn run(backend: &mut Backend, params: &Value) -> Result<Value> {
     }
     let mut results = Vec::with_capacity(parsed.len());
     for (index, (command, step_params)) in parsed.into_iter().enumerate() {
-        let result = execute(backend, &command, step_params, u32::try_from(index).ok())?;
+        let result = execute(backend, Some(folder), &command, step_params, u32::try_from(index).ok())?;
         results.push(object([("command", Value::String(command)), ("result", result)]));
     }
     Ok(Value::Array(results))
@@ -84,11 +87,17 @@ struct Call<'a> {
 /// started only by its runner, through [`execute_listed`], once it has listed. A render's failed
 /// items are not read here: a render started without waiting answers while its other items still
 /// render, so the runner reads every item once the render has ended.
-pub(crate) fn execute(backend: &mut Backend, command: &str, params: Value, step: Option<u32>) -> Result<Value> {
+///
+/// `folder` is the staged folder of the app whose command this is, where the door puts the copy a
+/// command that writes beside its source reads. A command the app names carries it; the commands the
+/// plugin's own methods and runners run carry `None`, since none of them is a command the door copies
+/// for (a template's import reads the copy the template runner made before the call,
+/// [`crate::templates::staged`]).
+pub(crate) fn execute(backend: &mut Backend, folder: Option<&Path>, command: &str, params: Value, step: Option<u32>) -> Result<Value> {
     let mut params = if params.is_null() { empty_params() } else { params };
     refuse_process(command, &params, step)?;
     // A copy that cannot be made is a refusal of the disk, worded as every other row's is in a step.
-    let staged = crate::imports::staged(backend, &mut [(command, &mut params)]).map_err(|error| match error {
+    let staged = crate::imports::staged(backend, folder, &mut [(command, &mut params)]).map_err(|error| match error {
         CraftError::Io { message } => CraftError::io(said(command, message, step)),
         other => other,
     })?;

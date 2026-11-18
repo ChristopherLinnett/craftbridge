@@ -119,10 +119,12 @@ struct Lottie {
     externals: Vec<String>,
 }
 
-/// The door: `calls` are the commands one call names, each with the parameters it runs with, which
-/// the door rewrites in place where they name a file it copies. Outside a call of an app, and behind a
-/// bridge, which has no files of its own to stage, every call goes on as it came.
-pub(crate) fn staged(backend: &mut Backend, calls: &mut [(&str, &mut Value)]) -> Result<Staged> {
+/// The door: `folder` is the staged folder of the app whose call this is, where the copies go, and
+/// `calls` are the commands the call names, each with the parameters it runs with, which the door
+/// rewrites in place where they name a file it copies. With no folder (a command of the plugin's own,
+/// or a server no app holds), and behind a bridge, which has no files of its own to stage, every call
+/// goes on as it came.
+pub(crate) fn staged(backend: &mut Backend, folder: Option<&Path>, calls: &mut [(&str, &mut Value)]) -> Result<Staged> {
     let mut imports: Vec<Value> = Vec::new();
     let mut converts = false;
     for (command, params) in calls.iter() {
@@ -136,7 +138,7 @@ pub(crate) fn staged(backend: &mut Backend, calls: &mut [(&str, &mut Value)]) ->
     if imports.is_empty() && !converts {
         return Ok(Staged::none());
     }
-    let (Some(folder), Some(confinement)) = (staging::folder(), backend.confinement().cloned()) else { return Ok(Staged::none()) };
+    let (Some(folder), Some(confinement)) = (folder, backend.confinement().cloned()) else { return Ok(Staged::none()) };
     if calls.iter().any(|(command, params)| confinement.check_command(command, params).is_err()) {
         return Ok(Staged::none());
     }
@@ -161,7 +163,7 @@ pub(crate) fn staged(backend: &mut Backend, calls: &mut [(&str, &mut Value)]) ->
         if copies.iter().any(|(staged_source, _)| *staged_source == source) {
             continue;
         }
-        let Some(copy) = staging::stage(backend, &folder, &source)? else { continue };
+        let Some(copy) = staging::stage(backend, folder, &source)? else { continue };
         for (_, params) in calls.iter_mut() {
             staged.rewritten |= substitute(params, &source, &copy);
         }

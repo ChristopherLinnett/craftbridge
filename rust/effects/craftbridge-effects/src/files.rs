@@ -39,5 +39,5 @@ fn file_command(backend: &mut Backend, params: &Value, method: &str, command: &s
     let obj = object_params(params, method)?;
     reject_unknown(&obj, method, known)?;
     let arguments = string_param(&obj, "path", method)?.map_or_else(empty_params, |path| object([("path", Value::from(path))]));
-    execute(backend, command, arguments, None)
+    execute(backend, None, command, arguments, None)
 }

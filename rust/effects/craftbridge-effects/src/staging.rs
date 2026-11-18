@@ -11,7 +11,9 @@
 //! sit where the system will not clear them as it may clear the cache. [`stage`] knows nothing of
 //! what the file is: each caller names the source a command reads, and hands the command the path it
 //! answers. The callers are the template runner ([`crate::templates`]) and the imports that write their
-//! images beside a Lottie or a vector file ([`crate::imports`]).
+//! images beside a Lottie or a vector file ([`crate::imports`]). Each is handed the staged folder with
+//! the call it serves, as a parameter passed down from the app's own call, never as state of the
+//! thread or the process, so only a call of the app that owns the folder can copy into it.
 //!
 //! A copy is named by what it holds, never by where its source sits. An app update installs the
 //! bundle at a new path on iOS, and may change a file at the same path on Android: a copy named by its
@@ -19,7 +21,6 @@
 //! wrote, for nothing to name again, or be written over where it was, under the media a project saved
 //! before the update still names.
 
-use std::cell::RefCell;
 use std::ffi::OsString;
 use std::hash::Hasher;
 use std::io::Read;
@@ -29,39 +30,6 @@ use craftbridge_core::{CraftError, Result};
 use effectcraft_automation::Backend;
 use effectcraft_automation::confine::{Access, Confinement};
 use siphasher::sip128::{Hasher128, SipHasher13};
-
-thread_local! {
-    /// The staged folder of the app whose call this thread is answering: the method table's rows take
-    /// no folder, and the door every command passes ([`crate::methods::execute`]) reaches a command
-    /// that writes beside its source only through them, so the app names its folder for the length of
-    /// a call, as it names the hardware choice a render reads.
-    static FOLDER: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
-}
-
-/// The guard that has `folder` stand as the staged folder of the calls this thread answers, until it
-/// is dropped; the folder named before it comes back then, so a call made inside another keeps its own.
-pub(crate) struct Scope(Option<PathBuf>);
-
-/// Name `folder` as the staged folder for as long as the returned guard lives.
-#[must_use = "the folder is named only while the guard lives"]
-pub(crate) fn scope(folder: &Path) -> Scope {
-    Scope(FOLDER.with(|slot| slot.try_borrow_mut().ok().and_then(|mut slot| slot.replace(folder.to_path_buf()))))
-}
-
-impl Drop for Scope {
-    fn drop(&mut self) {
-        FOLDER.with(|slot| {
-            if let Ok(mut slot) = slot.try_borrow_mut() {
-                *slot = self.0.take();
-            }
-        });
-    }
-}
-
-/// The staged folder of the call this thread is answering, `None` outside a call of an app.
-pub(crate) fn folder() -> Option<PathBuf> {
-    FOLDER.with(|slot| slot.try_borrow().ok().and_then(|slot| slot.clone()))
-}
 
 /// The path to read `source` from: a copy inside the container when the folder that holds `source`,
 /// as it is named, is one the confinement lets the session read and not write; `None` when it is read
