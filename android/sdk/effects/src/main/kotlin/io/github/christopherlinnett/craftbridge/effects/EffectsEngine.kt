@@ -4,13 +4,18 @@
 package io.github.christopherlinnett.craftbridge.effects
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.hardware.HardwareBuffer
+import android.view.Surface
 import io.github.christopherlinnett.craftbridge.core.CraftException
 import io.github.christopherlinnett.craftbridge.core.Engine
 import io.github.christopherlinnett.craftbridge.core.Folders
+import io.github.christopherlinnett.craftbridge.core.GpuException
 import io.github.christopherlinnett.craftbridge.core.JSONRepresentable
 import io.github.christopherlinnett.craftbridge.core.JSONValue
 import io.github.christopherlinnett.craftbridge.core.NamedArguments
 import io.github.christopherlinnett.craftbridge.core.ProgressHandler
+import io.github.christopherlinnett.craftbridge.core.UnsupportedException
 import io.github.christopherlinnett.craftbridge.core.jsonValue
 import io.github.christopherlinnett.craftbridge.ffi.core.FrameBytes
 import io.github.christopherlinnett.craftbridge.ffi.core.GpuChoice
@@ -21,8 +26,9 @@ import io.github.christopherlinnett.craftbridge.ffi.effects.startEffectsEngine
  * namespaces over its one generic request call, which the `generated/` facade hangs off this. */
 public class EffectsEngine internal constructor(
     /** The universal core engine behind this one: what its exports, its frame and MCP calls, and its
-     * end all go through. An app reaches the preview and the pictures Android draws through it
-     * (`attachPreview`, `present`, `frameBitmap`, `frameHardwareBuffer`), and the raw core calls too. */
+     * end all go through. The typed [preview], [frameBitmap] and [frameHardwareBuffer] go through it, and an app
+     * reaches the rest of the preview (`attachPreview` once for many frames, `detachPreview`, `suspendGpu`,
+     * `resumeGpu`) and the raw core calls on it. */
     public val core: Engine,
     /** How one request of the engine's method table is sent and its reply read back: JSON text
      * through [core] for a real engine, a recording stand-in for a host test of the shapes sent. */
@@ -191,9 +197,9 @@ public class EffectsEngine internal constructor(
      * time with neither; [maxSide] pixels across its longest side or [scale] of it, full size with
      * neither; and with [transparent], its own alpha kept rather than composited over the comp's
      * background colour. The bytes come back as [format] asks, before any conversion to a picture: a
-     * `Bitmap` or a `HardwareBuffer` of a frame is [core]'s `frameBitmap` and `frameHardwareBuffer`.
+     * `Bitmap` or a `HardwareBuffer` of a frame is [frameBitmap] and [frameHardwareBuffer].
      *
-     * @throws CraftException when the engine cannot render the frame.
+     * @throws CraftException when the engine cannot render it.
      */
     public suspend fun frame(
         vararg namedOnly: NamedArguments,
@@ -204,20 +210,76 @@ public class EffectsEngine internal constructor(
         scale: Double? = null,
         transparent: Boolean? = null,
         format: PixelFormat = PixelFormat.PNG,
-    ): FrameBytes =
-        core.frame(
-            jsonText(
-                fields(
-                    "comp" to comp,
-                    "time" to time?.jsonValue,
-                    "frame" to frame?.toNumber(),
-                    "maxSide" to maxSide?.toNumber(),
-                    "scale" to scale?.jsonValue,
-                    "transparent" to transparent?.jsonValue,
-                ),
-            ),
-            format,
-        )
+    ): FrameBytes = core.frame(frameRequest(comp, time, frame, maxSide, scale, transparent), format)
+
+    /**
+     * Render one frame as a [Bitmap], `ARGB_8888` and premultiplied: the frame [EffectsEngine.frame] asks for,
+     * with the same arguments, holding the pixels the core's own premultiplied conversion gives (plan §17).
+     *
+     * @throws CraftException with the engine's refusal of the render, or when the phone has no memory to hold the bitmap.
+     */
+    public suspend fun frameBitmap(
+        vararg namedOnly: NamedArguments,
+        comp: JSONValue? = null,
+        time: Double? = null,
+        frame: Long? = null,
+        maxSide: Long? = null,
+        scale: Double? = null,
+        transparent: Boolean? = null,
+    ): Bitmap = core.frameBitmap(frameRequest(comp, time, frame, maxSide, scale, transparent))
+
+    /**
+     * Render one frame as a [HardwareBuffer], `RGBA_8888` and premultiplied, which the GPU and other
+     * processes read as it is: the frame [EffectsEngine.frame] asks for, with the same arguments. The
+     * caller closes the buffer. It needs Android 12 (API 31) or newer.
+     *
+     * @throws UnsupportedException on an older Android, and [CraftException] when the render is refused.
+     */
+    public suspend fun frameHardwareBuffer(
+        vararg namedOnly: NamedArguments,
+        comp: JSONValue? = null,
+        time: Double? = null,
+        frame: Long? = null,
+        maxSide: Long? = null,
+        scale: Double? = null,
+        transparent: Boolean? = null,
+    ): HardwareBuffer = core.frameHardwareBuffer(frameRequest(comp, time, frame, maxSide, scale, transparent))
+
+    /**
+     * Preview [comp] at [time] into [surface], the app's own: the surface is attached, replacing the one
+     * the engine previewed before, and the frame is drawn into it on the GPU. [comp] is the active comp
+     * when it is left out, [time] its current time. Attaching costs a window and a configuration each
+     * call, so an app that draws many frames into one surface attaches it once through [core]'s
+     * `attachPreview` and then calls the overload without a surface.
+     *
+     * @throws GpuException when there is no device to draw on or the surface is lost, and [CraftException]
+     * for whatever else the core's `attachPreview` or `present` refuse with.
+     */
+    public suspend fun preview(
+        surface: Surface,
+        vararg namedOnly: NamedArguments,
+        comp: JSONValue? = null,
+        time: Double? = null,
+    ) {
+        core.attachPreview(surface)
+        preview(comp = comp, time = time)
+    }
+
+    /**
+     * Draw [comp] at [time] into the surface attached last: [comp] is the active comp when it is left out,
+     * [time] its current time. The engine lets that surface go at [core]'s `detachPreview`, and with the GPU
+     * at its `suspendGpu`, so after either, as with none attached, it answers `GpuException` until a surface
+     * is attached again, as the overload that takes one attaches it.
+     *
+     * @throws GpuException when the surface or the device fails, [CraftException] otherwise.
+     */
+    public suspend fun preview(
+        vararg namedOnly: NamedArguments,
+        comp: JSONValue? = null,
+        time: Double? = null,
+    ) {
+        core.present(frameRequest(comp, time, null, null, null, null))
+    }
 
     /**
      * Export, watching it: [request] is the engine's render request as the plan's table gives it — the
@@ -291,6 +353,29 @@ public class EffectsEngine internal constructor(
 /** The requests of a real engine go as JSON text through the core, and come back read as JSONValue. */
 private fun engineTransport(core: Engine): suspend (String, JSONValue) -> JSONValue =
     { method, params -> jsonValueOf(core.request(method, jsonText(params))) }
+
+/**
+ * The one frame request the core's `frame`, `frameBitmap`, `frameHardwareBuffer` and `present` read, as
+ * JSON text: a preview draws what a frame renders, so its request is these fields, the unnamed ones left out.
+ */
+private fun frameRequest(
+    comp: JSONValue?,
+    time: Double?,
+    frame: Long?,
+    maxSide: Long?,
+    scale: Double?,
+    transparent: Boolean?,
+): String =
+    jsonText(
+        fields(
+            "comp" to comp,
+            "time" to time?.jsonValue,
+            "frame" to frame?.toNumber(),
+            "maxSide" to maxSide?.toNumber(),
+            "scale" to scale?.jsonValue,
+            "transparent" to transparent?.jsonValue,
+        ),
+    )
 
 /** The JSON object of these request fields, dropping the ones the caller left out. */
 internal fun fields(vararg entries: Pair<String, JSONValue?>): JSONValue.Object =
