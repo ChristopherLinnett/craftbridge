@@ -10,10 +10,23 @@ public final class EffectsEngine: Sendable {
     /// through the bindings' own calls. Named `handle` because the generated namespaces take `engine`.
     let handle: Engine
 
+    /// The layer the engine previews into, and whether it holds it: ``preview(_:into:at:)`` goes through it.
+    let previewTarget: PreviewTarget
+
+    /// What the engine does with the GPU and with a running export when the app leaves the foreground:
+    /// the policy ``start(folders:gpu:background:)`` was given, applied for as long as the engine lives.
+    public let background: BackgroundController
+
     /// An engine over the UniFFI handle `engine`. ``start`` makes the handle from the folders and GPU the
-    /// app names; tests pass a handle of their own.
-    package init(engine: Engine) {
-        self.handle = engine
+    /// app names; tests pass a handle of their own, and a host of their own for the system.
+    package init(
+        engine: Engine,
+        background policy: BackgroundPolicy = .default,
+        host: any BackgroundHost = UIKitHost()
+    ) {
+        handle = engine
+        previewTarget = PreviewTarget(engine: engine)
+        background = BackgroundController(engine: engine, policy: policy, preview: previewTarget, host: host)
     }
 
     /// Sends one request of the engine's method table, such as `"exec"`, and returns its reply. Package-wide
@@ -23,16 +36,6 @@ public final class EffectsEngine: Sendable {
         try JSONValue(
             jsonText: try await handle.request(method: method, params: params.jsonText())
         )
-    }
-
-    /// Starts `method` of the method table as a job that reports its progress to `progress`, as an export is
-    /// started: every call of the table that reports progress is made through here, so each is started alike.
-    package func job(
-        _ method: String,
-        _ params: JSONValue,
-        progress: @escaping ProgressHandler = { _, _, _ in }
-    ) throws -> ExportJob {
-        try ExportJob(engine: handle, method: method, params: params, progress: progress)
     }
 
     /// Renders one frame as the engine's `frame` is asked with `params`: the typed `frame` call asks it with

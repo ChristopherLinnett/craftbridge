@@ -57,7 +57,7 @@ extension EffectsEngine.TemplatesCommands {
         // A render names no composition: the engine refuses one, since the template renders an instance
         // of its own.
         let request = engine.exportRequest(comp: nil, to: output, format: format, extra: extra)
-        return try engine.job(
+        return try await engine.job(
             "template.render",
             given([
                 "template": .string(template.path(percentEncoded: false)),

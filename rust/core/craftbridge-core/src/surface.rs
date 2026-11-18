@@ -35,11 +35,23 @@ const fn preferred_formats(platform: Platform) -> &'static [wgpu::TextureFormat]
 /// `frameworks/native/vulkan/libvulkan/swapchain.cpp`, reports `VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR`
 /// and nothing else); there the pass writes alpha 1, which shows the same whatever the window does
 /// with alpha.
-const ALPHA_MODES: [(wgpu::CompositeAlphaMode, Output); 3] = [
-    (wgpu::CompositeAlphaMode::PostMultiplied, Output::PostMultiplied),
-    (wgpu::CompositeAlphaMode::Opaque, Output::Opaque),
-    (wgpu::CompositeAlphaMode::Inherit, Output::Opaque),
-];
+///
+/// On iOS the translucent mode is still wgpu's `PostMultiplied`, the one non-opaque mode its Metal
+/// backend offers, which only clears the layer's opaque flag. Core Animation then reads the layer as
+/// premultiplied, whatever the name says (measured on the simulator, composing a half-transparent red over
+/// blue), so the pass writes the frame as it is held, premultiplied: written straight, every translucent
+/// pixel would show too bright.
+const fn alpha_modes(platform: Platform) -> [(wgpu::CompositeAlphaMode, Output); 3] {
+    let translucent = match platform {
+        Platform::Ios => Output::Premultiplied,
+        Platform::Android | Platform::Host => Output::PostMultiplied,
+    };
+    [
+        (wgpu::CompositeAlphaMode::PostMultiplied, translucent),
+        (wgpu::CompositeAlphaMode::Opaque, Output::Opaque),
+        (wgpu::CompositeAlphaMode::Inherit, Output::Opaque),
+    ]
+}
 
 /// How many frames the surface may hold between acquiring one and showing it: one, as the desktop
 /// app's window keeps it (`effectcraft: apps/effectcraft/src/main.rs:475-482`), so a scrub shows each
@@ -62,7 +74,7 @@ pub struct Choice {
 impl Choice {
     /// Choose from what a surface reports it supports. The format is the first of the platform's
     /// that the surface lists. The present mode is `Fifo`, which every surface must offer, checked
-    /// anyway. The alpha mode is the first of [`ALPHA_MODES`] the surface lists. Anything the
+    /// anyway. The alpha mode is the first of [`alpha_modes`] the surface lists. Anything the
     /// surface cannot give is [`CraftError::Gpu`] naming what was wanted and what it offered.
     pub(crate) fn from_capabilities(platform: Platform, capabilities: &wgpu::SurfaceCapabilities) -> Result<Self> {
         let format = preferred_formats(platform).iter().copied().find(|format| capabilities.formats.contains(format)).ok_or_else(|| {
@@ -71,10 +83,10 @@ impl Choice {
         if !capabilities.present_modes.contains(&wgpu::PresentMode::Fifo) {
             return Err(CraftError::gpu(format!("the preview surface does not offer Fifo, only {:?}", capabilities.present_modes)));
         }
-        let (alpha_mode, output) = ALPHA_MODES.into_iter().find(|(mode, _)| capabilities.alpha_modes.contains(mode)).ok_or_else(|| {
+        let (alpha_mode, output) = alpha_modes(platform).into_iter().find(|(mode, _)| capabilities.alpha_modes.contains(mode)).ok_or_else(|| {
             CraftError::gpu(format!(
                 "the preview surface offers none of the alpha modes {:?}, only {:?}",
-                ALPHA_MODES.map(|(mode, _)| mode),
+                alpha_modes(platform).map(|(mode, _)| mode),
                 capabilities.alpha_modes
             ))
         })?;
@@ -384,7 +396,9 @@ mod tests {
 
     /// `PostMultiplied` where offered, else `Opaque`, else `Inherit`, the one mode Android's surfaces
     /// offer, and what is configured is what the pass writes for it: straight colour for
-    /// `PostMultiplied`, an opaque picture for the other two. `PreMultiplied` alone is refused.
+    /// `PostMultiplied`, an opaque picture for the other two, except on iOS, where Core Animation reads
+    /// every non-opaque layer as premultiplied and the pass writes the frame as it is held.
+    /// `PreMultiplied` alone is refused.
     #[test]
     fn the_alpha_mode_is_post_multiplied_else_opaque_else_inherited() {
         let choose = |alpha: &[wgpu::CompositeAlphaMode]| Choice::from_capabilities(Platform::Android, &caps(&BOTH, &MODES, alpha));
@@ -392,6 +406,10 @@ mod tests {
         let post = choose(&EVERYTHING).expect("post-multiplied is offered");
         assert_eq!((post.alpha_mode, post.output), (wgpu::CompositeAlphaMode::PostMultiplied, Output::PostMultiplied));
         assert_eq!(configured(post), Some(wgpu::CompositeAlphaMode::PostMultiplied));
+        let ios = Choice::from_capabilities(Platform::Ios, &caps(&BOTH, &MODES, &EVERYTHING)).expect("post-multiplied is offered");
+        assert_eq!((ios.alpha_mode, ios.output), (wgpu::CompositeAlphaMode::PostMultiplied, Output::Premultiplied));
+        let ios_opaque = Choice::from_capabilities(Platform::Ios, &caps(&BOTH, &MODES, &[wgpu::CompositeAlphaMode::Opaque])).expect("opaque is offered");
+        assert_eq!((ios_opaque.alpha_mode, ios_opaque.output), (wgpu::CompositeAlphaMode::Opaque, Output::Opaque));
         let opaque =
             choose(&[wgpu::CompositeAlphaMode::Inherit, wgpu::CompositeAlphaMode::PreMultiplied, wgpu::CompositeAlphaMode::Opaque]).expect("opaque is offered");
         assert_eq!((opaque.alpha_mode, opaque.output), (wgpu::CompositeAlphaMode::Opaque, Output::Opaque));
