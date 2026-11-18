@@ -14,6 +14,13 @@
 disable_java_cleaner = true
 package_name = "io.github.christopherlinnett.craftbridge.ffi.core"
 
+# The `LocalizedError` UniFFI gives `CraftError` reads `String(reflecting:)`, the variant's debug text, and an
+# `errorDescription` its own module declares cannot be given other words from outside it. So the bindings
+# declare none, and `CraftBridge` declares the conformance, reading the core's own words through
+# `craft_error_message`.
+[bindings.swift]
+omit_localized_error_conformance = true
+
 # Each `CraftError` variant's text crosses as `detail` in both languages. Kotlin's generated exception
 # for a variant extends `kotlin.Exception` and overrides its `message`, which a field of that name
 # collides with, and one name lets the Swift and Kotlin layers read the same field. UniFFI renames an

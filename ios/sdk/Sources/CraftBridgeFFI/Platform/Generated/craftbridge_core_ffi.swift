@@ -1419,7 +1419,9 @@ public func FfiConverterTypeProgressListener_lower(_ value: ProgressListener) ->
 /// engine starts.
 public struct Folders: Equatable, Hashable {
     /**
-     * The app's sandbox: the engine's read and write root.
+     * The app's sandbox: the engine's read and write root, which holds every working folder. The start
+     * proves it can write here through the working folders alone, since the top of an iOS app's sandbox
+     * takes no new file while the folders in it do.
      */
     public var container: String
     /**
@@ -1457,7 +1459,9 @@ public struct Folders: Equatable, Hashable {
     // declare one manually.
     public init(
         /**
-         * The app's sandbox: the engine's read and write root.
+         * The app's sandbox: the engine's read and write root, which holds every working folder. The start
+         * proves it can write here through the working folders alone, since the top of an iOS app's sandbox
+         * takes no new file while the folders in it do.
          */
         container: String,
         /**
@@ -1781,7 +1785,7 @@ public func FfiConverterTypeRecoveryNote_lower(_ value: RecoveryNote) -> RustBuf
 }
 
 public
-    enum CraftError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError
+    enum CraftError: Swift.Error, Equatable, Hashable
 {
 
     case InvalidParams(
@@ -1806,10 +1810,6 @@ public
     case Internal(
         detail: String
     )
-
-    public var errorDescription: String? {
-        String(reflecting: self)
-    }
 
 }
 
@@ -2205,6 +2205,20 @@ private func uniffiFutureContinuationCallback(handle: UInt64, pollResult: Int8) 
         print("uniffiFutureContinuationCallback invalid handle")
     }
 }
+/// The sentence `error` shows the app's user: the core's own `Display` of it, a `CommandFailed`'s
+/// command before its text and its step after. The bindings' messages read it from here — Swift's
+/// `LocalizedError`, which `CraftBridge` gives the error — so every language says what the core says,
+/// with no second copy of how each variant reads to fall out of step with the core's. A free function,
+/// since an error UniFFI exports as `remote` takes no exported method of its own.
+public func craftErrorMessage(error: CraftError) -> String {
+    return try! FfiConverterString.lift(
+        try! rustCall {
+            uniffiCallStatus in
+            uniffi_craftbridge_core_ffi_fn_func_craft_error_message(
+                FfiConverterTypeCraftError_lower(error), uniffiCallStatus
+            )
+        })
+}
 /// Attach the app's `CAMetalLayer` as the engine's preview surface (plan §20): Swift passes
 /// `Unmanaged.passUnretained(layer).toOpaque()` as an integer, this takes a retain of its own for as long
 /// as the layer is attached, and the engine draws every later frame onto the layer for Core Animation to
@@ -2245,6 +2259,9 @@ private let initializationResult: InitializationResult = {
     let scaffolding_contract_version = ffi_craftbridge_core_ffi_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
+    }
+    if uniffi_craftbridge_core_ffi_checksum_func_craft_error_message() != 64800 {
+        return InitializationResult.apiChecksumMismatch
     }
     if uniffi_craftbridge_core_ffi_checksum_func_attach_metal_layer() != 10328 {
         return InitializationResult.apiChecksumMismatch

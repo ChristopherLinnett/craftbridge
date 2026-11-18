@@ -706,6 +706,8 @@ internal object IntegrityCheckingUniffiLib {
     }
 
     internal fun ensureInitialized() = Unit
+    external fun uniffi_craftbridge_core_ffi_checksum_func_craft_error_message(
+    ): Int
     external fun uniffi_craftbridge_core_ffi_checksum_func_attach_metal_layer(
     ): Int
     external fun uniffi_craftbridge_core_ffi_checksum_method_canceltoken_cancel(
@@ -803,6 +805,8 @@ internal object UniffiLib {
     ): Unit
     external fun uniffi_craftbridge_core_ffi_fn_method_progresslistener_progress(`ptr`: Long,`done`: Long,`total`: Long,`secondsLeft`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_craftbridge_core_ffi_fn_func_craft_error_message(`error`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_craftbridge_core_ffi_fn_func_attach_metal_layer(`engine`: Long,`layer`: Long,
     ): Long
     external fun ffi_craftbridge_core_ffi_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -924,6 +928,9 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if ((lib.uniffi_craftbridge_core_ffi_checksum_func_craft_error_message() and 0xFFFF) != 64800) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_craftbridge_core_ffi_checksum_func_attach_metal_layer() and 0xFFFF) != 10328) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2658,7 +2665,9 @@ public object FfiConverterTypeProgressListener: FfiConverter<ProgressListener, L
  */
 data class Folders (
     /**
-     * The app's sandbox: the engine's read and write root.
+     * The app's sandbox: the engine's read and write root, which holds every working folder. The start
+     * proves it can write here through the working folders alone, since the top of an iOS app's sandbox
+     * takes no new file while the folders in it do.
      */
     var `container`: kotlin.String
     , 
@@ -3359,6 +3368,24 @@ public object FfiConverterSequenceTypeRecoveryNote: FfiConverterRustBuffer<List<
 
 
 
+
+        /**
+         * The sentence `error` shows the app's user: the core's own `Display` of it, a `CommandFailed`'s
+         * command before its text and its step after. The bindings' messages read it from here — Swift's
+         * `LocalizedError`, which `CraftBridge` gives the error — so every language says what the core says,
+         * with no second copy of how each variant reads to fall out of step with the core's. A free function,
+         * since an error UniFFI exports as `remote` takes no exported method of its own.
+         */ fun `craftErrorMessage`(`error`: CraftException): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_craftbridge_core_ffi_fn_func_craft_error_message(
+    
+        
+        FfiConverterTypeCraftError.lower(`error`),_status)
+}
+    )
+    }
+    
 
         /**
          * Attach the app's `CAMetalLayer` as the engine's preview surface (plan §20): Swift passes

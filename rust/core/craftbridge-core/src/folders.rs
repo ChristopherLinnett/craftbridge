@@ -80,13 +80,19 @@ impl Folders {
     }
 
     /// Make the confinement usable before an engine starts (plan §16, behaviour 1): create the
-    /// container and the working folders that are missing, confirm the container and each working
-    /// folder can be read and written and each working folder resolves inside the container, and
-    /// confirm every folder the engine only reads is a directory it can read. A refusal is a
+    /// container and the working folders that are missing, confirm the container can be read, each
+    /// working folder resolves inside the container and can be read and written, and every folder the
+    /// engine only reads is a directory it can read. A refusal is a
     /// `CraftError` from the mapping: `InvalidParams` for a path that cannot name a folder at all,
     /// `Io` for a folder that is not there, is not one, cannot be used, or lies outside the container
     /// it must be in; nothing here panics on hostile paths, and nothing is created before the path it
     /// is made at is known to be inside the container, as the disk stands when it is checked.
+    ///
+    /// The engine's writes inside the container are proven by the working folders' probes, which all
+    /// lie inside it, and by no file of the container's own: the top of a sandbox may refuse a new file
+    /// while the folders in it take one, as an iOS app's does, and it is still the root every folder an
+    /// app writes in lies under — its documents and its temporary files beside the working folders — so
+    /// a probe of the top would refuse a container the engine can use.
     ///
     /// That check is made by path, so a folder replaced by a link out of the container between the
     /// check and the creation is followed. Only something writing in the container at that moment can
@@ -112,6 +118,7 @@ impl Folders {
             // The folder made is the one that was checked, spelt as the check resolved it: made from
             // the app's own spelling it could differ (a trailing `.` makes `mkdir` fail outright).
             ensure_dir(what, &target)?;
+            prove_writable(what, &target)?;
         }
         for (what, path) in read_only {
             readable_dir(what, path)?;
@@ -264,15 +271,18 @@ pub(crate) fn resolved(subject: &str, path: &Path) -> Result<PathBuf, CraftError
     }
 }
 
-/// Make a folder the engine writes, the container or a working folder, be there and prove the engine
-/// can use it: create it when missing, read the directory, and create and remove a probe file,
-/// because a folder a start-up cannot write is a start that would fail the first save and is better
-/// failed here, named. The probe is tempfile's: a fresh random name created only if nothing holds it,
-/// so two engines starting at once never share one and no file the app keeps is ever opened or
-/// removed.
+/// Make a folder the engine writes inside, the container or a working folder, be there: create it
+/// when missing, and read the directory.
 fn ensure_dir(what: &'static str, path: &Path) -> Result<(), CraftError> {
     fs::create_dir_all(path).map_err(|error| CraftError::io(format!("cannot create the {what} folder {}: {error}", path.display())))?;
-    readable_dir(what, path)?;
+    readable_dir(what, path)
+}
+
+/// Prove the engine can write in a working folder by creating and removing a probe file, because a
+/// folder a start-up cannot write is a start that would fail the first save and is better failed
+/// here, named. The probe is tempfile's: a fresh random name created only if nothing holds it, so two
+/// engines starting at once never share one and no file the app keeps is ever opened or removed.
+fn prove_writable(what: &'static str, path: &Path) -> Result<(), CraftError> {
     let unwritable = |error: io::Error| CraftError::io(format!("cannot write to the {what} folder {}: {error}", path.display()));
     tempfile::Builder::new().prefix(".craftbridge-write-probe-").tempfile_in(path).map_err(unwritable)?.close().map_err(unwritable)
 }
@@ -540,6 +550,7 @@ mod tests {
         Ok(())
     }
 
+    /// A container nothing can be written in is refused at the first working folder it cannot hold.
     #[cfg(unix)]
     #[test]
     fn prepare_refuses_a_container_it_cannot_write() -> Result<(), std::io::Error> {
@@ -555,7 +566,58 @@ mod tests {
         set_mode(&sand.folders.container, 0o755)?;
         let error = answer.expect_err("the container cannot be written");
         assert!(matches!(error, CraftError::Io { .. }), "{error:?}");
-        assert!(error.to_string().contains("cannot write to the container"), "{error}");
+        // The message names the folder as the check resolved it, the spelling it was made at.
+        let config = fs::canonicalize(&sand.folders.container)?.join("config");
+        assert!(error.to_string().starts_with(&format!("cannot create the config folder {}: ", config.display())), "{error}");
+        Ok(())
+    }
+
+    /// An iOS app's sandbox: its top refuses a new file while the folders in it take one. The engine
+    /// can use it, since its working folders lie inside and their probes pass, so the start makes no
+    /// file at the top and keeps it as the write root.
+    #[cfg(unix)]
+    #[test]
+    fn prepare_accepts_a_container_whose_top_takes_no_file_while_its_folders_do() -> Test {
+        let sand = sandbox()?;
+        for (_, folder) in sand.folders.working() {
+            fs::create_dir_all(folder)?;
+        }
+        set_mode(&sand.folders.container, 0o555)?;
+        if fs::File::create(sand.folders.container.join("probe")).is_ok() {
+            // As above: the permission bits do not bind this process, so the top takes a file anyway.
+            set_mode(&sand.folders.container, 0o755)?;
+            return Ok(());
+        }
+        let answer = sand.folders.prepare();
+        set_mode(&sand.folders.container, 0o755)?;
+        assert_eq!(answer?.write_root(), sand.folders.container.as_path());
+        let expected: BTreeSet<OsString> = Folders::WORKING.into_iter().map(OsString::from).collect();
+        assert_eq!(names(&sand.folders.container)?, expected, "the start wrote at the container's top");
+        Ok(())
+    }
+
+    /// Each working folder, made in turn so it takes no file, is refused as the folder it is: the
+    /// working folders' probes are what prove the engine can write inside its container.
+    #[cfg(unix)]
+    #[test]
+    fn prepare_refuses_a_working_folder_it_cannot_write() -> Test {
+        for (index, what) in Folders::WORKING.into_iter().enumerate() {
+            let sand = sandbox()?;
+            let folder = sand.folders.working().get(index).map(|(_, path)| path.to_path_buf()).ok_or("no such working folder")?;
+            fs::create_dir_all(&folder)?;
+            set_mode(&folder, 0o555)?;
+            if fs::File::create(folder.join("probe")).is_ok() {
+                // As above: the permission bits do not bind this process, so there is nothing to refuse.
+                set_mode(&folder, 0o755)?;
+                return Ok(());
+            }
+            let answer = sand.folders.prepare();
+            set_mode(&folder, 0o755)?;
+            let error = answer.expect_err("the working folder cannot be written");
+            assert!(matches!(error, CraftError::Io { .. }), "{what}: {error:?}");
+            let resolved = fs::canonicalize(&folder)?;
+            assert!(error.to_string().starts_with(&format!("cannot write to the {what} folder {}: ", resolved.display())), "{what}: {error}");
+        }
         Ok(())
     }
 
