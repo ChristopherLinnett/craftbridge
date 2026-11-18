@@ -1754,7 +1754,7 @@ pub fn set_device_codecs(codecs: Vec&lt;CodecInfo&gt;);   // the device&#39;s co
 <li><em>Surface lost</em>: the layer or surface was resized (outdated): the <code>present</code> that finds it configures the surface again and answers <code>Gpu</code>, and the next draws. Destroyed (lost): every <code>present</code> answers <code>Gpu</code> until the app attaches a new surface, and the session is untouched; a surface already destroyed when the app attaches it answers <code>Gpu</code> at the attach. Any error the device reports while a frame is acquired, drawn or shown answers <code>Gpu</code> too, never wgpu&#39;s default panic, and a frame that failed to draw is not shown. After <code>detach_preview</code> it answers <code>Gpu { &quot;no surface&quot; }</code>.</li>
 </ul>
 <p><strong>Edge cases.</strong> A comp larger than the device&#39;s texture limit: the compositor renders on the CPU for that comp (its existing decline path), and its preview frame is fitted to the limit. A preview during an export: waits (L3); the app shows its last frame.</p>
-<p><strong>Tests.</strong> Desktop: the blit pass against a reference image; CPU and GPU <code>frame</code> outputs equal within the compositor&#39;s own GPU tolerance. Simulator and emulator: <code>present</code> into an offscreen layer and surface, read back. Devices: V4.</p>
+<p><strong>Tests.</strong> Desktop: the blit pass against a reference image; CPU and GPU <code>frame</code> outputs equal within the compositor&#39;s own GPU tolerance. Simulator and emulator: <code>present</code> into an offscreen layer and surface, read back. Devices: V4, which runs the core&#39;s own device tests on each device: the clamped request must be given, on the backend the platform asks for, with no limit above the adapter&#39;s, and the compositor&#39;s own request, unclamped, is given or refused exactly as the adapter&#39;s limits say, its refusal recorded in wgpu&#39;s words.</p>
 <h2 id="18-native-media-design">18. Native media design<a class="anchor" href="#18-native-media-design" aria-label="link">#</a></h2>
 <p><code>craftbridge-media</code> is part of the universal core (PD18): CraftBridge&#39;s own hardware decoders, which every app plugin imports. It plugs into FilmCraft&#39;s public decoder registry, the one EffectCraft opens every movie through (<code>evidence/<wbr>04-craft-suite-shared-core.md</code> Findings 7–8), so EffectCraft needs no change and FilmCraft is neither forked nor changed.</p>
 <div class="table-wrap"><table>
@@ -2424,13 +2424,13 @@ which calls <code>request(&quot;exec&quot;, {&quot;command&quot;: &quot;layer.ne
 <td>E6</td>
 <td>core → Metal</td>
 <td>device and surface (§17)</td>
-<td><code>present</code> on the simulator and the acceptance iPhone (V4)</td>
+<td>the device on the acceptance iPhone (V4); <code>present</code> on the simulator (IOS-2) and the acceptance iPhone (QA-3)</td>
 </tr>
 <tr>
 <td>E7</td>
 <td>core → Vulkan</td>
 <td>device and surface (§17)</td>
-<td><code>present</code> on the emulator and the acceptance Android phones (V4)</td>
+<td>the device on the acceptance Android phone and the shared arm64 emulators (V4); <code>present</code> on the emulator (AND-2) and the acceptance Android phones (QA-3)</td>
 </tr>
 <tr>
 <td>E8</td>
@@ -2661,7 +2661,7 @@ which calls <code>request(&quot;exec&quot;, {&quot;command&quot;: &quot;layer.ne
 <td>R1</td>
 <td>A physical iPhone or Android GPU rejects the device request or behaves unlike the simulator and emulator</td>
 <td>high</td>
-<td>limits clamped to the adapter (§17); CPU fallback (L7); V4 on three devices</td>
+<td>limits clamped to the adapter (§17); CPU fallback (L7); V4: the acceptance iPhone and the acceptance Android phone each took the clamped request and the compositor&#39;s default limits; a Mali phone is untried</td>
 </tr>
 <tr>
 <td>R2</td>
@@ -2874,7 +2874,7 @@ which calls <code>request(&quot;exec&quot;, {&quot;command&quot;: &quot;layer.ne
 </tr>
 <tr>
 <td>V4</td>
-<td>Metal and Vulkan devices with clamped limits on the three phones, and whether each also accepts the compositor&#39;s default limits (T8)</td>
+<td>Metal and Vulkan devices with clamped limits on the acceptance phones and the emulators, and whether each also accepts the compositor&#39;s default limits (T8). Answered on 2026-11-18, through the core&#39;s own tests (<code>gpu::tests</code>), which ask for the device as the engine does and then for the compositor&#39;s own limits unclamped: on an iPhone 12 Pro (A14) with iOS 26.6.1, through <code>tools/<wbr>ios-device-test.sh</code>, the clamped request was given on <code>Apple A14 GPU (Metal)</code> and so were the compositor&#39;s default limits; on a Xiaomi 17 Pro Max with Android 17 (API 37) both were given on <code>Adreno (TM) 840 (Vulkan)</code>. The shared arm64 emulators ran with the emulator&#39;s SwiftShader software renderer (<code>-gpu swiftshader_indirect</code>): on the Android 14 one (API 34) both were given on <code>SwiftShader Device (LLVM 10.0.0) (Vulkan)</code>, a CPU adapter, which the core takes as the GPU as the compositor&#39;s own pick does, since wgpu offers one only when no other adapter answers; the Android 10 one (API 29) gives wgpu no Vulkan adapter in that mode, so the core answers CPU-only with wgpu&#39;s words. No device refused either request. The row first named three phones; the run was on the two acceptance phones and the two emulators, and a phone with a Mali GPU is a known gap: none was tried, nor an emulator on the Mac&#39;s own GPU (<code>evidence/<wbr>99-verification.md</code> findings 28–33)</td>
 <td>IOS-2, AND-2</td>
 </tr>
 <tr>

@@ -220,17 +220,24 @@ pub(crate) fn validated<T>(device: &wgpu::Device, what: &str, make: impl FnOnce(
 /// limit renders on the CPU for that comp — the compositor's own decline path (§17).
 const MAX_TEXTURE_DIMENSION_2D: u32 = 16_384;
 
-/// The limits to request from an adapter: `wgpu::Limits::default()` clamped to the adapter's, so
-/// a device that offers less than the default still answers (the iOS Simulator's Metal device
-/// offers 15 inter-stage shader variables against the default's 16), with the two limits the
-/// compositor takes from the adapter itself: `max_texture_dimension_2d` capped at
-/// [`MAX_TEXTURE_DIMENSION_2D`] and `max_buffer_size` as the adapter gives it (D-7, §17).
-fn required_limits(adapter_limits: &wgpu::Limits) -> wgpu::Limits {
+/// The limits the compositor's own device request asks of an adapter, unclamped: the two it takes
+/// from the adapter itself, `max_texture_dimension_2d` capped at [`MAX_TEXTURE_DIMENSION_2D`] and
+/// `max_buffer_size` as the adapter gives it, and `wgpu::Limits::default()` for every other limit,
+/// whatever the adapter offers (`effectcraft: crates/gpu/src/context.rs:1430-1435`). An adapter that
+/// offers less than the default refuses this request, which is why the core never makes it.
+fn compositor_limits(adapter_limits: &wgpu::Limits) -> wgpu::Limits {
     wgpu::Limits {
         max_texture_dimension_2d: adapter_limits.max_texture_dimension_2d.min(MAX_TEXTURE_DIMENSION_2D),
         max_buffer_size: adapter_limits.max_buffer_size,
-        ..wgpu::Limits::default().or_worse_values_from(adapter_limits)
+        ..wgpu::Limits::default()
     }
+}
+
+/// The limits to request from an adapter: the compositor's own, clamped to the adapter's, so a
+/// device that offers less than the default still answers (the iOS Simulator's Metal device offers
+/// 15 inter-stage shader variables against the default's 16) (D-7, §17).
+fn required_limits(adapter_limits: &wgpu::Limits) -> wgpu::Limits {
+    compositor_limits(adapter_limits).or_worse_values_from(adapter_limits)
 }
 
 /// The device descriptor: the clamped limits and the memory-lean buffers, as the compositor's own
@@ -280,27 +287,71 @@ fn open(instance: &wgpu::Instance, adapter: wgpu::Adapter, required: wgpu::Limit
 mod tests {
     use super::*;
 
-    /// The desktop request, which is what the acceptance runs: on this machine it must answer a
-    /// device, because Metal is there. It drives the whole production path — instance, adapter
-    /// pick, clamped limits, device request — so the clamping and the never-GL rule are proven on
-    /// a real device, and the phone code paths around them are the same code.
+    /// The adapter a device test ran on, as one line on stderr, which a run with `--nocapture`
+    /// shows: the adapter, its backend and type and its driver, so a run on a phone or an emulator
+    /// records what it ran on.
+    fn say_adapter(what: &str, adapter: &wgpu::Adapter) {
+        let info = adapter.get_info();
+        // A driver's own description can run over several lines, and Metal gives none; the record is one.
+        let driver =
+            std::iter::once(info.driver.as_str()).chain(info.driver_info.lines()).map(str::trim).filter(|part| !part.is_empty()).collect::<Vec<_>>().join("; ");
+        let driver = if driver.is_empty() { "none given" } else { driver.as_str() };
+        eprintln!("{what}: {} ({:?}), {:?}, driver: {driver}", info.name, info.backend, info.device_type);
+    }
+
+    /// Each limit `asked` asks more of than `offered` gives, in words, read by wgpu's own comparison
+    /// of every limit: what a device request for `asked` on an adapter offering `offered` is refused for.
+    fn limits_above(asked: &wgpu::Limits, offered: &wgpu::Limits) -> Vec<String> {
+        let mut above = Vec::new();
+        asked.check_limits_with_fail_fn(offered, false, |name, asked, offered| above.push(format!("{name}: asked {asked}, offered {offered}")));
+        above
+    }
+
+    /// The production request, which is what the acceptance runs, on whatever machine runs it (the
+    /// desktop, the iPhone, a phone or an emulator): it must answer a device, on a backend the
+    /// platform asks for. It drives the whole production path — instance, adapter pick, clamped
+    /// limits, device request — so the clamping and the never-GL rule are proven on a real device
+    /// (V4), and the phone code paths around them are the same code.
     #[test]
-    fn desktop_request_answers_a_device_with_clamped_limits() {
-        let gpu = GpuDevice::request(GpuChoice::Preferred);
-        let Some((adapter, device, _queue)) = gpu.parts() else {
-            panic!("the host must answer a GPU adapter for this test to mean anything: {}", gpu.summary());
-        };
-        let adapter_limits = adapter.limits();
-        let device_limits = device.limits();
+    fn this_machines_request_answers_a_device_with_clamped_limits() {
+        let rig = crate::testing::rig();
+        let adapter_limits = rig.adapter.limits();
+        let device_limits = rig.device.limits();
+        say_adapter("V4, the clamped request was given", &rig.adapter);
+        eprintln!("V4, the device's limits: {device_limits:?}");
         // Every limit is exactly what `required_limits` computes from the adapter — the clamp
         // itself, end to end.
         assert_eq!(device_limits, required_limits(&adapter_limits));
+        // No limit asks more than the adapter gives.
+        let beyond = limits_above(&device_limits, &adapter_limits);
+        assert!(beyond.is_empty(), "limits above the adapter's: {beyond:?}");
         // The two limits the adapter supplies on its own (§17): `max_buffer_size` as given, and
         // the texture dimension capped at 16384 (an adapter above the cap is clamped to it).
         assert_eq!(device_limits.max_buffer_size, adapter_limits.max_buffer_size);
         assert_eq!(device_limits.max_texture_dimension_2d, adapter_limits.max_texture_dimension_2d.min(16_384));
-        // GL was never requested: the instance asked only the host backends without it.
-        assert_ne!(adapter.get_info().backend, wgpu::Backend::Gl);
+        // The backend is one the platform asks for, never GL.
+        let backend = rig.adapter.get_info().backend;
+        assert!(Platform::current().backends().contains(wgpu::Backends::from(backend)), "{backend:?} is not a backend {:?} asks for", Platform::current());
+        assert_ne!(backend, wgpu::Backend::Gl);
+    }
+
+    /// Whether the adapter this machine's request picked also takes the compositor's own limits,
+    /// unclamped (V4): it takes them exactly when it offers every one, and its refusal is words
+    /// otherwise, never a panic. The outcome is recorded either way, with the limits the adapter
+    /// offers less of than the default asks, which is why the clamp exists.
+    #[test]
+    fn the_adapter_takes_the_compositors_unclamped_limits_exactly_when_it_offers_them() {
+        let rig = crate::testing::rig();
+        let adapter_limits = rig.adapter.limits();
+        let asked = compositor_limits(&adapter_limits);
+        let short = limits_above(&asked, &adapter_limits);
+        let given = pollster::block_on(rig.adapter.request_device(&device_descriptor(asked)));
+        say_adapter("V4, the compositor's default limits, unclamped", &rig.adapter);
+        match &given {
+            Ok(_) => eprintln!("V4, the compositor's default limits: given"),
+            Err(refusal) => eprintln!("V4, the compositor's default limits: refused ({refusal}); the adapter offers less than they ask: {short:?}"),
+        }
+        assert_eq!(given.is_ok(), short.is_empty(), "the request's outcome must follow the limits the adapter offers: {given:?}, short of {short:?}");
     }
 
     /// The clamp itself on numbers a real host may not offer: a simulator-like adapter with fewer
@@ -339,6 +390,25 @@ mod tests {
         // Nothing requested exceeds its adapter.
         assert!(requested.max_buffer_size <= adapter.max_buffer_size);
         assert!(requested.max_texture_dimension_2d <= adapter.max_texture_dimension_2d);
+    }
+
+    /// The compositor's own request is wgpu's defaults but for the two limits it takes from the
+    /// adapter, whatever the adapter offers of the rest: an adapter with less than the default keeps
+    /// the default here, which is what makes the request one it can refuse. The cap is written as a
+    /// literal so a mutation of the constant cannot agree with itself.
+    #[test]
+    fn the_compositors_limits_are_the_defaults_but_for_the_two_the_adapter_supplies() {
+        let default = wgpu::Limits::default();
+        let adapter = wgpu::Limits { max_inter_stage_shader_variables: 15, max_texture_dimension_2d: 163_840, max_buffer_size: 64 << 30, ..default };
+        let asked = compositor_limits(&adapter);
+        assert_eq!(asked, wgpu::Limits { max_texture_dimension_2d: 16_384, max_buffer_size: 64 << 30, ..default });
+        assert_eq!(asked.max_inter_stage_shader_variables, 16, "the default, though the adapter offers 15");
+        assert_eq!(
+            limits_above(&asked, &adapter),
+            ["max_inter_stage_shader_variables: asked 16, offered 15"],
+            "an adapter with fewer inter-stage variables than the default refuses it for that limit alone"
+        );
+        assert_eq!(limits_above(&required_limits(&adapter), &adapter), Vec::<String>::new(), "the clamped request is one the adapter takes");
     }
 
     /// `CpuOnly` never asks and answers the reason `info.gpu` can show.
