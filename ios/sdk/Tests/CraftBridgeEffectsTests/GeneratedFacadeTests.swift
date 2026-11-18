@@ -1,23 +1,8 @@
 import CraftBridge
 import CraftBridgeEffects
+import CraftBridgeFFI
 import Foundation
 import Testing
-
-/// What the engine was asked, kept for the test to read.
-private actor Requests {
-    private(set) var all: [(method: String, params: JSONValue)] = []
-
-    func record(_ method: String, _ params: JSONValue) {
-        all.append((method, params))
-    }
-}
-
-private func engine(recording requests: Requests) -> EffectsEngine {
-    EffectsEngine { method, params in
-        await requests.record(method, params)
-        return "done"
-    }
-}
 
 @Suite struct GeneratedFacadeTests {
     @Test func aTypedCallSendsTheCommandWithItsKeysAsJSON() async throws {
@@ -94,7 +79,9 @@ private func engine(recording requests: Requests) -> EffectsEngine {
 
     @Test func anErrorFromTheEngineIsThrown() async {
         struct Refused: Error {}
-        let refusing = EffectsEngine { _, _ in throw Refused() }
+        let fake = FakeEngine()
+        fake.answer = { _, _ in throw Refused() }
+        let refusing = EffectsEngine(engine: fake)
         await #expect(throws: Refused.self) { try await refusing.layer.newText() }
     }
 

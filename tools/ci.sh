@@ -275,7 +275,13 @@ stage_swift_build() {
   # error. Without it a module an earlier build left in the derived data satisfies the import with only
   # a warning, so `CraftBridge` could import a plugin against AGENTS.md §2 and still build.
   # build-for-testing builds the test targets too, which the package scheme builds only for testing.
-  local builds configuration destination architectures status=0
+  # Each build also writes the compiler's symbol graphs of every module into a folder of its own, which
+  # `cargo xtask swift-api` reads once all have built: no public member written by hand may take the name
+  # of one generated Swift gives the same type (rust/xtask/src/swift_api.rs). The folders sit inside the
+  # derived data and keep their place from run to run: a module that is up to date compiles nothing and
+  # writes no graph, so its last graph, written from the sources it still has, is the one read, and a
+  # clean build folder loses both together.
+  local builds configuration destination architectures status=0 build=0 folder graphs=()
   xcframework || return 1
   builds="$(mktemp)"
   if ! xtask swift-builds >"$builds"; then
@@ -288,10 +294,20 @@ stage_swift_build() {
     return 1
   fi
   while IFS=$'\t' read -r configuration destination architectures; do
+    build=$((build + 1))
+    folder="$PWD/ios/sdk/.build/xcode/symbol-graphs/$build"
+    graphs+=("$folder")
+    mkdir -p "$folder" || return 1
     (cd ios/sdk && xcodebuild -scheme CraftBridge-Package -destination "$destination" -configuration "$configuration" -derivedDataPath .build/xcode -quiet build build-for-testing \
-      DIAGNOSE_MISSING_TARGET_DEPENDENCIES=YES_ERROR ARCHS="$architectures") || status=1
+      DIAGNOSE_MISSING_TARGET_DEPENDENCIES=YES_ERROR ARCHS="$architectures" \
+      OTHER_SWIFT_FLAGS="\$(inherited) -emit-symbol-graph -emit-symbol-graph-dir \"$folder\"") || status=1
   done <"$builds"
   rm -f "$builds"
+  # A build that failed wrote the graphs of only what it compiled, so they are read only once every build
+  # has built.
+  if [ "$status" -eq 0 ]; then
+    xtask swift-api "${graphs[@]}" || status=1
+  fi
   return "$status"
 }
 stage_android() {

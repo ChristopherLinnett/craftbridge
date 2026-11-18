@@ -4,7 +4,8 @@
 //! `cargo xtask compiled`, and the lint library's run under its lock, `cargo xtask dylint …`; the file
 //! lists its stages read, `cargo xtask files <kind>`; the pins the doctor and the gate read,
 //! `cargo xtask pins` and `cargo xtask swift-builds`; the Swift stage's formatter check,
-//! `cargo xtask swift-format`; the XCFramework `tools/build-xcframework.sh` builds,
+//! `cargo xtask swift-format`, and its check of the names hand-written Swift gives beside generated Swift,
+//! `cargo xtask swift-api <graphs>…`; the XCFramework `tools/build-xcframework.sh` builds,
 //! `cargo xtask xcframework`; and for `tools/build-android.sh`, the native library the SDK ships,
 //! `cargo xtask sdk-library`, and the 16 KB alignment it hands over, `cargo xtask elf-alignment
 //! <llvm-readelf> <library>…`.
@@ -49,6 +50,7 @@ mod rust_syntax;
 mod scan;
 mod scratch;
 mod sources;
+mod swift_api;
 mod swift_bindings;
 mod swift_format;
 mod swift_lint;
@@ -238,6 +240,7 @@ fn dispatch(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
         ["upstream", "pin"] => upstream::run_pin(&root),
         ["swift-format"] => swift_format::run(&root),
         ["swift-lint"] => swift_lint::run(&root),
+        ["swift-api", folders @ ..] => swift_api::run(&root, folders),
         ["pins"] => pins::run(&root),
         ["elf-alignment", readelf, libraries @ ..] => elf_alignment::run(readelf, libraries),
         ["swift-builds"] => pins::builds(&root),
@@ -268,6 +271,9 @@ fn usage() {
     eprintln!("       cargo xtask dylint <cargo-dylint arguments…>   (cargo dylint, taking turns on the lock every lint library run shares)");
     eprintln!("       cargo xtask swift-format");
     eprintln!("       cargo xtask swift-lint");
+    eprintln!(
+        "       cargo xtask swift-api <symbol graph folder>...   (one folder for each Swift build: no hand-written public member named like a generated one of its type)"
+    );
     eprintln!("       cargo xtask pins");
     eprintln!("       cargo xtask elf-alignment <llvm-readelf> <library>...   (every library aligned to 16 KB pages)");
     eprintln!("       cargo xtask swift-builds");

@@ -116,68 +116,34 @@ private final class FirstReport: Sendable {
     }
 }
 
-/// What a fake engine was asked to run.
-private actor Calls {
-    private(set) var all: [(method: String, params: String)] = []
-
-    func record(_ method: String, _ params: String) {
-        all.append((method, params))
-    }
-}
-
-/// An engine with no native engine behind it, which records each progress call, reports one step of
-/// progress and answers `answer`.
-private final class ScriptedEngine: Engine, @unchecked Sendable {
-    let calls = Calls()
-    private let answer: String
-
-    init(answering answer: String) {
-        self.answer = answer
-        super.init(noHandle: NoHandle())
-    }
-
-    required init(unsafeFromHandle handle: UInt64) {
-        answer = "null"
-        super.init(unsafeFromHandle: handle)
-    }
-
-    override func requestWithProgress(
-        method: String,
-        params: String,
-        listener: any ProgressListener,
-        cancel: CancelToken
-    ) async throws -> String {
-        await calls.record(method, params)
-        listener.progress(done: 1, total: 2, secondsLeft: 0.5)
-        return answer
-    }
-}
-
 @Suite struct ExportJobCrossingTests {
     @Test func aJobHandsItsMethodAndParametersToTheEngineAndItsProgressToItsHandler() async throws {
-        let engine = ScriptedEngine(answering: #"{"rendered":[{"comp":"Card"}]}"#)
+        let engine = FakeEngine()
+        engine.answer = { _, _ in #"{"rendered":[{"comp":"Card"}]}"# }
         let heard = OSAllocatedUnfairLock<[String]>(initialState: [])
         let job = try ExportJob(engine: engine, method: "template.render", params: ["template": "Card"]) {
             done, total, secondsLeft in
             heard.withLock { $0.append("\(done)/\(total) \(secondsLeft.map { "\($0)" } ?? "-")") }
         }
         #expect(try await job.result == ["rendered": [["comp": "Card"]]])
-        let calls = await engine.calls.all
+        let calls = await engine.asked.all
         #expect(calls.map(\.method) == ["template.render"])
-        #expect(try calls.map { try JSONValue(jsonText: $0.params) } == [["template": "Card"]])
+        #expect(calls.map(\.params) == [["template": "Card"]])
         #expect(heard.withLock { $0 } == ["1/2 0.5"], "the engine reported before it answered")
     }
 
     @Test func parametersJSONCannotCarryStartNothing() async throws {
-        let engine = ScriptedEngine(answering: "null")
+        let engine = FakeEngine()
         let refusal = CraftError.InvalidParams(
             detail: "the parameters hold NaN or an infinity, which JSON has no number for")
         #expect(throws: refusal) { try ExportJob(engine: engine, method: "export", params: ["end": .number(.nan)]) }
-        #expect(await engine.calls.all.isEmpty)
+        #expect(await engine.asked.all.isEmpty)
     }
 
     @Test func anAnswerThatIsNotJSONIsTheEnginesOwnFailure() async throws {
-        let job = try ExportJob(engine: ScriptedEngine(answering: "{"), method: "export", params: [:])
+        let engine = FakeEngine()
+        engine.answer = { _, _ in "{" }
+        let job = try ExportJob(engine: engine, method: "export", params: [:])
         await #expect(throws: CraftError.Internal(detail: "the engine answered with text that is not JSON")) {
             try await job.result
         }

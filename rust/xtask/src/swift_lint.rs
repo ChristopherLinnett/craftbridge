@@ -1473,7 +1473,8 @@ fn uri_of(path: &Path) -> String {
 }
 
 /// The path a URI names, percent-decoded, whatever its scheme: a caller asks the scheme itself when it matters.
-fn path_of(uri: &str) -> Option<String> {
+/// The language server and the compiler's symbol graphs both name a file this way ([`crate::swift_api`]).
+pub(crate) fn path_of(uri: &str) -> Option<String> {
     let rest = uri.strip_prefix("file://")?;
     let mut bytes = Vec::new();
     let rest_bytes = rest.as_bytes();
