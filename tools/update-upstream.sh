@@ -22,14 +22,17 @@
 # the corpus; 6, the record appended to docs/upstream-updates.md, whose recheck lines the person
 # completes; 7, every version of android/sdk/gradle/libs.versions.toml and of the Gradle wrapper that has
 # a newer release, for a change of its own. A run on the revision the tree already holds stops after
-# step 2: it fetches only what the cache lacks, and looks up no release.
+# step 2: it fetches only what the cache lacks, and looks up no release. Its last line names what steps 1
+# and 2 wrote back, a generated table edited by hand among them, and says that nothing changed only when
+# they wrote no byte.
 #
 # Exit codes: 0 for an update that stands, up to date, clean or with adaptations to recheck; 2 for a
 # breaking API change, which makes the next release a major version; 1 for a failed gate, which the
 # run's output names, and for a step that could not finish; 64 for a misused script.
 #
-# Running the script again on the revision the tree already holds writes nothing, so it changes nothing
-# byte for byte; on a machine without the cache, that run is how the cache gets the pin. The `upstream`
+# Running the script again on the revision the tree already holds changes nothing byte for byte in a tree
+# the script wrote; where it does write, its last line names what it wrote back. On a machine without the
+# cache, that run is how the cache gets the pin. The `upstream`
 # rule refuses a hand-written [patch] entry, a pin that is no official revision, and a registry, fork,
 # path or other-commit copy of a pinned crate, together with any Cargo configuration that Cargo reads for
 # a build in rust/ — the repository's own, one in a folder above the checkout, the cargo home's, a file

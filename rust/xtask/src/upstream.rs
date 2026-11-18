@@ -26,7 +26,8 @@
 //!
 //! Everything here reads Cargo's own data — manifests and the lock as TOML, never a scanned line of
 //! text — and git's, through [`crate::git`]. The generator keeps the rest of `rust/Cargo.toml` byte for
-//! byte, which is what lets `tools/update-upstream.sh` run twice on the same revision and change nothing.
+//! byte, in the form the TOML writer prints, which is what lets `tools/update-upstream.sh` run twice on the
+//! same revision and change nothing; a run that does write names each part it wrote ([`Written`]).
 
 use crate::layers;
 use crate::layers::{CraftFamily, family};
@@ -252,6 +253,54 @@ fn transplant(ours: &mut toml_edit::DocumentMut, upstream: &toml_edit::DocumentM
 /// setting keeps its reason beside it.
 const GENERATED_PROFILES: &[&str] = &["dev", "release"];
 
+/// A part of `rust/Cargo.toml` that [`regenerate`] writes, by the name every message gives it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Part {
+    /// The whole file as the TOML writer prints it back before any table is written. It keeps every byte
+    /// of a file in the form it prints, but not of every form it reads: a byte-order mark, CRLF line
+    /// endings, a value with no newline after it at the end of the file, or a dotted key written apart from
+    /// the others of its table, among them, come back in its own form, so reading a file and writing it
+    /// can change bytes no table holds.
+    Layout,
+    /// The EffectCraft and FilmCraft pins in `[workspace.dependencies]`.
+    Pins,
+    /// The `[patch]` tables.
+    Patch,
+    /// One of the [`GENERATED_PROFILES`].
+    Profile(&'static str),
+}
+
+impl Part {
+    pub(crate) fn name(self) -> String {
+        match self {
+            Self::Layout => "the layout".to_string(),
+            Self::Pins => "the pins".to_string(),
+            Self::Patch => "[patch]".to_string(),
+            Self::Profile(profile) => format!("[profile.{profile}]"),
+        }
+    }
+}
+
+/// What [`regenerate`] wrote: the manifest's new text, and each [`Part`] whose writing changed a byte of
+/// it, in the order the parts are written. The record is kept as the text is written, starting from the
+/// text it was given, so it lists a part whenever the text it ends with differs from that one.
+#[derive(Debug)]
+pub(crate) struct Regenerated {
+    pub(crate) text: String,
+    pub(crate) parts: Vec<Part>,
+}
+
+impl Regenerated {
+    /// `part` has just been written into `document`: record it when that changed the text.
+    fn note(&mut self, part: Part, document: &toml_edit::DocumentMut) {
+        let now = document.to_string();
+        if now != self.text {
+            self.text = now;
+            self.parts.push(part);
+        }
+    }
+}
+
 /// Where the table that prints first in `table` and its sub-tables is: its position in the file and its
 /// keys down from `table`. Upstream writes `[profile.dev.package."*"]` above `[profile.dev]` itself, and a
 /// table prints in the order of its position, whatever it holds.
@@ -309,11 +358,14 @@ fn transplant_profile(ours: &mut toml_edit::DocumentMut, upstream: &toml_edit::D
 }
 
 /// Write what `tools/update-upstream.sh` writes for one revision into the manifest text: the pins, and
-/// the `[patch]` table and the [`GENERATED_PROFILES`] copied from the upstream manifest. Everything else in
-/// the file is kept byte for byte.
-pub(crate) fn regenerate(ours: &str, upstream_manifest: &str, effectcraft_rev: &str, filmcraft_rev: &str) -> Result<String, String> {
+/// the `[patch]` table and the [`GENERATED_PROFILES`] copied from the upstream manifest, recording each
+/// part whose writing changed a byte. Everything else in the file is kept byte for byte when it is in the
+/// form the TOML writer prints; another form comes back in that one, recorded as [`Part::Layout`].
+pub(crate) fn regenerate(ours: &str, upstream_manifest: &str, effectcraft_rev: &str, filmcraft_rev: &str) -> Result<Regenerated, String> {
     let mut document = ours.parse::<toml_edit::DocumentMut>().map_err(|error| format!("rust/Cargo.toml does not parse: {error}"))?;
     let upstream = upstream_manifest.parse::<toml_edit::DocumentMut>().map_err(|error| format!("the upstream Cargo.toml does not parse: {error}"))?;
+    let mut written = Regenerated { text: ours.to_string(), parts: Vec::new() };
+    written.note(Part::Layout, &document);
     let effects_url = app_url(effectcraft_app()?);
     let film_url = app_url(film_app()?);
     let dependencies = document
@@ -329,11 +381,14 @@ pub(crate) fn regenerate(ours: &str, upstream_manifest: &str, effectcraft_rev: &
     for (at, name) in core_named_upstream().iter().enumerate() {
         set_pin(dependencies, name, &film_url, filmcraft_rev, at == 0);
     }
+    written.note(Part::Pins, &document);
     transplant(&mut document, &upstream, "patch");
+    written.note(Part::Patch, &document);
     for name in GENERATED_PROFILES {
         transplant_profile(&mut document, &upstream, name);
+        written.note(Part::Profile(name), &document);
     }
-    Ok(document.to_string())
+    Ok(written)
 }
 
 /// Flatten one generated table into named entries: `[patch]` becomes one entry per source-and-crate
@@ -371,9 +426,9 @@ pub(crate) fn generated_table_errors(ours: &str, regenerated: &str) -> Vec<Strin
     };
     let list = |names: &[String]| -> String { names.join(", ") };
     let mut errors = Vec::new();
-    let tables = std::iter::once(("patch", "", "[patch]".to_string()))
-        .chain(GENERATED_PROFILES.iter().map(|profile| ("profile", *profile, format!("[profile.{profile}]"))));
-    for (table, sub, name) in tables {
+    let tables = std::iter::once(("patch", "", Part::Patch)).chain(GENERATED_PROFILES.iter().map(|profile| ("profile", *profile, Part::Profile(profile))));
+    for (table, sub, part) in tables {
+        let name = part.name();
         let mine = flatten_entries(read(&ours, table, sub).as_ref());
         let theirs = flatten_entries(read(&written, table, sub).as_ref());
         let extra: Vec<String> = mine.keys().filter(|entry| !theirs.contains_key(entry.as_str())).cloned().collect();
@@ -1043,8 +1098,9 @@ fn rev_text(ours: &str, full: &str, requested: &str, cache: &Cache) -> String {
 /// Cargo left it, rather than having CraftBridge's own crates resolved again against whatever the
 /// registry offers on the day, so a second run on the same revision changes nothing. A tree that holds
 /// the revision and its `[patch]` tables but not yet the profiles the script writes gets them, and keeps
-/// its lock for the same reason ([`keeps_lock`]).
-pub(crate) fn pin(root: &Path, rev: &str) -> Result<String, String> {
+/// its lock for the same reason ([`keeps_lock`]). The run's line comes back with the record of what it
+/// wrote, which every later message about the run reads.
+pub(crate) fn pin(root: &Path, rev: &str) -> Result<(String, Written), String> {
     // Before the cache is touched: a name that is no commit id neither makes a cache nor fetches.
     commit_id(rev)?;
     let cache = Cache::create()?;
@@ -1052,24 +1108,62 @@ pub(crate) fn pin(root: &Path, rev: &str) -> Result<String, String> {
     pin_from(root, &cache, rev, &full)
 }
 
+/// What steps 1 and 2 wrote into the tree, as the rewrite recorded it. The pin's own line and the update's
+/// closing line are both read from it, so neither can say that nothing changed after a rewrite, which
+/// would hide the hand edit the rewrite just undid.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Written {
+    /// Each part of `rust/Cargo.toml` whose writing changed a byte, in the order they are written; none
+    /// when no byte of the file changed.
+    pub(crate) parts: Vec<Part>,
+    /// Whether `rust/Cargo.lock` was started again from upstream's and resolved.
+    pub(crate) seeded: bool,
+}
+
+impl Written {
+    /// What the run wrote, in the words every message about it uses, or `None` when it wrote no byte.
+    pub(crate) fn rewrote(&self) -> Option<String> {
+        if self.parts.is_empty() {
+            return None;
+        }
+        let parts: Vec<String> = self.parts.iter().map(|part| part.name()).collect();
+        let lock = if self.seeded { " and rust/Cargo.lock, started from upstream's and resolved" } else { "" };
+        Some(format!("rust/Cargo.toml ({}){lock}", parts.join(", ")))
+    }
+}
+
+/// The line steps 1 and 2 print for `written`, the pin spelt `spelling` and in full `full`.
+fn pinned_line(spelling: &str, full: &str, filmcraft_rev: &str, written: &Written) -> String {
+    match written.rewrote() {
+        None => format!("rust/Cargo.toml already holds effectcraft {spelling} ({full}), filmcraft {filmcraft_rev} and their tables: nothing written"),
+        Some(what) if written.seeded => format!("pinned effectcraft {spelling} ({full}), filmcraft {filmcraft_rev}: rewrote {what}"),
+        Some(what) => {
+            format!("rewrote {what} for effectcraft {spelling} ({full}); the pins and the [patch] tables name what they named, so rust/Cargo.lock is unchanged")
+        }
+    }
+}
+
 /// What [`pin`] writes for the official commit `full`, which `rev` names, read from `cache`: apart from the
 /// making and fetching of the machine's cache, so a test gives it a scratch one and reaches no network.
-fn pin_from(root: &Path, cache: &Cache, rev: &str, full: &str) -> Result<String, String> {
+fn pin_from(root: &Path, cache: &Cache, rev: &str, full: &str) -> Result<(String, Written), String> {
     let upstream_manifest = cache.file(full, "Cargo.toml")?;
     let upstream_lock = cache.file(full, "Cargo.lock")?;
     let filmcraft_rev = upstream_filmcraft_rev(&upstream_manifest)?;
     let manifest_path = root.join("rust/Cargo.toml");
     let ours = std::fs::read_to_string(&manifest_path).map_err(|error| format!("cannot read rust/Cargo.toml: {error}"))?;
     let spelling = rev_text(&ours, full, rev, cache);
-    let written = regenerate(&ours, &upstream_manifest, &spelling, &filmcraft_rev)?;
-    if written == ours {
-        return Ok(format!("rust/Cargo.toml already holds effectcraft {spelling} ({full}), filmcraft {filmcraft_rev} and their tables: nothing written"));
+    let regenerated = regenerate(&ours, &upstream_manifest, &spelling, &filmcraft_rev)?;
+    let done = |written: Written| (pinned_line(&spelling, full, &filmcraft_rev, &written), written);
+    // Decided on the bytes, not on the parts recorded: the file is left as it is only when not one byte
+    // of it would change, and then the run says it wrote nothing.
+    if regenerated.text == ours {
+        return Ok(done(Written::default()));
     }
-    std::fs::write(&manifest_path, &written).map_err(|error| format!("cannot write rust/Cargo.toml: {error}"))?;
-    if keeps_lock(&ours, &written, &spelling, &filmcraft_rev) {
-        return Ok(format!(
-            "rewrote the generated tables of rust/Cargo.toml for effectcraft {spelling} ({full}); the pins and the [patch] tables name what they named, so rust/Cargo.lock is unchanged"
-        ));
+    std::fs::write(&manifest_path, &regenerated.text).map_err(|error| format!("cannot write rust/Cargo.toml: {error}"))?;
+    let seeded = !keeps_lock(&ours, &regenerated.text, &spelling, &filmcraft_rev);
+    let written = Written { parts: regenerated.parts, seeded };
+    if !seeded {
+        return Ok(done(written));
     }
     std::fs::write(root.join("rust/Cargo.lock"), &upstream_lock).map_err(|error| format!("cannot write rust/Cargo.lock: {error}"))?;
     // Resolve CraftBridge's own crates on top of the copied lock (D-21): versions upstream locked
@@ -1082,7 +1176,7 @@ fn pin_from(root: &Path, cache: &Cache, rev: &str, full: &str) -> Result<String,
     if !output.status.success() {
         return Err(format!("cargo metadata failed while resolving the pin:\n{}", String::from_utf8_lossy(&output.stderr).trim()));
     }
-    Ok(format!("pinned effectcraft {spelling} ({full}), filmcraft {filmcraft_rev}; rust/Cargo.lock started from upstream's and resolved"))
+    Ok(done(written))
 }
 
 /// Whether writing `written` over `ours` keeps the lock Cargo resolved on `ours`. While the pins and the
@@ -1101,11 +1195,79 @@ pub(crate) fn official_scratch(tag: &str) -> crate::scratch::Scratch {
     crate::git::bare_scratch(tag, &app_url(effectcraft_app().unwrap()))
 }
 
+/// Point a scratch cache's main at `commit`, which makes it an official revision there.
+#[cfg(test)]
+fn point_main_at(cache: &crate::scratch::Scratch, commit: &str) {
+    crate::git::output(&cache.0, &["--git-dir=.", "update-ref", "refs/heads/main", commit]).unwrap();
+}
+
+/// A scratch cache whose official main holds one commit, `manifest` and a lock, and that commit's id.
+#[cfg(test)]
+fn pinned_cache(tag: &str, manifest: &str) -> (crate::scratch::Scratch, Cache, String) {
+    let scratch = official_scratch(tag);
+    let full = crate::git::commit_files(&scratch.0, None, "pinned", &[("Cargo.toml", manifest), ("Cargo.lock", "# upstream's lock\n")]);
+    point_main_at(&scratch, &full);
+    let cache = Cache::at(scratch.0.clone()).unwrap();
+    (scratch, cache, full)
+}
+
+/// The `[patch]` entry the acceptance's own case deletes by hand, as upstream writes it: a crate named by
+/// its path, beside a member with no dependencies, so Cargo resolves the workspace without the network.
+#[cfg(test)]
+const PATCHED: &str = "patched = { path = \"patched\" }\n";
+
+/// The acceptance's own case: a tree on the revision a scratch official cache holds, whose `[patch]` table
+/// was edited by hand after the script wrote it, with a lock standing for the one Cargo resolved on the edit.
+#[cfg(test)]
+pub(crate) struct HandEditedPatch {
+    /// The cache, whose official main holds the revision.
+    pub(crate) cache: crate::scratch::Scratch,
+    /// The tree, the repository root of the run.
+    pub(crate) tree: crate::scratch::Scratch,
+    /// The revision in full; the manifest spells it by its first eight digits.
+    pub(crate) full: String,
+    /// `rust/Cargo.toml` as the script writes it for the revision.
+    pub(crate) script: String,
+}
+
+/// A fresh [`HandEditedPatch`], its scratch folders named for `tag`.
+#[cfg(test)]
+pub(crate) fn hand_edited_patch(tag: &str) -> HandEditedPatch {
+    let upstream = format!(
+        "[workspace.dependencies]\nfilmcraft-codecs = {{ git = \"https://github.com/storytold/filmcraft\", rev = \"d5ead4ba\" }}\n\n[patch.crates-io]\n{PATCHED}"
+    );
+    let (cache, _, full) = pinned_cache(tag, &upstream);
+    let ours = "[workspace]\nresolver = \"3\"\nmembers = [\"member\"]\n\n[workspace.dependencies]\n";
+    let script = regenerate(ours, &upstream, full.get(..8).unwrap(), "d5ead4ba").unwrap().text;
+    let tree = crate::scratch::Scratch::new(&format!("{tag}-tree"));
+    let edited = script.replace(PATCHED, "");
+    assert_ne!(edited, script, "the hand edit deletes the entry the script wrote");
+    tree.write("rust/Cargo.toml", edited);
+    tree.write("rust/Cargo.lock", "# the lock as Cargo resolved it on the hand edit\n");
+    for package in ["member", "patched"] {
+        tree.write(&format!("rust/{package}/Cargo.toml"), format!("[package]\nname = \"{package}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"));
+        tree.write(&format!("rust/{package}/src/lib.rs"), "");
+    }
+    HandEditedPatch { cache, tree, full, script }
+}
+
+/// Each [`Part`] with the exact name every message gives it: the one list the tests pin the names by, and
+/// the closing line of a run that wrote that part alone.
+#[cfg(test)]
+pub(crate) const NAMED_PARTS: [(Part, &str); 5] = [
+    (Part::Layout, "the layout"),
+    (Part::Pins, "the pins"),
+    (Part::Patch, "[patch]"),
+    (Part::Profile("dev"), "[profile.dev]"),
+    (Part::Profile("release"), "[profile.release]"),
+];
+
 /// The cache `tools/env.sh` names, or the failure that names its fix: the update script fetches the pinned
-/// revision into it and, on a tree that already holds that revision, writes nothing.
+/// revision into it and, on a tree that already holds that revision exactly as the script wrote it, writes
+/// nothing.
 fn pin_cache(rev: &str) -> Result<Cache, String> {
     Cache::open().map_err(|error| {
-        format!("{error}; run tools/update-upstream.sh {rev}, which fetches the pinned revision and, on a tree that already holds it, writes nothing")
+        format!("{error}; run tools/update-upstream.sh {rev}, which fetches the pinned revision and, on a tree that already holds it exactly as the script wrote it, writes nothing")
     })
 }
 
@@ -1203,7 +1365,7 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
         Err(error) => errors.push(error),
     }
     match regenerate(&text, &upstream_manifest, rev, &pin.filmcraft_rev) {
-        Ok(regenerated) => errors.extend(generated_table_errors(&text, &regenerated)),
+        Ok(regenerated) => errors.extend(generated_table_errors(&text, &regenerated.text)),
         Err(error) => errors.push(error),
     }
     let lock = crate::scan::read_text(&root.join("rust/Cargo.lock"))?;
@@ -1297,7 +1459,7 @@ mod tests {
     #[test]
     fn the_generated_tables_land_and_a_second_run_writes_nothing_new() {
         let ours = workspace_manifest("10376058", "d5ead4ba");
-        let once = regenerate(&ours, &upstream_manifest("d5ead4ba", "e7c3dda"), "10376058", "d5ead4ba").expect("the fixture parses");
+        let once = regenerate(&ours, &upstream_manifest("d5ead4ba", "e7c3dda"), "10376058", "d5ead4ba").expect("the fixture parses").text;
         assert!(once.contains("lto = \"thin\"") && once.contains("[patch.crates-io]"), "{once}");
         assert!(
             once.contains("[profile.dev]") && once.contains("[profile.dev.package.\"*\"]") && once.contains("[profile.dev.package.effectcraft-raster]"),
@@ -1310,7 +1472,7 @@ mod tests {
         assert!(!once.contains("dev-full"), "a profile the script does not name is not copied: {once}");
         assert_eq!(
             once,
-            regenerate(&once, &upstream_manifest("d5ead4ba", "e7c3dda"), "10376058", "d5ead4ba").expect("the rerun parses"),
+            regenerate(&once, &upstream_manifest("d5ead4ba", "e7c3dda"), "10376058", "d5ead4ba").expect("the rerun parses").text,
             "running the generator twice writes the same bytes"
         );
         assert!(generated_table_errors(&once, &once).is_empty(), "the generated tables of a generated file match themselves");
@@ -1327,31 +1489,22 @@ mod tests {
         assert!(annotated.contains("# the tool's own") && annotated.contains("# FilmCraft, at"), "{annotated}");
         assert_eq!(
             annotated,
-            regenerate(&annotated, &upstream_manifest("d5ead4ba", "e7c3dda"), "10376058", "d5ead4ba").expect("the rerun parses"),
+            regenerate(&annotated, &upstream_manifest("d5ead4ba", "e7c3dda"), "10376058", "d5ead4ba").expect("the rerun parses").text,
             "a rerun keeps what surrounds a pin byte for byte"
         );
     }
 
-    /// A scratch cache whose official main holds one commit, `manifest` and a lock, and that commit's id.
-    fn pinned_cache(tag: &str, manifest: &str) -> (Scratch, Cache, String) {
-        let scratch = official_scratch(tag);
-        let full = crate::git::commit_files(&scratch.0, None, "pinned", &[("Cargo.toml", manifest), ("Cargo.lock", "# upstream's lock\n")]);
-        point_main_at(&scratch, &full);
-        let cache = Cache::at(scratch.0.clone()).unwrap();
-        (scratch, cache, full)
-    }
-
     /// The dry run of E12: taking the revision the tree already holds again, by the abbreviated id the
-    /// manifest spells it with or in full, writes nothing, the lock included. The abbreviated id is the
-    /// line `cargo xtask upstream pin` prints, which a machine with no upstream cache hands the update
-    /// script to fetch the pin. The cache is a scratch one, so the test needs neither the machine's cache
-    /// nor the network.
+    /// manifest spells it with or in full, writes nothing, the lock included, and says so; it says so only
+    /// while no byte changes. The abbreviated id is the line `cargo xtask upstream pin` prints, which a
+    /// machine with no upstream cache hands the update script to fetch the pin. The cache is a scratch
+    /// one, so the test needs neither the machine's cache nor the network.
     #[test]
     fn taking_the_revision_the_tree_holds_again_writes_nothing() {
         let upstream = upstream_manifest("d5ead4ba", "e7c3dda");
         let (_scratch, cache, full) = pinned_cache("upstream-dry-run", &upstream);
         let abbreviated = full.get(..8).unwrap();
-        let manifest = regenerate(&workspace_manifest(abbreviated, "d5ead4ba"), &upstream, abbreviated, "d5ead4ba").unwrap();
+        let manifest = regenerate(&workspace_manifest(abbreviated, "d5ead4ba"), &upstream, abbreviated, "d5ead4ba").unwrap().text;
         let lock = "# the lock as Cargo resolved it\n";
         let tree = Scratch::new("upstream-dry-run-tree");
         tree.write("rust/Cargo.toml", &manifest);
@@ -1359,16 +1512,30 @@ mod tests {
         let printed = pin_line(&tree.0).unwrap();
         assert_eq!(printed, abbreviated, "`upstream pin` prints the EffectCraft pin as the manifest spells it");
         for rev in [printed.as_str(), full.as_str()] {
-            let said = pin_from(&tree.0, &cache, rev, &full).unwrap();
-            assert!(said.contains("nothing written"), "{rev}: {said}");
+            let (said, written) = pin_from(&tree.0, &cache, rev, &full).unwrap();
+            assert_eq!(said, format!("rust/Cargo.toml already holds effectcraft {abbreviated} ({full}), filmcraft d5ead4ba and their tables: nothing written"));
+            assert_eq!(written, Written::default(), "{rev}: the record of a run that wrote nothing holds nothing");
             assert_eq!(std::fs::read_to_string(tree.0.join("rust/Cargo.toml")).unwrap(), manifest, "{rev}");
             assert_eq!(std::fs::read_to_string(tree.0.join("rust/Cargo.lock")).unwrap(), lock, "{rev}");
         }
+        // A byte no table holds, and that the TOML writer prints back, is still a byte written: the run
+        // names it and never says it wrote nothing.
+        tree.write("rust/Cargo.toml", manifest.strip_suffix('\n').unwrap());
+        let (said, written) = pin_from(&tree.0, &cache, abbreviated, &full).unwrap();
+        assert_eq!(
+            said,
+            format!(
+                "rewrote rust/Cargo.toml (the layout) for effectcraft {abbreviated} ({full}); the pins and the [patch] tables name what they named, so rust/Cargo.lock is unchanged"
+            )
+        );
+        assert_eq!(written, Written { parts: vec![Part::Layout], seeded: false });
+        assert_eq!(std::fs::read_to_string(tree.0.join("rust/Cargo.toml")).unwrap(), manifest, "the newline is back");
     }
 
     /// A tree that holds its pin and its `[patch]` tables as the revision gives them but not the dev
-    /// profile, as one the script wrote before it wrote that profile, gets the profile alone: the lock
-    /// Cargo resolved on that pin stays as it is.
+    /// profile, as one the script wrote before it wrote that profile, gets the profile, and the lock Cargo
+    /// resolved on that pin stays as it is. Writing `[profile.release]` then moves it below the dev
+    /// profile, where upstream writes it, so the record names it too.
     #[test]
     fn a_table_the_tree_lacks_is_written_without_seeding_the_lock_again() {
         let upstream = upstream_manifest("d5ead4ba", "e7c3dda");
@@ -1378,22 +1545,98 @@ mod tests {
             "[profile.dev.package.\"*\"]\nopt-level = 2\n\n[profile.dev]\nopt-level = 1\n\n[profile.dev.package.effectcraft-raster]\nopt-level = 3\n\n";
         assert!(upstream.contains(dev_profile));
         let without_the_profile =
-            regenerate(&workspace_manifest(abbreviated, "d5ead4ba"), &upstream.replace(dev_profile, ""), abbreviated, "d5ead4ba").unwrap();
+            regenerate(&workspace_manifest(abbreviated, "d5ead4ba"), &upstream.replace(dev_profile, ""), abbreviated, "d5ead4ba").unwrap().text;
         assert!(without_the_profile.contains("[patch.crates-io]") && !without_the_profile.contains("[profile.dev"), "{without_the_profile}");
         let lock = "# the lock as Cargo resolved it\n";
         let tree = Scratch::new("upstream-new-table-tree");
         tree.write("rust/Cargo.toml", &without_the_profile);
         tree.write("rust/Cargo.lock", lock);
-        let said = pin_from(&tree.0, &cache, abbreviated, &full).unwrap();
+        let (said, written) = pin_from(&tree.0, &cache, abbreviated, &full).unwrap();
         assert_eq!(
             said,
             format!(
-                "rewrote the generated tables of rust/Cargo.toml for effectcraft {abbreviated} ({full}); the pins and the [patch] tables name what they named, so rust/Cargo.lock is unchanged"
+                "rewrote rust/Cargo.toml ([profile.dev], [profile.release]) for effectcraft {abbreviated} ({full}); the pins and the [patch] tables name what they named, so rust/Cargo.lock is unchanged"
             )
         );
+        assert_eq!(written, Written { parts: vec![Part::Profile("dev"), Part::Profile("release")], seeded: false });
         let manifest = std::fs::read_to_string(tree.0.join("rust/Cargo.toml")).unwrap();
         assert!(generated_table_errors(&manifest, &manifest).is_empty() && manifest.contains("[profile.dev]"), "{manifest}");
+        assert!(manifest.find("[profile.dev]") < manifest.find("[profile.release]"), "the release profile moved below the dev one: {manifest}");
         assert_eq!(std::fs::read_to_string(tree.0.join("rust/Cargo.lock")).unwrap(), lock);
+    }
+
+    /// The record names each part whose writing changed a byte, in the order the parts are written, and
+    /// only those: a file the script wrote gets none, and each part edited by hand is named alone, the
+    /// layout the TOML writer prints the file in among them, so a run never says that nothing changed
+    /// while its text differs from the file's.
+    #[test]
+    fn the_rewrite_records_each_part_whose_writing_changed_a_byte() {
+        let upstream = upstream_manifest("d5ead4ba", "e7c3dda");
+        let script = regenerate(&workspace_manifest("10376058", "d5ead4ba"), &upstream, "10376058", "d5ead4ba").unwrap().text;
+        let parts = |ours: &str, rev: &str| {
+            let regenerated = regenerate(ours, &upstream, rev, "d5ead4ba").unwrap();
+            assert_eq!(regenerated.parts.is_empty(), regenerated.text == ours, "parts recorded exactly when a byte changed: {:?}", regenerated.parts);
+            regenerated.parts
+        };
+        assert_eq!(parts(&script, "10376058"), [], "a file the script wrote");
+        assert_eq!(parts(&script, "abcdef12"), [Part::Pins], "a pin that moves");
+        let commented = script.replace("[patch.crates-io]\n", "[patch.crates-io]\n# A note written by hand.\n");
+        assert_eq!(parts(&commented, "10376058"), [Part::Patch], "a comment written into [patch]");
+        let repatched = script.replace("rev = \"beef\"", "rev = \"cafe\"");
+        assert_eq!(parts(&repatched, "10376058"), [Part::Patch], "a [patch] entry edited");
+        let unoptimised = script.replace("opt-level = 1", "opt-level = 0");
+        assert_eq!(parts(&unoptimised, "10376058"), [Part::Profile("dev")], "a dev profile key edited");
+        let slower = script.replace("lto = \"thin\"", "lto = false");
+        assert_eq!(parts(&slower, "10376058"), [Part::Profile("release")], "a release profile key edited");
+        let unterminated = script.strip_suffix('\n').unwrap();
+        assert_eq!(parts(unterminated, "10376058"), [Part::Layout], "the last newline, which the TOML writer prints back");
+        assert_eq!(parts(&script.replace('\n', "\r\n"), "10376058"), [Part::Layout], "CRLF line endings, which it prints as LF");
+        let all = slower.replace("[patch.crates-io]\n", "[patch.crates-io]\n# A note written by hand.\n").replace('\n', "\r\n");
+        assert_eq!(parts(&all, "abcdef12"), [Part::Layout, Part::Pins, Part::Patch, Part::Profile("release")], "in the order they are written");
+    }
+
+    /// The names the record's words are built from, each pinned by its exact text, and the words every
+    /// message about a run reads, as the pin's own line puts them.
+    #[test]
+    fn the_record_names_what_was_written_in_one_set_of_words() {
+        for (part, name) in NAMED_PARTS {
+            assert_eq!(part.name(), name);
+        }
+        assert_eq!(Written::default().rewrote(), None, "no byte written, no words");
+        let kept = Written { parts: vec![Part::Patch, Part::Profile("dev")], seeded: false };
+        assert_eq!(kept.rewrote().as_deref(), Some("rust/Cargo.toml ([patch], [profile.dev])"));
+        let seeded = Written { parts: vec![Part::Pins, Part::Patch], seeded: true };
+        assert_eq!(seeded.rewrote().as_deref(), Some("rust/Cargo.toml (the pins, [patch]) and rust/Cargo.lock, started from upstream's and resolved"));
+        assert_eq!(
+            pinned_line("10376058", "1037605800", "d5ead4ba", &kept),
+            "rewrote rust/Cargo.toml ([patch], [profile.dev]) for effectcraft 10376058 (1037605800); the pins and the [patch] tables name what they named, so rust/Cargo.lock is unchanged"
+        );
+        assert_eq!(
+            pinned_line("10376058", "1037605800", "d5ead4ba", &seeded),
+            "pinned effectcraft 10376058 (1037605800), filmcraft d5ead4ba: rewrote rust/Cargo.toml (the pins, [patch]) and rust/Cargo.lock, started from upstream's and resolved"
+        );
+    }
+
+    /// The acceptance's own case, run whole: on the revision the tree already holds, a `[patch]` table
+    /// edited by hand, with a lock standing for the one Cargo resolved on the edit, is written back, the lock
+    /// is started again from upstream's and resolved, and the run's line names both, from the record the
+    /// rewrite kept.
+    #[test]
+    fn a_run_on_the_revision_held_that_puts_back_a_hand_edited_patch_table_names_it() {
+        let fixture = hand_edited_patch("upstream-hand-edited-patch");
+        let (full, abbreviated) = (fixture.full.as_str(), fixture.full.get(..8).unwrap());
+        let cache = Cache::at(fixture.cache.0.clone()).unwrap();
+        let (said, written) = pin_from(&fixture.tree.0, &cache, abbreviated, full).unwrap();
+        assert_eq!(written, Written { parts: vec![Part::Patch], seeded: true });
+        assert_eq!(
+            said,
+            format!(
+                "pinned effectcraft {abbreviated} ({full}), filmcraft d5ead4ba: rewrote rust/Cargo.toml ([patch]) and rust/Cargo.lock, started from upstream's and resolved"
+            )
+        );
+        assert_eq!(std::fs::read_to_string(fixture.tree.0.join("rust/Cargo.toml")).unwrap(), fixture.script, "the table is back as the script writes it");
+        let lock = std::fs::read_to_string(fixture.tree.0.join("rust/Cargo.lock")).unwrap();
+        assert!(lock.contains("# upstream's lock") && lock.contains("name = \"patched\""), "started from upstream's and resolved by Cargo: {lock}");
     }
 
     /// The lock stays only while nothing Cargo's resolution reads moves: a profile alone, or the way a
@@ -1401,7 +1644,7 @@ mod tests {
     /// starts it again from upstream's.
     #[test]
     fn only_a_change_resolution_never_reads_keeps_the_lock() {
-        let written = regenerate(&workspace_manifest("10376058", "d5ead4ba"), &upstream_manifest("d5ead4ba", "e7c3dda"), "10376058", "d5ead4ba").unwrap();
+        let written = regenerate(&workspace_manifest("10376058", "d5ead4ba"), &upstream_manifest("d5ead4ba", "e7c3dda"), "10376058", "d5ead4ba").unwrap().text;
         let without_a_profile = written.replace("[profile.dev.package.effectcraft-raster]\nopt-level = 3\n", "");
         assert_ne!(without_a_profile, written);
         assert!(keeps_lock(&without_a_profile, &written, "10376058", "d5ead4ba"));
@@ -1417,7 +1660,7 @@ mod tests {
     #[test]
     fn a_hand_written_patch_entry_or_profile_key_is_a_finding() {
         let ours = workspace_manifest("10376058", "d5ead4ba");
-        let written = regenerate(&ours, &upstream_manifest("d5ead4ba", "e7c3dda"), "10376058", "d5ead4ba").expect("the fixture parses");
+        let written = regenerate(&ours, &upstream_manifest("d5ead4ba", "e7c3dda"), "10376058", "d5ead4ba").expect("the fixture parses").text;
         let planted = written.replace("[patch.crates-io]", "[patch.crates-io]\nmy-copy = { path = \"../a-changed-effectcraft\" }");
         let errors = generated_table_errors(&planted, &written);
         assert!(errors.iter().any(|error| error.contains("[patch]")), "{errors:?}");
@@ -1567,10 +1810,6 @@ mod tests {
         let first = commit(&scratch, None, "one");
         point_main_at(&scratch, &first);
         (scratch, first)
-    }
-
-    fn point_main_at(cache: &Scratch, commit: &str) {
-        crate::git::output(&cache.0, &["--git-dir=.", "update-ref", "refs/heads/main", commit]).unwrap();
     }
 
     /// One commit of the empty tree on the scratch repository.
@@ -1953,6 +2192,37 @@ mod tests {
                 ("XTASK_UPSTREAM_CACHE_OWN", scratch.0.as_os_str()),
             ],
             "the cache did not open past the machine's rewrite",
+        )
+        .unwrap();
+    }
+
+    /// The child half of the test below: run only when the parent aims the machine's cache variable at a
+    /// folder that is not there.
+    #[test]
+    #[ignore = "run by a_machine_without_the_cache_is_told_the_run_that_makes_it, with CRAFTBRIDGE_UPSTREAM_CACHE naming a folder that is not there"]
+    fn child_meets_no_cache() {
+        let Some(missing) = std::env::var_os("XTASK_UPSTREAM_MISSING_CACHE") else { return };
+        assert_eq!(
+            pin_cache("10376058").err(),
+            Some(format!(
+                "there is no upstream cache at {}; run tools/update-upstream.sh 10376058, which fetches the pinned revision and, on a tree that already holds it exactly as the script wrote it, writes nothing",
+                Path::new(&missing).display()
+            ))
+        );
+    }
+
+    /// A machine whose cache lacks the pin is told the run that fetches it, and that the run writes nothing
+    /// on a tree holding the revision as the script wrote it, not on every tree holding it: one whose tables
+    /// were edited by hand gets them written back. The variable is the machine's, which a test cannot set on
+    /// its own process while other tests run beside it, so a child meets it.
+    #[test]
+    fn a_machine_without_the_cache_is_told_the_run_that_makes_it() {
+        let scratch = Scratch::new("upstream-missing-cache");
+        let missing = scratch.0.join("effectcraft");
+        craftbridge_process::rerun(
+            "upstream::tests::child_meets_no_cache",
+            &[("CRAFTBRIDGE_UPSTREAM_CACHE", missing.as_os_str()), ("XTASK_UPSTREAM_MISSING_CACHE", missing.as_os_str())],
+            "a machine without the cache was not told the run that makes it",
         )
         .unwrap();
     }
