@@ -8,9 +8,11 @@
 # group of stages stands here. The Linux job runs the stages that read the same there, among them the host
 # tools' clippy, lint library and test runs, which reach the code only Linux compiles; the macOS job, on the
 # newest arm64 image, runs every other stage, each with the reason it is left to macOS. tools/ci.sh names
-# them all where it splits them. Every stage runs in at least one job, and none
-# needs a device, a simulator or an emulator. The device acceptance runs (plan §28) are no stage of the gate
-# and stay with the machine that has the devices.
+# them all where it splits them. Every stage runs in at least one job, and none needs a physical device or
+# an emulator. The Swift suite runs on one of the runner's own iPhone simulators, which `cargo xtask
+# simulator` boots on the newest iOS runtime the image holds and shuts down again once the suite has run.
+# The device acceptance runs (plan §28) are no stage of the gate and stay with the machine that has the
+# devices.
 #
 # Every tool the repository pins comes from that pin, never a second list here: the Rust toolchains from
 # rust/rust-toolchain.toml and the lint library's, as rustup reads them; the Xcode, cargo-dylint and

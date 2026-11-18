@@ -521,16 +521,8 @@ pub(crate) fn run_dylint(root: &Path, arguments: &[&str]) -> std::process::ExitC
             return std::process::ExitCode::FAILURE;
         }
     };
-    match status.code() {
-        Some(0) => std::process::ExitCode::SUCCESS,
-        Some(code) => std::process::ExitCode::from(code.clamp(1, 255) as u8),
-        // Which signal says who ended it: the system kills a driver whose loaded library was rewritten
-        // under it, and an interrupt is somebody at the terminal.
-        None => {
-            eprintln!("xtask: cargo dylint was ended by {status}");
-            std::process::ExitCode::FAILURE
-        }
-    }
+    // The system kills a driver whose loaded library was rewritten under it, which the signal names.
+    crate::report::exit_of("dylint", "cargo dylint", status)
 }
 
 #[cfg(test)]

@@ -3,7 +3,9 @@
 //! `tools/ci.sh` hands over from the stages it runs, `cargo xtask skipped-tasks <gradle log>`,
 //! `cargo xtask compiled`, and the lint library's run under its lock, `cargo xtask dylint …`; the file
 //! lists its stages read, `cargo xtask files <kind>`; the pins the doctor and the gate read,
-//! `cargo xtask pins` and `cargo xtask swift-builds`; the Swift stage's formatter check,
+//! `cargo xtask pins`, the Swift package's builds `cargo xtask swift-builds`, and the one of those the
+//! Swift Testing suite runs on, `cargo xtask swift-suite`, and the iPhone simulator it runs on, shared
+//! with every other run on the machine, `cargo xtask simulator -- <program>…`; the Swift stage's formatter check,
 //! `cargo xtask swift-format`, and its check of the names hand-written Swift gives beside generated Swift,
 //! `cargo xtask swift-api <graphs>…`; the XCFramework `tools/build-xcframework.sh` builds,
 //! `cargo xtask xcframework`; and for `tools/build-android.sh`, the native library the SDK ships,
@@ -49,6 +51,7 @@ mod report;
 mod rust_syntax;
 mod scan;
 mod scratch;
+mod simulator;
 mod sources;
 mod swift_api;
 mod swift_bindings;
@@ -244,6 +247,8 @@ fn dispatch(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
         ["pins"] => pins::run(&root),
         ["elf-alignment", readelf, libraries @ ..] => elf_alignment::run(readelf, libraries),
         ["swift-builds"] => pins::builds(&root),
+        ["swift-suite"] => pins::suite(&root),
+        ["simulator", "--", program @ ..] => simulator::run(program),
         ["xcframework"] => xcframework::run(&root),
         ["sdk-library"] => layers::run_sdk_library(),
         _ => {
@@ -276,7 +281,11 @@ fn usage() {
     );
     eprintln!("       cargo xtask pins");
     eprintln!("       cargo xtask elf-alignment <llvm-readelf> <library>...   (every library aligned to 16 KB pages)");
-    eprintln!("       cargo xtask swift-builds");
+    eprintln!("       cargo xtask swift-builds   (every build the Swift package ships: a configuration, a destination and its architectures per line)");
+    eprintln!("       cargo xtask swift-suite   (the build the Swift Testing suite runs on, read from that same table)");
+    eprintln!(
+        "       cargo xtask simulator -- <program> <argument>...   (the program on one of the machine's iPhone simulators, its id where an argument says {{simulator}})"
+    );
     eprintln!("       cargo xtask xcframework   (through tools/build-xcframework.sh: the native library's XCFramework, joined again only when it changed)");
     eprintln!("       cargo xtask sdk-library   (the native library the SDK ships, as the layer table gives it, for tools/build-android.sh)")
 }
@@ -439,8 +448,8 @@ mod tests {
     /// words for them): the Linux job runs the host tools' clippy and lint library runs and their tests, so
     /// the code only Linux compiles (`cfg(target_os = "linux")`) meets a compiler, the lints and a test
     /// there; the macOS job runs the whole workspace's, which the host tools' are part of, so Linux alone
-    /// runs those as stages of their own; and the stages that need Xcode, the phones' SDKs or the host's GPU
-    /// stay on macOS.
+    /// runs those as stages of their own; and the stages that need Xcode, the phones' SDKs, the iOS
+    /// Simulator or the host's GPU stay on macOS.
     #[test]
     fn the_linux_job_lints_and_tests_the_host_tools_and_macos_keeps_the_rest() {
         let job = |system: &str| {
@@ -454,9 +463,20 @@ mod tests {
             assert!(linux.contains(&host.to_string()), "the Linux job does not run {host}: {linux:?}");
             assert!(!macos.contains(&host.to_string()), "the macOS job runs {host} through {whole}: {macos:?}");
         }
-        for stage in
-            ["doctor", "rules", "rust_clippy", "rust_test", "conformance", "rust_mobile", "generated", "swift_format", "swift_build", "swift_lint", "shell"]
-        {
+        for stage in [
+            "doctor",
+            "rules",
+            "rust_clippy",
+            "rust_test",
+            "conformance",
+            "rust_mobile",
+            "generated",
+            "swift_format",
+            "swift_build",
+            "swift_test",
+            "swift_lint",
+            "shell",
+        ] {
             assert!(macos.contains(&stage.to_string()) && !linux.contains(&stage.to_string()), "{stage} runs on macOS alone: linux {linux:?}, macos {macos:?}");
         }
     }

@@ -215,12 +215,12 @@ stage_rust_deny() {
   return "$status"
 }
 # The Swift package's binary target is the XCFramework tools/build-xcframework.sh builds and nobody
-# commits, and SwiftPM neither builds nor describes a package whose binary is missing, so the two stages
-# that compile the package's Swift — its builds and the lint, which builds it for the language server —
-# build it first, once per run; the script joins it again only when what it holds changed. The rules read
-# the package through its manifest alone, which needs no binary. --keep-bindings: the `generated` stage must
-# see a hand edit to the committed Swift bindings, which a regeneration here would write over before that
-# stage looked.
+# commits, and SwiftPM neither builds nor describes a package whose binary is missing, so the three stages
+# that need it — the builds, the lint, which builds the package for the language server, and the suite's
+# run — build it first, once per run; the script joins it again only when what it holds changed. The rules
+# read the package through its manifest alone, which needs no binary. --keep-bindings: the `generated` stage
+# must see a hand edit to the committed Swift bindings, which a regeneration here would write over before
+# that stage looked.
 xcframework_built=no
 xcframework() {
   if [ "$xcframework_built" = no ]; then
@@ -310,6 +310,91 @@ stage_swift_build() {
   fi
   return "$status"
 }
+# The Swift Testing suite, run on the iOS Simulator. `swift_build` compiles the suite's targets and runs
+# none of them, so until here no gate ever ran a Swift test: a test no gate runs is a test that drifts. plan
+# §28 puts the suite — the Swift unit tests and the corpus read through the Swift API — in the gate, on the
+# iPhone Simulator. The destination is the table's own (`cargo xtask swift-suite`, rust/xtask/src/pins.rs),
+# the one list of slices, with one of this machine's own simulators named in it, which `cargo xtask
+# simulator` chooses and shares one at a time with every other run on the machine
+# (rust/xtask/src/simulator.rs): the stage creates no device, boots an iPhone simulator only when none is
+# running, waits its turn when another run is testing on the simulator it chose, and shuts down only one
+# it booted, once nothing uses it; and its test runner takes a sandbox of its own, so a run of the suite
+# started by hand on the same simulator never meets this one's files. The suite runs in the one
+# configuration that command names, the one a developer and `swift test` run it in. The Simulator is
+# macOS's own, so the hosted macOS job runs this stage on the runner's simulator.
+stage_swift_test() {
+  local suites configuration destination architectures status=0
+  xcframework || return 1
+  suites="$(mktemp)"
+  if ! xtask swift-suite >"$suites"; then
+    rm -f "$suites"
+    return 1
+  fi
+  if [ ! -s "$suites" ]; then
+    echo "ci: no Swift suite to run" >&2
+    rm -f "$suites"
+    return 1
+  fi
+  while IFS=$'\t' read -r configuration destination architectures; do
+    swift_suite_on "$configuration" "$destination" "$architectures" || status=1
+  done <"$suites"
+  rm -f "$suites"
+  return "$status"
+}
+# One run of the suite: its build, its run on a simulator, and what its own report says ran.
+swift_suite_on() {
+  local configuration="$1" destination="$2" architectures="$3"
+  local package run_folder result summary sandbox tests skipped status=0
+  # The architectures stay the toolchain's, so nothing is built for a slice the native library does not
+  # hold.
+  package=(-scheme CraftBridge-Package -configuration "$configuration" -derivedDataPath .build/xcode ARCHS="$architectures")
+  # Built first, for the table's destination as it stands, which names no device, so that a simulator is
+  # taken only once the tests are ready to run in it: a simulator held while it ran nothing would look
+  # unused to another run deciding whether to shut it down. The run is of the very products this build made.
+  (cd ios/sdk && xcodebuild "${package[@]}" -destination "$destination" build-for-testing) || return 1
+  # The run's own folder for its report: a result bundle path that already exists is refused by xcodebuild,
+  # and one that a previous run left would be read as this run's.
+  run_folder="$(mktemp -d)"
+  result="$run_folder/suite.xcresult"
+  summary="$run_folder/summary.json"
+  # The run's own sandbox. The suite's tests start engines in the app's sandbox (`Folders.appDefault`),
+  # whose export journal one process holds at a time, and a Swift package's tests on the simulator have no
+  # app container: their sandbox is the simulator's own data folder, which every run on that simulator
+  # shares, so a run started by hand beside this one would fail on this one's journal, or this one on its.
+  # The test runner takes its home and its temporary folder in this run's folder instead, which goes with
+  # the run and leaves nothing on the simulator: Foundation's home on the simulator is `CFFIXED_USER_HOME`,
+  # EffectCraft resolves an unsaved project's relative output against `HOME`, and the temporary folder sits
+  # inside the home, as an app's does, since the engine reads only inside its container. xcodebuild hands
+  # each `TEST_RUNNER_` variable to the test runner without the prefix.
+  sandbox="$run_folder/sandbox"
+  # `generic/platform=iOS Simulator` names a whole platform, which a build builds for and no run runs on: a
+  # test run names one device, so `generic/` — any device of this platform — is replaced by the simulator
+  # `cargo xtask simulator` puts where the argument says, and the destination stays the table's.
+  (mkdir -p "$sandbox/tmp" && cd ios/sdk &&
+    export TEST_RUNNER_HOME="$sandbox" TEST_RUNNER_CFFIXED_USER_HOME="$sandbox" TEST_RUNNER_TMPDIR="$sandbox/tmp/" &&
+    xtask simulator -- xcodebuild "${package[@]}" -destination "${destination#generic/},id={simulator}" \
+      -resultBundlePath "$result" test-without-building) || status=1
+  # How many tests ran is read from the report the tool that ran them wrote, through that tool: a run that
+  # collected no test, or skipped every one, exits 0 and checked nothing, so the suite's own count of the
+  # tests it ran, which are those it did not skip, is what says it ran at all.
+  tests=''
+  skipped=''
+  if xcrun xcresulttool get test-results summary --path "$result" >"$summary"; then
+    tests="$(plutil -extract totalTestCount raw -o - "$summary")" || tests=''
+    skipped="$(plutil -extract skippedTests raw -o - "$summary")" || skipped=''
+  fi
+  if [ -z "$tests" ] || [ -z "$skipped" ]; then
+    echo "ci: the Swift suite ran no test: its own report names no count of tests" >&2
+    status=1
+  elif [ "$((tests - skipped))" -le 0 ]; then
+    echo "ci: the Swift suite ran no test: its own report counts $tests, and skipped $skipped" >&2
+    status=1
+  else
+    echo "ci: $((tests - skipped)) tests ran on the simulator, $skipped skipped"
+  fi
+  rm -rf "$run_folder"
+  return "$status"
+}
 stage_android() {
   # A fresh JVM every run: ktlint keeps the .editorconfig files it has parsed for the life of the
   # Gradle daemon, so a warm daemon would go on checking against rules that have since changed.
@@ -385,10 +470,10 @@ stage_duplicates() {
 
 # `rules` runs before every cargo stage that compiles the workspace: what it reads needs no build, and a
 # build script runs as soon as cargo compiles its crate.
-stages=(doctor rules rust_fmt rust_clippy rust_host_clippy rust_test rust_host_test conformance rust_mobile rust_deny generated plan_views swift_format swift_build swift_lint android shell duplicates)
+stages=(doctor rules rust_fmt rust_clippy rust_host_clippy rust_test rust_host_test conformance rust_mobile rust_deny generated plan_views swift_format swift_build swift_test swift_lint android shell duplicates)
 # The stage groups the decision and plan §15 name: Rust and Swift are each several stages.
 group_rust=(rust_fmt rust_clippy rust_test rust_mobile rust_deny)
-group_swift=(swift_format swift_build swift_lint)
+group_swift=(swift_format swift_build swift_test swift_lint)
 # The hosted jobs' split of the stages (.github/workflows/ci.yml), made here and nowhere else: each job runs
 # `tools/ci.sh --hosted`, which takes its stages from its runner's system. The Linux job runs `linux_only`,
 # the stages that read the same on Linux and need nothing of macOS; the macOS job runs every other stage, so
@@ -405,6 +490,7 @@ left_to_macos=(
   "conformance: its steps that ask for the GPU fail where the machine gives none (rust/effects/craftbridge-effects-conformance/src/host.rs), and the oracle they are compared with is an EffectCraft build of its own (tools/oracle.sh)"
   "rust_mobile: the iOS targets need Xcode's SDKs, and the Android targets the NDK r28 tools/env.sh pins, which the macOS image carries and Ubuntu's does not"
   "swift_format swift_build swift_lint: Xcode and SwiftPM"
+  "swift_test: the suite runs on the iOS Simulator, which is macOS's own, so the hosted macOS job runs it on the runner's simulator"
   "shell: Homebrew's shellcheck is the release the doctor's fix installs, while Ubuntu's is an older one whose checks differ"
 )
 # Is `name` one of the items after it: `among <name> <item>…`.
