@@ -6,7 +6,6 @@
 package io.github.christopherlinnett.craftbridge.effects
 
 import android.content.Context
-import android.graphics.Bitmap
 import io.github.christopherlinnett.craftbridge.core.JSONValue
 import java.io.File
 import java.util.UUID
@@ -126,6 +125,15 @@ private val comparisonFileChecks =
         }
     }
 
+/**
+ * A PNG of sixteen bits a channel, 2 by 1 pixels of RGBA, as ffmpeg's encoder writes it (`-pix_fmt rgba64be`), in
+ * hex: the same deep file on every device. The platform's own encoder is no source of one: Android 10's writes a
+ * bitmap of half floats as a PNG of eight bits a channel, which the runner rightly reads as the PNG it is.
+ */
+private const val SIXTEEN_BIT_PNG =
+    "89504e470d0a1a0a0000000d4948445200000002000000011006000000a4b2a3c900000009704859730000000100000001004f25c4d6" +
+        "0000001449444154789c6334aa4b4d98d1f4ff3f0314000034ad048f880efcdb0000000049454e44ae426082"
+
 private val straightPngChecks =
     Case("a PNG is written and read as the straight pixels it holds, a translucent one included, and a deeper one is refused") { context ->
         val shades = listOf(listOf(255, 128, 64, 255), listOf(10, 20, 30, 255), listOf(1, 2, 3, 255), listOf(200, 100, 50, 255))
@@ -137,14 +145,7 @@ private val straightPngChecks =
             val translucentShades = shades.mapIndexed { index, shade -> if (index == 0) listOf(255, 128, 64, 128) else shade }
             val translucent = straightRaster(pngFile("translucent.png", folder, 2, 2) { translucentShades[it] })
             agreed(translucent.pixels.map { it.toInt() and 0xff }, translucentShades.flatten(), "the translucent PNG's pixels")
-            // Sixteen bits a channel, as the platform's encoder writes a bitmap of half floats.
-            val deep = File(folder, "deep.png")
-            val sixteen = Bitmap.createBitmap(2, 1, Bitmap.Config.RGBA_F16)
-            try {
-                deep.outputStream().use { require(sixteen.compress(Bitmap.CompressFormat.PNG, 100, it)) { "the deep PNG was not written" } }
-            } finally {
-                sixteen.recycle()
-            }
+            val deep = File(folder, "deep.png").apply { writeBytes(SIXTEEN_BIT_PNG.chunked(2).map { it.toInt(16).toByte() }.toByteArray()) }
             val deepRefusal =
                 try {
                     straightRaster(deep)

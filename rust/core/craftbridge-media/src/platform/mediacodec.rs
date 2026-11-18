@@ -352,7 +352,12 @@ fn read_picture(image: &Image, layout: &Layout) -> std::result::Result<VideoFram
     // The platform's own description of where the picture is in the image: the only answer there is, and
     // [`mediacodec_input::crop_of`] says when it cannot be trusted.
     let rect = step(image.crop_rect(), "reading the picture's crop")?;
-    let crop = mediacodec_input::crop_of((rect.left, rect.top, rect.right, rect.bottom), layout)?;
+    let crop = mediacodec_input::crop_of((rect.left, rect.top, rect.right, rect.bottom), layout);
+    #[cfg(test)]
+    if let Err(why) = &crop {
+        tests::saw_refused_window(why);
+    }
+    let crop = crop?;
     let pixels = match mediacodec_input::reader_format(layout.depth) {
         ReaderFormat::Yuv420 => yuv_420_888_pixels(image, crop)?,
         ReaderFormat::P010 => p010_pixels(&step(image.hardware_buffer(), "getting the picture's hardware buffer")?, crop)?,
@@ -370,6 +375,8 @@ fn yuv_420_888_pixels(image: &Image, crop: Crop) -> std::result::Result<PixelDat
     };
     let described = if planes == 3 { [strides(0)?, strides(1)?, strides(2)?] } else { [(0, 0); 3] };
     let [luma, cb, cr] = mediacodec_input::described_planes(i32::from(format), planes, described)?;
+    #[cfg(test)]
+    tests::saw_image_layout(image, [luma, cb, cr]);
     let plane = |index: i32, (stride, pixel): (i32, i32)| -> std::result::Result<Strided<'_>, Failure> {
         mediacodec_input::plane(index, step(image.plane_data(index), "reading a plane")?, stride, pixel)
     };
@@ -557,7 +564,7 @@ pub(crate) mod tests {
         self, Branch, Stream, av1_entry, av1_samples, counters, decoded, h264_with_b_pictures_from_before_zero, hevc_entry, hevc_samples, hevc10_entry,
         hevc10_samples, pictures, reordered_entry, reordered_samples, stream, text, through_a_failed_drain, tiny_entry, tiny_samples, two_runs,
     };
-    use crate::mediacodec_input::{AV1_MIME, H264_MIME, HEVC_MIME};
+    use crate::mediacodec_input::{AV1_MIME, H264_MIME, HEVC_MIME, ImageLayout, PerThread};
     use crate::platform::mediacodec_encoder::tests::{through_a_software_codec, through_the_hardware};
 
     /// Names the file the harness writes from `MediaCodecList(MediaCodecList.REGULAR_CODECS)`, one codec a line
@@ -644,7 +651,21 @@ pub(crate) mod tests {
 
     /// The device's hardware decoder for `mime`, chosen from the device's list.
     fn listed(mime: &str) -> std::result::Result<MediaCodec, Failure> {
-        listed_hardware_codec(mime, device_codecs())
+        said(mime, listed_hardware_codec(mime, device_codecs()))
+    }
+
+    /// `picked`, the decoder a test chose for `mime`, said in the run's output: its name and whether the device's
+    /// list calls it a hardware decoder, so each check shows the branch it took.
+    fn said(mime: &str, picked: std::result::Result<MediaCodec, Failure>) -> std::result::Result<MediaCodec, Failure> {
+        match &picked {
+            Ok(codec) => {
+                let name = codec.name().unwrap();
+                let hardware = device_codecs().iter().any(|listed| listed.name == name && !listed.encoder && listed.hardware_accelerated);
+                eprintln!("{}", mediacodec_input::picked_decoder_says(mime, &name, hardware));
+            }
+            Err(why) => eprintln!("{mime}: no decoder, {why}"),
+        }
+        picked
     }
 
     /// The name of the first hardware decoder for `mime` the device's codec list names, the one [`listed`] makes
@@ -973,10 +994,86 @@ pub(crate) mod tests {
         assert!(matches!(decoder.decode(&[], 0), Err(CodecError::Decode(_))), "an empty sample");
     }
 
+    #[test]
+    fn a_seek_to_an_hevc_cra_gives_the_pictures_the_software_decoder_gives_from_it() {
+        let entry = hevc_entry();
+        for mut decoder in device_decoders(&entry, HEVC_MIME) {
+            let compared = fixtures::seek_to_the_hevc_cra(&mut decoder);
+            eprintln!("{}: the pictures compared after each of the seeks: {compared:?}", fixtures::hevc_from_its_cra().name);
+            hardware_compared(HEVC_MIME, compared.iter().sum()).unwrap();
+        }
+    }
+
+    #[test]
+    fn an_av1_stream_with_hidden_frames_decodes_to_the_pictures_the_software_decoder_gives_and_seeks_back_to_its_start() {
+        let Stream { name, entry, samples } = fixtures::av1_with_hidden_frames();
+        let wanted = decoded(software(&entry).as_mut(), &samples);
+        for mut decoder in device_decoders(&entry, AV1_MIME) {
+            assert_eq!(decoded(&mut decoder, &samples), wanted, "{name}");
+            for before in [0..0, 0..7, 0..samples.len()] {
+                assert_seek_matches_software(&mut decoder, &entry, &samples, (before, 0, samples.len()));
+            }
+        }
+    }
+
+    /// Every image layout a decoded image was read from.
+    static LAYOUTS: PerThread<ImageLayout> = PerThread::new();
+
+    /// Every picture whose window the device's decoder described where it cannot be trusted, in the decoder's words.
+    static REFUSED_WINDOWS: PerThread<String> = PerThread::new();
+
+    /// Records the layout of `image`, whose planes the platform described as `planes`, for the test running on this
+    /// thread: the one call the decoder makes for a test to see the real images a device's decoder gives.
+    pub(super) fn saw_image_layout(image: &Image, planes: [(i32, i32); 3]) {
+        let rect = image.crop_rect().unwrap();
+        let layout =
+            ImageLayout { image: (image.width().unwrap(), image.height().unwrap()), picture: (rect.right - rect.left, rect.bottom - rect.top), planes };
+        LAYOUTS.push(layout);
+    }
+
+    /// Records why the decoder refused a picture's window, for the test running on this thread: the one call the
+    /// decoder makes for a test to read why the run it watched was switched, not a second run's reason.
+    pub(super) fn saw_refused_window(why: &str) {
+        REFUSED_WINDOWS.push(why.to_string());
+    }
+
+    /// The distinct layouts this thread's decoding has read since it last asked, in the order they first came.
+    fn take_layouts() -> Vec<ImageLayout> {
+        let mut seen: Vec<ImageLayout> = Vec::new();
+        for layout in LAYOUTS.take() {
+            if !seen.contains(&layout) {
+                seen.push(layout);
+            }
+        }
+        seen
+    }
+
+    #[test]
+    fn the_images_a_hardware_decoder_gives_are_read_as_the_platform_lays_them_out_into_the_software_decoders_pictures() {
+        // Each stream through the device's hardware decoder for its codec, whichever layout the decoder chooses
+        // (planar or semi-planar, with rows padded or not, in an image of the coded size or the picture's): the
+        // pictures are the software decoder's, and the layout read says which it was. The offset crops are left to
+        // the registry's test, since a decoder may refuse their window, and the registry then switches.
+        let _counters = counters();
+        for stream in [fixtures::h264(), fixtures::h264_with_b_pictures(), fixtures::hevc(), fixtures::av1(), fixtures::av1_with_hidden_frames()] {
+            let mime = mediacodec_input::mime(&Layout::for_stream(&fixtures::stream(&stream.entry)).unwrap()).unwrap();
+            for mut decoder in device_decoders(&stream.entry, mime) {
+                let wanted = decoded(software(&stream.entry).as_mut(), &stream.samples);
+                assert_eq!(decoded(&mut decoder, &stream.samples), wanted, "{}", stream.name);
+                let seen = take_layouts();
+                assert!(!seen.is_empty(), "{}: the hardware decoder's pictures were read from no image", stream.name);
+                for layout in &seen {
+                    assert!(layout.image.0 >= layout.picture.0 && layout.image.1 >= layout.picture.1, "{}: {layout:?}", stream.name);
+                    eprintln!("{}", layout.says_of(stream.name));
+                }
+            }
+        }
+    }
+
     /// The device's own decoder for `mime`, a software one included, the first the list gives.
     fn any_codec(mime: &str) -> std::result::Result<MediaCodec, Failure> {
         let name = device_codecs().iter().find(|codec| !codec.encoder && codec.types.iter().any(|kind| kind == mime)).map(|codec| codec.name.as_str());
-        name.and_then(MediaCodec::from_codec_name).ok_or_else(|| format!("this device has no decoder for {mime}"))
+        said(mime, name.and_then(MediaCodec::from_codec_name).ok_or_else(|| format!("this device has no decoder for {mime}")))
     }
 
     #[test]
@@ -1105,6 +1202,7 @@ pub(crate) mod tests {
             let mut decoder = Fallback::new(hardware, &entry, stream(&entry));
             assert_eq!(text(&pictures(&mut decoder, &samples)), wanted, "stopped before sample {stop_at}");
             assert_eq!(hw_stats().fallbacks, fallbacks + 1, "one switch, stopped before sample {stop_at}");
+            eprintln!("{}", fixtures::went_on_in(&format!("the codec stopped before sample {stop_at}"), decoder.name()));
         }
     }
 
@@ -1366,15 +1464,6 @@ pub(crate) mod tests {
         hardware_compared(HEVC_MIME, compared.unwrap()).unwrap();
     }
 
-    /// Why the device's hardware decoder refuses a picture of `stream`: the error of the first sample it fails,
-    /// `None` where it decodes every sample.
-    fn first_refusal(stream: &Stream) -> Option<String> {
-        let mut decoder = decoder_with(&stream.entry, &fixtures::stream(&stream.entry), listed).unwrap();
-        let refused = stream.samples.iter().find_map(|(pts, sample)| decoder.decode(sample, *pts).err());
-        decoder.flush();
-        refused.map(|error| error.to_string())
-    }
-
     /// `stream` opened through FilmCraft's registry, as an engine's start leaves it ([`crate::register`] over the
     /// device's list), every picture held to the software decoder's: the branch it took. It is the device's: the
     /// first hardware decoder the list names for the stream's type, with no picture from another decoder and no
@@ -1384,19 +1473,25 @@ pub(crate) mod tests {
     /// coded picture's corner as a decoder that ignores the offset does ([`mediacodec_input::IGNORED_OFFSET`])
     /// is refused at the stream's first picture, naming the corner the stream's own record gives its crop, and
     /// the stream goes to the software decoder, the switch counted; any other refusal fails the test. The branch
-    /// is held to what the registry did, so the branch the test says is the one taken.
+    /// and its reason are both read from the registry's own run: a decoder may describe the same stream's window
+    /// at the crop's corner in one run and at the origin in the next (the API 34 emulator's does), so a second run
+    /// of the device's decoder would say what that run did, not why the registry switched.
     fn through_the_registry(stream: &Stream) -> Branch {
         let layout = Layout::for_stream(&fixtures::stream(&stream.entry)).unwrap();
         let mime = mediacodec_input::mime(&layout).unwrap();
         let hardware = hardware_name(mime).filter(|_| layout.depth == Depth::Eight || p010_reader_made());
-        let refusal = hardware.as_ref().and_then(|_| first_refusal(stream));
         let backend = format!("{BACKEND} {}", layout.codec.name());
         let (declined, fallbacks) = (hw_stats().declined, hw_stats().fallbacks);
+        take_layouts();
+        REFUSED_WINDOWS.take();
         let mut decoder = make_video_decoder(&stream.entry).unwrap();
         let opened = decoder.name().to_string();
         let compared = fixtures::compared_with_software(stream.name, decoder.as_mut(), &stream.entry, &stream.samples);
         assert_eq!(compared, stream.samples.len(), "{}: a picture for each sample", stream.name);
         let did = (opened.as_str(), decoder.name(), hw_stats().declined, hw_stats().fallbacks);
+        // The first refused window is the one the registry switched at; the pictures the hardware decoder still
+        // held as it was let go can be refused after it.
+        let refusal = REFUSED_WINDOWS.take().into_iter().next();
         let branch = match (hardware, refusal) {
             (Some(name), None) => Branch::Hardware(format!("{name} ({backend})")),
             (Some(name), Some(why)) => {
@@ -1424,6 +1519,9 @@ pub(crate) mod tests {
         let said = branch.says(stream.name, compared);
         assert_eq!(did, does, "the registry took another branch than this: {said}");
         eprintln!("{said}");
+        for layout in take_layouts() {
+            eprintln!("{}", layout.says_of(stream.name));
+        }
         branch
     }
 
@@ -1456,6 +1554,7 @@ pub(crate) mod tests {
             fixtures::hevc(),
             fixtures::hevc10(),
             fixtures::av1(),
+            fixtures::av1_with_hidden_frames(),
             fixtures::h264_with_an_offset_crop(),
             fixtures::hevc_with_an_offset_crop(),
         ];
