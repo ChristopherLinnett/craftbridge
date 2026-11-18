@@ -494,7 +494,9 @@ pub(crate) fn hold_dylint_lock(root: &Path) -> Result<std::fs::File, String> {
 
 /// `cargo dylint <arguments>`, from the workspace's folder and holding [`hold_dylint_lock`]: the way
 /// `tools/ci.sh` runs it, so a stage and a workspace test's probe runs beside it never build over one
-/// another. The child owns the run's streams, so what cargo prints reaches the stage's pipe to
+/// another. The run starts through `crate::pin`, as every cargo a tool starts; dylint takes the library's
+/// own nightly from the library's folder itself, removing the variable from every command it starts there
+/// (AGENTS.md §7). The child owns the run's streams, so what cargo prints reaches the stage's pipe to
 /// `cargo xtask compiled` whole.
 pub(crate) fn run_dylint(root: &Path, arguments: &[&str]) -> std::process::ExitCode {
     let _alone = match hold_dylint_lock(root) {
@@ -504,7 +506,14 @@ pub(crate) fn run_dylint(root: &Path, arguments: &[&str]) -> std::process::ExitC
             return std::process::ExitCode::FAILURE;
         }
     };
-    let running = std::process::Command::new(env!("CARGO")).arg("dylint").args(arguments).current_dir(root.join("rust")).spawn();
+    let mut cargo = match crate::pin::cargo_in(&root.join("rust")) {
+        Ok(cargo) => cargo,
+        Err(failure) => {
+            eprintln!("xtask: {failure}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+    let running = cargo.arg("dylint").args(arguments).spawn();
     let status = match running.and_then(|mut running| running.wait()) {
         Ok(status) => status,
         Err(failure) => {

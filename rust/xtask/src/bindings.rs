@@ -83,17 +83,20 @@ pub(crate) fn files_under(folder: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(files)
 }
 
+/// The bindgen's run for `language` over `library`, into `out_dir`. The bindgen asks cargo about the
+/// library's crates, which it finds from the folder it runs in, through a cargo of its own that inherits
+/// what the bindgen is started with, so it starts through `crate::pin` like every cargo a tool starts.
+fn bindgen_command(bindgen: &Path, library: &Path, language: &str, out_dir: &Path) -> Result<Command, String> {
+    let mut command = crate::pin::pinned_in(bindgen, &crate::repository_root()?.join("rust"))?;
+    command.args(["generate", "--no-format", "--library"]).arg(library).args(["--language", language, "--out-dir"]).arg(out_dir);
+    Ok(command)
+}
+
 /// Run the bindgen for `language` over the host build of the distribution library, into `out_dir`, and give
 /// every file it wrote the header of [`header`].
 fn run(language: &str, out_dir: &Path) -> Result<(), String> {
     let built = host_build()?;
-    // The bindgen asks cargo about the library's crates, which it finds from the folder it runs in.
-    let output = Command::new(&built.bindgen)
-        .current_dir(crate::repository_root()?.join("rust"))
-        .args(["generate", "--no-format", "--library"])
-        .arg(&built.library)
-        .args(["--language", language, "--out-dir"])
-        .arg(out_dir)
+    let output = bindgen_command(&built.bindgen, &built.library, language, out_dir)?
         .output()
         .map_err(|error| format!("cannot run {}: {error}", built.bindgen.display()))?;
     if !output.status.success() {
@@ -119,6 +122,22 @@ pub(crate) fn with_run<T>(language: &str, keep: impl FnOnce(&Path) -> Result<T, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bindgen starts from the workspace's folder with exactly what the helper hands a cargo there,
+    /// the pin, so the cargo it asks about the library's crates runs the pinned toolchain whoever started
+    /// xtask, and not the toolchain a caller's variable names.
+    #[test]
+    fn the_bindgen_starts_with_the_pin_named() {
+        let rust = crate::repo_root().join("rust");
+        let command = bindgen_command(Path::new("uniffi-bindgen"), Path::new("library.dylib"), "swift", Path::new("out")).unwrap();
+        let cargo = crate::pin::cargo_in(&rust).unwrap();
+        assert_eq!(command.get_current_dir(), Some(rust.as_path()), "the bindgen finds the library's crates from the workspace's folder");
+        assert_eq!(
+            command.get_envs().collect::<Vec<_>>(),
+            cargo.get_envs().collect::<Vec<_>>(),
+            "the bindgen starts with other variables than the helper hands a cargo, so the cargo it starts itself is not held to the pin"
+        );
+    }
 
     #[test]
     fn every_language_gets_the_marker_in_its_first_lines() {

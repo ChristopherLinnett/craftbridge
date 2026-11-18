@@ -109,18 +109,19 @@ pub(crate) fn build(rust_dir: &Path, packages: &[&str]) -> Result<Vec<Artifact>,
     compile(rust_dir, "build", &arguments, &[]).map(|reported| reported.artifacts)
 }
 
-/// Run `cargo <command> --locked <arguments>` in `rust_dir`, with `variables` for the compilers it runs, and
-/// read what it reports in the JSON messages `arguments` asks for. Besides [`build`], the native library the
-/// XCFramework holds is built here, through `cargo rustc`, which hands what follows `--` to that library's
-/// own compilation alone.
+/// Run `cargo <command> --locked <arguments>` in `rust_dir`, with the pinned toolchain named to it
+/// (`crate::pin`, AGENTS.md §7) and with `variables` for the compilers it runs, and read what it reports
+/// in the JSON messages `arguments` asks for. Besides [`build`], the native library the XCFramework holds
+/// is built here, through `cargo rustc`, which hands what follows `--` to that library's own compilation
+/// alone.
 pub(crate) fn compile(rust_dir: &Path, command: &str, arguments: &[&str], variables: &[(&str, &str)]) -> Result<Reported, String> {
-    let output = std::process::Command::new(env!("CARGO"))
-        .current_dir(rust_dir)
+    let mut cargo = crate::pin::cargo_in(rust_dir)?;
+    let output = cargo
         .args([command, "--locked"])
         .args(arguments)
         .envs(variables.iter().copied())
         .output()
-        .map_err(|error| format!("cannot run `{} {command}`: {error}", env!("CARGO")))?;
+        .map_err(|error| format!("cannot run `{} {command}`: {error}", Path::new(cargo.get_program()).display()))?;
     if !output.status.success() {
         return Err(format!("`cargo {command} {}` exited with {}: {}", arguments.join(" "), output.status, String::from_utf8_lossy(&output.stderr).trim()));
     }
@@ -851,6 +852,65 @@ mod tests {
         assert_eq!(profile_error("x", &unit(",\"profile\":{\"test\":true}"), true), Some(refusal("x", test, "overflow checks or debug assertions")));
         let untold = unit(",\"profile\":{\"debug_assertions\":true,\"overflow_checks\":true}");
         assert_eq!(untold.profile, Some(UnitProfile { test: true, without: Vec::new() }), "a report silent on `test` counts the unit as a test");
+    }
+
+    /// A crate whose own folder pins another toolchain — what `dashmap` is, through EffectCraft — builds
+    /// with the pin, and installs nothing. The scratch is laid out as the tree is: its `rust/` pins the
+    /// toolchain with a copy of the workspace's own file, and the path dependency stands outside the
+    /// workspace, where cargo runs its compiler in its own folder, as it runs every registry crate's; that
+    /// folder's file names a toolchain no machine holds. The child builds it twice. First from a caller
+    /// with no toolchain variable, as a clean machine starts (rustup reads an empty variable as none):
+    /// there `rust/` resolves the pin by its file, and a helper that dropped the pin stops at the folder's
+    /// file, as the real build stopped at `dashmap`'s. Then from a caller naming a toolchain this machine
+    /// lacks, which the helper names the pin over. The folder's file stands only after the parent resolved
+    /// the lock, which reads no folder.
+    #[test]
+    fn a_crate_whose_folder_pins_another_toolchain_builds_with_the_pin() {
+        let scratch = Scratch::new("compiled-toolchain-pin");
+        scratch.write(crate::pins::TOOLCHAIN, std::fs::read(crate::repo_root().join(crate::pins::TOOLCHAIN)).unwrap());
+        scratch.write("rust/Cargo.toml", "[workspace]\nmembers = [\"probe\"]\nresolver = \"3\"\n");
+        scratch.write("rust/probe/Cargo.toml", "[package]\nname = \"under-the-pin\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\nfolder-pin = { path = \"../../outside/folder-pin\" }\n");
+        scratch.write("rust/probe/src/lib.rs", "pub fn probe() -> u8 { folder_pin::blocker() }\n");
+        scratch.write("outside/folder-pin/Cargo.toml", "[package]\nname = \"folder-pin\"\nversion = \"0.1.0\"\nedition = \"2024\"\n");
+        scratch.write("outside/folder-pin/src/lib.rs", "pub fn blocker() -> u8 { 1 }\n");
+        let locked = std::process::Command::new(env!("CARGO")).current_dir(scratch.0.join("rust")).args(["generate-lockfile", "--offline"]).output().unwrap();
+        assert!(locked.status.success(), "{}", String::from_utf8_lossy(&locked.stderr));
+        scratch.write("outside/folder-pin/rust-toolchain.toml", "[toolchain]\nchannel = \"9.9.9-craftbridge-folder-plant\"\n");
+        for (caller, target) in [("", "target-clean"), ("9.9.9-craftbridge-caller-plant", "target-caller")] {
+            craftbridge_process::rerun(
+                "compiled::tests::child_builds_the_crate_whose_folder_pins_another_toolchain",
+                &[
+                    ("XTASK_COMPILED_TOOLCHAIN_SCRATCH", scratch.0.as_os_str()),
+                    ("XTASK_COMPILED_TOOLCHAIN_TARGET", target.as_ref()),
+                    ("RUSTUP_TOOLCHAIN", caller.as_ref()),
+                ],
+                &format!("a crate whose folder pins another toolchain did not build with the pin named by the helper, from a caller naming `{caller}`"),
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    #[ignore = "run by a_crate_whose_folder_pins_another_toolchain_builds_with_the_pin, with the caller's toolchain variable set"]
+    fn child_builds_the_crate_whose_folder_pins_another_toolchain() {
+        let scratch = std::env::var_os("XTASK_COMPILED_TOOLCHAIN_SCRATCH").expect("the parent test names the scratch it made");
+        let rust = std::path::PathBuf::from(&scratch).join("rust");
+        let target =
+            std::path::PathBuf::from(&scratch).join(std::env::var_os("XTASK_COMPILED_TOOLCHAIN_TARGET").expect("the parent test names the build folder"));
+        let target_dir = target.to_string_lossy();
+        let reported = compile(
+            &rust,
+            "build",
+            &["--message-format=json-render-diagnostics", "--package", "under-the-pin", "--offline", "--target-dir", &target_dir],
+            // The machine installs nothing on this run's account, whatever rustup resolves.
+            &[("RUSTUP_AUTO_INSTALL", "0")],
+        )
+        .expect("the crate builds with the pin, installing nothing");
+        assert!(
+            reported.artifacts.iter().any(|unit| unit.target_name == "folder_pin"),
+            "cargo reported no build of folder-pin: {:?}",
+            reported.artifacts.iter().map(|unit| &unit.target_name).collect::<Vec<_>>()
+        );
     }
 
     /// The whole path with the real cargo, over a probe workspace whose members, named as no crate of ours

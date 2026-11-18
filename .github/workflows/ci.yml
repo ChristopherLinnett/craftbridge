@@ -171,17 +171,8 @@ jobs:
           rev="$(cd rust && cargo xtask upstream pin)"
           tools/update-upstream.sh "$rev"
 
-      # xtask starts cargo itself, by the path it was built with, so no RUSTUP_TOOLCHAIN reaches that cargo,
-      # and cargo runs each dependency's compiler in the dependency's own folder, where rustup picks the
-      # toolchain from whatever pin the dependency ships (dashmap asks for 1.85, which the runner lacks) or
-      # else the image's default, the pin only while the two happen to match. So the gate runs with the one
-      # RUSTUP_TOOLCHAIN it lets through, rust/'s pin as rustup resolves it, which tools/env.sh strips from
-      # every command run in another folder, the lint library's; a toolchain rustup cannot resolve is left
-      # for the gate to name.
       - name: The gate, tools/ci.sh
         run: |
-          pinned="$(source tools/env.sh && craftbridge_toolchain_status_in "$CRAFTBRIDGE_ROOT/rust")"
-          if [ "${pinned%% *}" = ok ]; then export RUSTUP_TOOLCHAIN="${pinned#ok }"; fi
           # shellcheck disable=SC2086 # one stage per word, split on purpose
           if [ "$RUNNER_OS" = Linux ]; then
             tools/ci.sh $LINUX_STAGES
