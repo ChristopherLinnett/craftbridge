@@ -39,24 +39,30 @@ in_library() {
   craftbridge_cargo_in "$CRAFTBRIDGE_LINT_LIBRARY" "$@" | "$xtask_run/debug/xtask" compiled
 }
 
-# The files a stage hands its tool, one per line into the caller's `files`: the rules' own walk chooses
-# them (`cargo xtask files`, rust/xtask/src/files.rs), so every stage reads exactly what the rules read and
-# build output is told from source in one place. A list that comes back empty fails, as a check that read
-# nothing must.
-listed() {
-  local kind="$1" list file
-  files=()
+# What an xtask command lists, one item per line, into the caller's `items`: `items_of <what> <command>…`.
+# A list that comes back empty fails, naming what it lists, as a check that read nothing must.
+items_of() {
+  local what="$1" list item
+  shift
+  items=()
   list="$(mktemp)"
-  if ! xtask files "$kind" >"$list"; then
+  if ! xtask "$@" >"$list"; then
     rm -f "$list"
     return 1
   fi
-  while IFS= read -r file; do files+=("$file"); done <"$list"
+  while IFS= read -r item; do items+=("$item"); done <"$list"
   rm -f "$list"
-  if [ ${#files[@]} -eq 0 ]; then
-    echo "ci: no $kind files to check" >&2
+  if [ ${#items[@]} -eq 0 ]; then
+    echo "ci: no $what" >&2
     return 1
   fi
+}
+# The files a stage hands its tool, into the caller's `files`: the rules' own walk chooses them (`cargo
+# xtask files`, rust/xtask/src/files.rs), so every stage reads exactly what the rules read and build output
+# is told from source in one place.
+listed() {
+  items_of "$1 files to check" files "$1" || return 1
+  files=("${items[@]}")
 }
 
 # The doctor reads the pins from this run's xtask, which the guard below has built before any stage, so it
@@ -275,14 +281,22 @@ stage_swift_build() {
   # error. Without it a module an earlier build left in the derived data satisfies the import with only
   # a warning, so `CraftBridge` could import a plugin against AGENTS.md §2 and still build.
   # build-for-testing builds the test targets too, which the package scheme builds only for testing.
+  # Besides this build of the whole package, every build line below also builds each library product
+  # again the way an app extension links it, the products listed from the manifest by
+  # `cargo xtask swift-products`; why, in the comment on that build.
   # Each build also writes the compiler's symbol graphs of every module into a folder of its own, which
   # `cargo xtask swift-api` reads once all have built: no public member written by hand may take the name
   # of one generated Swift gives the same type (rust/xtask/src/swift_api.rs). The folders sit inside the
   # derived data and keep their place from run to run: a module that is up to date compiles nothing and
   # writes no graph, so its last graph, written from the sources it still has, is the one read, and a
   # clean build folder loses both together.
-  local builds configuration destination architectures status=0 build=0 folder graphs=()
+  local builds configuration destination architectures status=0 build=0 folder graphs=() library libraries=()
   xcframework || return 1
+  # The library products, listed from the manifest through `cargo xtask swift-products` (rust/xtask/src/
+  # pins.rs), so a product added to the package joins the extension builds below with no second list here
+  # to keep in step.
+  items_of "Swift library products to build" swift-products || return 1
+  libraries=("${items[@]}")
   builds="$(mktemp)"
   if ! xtask swift-builds >"$builds"; then
     rm -f "$builds"
@@ -301,6 +315,27 @@ stage_swift_build() {
     (cd ios/sdk && xcodebuild -scheme CraftBridge-Package -destination "$destination" -configuration "$configuration" -derivedDataPath .build/xcode -quiet build build-for-testing \
       DIAGNOSE_MISSING_TARGET_DEPENDENCIES=YES_ERROR ARCHS="$architectures" \
       OTHER_SWIFT_FLAGS="\$(inherited) -emit-symbol-graph -emit-symbol-graph-dir \"$folder\"") || status=1
+    # And each library product again, the way an app's own extension links it: with the extension-only
+    # API restriction, so an API the system takes from extensions — `UIApplication.shared` among them —
+    # named anywhere the extension would link fails here, in the file and line that name it, rather than
+    # at the app's first extension build (plan §28 runs the engine in one). Warnings are errors in these
+    # builds: a key path to such an API, `#keyPath(UIApplication.shared)`, is graded only a warning, and a
+    # warning no stage fails on is a check that never ran. A product's build compiles the targets it
+    # depends on with the same settings, so the generated bindings are read as an extension links them too.
+    # Only library products are built this way: an extension links the libraries, never a package's test
+    # targets, and a test may call what an extension may not. These builds take derived data of their own:
+    # their settings differ from a shipping build's, so in its folder they would keep rebuilding the very
+    # products the later stages reuse. It is a folder per build line, as the symbol graphs are, because in
+    # one folder all the lines share, every warm run does work again, several times what it takes in
+    # folders of their own. The folders are not locked, here or for `.build/xcode`, which `swift_test` builds
+    # in too, so a lock this stage took alone would still let it meet that stage there: two runs in one
+    # worktree meet on xcodebuild's build database and fail ("database is locked"), never passing falsely.
+    # Runs in different worktrees never meet, each holding its own folders.
+    for library in "${libraries[@]}"; do
+      (cd ios/sdk && xcodebuild -scheme "$library" -destination "$destination" -configuration "$configuration" -derivedDataPath ".build/xcode-extension/$build" -quiet build \
+        DIAGNOSE_MISSING_TARGET_DEPENDENCIES=YES_ERROR ARCHS="$architectures" \
+        APPLICATION_EXTENSION_API_ONLY=YES SWIFT_TREAT_WARNINGS_AS_ERRORS=YES) || status=1
+    done
   done <"$builds"
   rm -f "$builds"
   # A build that failed wrote the graphs of only what it compiled, so they are read only once every build
