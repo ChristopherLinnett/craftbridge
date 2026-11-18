@@ -9,13 +9,15 @@ repository.workspace = true
 publish.workspace = true
 
 # A host tool may depend on anything. It decodes what an export wrote with EffectCraft's own media crate,
-# the registry CraftBridge's decoders register into, so a frame is decoded the way the engine decodes it.
+# the registry CraftBridge's decoders register into, so a frame is decoded the way the engine decodes it,
+# and holds an export where a scenario stops it through the engine's own `Exporter` (`src/hold.rs`).
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 tempfile.workspace = true
 craftbridge-process.workspace = true
+effectcraft-engine.workspace = true
 effectcraft-media.workspace = true
 effectcraft-time.workspace = true
 # The plug-in side of every scenario: the runner starts itself with the plug-in's calls (`--plugin-step`),

@@ -709,6 +709,7 @@ dependencies = [
  "craftbridge-core",
  "craftbridge-effects",
  "craftbridge-process",
+ "effectcraft-engine",
  "effectcraft-media",
  "effectcraft-time",
  "image",
