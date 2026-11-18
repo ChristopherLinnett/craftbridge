@@ -49,7 +49,8 @@ pub trait CraftApp: Send {
     ///   name it was given (a PNG sequence asked for at `card.png` writes `card_00000.png` on).
     ///   `list_outputs` may be called more than once; each call adds to the export's list. It
     ///   answers an error, which the implementation returns without writing those files, when a
-    ///   path lies outside the container, is a folder or a link, or the list cannot be written.
+    ///   path lies outside the container, is a folder or a link, is one another export of the app
+    ///   has listed and not ended, or the list cannot be written.
     ///
     /// The list is the engine's pending-export journal: when the app is killed mid-export, the next
     /// start deletes each listed file the export wrote, leaving any it never reached as they were,

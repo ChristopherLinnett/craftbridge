@@ -29,6 +29,17 @@
 //!   the next start, until an export lists its path again and takes its entry over, keeping what
 //!   was there before: a finished file that export writes there is never deleted for the older entry,
 //!   and one that fails leaves whatever is there, as a failed export leaves its own files.
+//! * **Each listing belongs to one export.** Every entry keeps the identity of the export that made
+//!   it, unique among the exports of the process that wrote it, so an export's end takes apart exactly
+//!   its own listings, never another export's, and an entry a build without identities wrote keeps
+//!   none and belongs to no export running now. A path a running export of the process has listed
+//!   belongs to that export alone until it ends, and a second listing of it is refused, as a path
+//!   outside the container is: two exports writing one path at once leave no defined file there,
+//!   and once two exports had listed one path and the one that finished cleared its entry, no rule
+//!   could tell whose file the one at the path was, and the other's cancel, kill or failure could
+//!   delete a file it never wrote, at the time or after a restart. An export may list its own path
+//!   again, and two exports whose files need one new folder each keep that folder's entry apart, as
+//!   each export makes the folder its own files need.
 //! * **Only regular files, and empty folders an export made, inside the container are touched.**
 //!   Entries are stored relative to the container, because the absolute path of an iOS app's
 //!   container can change between one launch and the next (an update moves it). A start joins each
@@ -153,6 +164,9 @@ const PATH: &str = "path";
 const BYTES: &str = "bytes";
 /// That file's modification time, in nanoseconds since the Unix epoch, when the disk gives one.
 const MODIFIED: &str = "modified";
+/// Which export listed the entry, as [`NEXT_EXPORT`] numbers it; absent from an entry written before
+/// identities.
+const EXPORT: &str = "export";
 
 /// What a temporary file of the journal's atomic write starts with, so a start can sweep the ones a
 /// killed write left behind and nothing else.
@@ -172,6 +186,12 @@ pub const MAX_SET_ASIDE: usize = 8;
 
 /// Tells the names of two journals set aside in one instant apart.
 static SHELVED: AtomicU64 = AtomicU64::new(0);
+
+/// Numbers the exports of this process, so each one's listings can be told from every other's: the
+/// next [`Journal::pending`] takes one, and every entry that export lists carries it. Exports of
+/// other processes may hold the same numbers, which is harmless: entries read from another process's
+/// journal are no export running here's, and are dealt with as a start deals with them.
+static NEXT_EXPORT: AtomicU64 = AtomicU64::new(1);
 
 /// What this process knows each journal holds, by journal file, while exports of its own run with it.
 /// The lock serialises every change of every journal in the process.
@@ -383,6 +403,9 @@ pub(crate) struct Pending {
     /// Every folder of a listed file's path this export has looked at, there or not, so each is looked
     /// at once however many files of a sequence it holds.
     looked: BTreeSet<PathBuf>,
+    /// The identity every entry of this listing carries ([`Entry::export`]), so its end clears exactly
+    /// its own entries and no other export can list what it holds.
+    export: u64,
 }
 
 /// One listed path.
@@ -392,6 +415,11 @@ struct Entry {
     path: String,
     /// What the export's writer puts there.
     kind: Kind,
+    /// Which export listed it, as [`NEXT_EXPORT`] numbers it: an export's end takes apart exactly
+    /// the entries of its own listing, and a running entry of one export is no other's to take.
+    /// None for an entry a journal written without identities left, and for the entries a start
+    /// invents for a set-aside journal's files: neither is any export running now's.
+    export: Option<u64>,
 }
 
 /// What a listed path is.
@@ -576,7 +604,10 @@ impl Journal {
     fn deal_with_all(&self, stale: Vec<Entry>, running: &[Entry], recovery: &mut Recovery) -> Vec<Entry> {
         let (files, mut folders): (Vec<Entry>, Vec<Entry>) = stale.into_iter().partition(|entry| matches!(entry.kind, Kind::File(_)));
         folders.sort_by(|a, b| depth(&b.path).cmp(&depth(&a.path)).then_with(|| b.path.cmp(&a.path)));
-        folders.dedup();
+        // A folder one path names is one folder however many exports made an entry for it, each of
+        // their files needing it: the entries differ only in the export that made each, and one of
+        // them stands for the folder.
+        folders.dedup_by(|a, b| a.path == b.path);
         let mut held = Vec::new();
         for entry in files.into_iter().chain(folders) {
             if running.iter().any(|listed| entry.claims(listed)) {
@@ -699,15 +730,17 @@ impl Journal {
         }
     }
 
-    /// An export's entry, empty until the export lists the files it is about to write.
+    /// An export's entry, empty until the export lists the files it is about to write. It is one
+    /// export's, numbered from [`NEXT_EXPORT`]: every entry it lists carries its number.
     pub(crate) fn pending(&self) -> Pending {
-        Pending { journal: self.clone(), listed: Vec::new(), looked: BTreeSet::new() }
+        Pending { journal: self.clone(), listed: Vec::new(), looked: BTreeSet::new(), export: NEXT_EXPORT.fetch_add(1, Ordering::Relaxed) }
     }
 
-    /// The entry of `output`, a file an export is about to write: where its writer's open lands,
-    /// below the container, and the file that is there now, if any. Refused when that is outside the
-    /// container, or is anything but a file or nothing: a start would refuse to touch it.
-    fn entry_of(&self, output: &Path) -> Result<Entry> {
+    /// The entry of `output`, a file the export numbered `export` is about to write: where its
+    /// writer's open lands, below the container, and the file that is there now, if any. Refused when
+    /// that is outside the container, or is anything but a file or nothing: a start would refuse to
+    /// touch it.
+    fn entry_of(&self, output: &Path, export: u64) -> Result<Entry> {
         let below = written_file(&self.root, output)?;
         let path = below.to_str().ok_or_else(|| {
             CraftError::io(format!("the output file {} cannot be listed in the pending-export journal: its path is not UTF-8", output.display()))
@@ -721,14 +754,15 @@ impl Journal {
             // its target wherever it points.
             Ok(_) => return Err(CraftError::io(format!("the output file {} is a folder or a link, not a file an export writes", target.display()))),
         };
-        Ok(Entry { path: path.to_string(), kind: Kind::File(found) })
+        Ok(Entry { path: path.to_string(), kind: Kind::File(found), export: Some(export) })
     }
 
     /// The folders of the path `file` (an entry's, below the container) that are not there now, the
-    /// deepest first: the ones its writer makes. A folder this export has looked at already (in
-    /// `looked`, or in `seen` during this listing) is not looked at again, and nor is any folder
-    /// above it, which was looked at with it; one that is there holds only folders that are.
-    fn made_folders(&self, file: &str, looked: &BTreeSet<PathBuf>, seen: &mut BTreeSet<PathBuf>) -> Vec<Entry> {
+    /// deepest first: the ones its writer makes, each entered for the export numbered `export`. A
+    /// folder this export has looked at already (in `looked`, or in `seen` during this listing) is not
+    /// looked at again, and nor is any folder above it, which was looked at with it; one that is there
+    /// holds only folders that are.
+    fn made_folders(&self, file: &str, looked: &BTreeSet<PathBuf>, seen: &mut BTreeSet<PathBuf>, export: u64) -> Vec<Entry> {
         let mut made = Vec::new();
         for folder in Path::new(file).ancestors().skip(1).take_while(|folder| !folder.as_os_str().is_empty()) {
             if looked.contains(folder) || !seen.insert(folder.to_path_buf()) {
@@ -736,7 +770,7 @@ impl Journal {
             }
             match fs::symlink_metadata(self.root.join(folder)) {
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                    made.push(Entry { path: folder.to_string_lossy().into_owned(), kind: Kind::Folder });
+                    made.push(Entry { path: folder.to_string_lossy().into_owned(), kind: Kind::Folder, export: Some(export) });
                 }
                 // Whatever is there was there before the export, so it is not the export's to remove;
                 // one the disk will not show is not counted as the export's either.
@@ -906,13 +940,20 @@ impl Journal {
 
 impl Pending {
     /// List `outputs`, files the export is about to write, before it writes them. Refused, so the
-    /// export must not write them, when one lies outside the container or the journal cannot be
-    /// written: an export that could be killed unlisted would leave partial files nothing deletes.
+    /// export must not write them, when one lies outside the container, or is a path a running export
+    /// of this process has listed and not ended, or the journal cannot be written: an export that
+    /// could be killed unlisted would leave partial files nothing deletes. The refused path holds
+    /// whatever entry of the listing ran into it, a path the second export derives as much as one it
+    /// was given: an exporter that writes its log beside the output, named from the output's stem,
+    /// gives two formats of one name one shared log, and the second export is refused there, for two
+    /// writers on one log at once leave it no more defined a file than two writers on one output. The
+    /// app waits for the export that holds the log, or writes its outputs under names whose logs
+    /// differ; a refused listing wrote nothing, so waiting for the holder costs nothing.
     pub(crate) fn list(&mut self, outputs: &[PathBuf]) -> Result<()> {
         let (mut entries, mut seen) = (Vec::with_capacity(outputs.len()), BTreeSet::new());
         for output in outputs {
-            let file = self.journal.entry_of(output)?;
-            let made = self.journal.made_folders(&file.path, &self.looked, &mut seen);
+            let file = self.journal.entry_of(output, self.export)?;
+            let made = self.journal.made_folders(&file.path, &self.looked, &mut seen, self.export);
             entries.push(file);
             entries.extend(made);
         }
@@ -921,6 +962,28 @@ impl Pending {
         }
         let mut known = lock(&KNOWN);
         let state = self.journal.hold(&mut known)?;
+        // A path a running export of this process has listed belongs to that export alone until it
+        // ends. Two exports writing one path at once leave no defined file there, and once two exports
+        // had listed one path and the one that finished cleared its entry, nothing in the journal could
+        // tell whose file the one at the path was: the other's cancel, kill or failure could then
+        // delete a file it never wrote, at the time or after a restart. So the second listing is
+        // refused here, before any of it is written. An export may list its own path again, and a
+        // folder two exports' files each need is listed by both; refused is only a path this listing
+        // would put a file, or a folder of its own making, where a running export of another listing
+        // has one of its own. What the others hold is gathered once, each path with whether one of
+        // them puts a file there, so a listing of a long sequence looks each of its paths up instead
+        // of walking every running entry for each.
+        let mut others: BTreeMap<&str, bool> = BTreeMap::new();
+        for listed in state.running.iter().filter(|listed| listed.export != Some(self.export)) {
+            *others.entry(listed.path.as_str()).or_default() |= matches!(listed.kind, Kind::File(_));
+        }
+        let clash = entries.iter().find(|entry| others.get(entry.path.as_str()).is_some_and(|&file| file || matches!(entry.kind, Kind::File(_))));
+        if let Some(entry) = clash {
+            return Err(CraftError::io(format!(
+                "the output file {} is listed by an export that has not ended, so two exports cannot write it at once",
+                self.journal.root.join(&entry.path).display()
+            )));
+        }
         let held = taken_over(&state.held, &mut entries);
         let mut listed: Vec<Entry> = held.iter().chain(&state.running).cloned().collect();
         listed.extend(entries.iter().cloned());
@@ -1038,6 +1101,7 @@ impl Entry {
     /// The file entry a journal's JSON holds, or none for one that is not an entry.
     fn file_from(value: &Value) -> Option<Self> {
         let path = path_from(value)?;
+        let export = listed_by(value)?;
         let found = match (value.get(BYTES), value.get(MODIFIED)) {
             (None, None) => None,
             (Some(bytes), modified) => {
@@ -1049,16 +1113,19 @@ impl Entry {
             }
             (None, Some(_)) => return None,
         };
-        Some(Self { path, kind: Kind::File(found) })
+        Some(Self { path, kind: Kind::File(found), export })
     }
 
     /// The folder entry a journal's JSON holds, or none for one that is not an entry.
     fn folder_from(value: &Value) -> Option<Self> {
-        Some(Self { path: path_from(value)?, kind: Kind::Folder })
+        Some(Self { path: path_from(value)?, kind: Kind::Folder, export: listed_by(value)? })
     }
 
     fn to_value(&self) -> Value {
         let mut fields = named(&self.path);
+        if let Some(export) = self.export {
+            fields.insert(EXPORT.to_string(), Value::from(export));
+        }
         if let Kind::File(Some(found)) = self.kind {
             fields.insert(BYTES.to_string(), Value::from(found.bytes));
             if let Some(modified) = found.modified {
@@ -1066,6 +1133,16 @@ impl Entry {
             }
         }
         Value::Object(fields)
+    }
+}
+
+/// Which export an entry's JSON names as having listed it: none when it names no [`EXPORT`], as an
+/// entry a journal written before identities left, and no entry at all when it names something that
+/// is no export's number.
+fn listed_by(value: &Value) -> Option<Option<u64>> {
+    match value.get(EXPORT) {
+        None => Some(None),
+        Some(export) => export.as_u64().map(Some),
     }
 }
 
@@ -1216,12 +1293,14 @@ fn still_set_aside(set_aside: Contents, taken: &mut Taken, root: &Path, recovery
         });
     }
     // The exports that ended at those files, as the later listing.
-    let mut ended: Vec<Entry> = yielding.into_iter().map(|path| Entry { path, kind: Kind::File(None) }).collect();
+    let mut ended: Vec<Entry> = yielding.into_iter().map(|path| Entry { path, kind: Kind::File(None), export: None }).collect();
     taken_over(&entries, &mut ended)
 }
 
-/// Remove one entry equal to `entry` from `entries`: two exports may list the same file, and each
-/// clears only its own listing of it.
+/// Remove one entry equal to `entry` from `entries`: an export's end takes apart its own listing
+/// alone, never another's. Two exports may each have entered one folder their files need, the
+/// entries equal but for the export that entered each, and only the entry of the export that ends
+/// goes, so the folder stays listed while the other still writes into it.
 fn take_one(entries: &mut Vec<Entry>, entry: &Entry) {
     let mut taken = false;
     entries.retain(|listed| {
@@ -1336,6 +1415,15 @@ mod tests {
         /// The resolved place of `name` in the container, as a recovery reports it.
         fn real(&self, name: &str) -> PathBuf {
             fs::canonicalize(&self.folders.container).unwrap().join(name)
+        }
+
+        /// The refusal of a listing that would write `name`, which a running export of another listing
+        /// holds, in its exact words.
+        fn held_by_another(&self, name: &str) -> CraftError {
+            CraftError::io(format!(
+                "the output file {} is listed by an export that has not ended, so two exports cannot write it at once",
+                self.real(name).display()
+            ))
         }
     }
 
@@ -1911,7 +1999,7 @@ mod tests {
             };
             let (engine, answered) = cancelled_while_refused(&sand, &[file.clone(), sound.clone()], &locked)?;
             fs::set_permissions(&locked, fs::Permissions::from_mode(0o700))?;
-            let still = if refused == Refused::Folder { r#"{"path":"exports"}"# } else { "card.mp4" };
+            let still = if refused == Refused::Folder { r#""path":"exports"}"# } else { "card.mp4" };
             assert!(fs::read_to_string(sand.file())?.contains(still), "{refused:?}: what the disk kept is no longer listed");
             match refused {
                 Refused::Files => {
@@ -2165,10 +2253,12 @@ mod tests {
             r#"{"outputs": [{"path": 1}]}"#,
             r#"{"outputs": [{"path": "card.mp4", "bytes": "four"}]}"#,
             r#"{"outputs": [{"path": "card.mp4", "modified": 1}]}"#,
+            r#"{"outputs": [{"path": "card.mp4", "export": "one"}]}"#,
             r#"{"files": []}"#,
             r#"{"outputs": [{"path": "card.mp4"}], "folders": "exports"}"#,
             r#"{"outputs": [{"path": "card.mp4"}], "folders": [{"path": 1}]}"#,
             r#"{"outputs": [{"path": "card.mp4"}], "folders": ["exports"]}"#,
+            r#"{"outputs": [{"path": "card.mp4"}], "folders": [{"path": "exports", "export": [1]}]}"#,
             "\u{0}\u{1}",
             too_long.as_str(),
         ];
@@ -2268,7 +2358,9 @@ mod tests {
         export.list(&[container.join("seq/a/f_00000.png"), container.join("seq/a/f_00001.png"), container.join("kept/f_00000.png")])?;
         export.list(&[container.join("seq/a/f_00002.png"), container.join("seq/b/f_00000.png"), container.join("top.png")])?;
         let journal: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
-        assert_eq!(journal[FOLDERS], json!([{ PATH: "seq/a" }, { PATH: "seq" }, { PATH: "seq/b" }]), "{journal}");
+        // Every entry of one listing names the same export, by [`EXPORT`].
+        let by = export.export;
+        assert_eq!(journal[FOLDERS], json!([{ PATH: "seq/a", EXPORT: by }, { PATH: "seq", EXPORT: by }, { PATH: "seq/b", EXPORT: by }]), "{journal}");
         assert_eq!(journal[OUTPUTS].as_array().map(Vec::len), Some(6), "{journal}");
         export.clear()?;
         assert!(!sand.file().exists());
@@ -2466,7 +2558,7 @@ mod tests {
         fs::set_permissions(sand.file(), fs::Permissions::from_mode(0o000))?;
         second.list(&[container.join("other.png")])?;
         let now: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
-        assert_eq!(now[FOLDERS], json!([entry("made")]), "{now}");
+        assert_eq!(now[FOLDERS], json!([{ PATH: "made", EXPORT: first.export }]), "{now}");
         first.clear()?;
         second.clear()?;
         assert!(!sand.file().exists());
@@ -3575,7 +3667,7 @@ mod tests {
         sand.write_journal(&[entry("old.mp4")]);
         let before = fs::read(sand.file())?;
         let long = "x".repeat(1 << 20);
-        let entries: Vec<Entry> = (0..17).map(|n| Entry { path: format!("{n}{long}"), kind: Kind::File(None) }).collect();
+        let entries: Vec<Entry> = (0..17).map(|n| Entry { path: format!("{n}{long}"), kind: Kind::File(None), export: None }).collect();
         let refused = journal.write(&entries, &Taken::default());
         assert!(refused.is_err(), "a journal past its bound was written");
         assert_eq!(fs::read(sand.file())?, before);
@@ -3695,10 +3787,12 @@ mod tests {
         Ok(())
     }
 
-    /// A cancelled export never deletes a file another export of the process is still writing, even
-    /// one it wrote to itself: the file is the running export's, whose own end deals with it.
+    /// A second export of the process may not list a file a running export has listed and not ended:
+    /// its listing is refused, before any of it is written, in exactly these words, and the export
+    /// answers the refusal without touching the file the first export is writing. Once the first has
+    /// ended, a later export may list the path after all.
     #[test]
-    fn a_cancelled_export_leaves_a_file_another_running_export_writes() -> Test {
+    fn a_second_export_of_a_running_exports_file_is_refused_in_its_exact_words() -> Test {
         let sand = Sandbox::new()?;
         let output = sand.folders.container.join("card.mp4");
         let (script, listed, release) = held_export(&output, true);
@@ -3706,36 +3800,300 @@ mod tests {
         let export = exporting(&first);
         assert!(listed.wait(), "the export never listed its output");
 
-        let cancel = CancelToken::new();
-        let (stop, written) = (cancel.clone(), output.clone());
-        let second = sand.start_running(Box::new(move |on_progress, list_outputs| {
-            list_outputs(std::slice::from_ref(&written))?;
-            fs::write(&written, b"written over by the cancelled export").unwrap();
-            stop.cancel();
-            assert!(!on_progress(1, 1, None));
-            Ok(Value::Null)
-        }))?;
-        assert_eq!(second.request_with_progress("export", Value::Null, |_, _, _| {}, &cancel), Err(CraftError::Cancelled));
-        assert!(output.is_file(), "a cancelled export deleted a file another export of the process is writing");
+        let held = output.clone();
+        let second = sand.start_running(Box::new(move |_, list_outputs| list_outputs(std::slice::from_ref(&held)).map(|()| Value::Null)))?;
+        let refused = second.request_with_progress("export", Value::Null, |_, _, _| {}, &CancelToken::new());
+        assert_eq!(refused, Err(sand.held_by_another("card.mp4")), "the refusal, in its exact words: {refused:?}");
+        assert_eq!(fs::read(&output)?, b"being written", "a refused second export touched the file the first export is writing");
+        assert!(fs::read_to_string(sand.file())?.contains("card.mp4"), "the refused listing disturbed the running export's entry");
+
         release.open();
         assert_eq!(export.join().unwrap(), Ok(Value::Null));
-        assert!(!sand.file().exists(), "an entry outlived both exports");
+        assert!(!sand.file().exists(), "an entry outlived the export");
+        // The path belongs to no running export now: a later export may list it, and its own end
+        // leaves the file the first export finished, having never written over it.
+        let mut later = sand.journal().pending();
+        later.list(std::slice::from_ref(&output))?;
+        later.clear()?;
+        assert_eq!(fs::read(&output)?, b"being written");
         Ok(())
     }
 
-    /// Two exports that list one file each clear only their own listing of it, so the file stays
-    /// listed while the other still writes it.
+    /// Refusal is one export's path from another's, not a path from itself: an export may list its
+    /// own path again, and its end clears both of its listings of it.
     #[test]
-    fn two_exports_of_one_file_each_clear_their_own_listing() -> Test {
+    fn an_export_may_list_its_own_path_again() -> Test {
         let sand = Sandbox::new()?;
         let output = sand.folders.container.join("card.mp4");
-        let (mut first, mut second) = (sand.journal().pending(), sand.journal().pending());
-        first.list(std::slice::from_ref(&output))?;
-        second.list(std::slice::from_ref(&output))?;
-        first.clear()?;
-        assert!(fs::read_to_string(sand.file())?.contains("card.mp4"), "one export's end unlisted the other's file");
-        second.clear()?;
+        let mut export = sand.journal().pending();
+        export.list(std::slice::from_ref(&output))?;
+        export.list(std::slice::from_ref(&output))?;
+        let journal: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
+        assert_eq!(journal[OUTPUTS].as_array().map(Vec::len), Some(2), "{journal}");
+        export.clear()?;
         assert!(!sand.file().exists());
+        Ok(())
+    }
+
+    /// A second listing of a running export's path is refused before any of it is written, so the
+    /// refused export has nothing of its own to delete however it ends. The order is the one in which
+    /// entries told apart by their value lost the file: the second export lists while nothing is at
+    /// the path yet, the holder writes there and finishes, and the second ends after it, cancelled,
+    /// killed or failed. The file the holder finished stays through each ending and the restart
+    /// after it, and the refused listing wrote nothing.
+    #[test]
+    fn a_refused_export_deletes_nothing_of_the_export_that_holds_the_path() -> Test {
+        let endings: [(&str, fn(Pending) -> Result<()>); 3] = [
+            ("cancelled", Pending::remove),
+            // The holder has ended, so the refused export is all the killed process was running.
+            ("killed", |refused| {
+                refused.killed();
+                Ok(())
+            }),
+            ("failed", Pending::clear),
+        ];
+        for (ending, end) in endings {
+            let sand = Sandbox::new()?;
+            let output = sand.folders.container.join("card.mp4");
+            let (mut holder, mut refused) = (sand.journal().pending(), sand.journal().pending());
+            let held_by = holder.export;
+            holder.list(std::slice::from_ref(&output))?;
+            let listing = refused.list(std::slice::from_ref(&output));
+            let after_refusal: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
+            sand.put("card.mp4", b"the finished movie");
+            holder.clear()?;
+            end(refused)?;
+            let engine = sand.start()?;
+            let kept = fs::read(&output).ok();
+            assert_eq!(kept.as_deref(), Some(&b"the finished movie"[..]), "{ending}: the holder's finished file was lost");
+            assert_eq!(engine.recovery(), &Recovery::default(), "{ending}");
+            assert!(!sand.file().exists(), "{ending}: the journal outlived both exports");
+            assert_eq!(listing, Err(sand.held_by_another("card.mp4")), "{ending}");
+            assert_eq!(after_refusal[OUTPUTS], json!([{ PATH: "card.mp4", EXPORT: held_by }]), "{ending}: the refused listing was written: {after_refusal}");
+        }
+        Ok(())
+    }
+
+    /// A path is one export's whatever the other would put there: a file where a running export's
+    /// writer makes a folder for its own files is refused, and so is a file whose path needs a folder
+    /// where a running export writes a file, each in the refusal's words naming that path.
+    #[test]
+    fn a_file_and_a_folder_at_one_path_are_two_exports_writing_it() -> Test {
+        let sand = Sandbox::new()?;
+        let container = &sand.folders.container;
+        let (mut sequence, mut over_its_folder) = (sand.journal().pending(), sand.journal().pending());
+        sequence.list(&[container.join("frames/f_00000.png")])?;
+        assert_eq!(over_its_folder.list(&[container.join("frames")]), Err(sand.held_by_another("frames")));
+        sequence.clear()?;
+        let (mut movie, mut below_it) = (sand.journal().pending(), sand.journal().pending());
+        movie.list(&[container.join("card")])?;
+        assert_eq!(below_it.list(&[container.join("card/f_00000.png")]), Err(sand.held_by_another("card")));
+        movie.clear()?;
+        assert!(!sand.file().exists(), "a refused listing was written");
+        Ok(())
+    }
+
+    /// A running export's path holds however its own entry names it, not only by the kind this
+    /// listing would put there: an export that listed `card` as a file and `card/x.png` — whose
+    /// writer can make only one of the two, but whose entries hold the name either way — holds
+    /// `card` against a second export whose own new file would need the folder `card`, and the
+    /// refusal names it. Every entry of a listing counts, so no entry's kind hides another's.
+    #[test]
+    fn a_path_held_as_a_file_and_as_a_folder_holds_by_both() -> Test {
+        let sand = Sandbox::new()?;
+        let container = &sand.folders.container;
+        let mut both = sand.journal().pending();
+        both.list(&[container.join("card"), container.join("card/x.png")])?;
+        let mut other = sand.journal().pending();
+        assert_eq!(other.list(std::slice::from_ref(&container.join("card/y.png"))), Err(sand.held_by_another("card")));
+        both.clear()?;
+        assert!(!sand.file().exists(), "a refused listing was written");
+        Ok(())
+    }
+
+    /// A cancelled export removes no folder another running export of the process still needs: the
+    /// new folder both exports' files need stays, though the cancel leaves it empty, listed by the
+    /// other export alone, and goes once no running export needs it, with the other's own cancel.
+    #[test]
+    fn a_cancelled_export_leaves_a_folder_another_running_export_needs() -> Test {
+        let sand = Sandbox::new()?;
+        let container = &sand.folders.container;
+        let (mut running, mut cancelled) = (sand.journal().pending(), sand.journal().pending());
+        running.list(&[container.join("shared/one.png")])?;
+        cancelled.list(&[container.join("shared/two.png")])?;
+        let written = sand.put("shared/two.png", b"half");
+        cancelled.remove()?;
+        assert!(!written.exists(), "the cancel left the file it wrote");
+        assert!(container.join("shared").is_dir(), "a cancel removed the folder another running export needs");
+        let journal: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
+        assert_eq!(journal[FOLDERS], json!([{ PATH: "shared", EXPORT: running.export }]), "{journal}");
+        sand.put("shared/one.png", b"half");
+        running.remove()?;
+        assert!(!container.join("shared").exists(), "the folder outlived every export that needed it");
+        assert!(!sand.file().exists());
+        Ok(())
+    }
+
+    /// A dead process's exports may carry the numbers this process's running exports carry, which is
+    /// harmless: an entry read from a journal is no running export's, whatever number it names. An
+    /// export's end takes nothing of it, and a start deals with it by its own record while an export
+    /// of the same number runs.
+    #[test]
+    fn a_dead_processs_export_numbers_equal_to_live_ones_belong_to_no_live_export() -> Test {
+        let sand = Sandbox::new()?;
+        let container = &sand.folders.container;
+        // What a killed process left: a partial file and the folder its writer made, listed by an
+        // export of the number `live` carries.
+        let left = |live: &Pending| {
+            let partial = sand.put("dead/card.mp4", b"half");
+            sand.write_journal_with(&[json!({ PATH: "dead/card.mp4", EXPORT: live.export })], &[json!({ PATH: "dead", EXPORT: live.export })]);
+            partial
+        };
+        let mut ending = sand.journal().pending();
+        let number = ending.export;
+        let partial = left(&ending);
+        ending.list(&[container.join("live/card.mp4")])?;
+        sand.put("live/card.mp4", b"half of the live one");
+        ending.remove()?;
+        assert!(partial.exists(), "an export's end deleted what a dead export of its number left");
+        let journal: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
+        assert_eq!(journal[OUTPUTS], json!([{ PATH: "dead/card.mp4", EXPORT: number }]), "an export's end took a dead export's entry: {journal}");
+        assert_eq!(journal[FOLDERS], json!([{ PATH: "dead", EXPORT: number }]), "{journal}");
+
+        let mut running = sand.journal().pending();
+        let partial = left(&running);
+        running.list(&[container.join("live/card.mp4")])?;
+        let engine = sand.start()?;
+        assert_eq!(engine.recovery().removed, [sand.real("dead/card.mp4"), sand.real("dead")], "{:?}", engine.recovery());
+        assert!(!partial.exists());
+        running.clear()?;
+        assert!(!sand.file().exists());
+        Ok(())
+    }
+
+    /// What a later export of a finished export's path does at its end.
+    #[derive(Clone, Copy, Debug)]
+    enum Ending {
+        /// Cancelled before it reached the path: the finished file stays as it was.
+        CancelledBeforeReaching,
+        /// Cancelled after it wrote its own file there: what it wrote goes, since it wrote it.
+        CancelledAfterReaching,
+        /// Killed before it reached the path: the next start keeps the file it found when it listed.
+        KilledBeforeReaching,
+        /// Failed there, whatever it left: the entries clear and the file stays.
+        Failed,
+        /// Killed after it wrote: the next start deletes exactly what that export wrote.
+        KilledAfterReaching,
+    }
+
+    /// A finished export keeps its file whatever a later export of the same path does, before a
+    /// restart and after one. The later export may only list the path once the first has ended, and
+    /// its entry records the finished file as what was there before: a cancel before it reaches the
+    /// path, a kill that leaves an entry no write followed, and a failure all leave that file, and
+    /// only a cancel or a kill after the export wrote there removes anything, and then exactly the
+    /// bytes that export wrote, never the finished file it found.
+    #[test]
+    fn a_finished_export_keeps_its_file_through_every_ending_of_a_later_export_of_its_path() -> Test {
+        let endings =
+            [Ending::CancelledBeforeReaching, Ending::CancelledAfterReaching, Ending::KilledBeforeReaching, Ending::Failed, Ending::KilledAfterReaching];
+        for ending in endings {
+            let sand = Sandbox::new()?;
+            let output = sand.folders.container.join("card.mp4");
+            let (mut finished, mut later) = (sand.journal().pending(), sand.journal().pending());
+            finished.list(std::slice::from_ref(&output))?;
+            sand.put("card.mp4", b"the finished movie");
+            finished.clear()?;
+            later.list(std::slice::from_ref(&output))?;
+            match ending {
+                Ending::CancelledBeforeReaching => {
+                    later.remove()?;
+                    assert_eq!(fs::read(&output)?, b"the finished movie", "a cancel before reaching the path deleted a finished file");
+                }
+                Ending::CancelledAfterReaching => {
+                    sand.put("card.mp4", b"half a newer movie, cut short");
+                    later.remove()?;
+                    assert!(!output.exists(), "a cancel after writing left the file this export wrote");
+                }
+                Ending::Failed => {
+                    later.clear()?;
+                    assert_eq!(fs::read(&output)?, b"the finished movie", "a failed export deleted what it listed");
+                }
+                Ending::KilledBeforeReaching => {
+                    later.killed();
+                    let engine = sand.start()?;
+                    assert_eq!(engine.recovery().untouched, [sand.real("card.mp4")], "{:?}", engine.recovery());
+                    assert_eq!(fs::read(&output)?, b"the finished movie", "a restart deleted the file a killed run listed but never wrote");
+                }
+                Ending::KilledAfterReaching => {
+                    sand.put("card.mp4", b"half a newer movie, cut short");
+                    later.killed();
+                    let engine = sand.start()?;
+                    assert_eq!(engine.recovery().removed, [sand.real("card.mp4")], "{:?}", engine.recovery());
+                    assert!(!output.exists(), "a restart kept the partial file a killed run wrote");
+                }
+            }
+            assert!(!sand.file().exists(), "{ending:?}: the journal outlived the endings");
+        }
+        Ok(())
+    }
+
+    /// Every entry names the export that listed it, and an export's end takes apart exactly its own
+    /// entries: two exports whose new files share one folder keep that folder's entry apart, and it
+    /// stays listed as one export's while the other still writes into it, going only once the last
+    /// of them has ended.
+    #[test]
+    fn the_journal_names_the_export_that_made_each_entry() -> Test {
+        let sand = Sandbox::new()?;
+        let container = &sand.folders.container;
+        let (mut first, mut second) = (sand.journal().pending(), sand.journal().pending());
+        assert_ne!(first.export, second.export, "two exports of one process share an identity");
+        first.list(&[container.join("shared/one.png")])?;
+        second.list(&[container.join("shared/two.png")])?;
+        let journal: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
+        assert_eq!(journal[FOLDERS], json!([{ PATH: "shared", EXPORT: first.export }, { PATH: "shared", EXPORT: second.export }]), "{journal}");
+        assert_eq!(journal[OUTPUTS], json!([{ PATH: "shared/one.png", EXPORT: first.export }, { PATH: "shared/two.png", EXPORT: second.export }]), "{journal}");
+        // The later export's end takes its own entries only: the folder stays listed, as first's.
+        second.clear()?;
+        let journal: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
+        assert_eq!(journal[FOLDERS], json!([{ PATH: "shared", EXPORT: first.export }]), "one export's end cleared the other's folder entry: {journal}");
+        assert_eq!(journal[OUTPUTS], json!([{ PATH: "shared/one.png", EXPORT: first.export }]), "{journal}");
+        first.clear()?;
+        assert!(!sand.file().exists());
+        Ok(())
+    }
+
+    /// The export an entry names is part of the record: an entry a start could not delete keeps the
+    /// number of the export that listed it through the rewrite that lists it again, and when a later
+    /// export lists the path and takes the entry over, the record of what was there before comes
+    /// along with it while the entry becomes the listing export's own.
+    #[cfg(unix)]
+    #[test]
+    fn a_journals_export_identity_survives_a_restart_and_a_take_over() -> Test {
+        use std::os::unix::fs::PermissionsExt;
+        let sand = Sandbox::new()?;
+        if !permissions_hold(&sand)? {
+            return Ok(());
+        }
+        let file = sand.put("locked/card.mp4", b"the finished movie");
+        let held = json!({ PATH: "locked/card.mp4", BYTES: 18, MODIFIED: 1234, EXPORT: 9 });
+        sand.write_journal(std::slice::from_ref(&held));
+        let locked = sand.folders.container.join("locked");
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o500))?;
+        let engine = sand.start()?;
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o700))?;
+        if engine.recovery().failed.is_empty() {
+            // A user the permissions do not hold back (root) deleted it anyway.
+            return Ok(());
+        }
+        let now: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
+        assert_eq!(now[OUTPUTS], json!([held]), "the rewrite lost the export that listed the entry it could not delete: {now}");
+        // A later export listing the path takes the entry over: the record of what was there comes
+        // along, and the identity becomes the listing export's.
+        let mut later = sand.journal().pending();
+        later.list(std::slice::from_ref(&file))?;
+        let now: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
+        assert_eq!(now[OUTPUTS], json!([{ PATH: "locked/card.mp4", EXPORT: later.export, BYTES: 18, MODIFIED: 1234 }]), "{now}");
+        later.clear()?;
         Ok(())
     }
 
