@@ -10,13 +10,16 @@
 //! 6. append the record to `docs/upstream-updates.md`,
 //! 7. name every version with a newer release ([`crate::versions`]).
 //!
-//! A run on the revision the tree already holds stops after step 2, having changed nothing: it fetches
-//! only what the cache lacks for steps 1 and 2, and looks up no release. Every step sits behind [`Steps`],
+//! A run on the revision the tree already holds stops after step 2: it fetches only what the cache lacks
+//! for steps 1 and 2, and looks up no release. It changes nothing in a tree the script wrote, and its last
+//! line names whatever steps 1 and 2 did write, read from their own record ([`crate::upstream::Written`]),
+//! so a generated table edited by hand and put back is never passed over. Every step sits behind [`Steps`],
 //! so the order, the states and the exit codes are tested with steps that only record what was asked of
 //! them.
 
 use crate::adaptations::{Adaptation, Comparison, Repository, Revisions};
 use crate::effects_api::SurfaceDiff;
+use crate::upstream::Written;
 use crate::versions::Newer;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -57,7 +60,8 @@ fn same_revision(one: &str, two: &str) -> bool {
 /// How a run ended: the states of plan §24.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum State {
-    /// The tree already held the revision: nothing changed.
+    /// The tree already held the revision, so the run stopped after step 2; its report names what steps 1
+    /// and 2 wrote, and says that nothing changed only when they wrote no byte.
     UpToDate,
     /// Updated, with nothing to recheck.
     Clean,
@@ -98,8 +102,8 @@ pub(crate) trait Steps {
     /// them, the revisions the Craft libraries its places name are built at kept for step 3, and the
     /// surface kept for step 4.
     fn before(&self) -> Result<Revs, String>;
-    /// Steps 1 and 2: move the pin to `rev`; the revisions it now holds.
-    fn pin(&self, rev: &str) -> Result<Revs, String>;
+    /// Steps 1 and 2: move the pin to `rev`; the revisions it now holds, and the record of what it wrote.
+    fn pin(&self, rev: &str) -> Result<(Revs, Written), String>;
     /// Step 3.
     fn adaptations(&self, old: &Revs, new: &Revs) -> Result<Comparison, String>;
     /// Step 4: regenerate, and diff against the surface kept in [`Steps::before`].
@@ -114,6 +118,17 @@ pub(crate) trait Steps {
 
 fn short(revision: &str) -> &str {
     revision.get(..12).unwrap_or(revision)
+}
+
+/// The report of a run on the revision the tree holds: what steps 1 and 2 wrote, in their record's own
+/// words, and that nothing changed only when they wrote no byte. It sends the reader nowhere else: when the
+/// hand edit it undid was never committed, the tree is back to what the last commit holds and `git diff`
+/// shows nothing of it, and git reads a change of line endings alone as no change at all.
+fn up_to_date(revision: &str, written: &Written) -> String {
+    match written.rewrote() {
+        None => format!("upstream: up to date at EffectCraft {}: nothing changed\n", short(revision)),
+        Some(what) => format!("upstream: up to date at EffectCraft {}, but this run rewrote {what}\n", short(revision)),
+    }
 }
 
 /// The section of `docs/upstream-updates.md` for one update. How each adaptation was resolved is the
@@ -206,13 +221,9 @@ pub(crate) fn update(steps: &dyn Steps, rev: &str) -> Result<Outcome, String> {
 
 /// Every step from the pin on, which is where a failure can leave the tree changed.
 fn from_the_pin(steps: &dyn Steps, rev: &str, old: &Revs) -> Result<Outcome, String> {
-    let new = steps.pin(rev)?;
+    let (new, written) = steps.pin(rev)?;
     if old.same_as(&new) {
-        return Ok(Outcome {
-            state: State::UpToDate,
-            report: format!("upstream: up to date at EffectCraft {}: nothing changed\n", short(&new.effectcraft)),
-            unchecked: None,
-        });
+        return Ok(Outcome { state: State::UpToDate, report: up_to_date(&new.effectcraft, &written), unchecked: None });
     }
     let comparison = steps.adaptations(old, &new)?;
     let surface = steps.surface()?;
@@ -324,6 +335,10 @@ struct Live {
 }
 
 impl Live {
+    fn new(root: &Path) -> Self {
+        Self { root: root.to_path_buf(), kept: RefCell::new(None), libraries: RefCell::new(Vec::new()) }
+    }
+
     fn revs(&self) -> Result<Revs, String> {
         let pin = crate::upstream::manifest_pin(&self.root)?;
         let effectcraft = crate::upstream::Cache::create()?.official_commit_fetching(&pin.effectcraft_rev)?;
@@ -362,9 +377,10 @@ impl Steps for Live {
         Ok(old)
     }
 
-    fn pin(&self, rev: &str) -> Result<Revs, String> {
-        println!("upstream: {}", crate::upstream::pin(&self.root, rev)?);
-        self.revs()
+    fn pin(&self, rev: &str) -> Result<(Revs, Written), String> {
+        let (line, written) = crate::upstream::pin(&self.root, rev)?;
+        println!("upstream: {line}");
+        Ok((self.revs()?, written))
     }
 
     fn adaptations(&self, old: &Revs, new: &Revs) -> Result<Comparison, String> {
@@ -441,8 +457,7 @@ fn code_of(result: &Result<Outcome, String>) -> u8 {
 
 /// `cargo xtask upstream update <rev>` as a command.
 pub(crate) fn run(root: &Path, rev: &str) -> ExitCode {
-    let live = Live { root: root.to_path_buf(), kept: RefCell::new(None), libraries: RefCell::new(Vec::new()) };
-    let result = update(&live, rev);
+    let result = update(&Live::new(root), rev);
     match &result {
         Ok(outcome) => {
             print!("{}", outcome.report);
@@ -468,6 +483,7 @@ mod tests {
     struct Fake {
         held: Revs,
         taken: Revs,
+        written: Written,
         recheck: Vec<Recheck>,
         moved: Vec<Moved>,
         retired: Vec<Retired>,
@@ -485,6 +501,7 @@ mod tests {
             Self {
                 held: revs("1"),
                 taken: revs("2"),
+                written: Written::default(),
                 recheck: Vec::new(),
                 moved: Vec::new(),
                 retired: Vec::new(),
@@ -507,9 +524,9 @@ mod tests {
             self.called("before")?;
             Ok(self.held.clone())
         }
-        fn pin(&self, _: &str) -> Result<Revs, String> {
+        fn pin(&self, _: &str) -> Result<(Revs, Written), String> {
             self.called("pin")?;
-            Ok(self.taken.clone())
+            Ok((self.taken.clone(), self.written.clone()))
         }
         fn adaptations(&self, _: &Revs, _: &Revs) -> Result<Comparison, String> {
             self.called("adaptations")?;
@@ -553,11 +570,83 @@ mod tests {
         fake.taken = fake.held.clone();
         let outcome = update(&fake, "1").unwrap();
         assert_eq!((outcome.state, outcome.code()), (State::UpToDate, 0));
+        assert_eq!(outcome.report, "upstream: up to date at EffectCraft 100000000000: nothing changed\n", "a pin that wrote no byte says so");
         assert_eq!(*fake.calls.borrow(), ["before", "pin"], "no adaptation compared, nothing regenerated, no gate, no record, no network");
         assert!(fake.recorded.borrow().is_empty());
         let mut abbreviated = Fake::new();
         abbreviated.taken = Revs { effectcraft: abbreviated.held.effectcraft.get(..8).unwrap_or_default().to_string(), ..abbreviated.held.clone() };
         assert_eq!(update(&abbreviated, "1").unwrap().state, State::UpToDate, "an abbreviated spelling of the revision held is the same revision");
+    }
+
+    /// A run on the revision the tree holds whose steps 1 and 2 put back a table edited by hand still stops
+    /// as up to date, and its last line names what they wrote, from their own record, never "nothing
+    /// changed": each part written alone, the layout alone among them, and several at once.
+    #[test]
+    fn a_run_on_the_revision_the_tree_holds_names_each_table_it_rewrote() {
+        use crate::upstream::Part;
+        let ends = |written: Written| {
+            let mut fake = Fake::new();
+            fake.taken = fake.held.clone();
+            fake.written = written;
+            let outcome = update(&fake, "1").unwrap();
+            assert_eq!((outcome.state, outcome.code()), (State::UpToDate, 0));
+            assert_eq!(*fake.calls.borrow(), ["before", "pin"], "the run still stops after step 2");
+            outcome.report
+        };
+        for (part, name) in crate::upstream::NAMED_PARTS {
+            assert_eq!(
+                ends(Written { parts: vec![part], seeded: false }),
+                format!("upstream: up to date at EffectCraft 100000000000, but this run rewrote rust/Cargo.toml ({name})\n")
+            );
+        }
+        assert_eq!(
+            ends(Written { parts: vec![Part::Patch], seeded: true }),
+            "upstream: up to date at EffectCraft 100000000000, but this run rewrote rust/Cargo.toml ([patch]) and rust/Cargo.lock, started from upstream's and resolved\n"
+        );
+        assert_eq!(
+            ends(Written { parts: vec![Part::Layout, Part::Pins, Part::Profile("dev"), Part::Profile("release")], seeded: false }),
+            "upstream: up to date at EffectCraft 100000000000, but this run rewrote rust/Cargo.toml (the layout, the pins, [profile.dev], [profile.release])\n"
+        );
+    }
+
+    /// The child of the test below: the update, on the steps a real run takes, of the revision the fixture
+    /// tree already holds.
+    #[test]
+    #[ignore = "run by a_live_run_on_the_revision_held_names_the_patch_table_it_put_back, with CRAFTBRIDGE_UPSTREAM_CACHE naming its scratch cache"]
+    fn child_takes_the_revision_the_tree_holds_live() {
+        let (Some(tree), Some(full)) = (std::env::var_os("XTASK_UPDATE_TREE"), std::env::var_os("XTASK_UPDATE_FULL")) else { return };
+        let full = full.into_string().unwrap();
+        let outcome = update(&Live::new(Path::new(&tree)), full.get(..8).unwrap()).unwrap();
+        assert_eq!((outcome.state, outcome.code()), (State::UpToDate, 0));
+        assert_eq!(
+            outcome.report,
+            format!(
+                "upstream: up to date at EffectCraft {}, but this run rewrote rust/Cargo.toml ([patch]) and rust/Cargo.lock, started from upstream's and resolved\n",
+                short(&full)
+            )
+        );
+    }
+
+    /// The acceptance's own case through the steps a real run takes: a run on the revision the tree holds,
+    /// whose `[patch]` table was edited by hand, writes it back and ends naming it, from the record steps 1
+    /// and 2 kept. The child meets the machine's cache variable aimed at a scratch cache, which a test
+    /// cannot set on its own process while other tests run beside it.
+    #[test]
+    fn a_live_run_on_the_revision_held_names_the_patch_table_it_put_back() {
+        let fixture = crate::upstream::hand_edited_patch("update-live-hand-edit");
+        fixture.tree.write(crate::adaptations::LIST, "[[adaptation]]\nid = \"AD1\"\nretired = \"0d1e2f3a4b5c\"\n");
+        fixture.tree.write(crate::effects_api::SURFACE_FILE, "{}\n");
+        craftbridge_process::rerun(
+            "update::tests::child_takes_the_revision_the_tree_holds_live",
+            &[
+                ("CRAFTBRIDGE_UPSTREAM_CACHE", fixture.cache.0.as_os_str()),
+                ("XTASK_UPDATE_TREE", fixture.tree.0.as_os_str()),
+                ("XTASK_UPDATE_FULL", std::ffi::OsStr::new(&fixture.full)),
+            ],
+            "a live run on the revision the tree holds did not name the [patch] table it put back",
+        )
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(fixture.tree.0.join("rust/Cargo.toml")).unwrap(), fixture.script, "the table is back as the script writes it");
     }
 
     #[test]
