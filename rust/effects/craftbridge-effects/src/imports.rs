@@ -46,6 +46,15 @@
 //! call that works: the open in one call, the conversion in the next, which is handed a copy as every
 //! other conversion is. Whether the document shows such a file is told before the call by the command
 //! that reads it in, run on a scratch session, so a call whose document needs no copy runs as it came.
+//!
+//! The imports read a project or an `.aep` too, without a command of the call naming it as one:
+//! EffectCraft sends such a path given to `file.import` or `file.importMultiple` to the commands that read
+//! one, `file.importRecent` imports a recent file through `file.import`, and `essential.importTemplate`
+//! reads a template's own project. So the imports before the conversion are run the same way, as the call
+//! runs them: in its order, on one scratch session, each handed the copies the door hands the call. What an
+//! import makes of a file the call names then shows the copy, so footage that still needs one is footage
+//! read from a file the call does not name, a project's or a folder's, and the call is refused for it. Which path
+//! is a project is the engine's to tell, never read from a suffix here.
 
 use std::io;
 use std::path::Path;
@@ -156,7 +165,7 @@ pub(crate) fn staged(backend: &mut Backend, folder: Option<&Path>, calls: &mut [
     let refused = match opening(&reaches) {
         Opening::Nothing => false,
         Opening::Undecided => true,
-        Opening::Reads(opener, given) => reads_in_what_needs_a_copy(backend, &confinement, opener, given),
+        Opening::Reads(opener, given) => reads_in_what_needs_a_copy(backend, &confinement, &[(opener, given.clone())]),
     };
     if refused {
         return Err(CraftError::unsupported(opened_and_converted()));
@@ -176,18 +185,20 @@ pub(crate) fn staged(backend: &mut Backend, folder: Option<&Path>, calls: &mut [
     if converts {
         vector_files(backend, &confinement, calls, &mut sources);
     }
-    let mut staged = Staged::none();
+    // An import reads a project or an `.aep` it is given as the commands above do, so a conversion after
+    // one is refused in the same words when what the imports bring in, given the copies the call is given,
+    // still shows such footage.
     let mut copies: Vec<(String, String)> = Vec::new();
-    for source in sources {
-        if copies.iter().any(|(staged_source, _)| *staged_source == source) {
-            continue;
-        }
-        let Some(copy) = staging::stage(backend, folder, &source)? else { continue };
+    if imports_what_needs_a_copy(backend, folder, &confinement, &reaches, &sources, &mut copies)? {
+        return Err(CraftError::unsupported(opened_and_converted()));
+    }
+    let mut staged = Staged::none();
+    for source in &sources {
+        let Some(copy) = copy_of(backend, folder, &mut copies, source)? else { continue };
         for (_, params) in calls.iter_mut() {
-            staged.rewritten |= substitute(params, &source, &copy);
+            staged.rewritten |= substitute(params, source, &copy);
         }
-        repoint(backend, &source, &copy);
-        copies.push((source, copy));
+        repoint(backend, source, &copy);
     }
     for lottie in lotties.into_iter().filter(|lottie| !lottie.externals.is_empty()) {
         let Some((_, copy)) = copies.iter().find(|(source, _)| *source == lottie.source) else { continue };
@@ -222,6 +233,13 @@ fn converting(reached: &str, params: &Value) -> bool {
 /// is open. What each shows comes from the file it reads, so none of it is in the project before the call.
 const OPENS_A_PROJECT: [&str; 6] = ["file.open", "file.openRecent", "file.revert", "file.newProject", "file.importProject", "file.importAep"];
 
+/// The commands that import files into the project, and so read a project or an `.aep` among them
+/// without a command of the call naming it as one: `file.import` and `file.importMultiple` hand each
+/// such path to `file.importProject` or `file.importAep`, `file.importRecent` imports a recent file
+/// through `file.import`, and `essential.importTemplate` merges a template's project and media. Which
+/// path is a project is the engine's to tell, so the import itself is run to see what it shows.
+const IMPORTS: [&str; 4] = ["file.import", "file.importMultiple", "file.importRecent", "essential.importTemplate"];
+
 /// The command that changes the settings, among them the template project `file.newProject` reads.
 const SETTINGS: &str = "prefs.set";
 
@@ -249,32 +267,101 @@ fn opening<'a>(reaches: &[(&'a str, &'a Value)]) -> Opening<'a> {
     let before = reaches.get(..last).unwrap_or_default();
     let mut openers = before.iter().enumerate().filter(|(_, (reached, _))| OPENS_A_PROJECT.contains(reached));
     let Some((at, &(opener, given))) = openers.next() else { return Opening::Nothing };
-    let mut referenced = false;
-    each_string(given, &mut |text| referenced |= text.starts_with('$'));
     let settled = before.iter().take(at).any(|(reached, _)| *reached == SETTINGS);
-    if referenced || settled || openers.next().is_some() { Opening::Undecided } else { Opening::Reads(opener, given) }
+    if references(given) || settled || openers.next().is_some() { Opening::Undecided } else { Opening::Reads(opener, given) }
 }
 
-/// Whether the document `opener` reads into the session with `given` shows vector footage that must be
-/// read from a copy ([`vector_footage_to_copy`]). What a document shows is EffectCraft's to read, so the
-/// command itself tells it, run once on a scratch session ([`scratch`]) that starts from an empty
-/// project, so that what it holds after is what the document brought in, and that refuses every write.
-/// A command the scratch session refuses reads in nothing the door could tell.
-fn reads_in_what_needs_a_copy(backend: &mut Backend, confinement: &Confinement, opener: &str, given: &Value) -> bool {
+/// Whether a string of `given` is a `$` reference to an earlier step's result, which a batch fills in
+/// only as it runs, so what the command does cannot be read before the call.
+fn references(given: &Value) -> bool {
+    any_string(given, &|text| text.starts_with('$'))
+}
+
+/// The imports the call makes before its last conversion of vector footage, in the order it reaches its
+/// commands, or `None` when what they read in turns on what the call itself does first, which nothing
+/// can read before it runs, as for an open ([`Opening::Undecided`]): a parameter given as a `$`
+/// reference, or a change of the settings before one, which decide how an import reads its files and
+/// whether `file.importRecent` runs at all. An import after the last conversion is not converted.
+fn importers<'a>(reaches: &[(&'a str, &'a Value)]) -> Option<Vec<(&'a str, &'a Value)>> {
+    let Some(last) = reaches.iter().rposition(|(reached, given)| converting(reached, given)) else { return Some(Vec::new()) };
+    let before = reaches.get(..last).unwrap_or_default();
+    let imports: Vec<(&str, &Value)> = before.iter().filter(|(reached, _)| IMPORTS.contains(reached)).copied().collect();
+    let settled =
+        before.iter().rposition(|(reached, _)| IMPORTS.contains(reached)).is_some_and(|at| before.iter().take(at).any(|(reached, _)| *reached == SETTINGS));
+    if settled || imports.iter().any(|(_, given)| references(given)) { None } else { Some(imports) }
+}
+
+/// Whether the imports the call makes before its last conversion of vector footage bring in vector
+/// footage that must be read from a copy, run as the call runs them: each given a copy of every one of
+/// `sources` its parameters name, as the door hands the call, made once for the call and kept in
+/// `copies`. What an import makes of a file the call names then shows the copy, so what still needs one
+/// was read from a file the call does not name, such as a project's, which only a conversion in a call
+/// of its own can be handed a copy of. Only what the imports name is copied before the call can be
+/// refused, and the call that works copies the same. Imports the call's own earlier steps decide count
+/// too, since they cannot be run as the call runs them ([`importers`]).
+fn imports_what_needs_a_copy(
+    backend: &mut Backend,
+    folder: &Path,
+    confinement: &Confinement,
+    reaches: &[(&str, &Value)],
+    sources: &[String],
+    copies: &mut Vec<(String, String)>,
+) -> Result<bool> {
+    let Some(imports) = importers(reaches) else { return Ok(true) };
+    let mut handed: Vec<(&str, Value)> = Vec::with_capacity(imports.len());
+    for (import, given) in imports {
+        let mut given = given.clone();
+        for source in sources {
+            if any_string(&given, &|text| text == source)
+                && let Some(copy) = copy_of(backend, folder, copies, source)?
+            {
+                substitute(&mut given, source, &copy);
+            }
+        }
+        handed.push((import, given));
+    }
+    Ok(!handed.is_empty() && reads_in_what_needs_a_copy(backend, confinement, &handed))
+}
+
+/// The copy of `source` in `folder` for this call: made the first time the call asks for it and kept in
+/// `copies` after, since [`staging::stage`] writes the copy again each time it is asked.
+fn copy_of(backend: &Backend, folder: &Path, copies: &mut Vec<(String, String)>, source: &str) -> Result<Option<String>> {
+    if let Some((_, copy)) = copies.iter().find(|(copied, _)| copied == source) {
+        return Ok(Some(copy.clone()));
+    }
+    let copy = staging::stage(backend, folder, source)?;
+    if let Some(copy) = &copy {
+        copies.push((source.to_string(), copy.clone()));
+    }
+    Ok(copy)
+}
+
+/// Whether what `commands` read into the session shows vector footage that must be read from a copy
+/// ([`vector_footage_to_copy`]). What a document shows is EffectCraft's to read, so the commands
+/// themselves tell it, run in order on one scratch session ([`scratch`]) that starts from an empty
+/// project, so that what it holds after is what they brought in, and that refuses every write made
+/// through its file service ([`Probe`]): a template's import makes the folders of its media on the disk
+/// itself, where the call's own import makes them too. One session runs them all, since what one does
+/// can turn on an earlier one: `file.importRecent` runs only once there is recent footage, which an
+/// import notes. A command the scratch session refuses reads in nothing the door could tell, and the
+/// next still runs, as the call may still run it.
+fn reads_in_what_needs_a_copy(backend: &mut Backend, confinement: &Confinement, commands: &[(&str, Value)]) -> bool {
     let Some(session) = backend.session() else { return false };
     let probe = Arc::new(Probe { inner: session.services.clone(), writes: Mutex::new(Vec::new()) });
     let mut scratch = scratch(session, probe, confinement, false);
-    if scratch.exec(opener, given.clone()).is_err() {
-        return false;
+    for (command, given) in commands {
+        // The call itself answers a command refused here, and may run the next all the same.
+        let _ = scratch.exec(command, given.clone());
     }
-    scratch.session().is_some_and(|opened| vector_footage_to_copy(&opened.project, confinement).next().is_some())
+    scratch.session().is_some_and(|read| vector_footage_to_copy(&read.project, confinement).next().is_some())
 }
 
-/// The refusal of a call that converts vector footage in the same call that opens a project, in the
-/// words of a capability this build was put together without, naming at the end the call that works.
+/// The refusal of a call that converts vector footage in the same call that opens or imports a project,
+/// or imports a folder, whose files it names no more than a project's, in the words of a capability this
+/// build was put together without, naming at the end the call that works.
 fn opened_and_converted() -> String {
     format!(
-        "`{CONVERT}` is not available in this build in a call that opens a project: what that project shows is not there before the call, so no copy can be handed over of a file it shows in a folder this build may read and never write, beside which its images would land; open the project in one call and convert in the next"
+        "`{CONVERT}` is not available in this build in a call that opens or imports a project or a folder: what it brings in is not there before the call, so no copy can be handed over of a file it shows in a folder this build may read and never write, beside which its images would land; open or import in one call and convert in the next"
     )
 }
 
@@ -319,6 +406,13 @@ fn each_string(value: &Value, each: &mut dyn FnMut(&str)) {
     }
 }
 
+/// Whether a string `value` holds passes `test`.
+fn any_string(value: &Value, test: &dyn Fn(&str) -> bool) -> bool {
+    let mut found = false;
+    each_string(value, &mut |text| found |= test(text));
+    found
+}
+
 /// Have every string of `value` that is `source` be `copy`; whether any was.
 fn substitute(value: &mut Value, source: &str, copy: &str) -> bool {
     match value {
@@ -352,16 +446,18 @@ fn probe(backend: &mut Backend, confinement: &Confinement, params: &Value) -> (V
     (noted(&probe.writes), shown)
 }
 
-/// A scratch session that shares the file service of `session`, through `probe`, its project's path
-/// and its settings, and, `with_project`, its project and editor state, and is confined as `session`
-/// is, so the confinement checks every command and every read the scratch makes as it checks the real
-/// session's, and the probe sees what the session may see and no more. Without the project it starts
-/// from an empty one, so what a command reads into it is all it holds.
+/// A scratch session that shares the file service of `session`, through `probe`, its project's path,
+/// its settings and its importer, which tells the footage of an import what it is, and, `with_project`,
+/// its project and editor state, and is confined as `session` is, so the confinement checks every
+/// command and every read the scratch makes as it checks the real session's, and the probe sees what
+/// the session may see and no more. Without the project it starts from an empty one, so what a command
+/// reads into it is all it holds.
 fn scratch(session: &Session, probe: Arc<Probe>, confinement: &Confinement, with_project: bool) -> Backend {
     let mut scratch = Session::new();
     scratch.services = probe;
     scratch.path = session.path.clone();
     scratch.prefs = session.prefs.clone();
+    scratch.importer = session.importer.clone();
     if with_project {
         scratch.project = session.project.clone();
         scratch.state = session.state.clone();
@@ -546,5 +642,38 @@ mod tests {
         assert_eq!(opening(&[("file.open", &open)]), Opening::Nothing, "no conversion at all");
         assert_eq!(opening(&[(CONVERT, &convert)]), Opening::Nothing, "no open at all");
         assert_eq!(opening(&[]), Opening::Nothing, "nothing at all");
+    }
+
+    /// Every import before the last conversion is read, however many there are and wherever among the
+    /// call's other commands; one after it, another command, and a call with no conversion are not.
+    /// What the call decides first is not read at all: a `$` reference anywhere in an import's
+    /// parameters, or a change of the settings before an import, though not one after the last.
+    #[test]
+    fn only_an_import_before_the_conversion_is_read() {
+        let given = serde_json::json!({"paths": ["/b/a.ecproj"]});
+        let none = serde_json::json!({});
+        let convert = serde_json::json!({"op": "shapesFromVector"});
+        for importer in ["file.import", "file.importMultiple", "file.importRecent", "essential.importTemplate"] {
+            assert_eq!(
+                importers(&[(importer, &given), (CONVERT, &convert)]),
+                Some(vec![(importer, &given)]),
+                "`{importer}` brings in what the conversion converts"
+            );
+        }
+        assert_eq!(
+            importers(&[("file.import", &given), ("comp.new", &none), ("file.importMultiple", &none), (CONVERT, &convert), ("file.import", &none)]),
+            Some(vec![("file.import", &given), ("file.importMultiple", &none)]),
+            "each import before the last conversion, and none after it"
+        );
+        assert_eq!(importers(&[("file.import", &given)]), Some(Vec::new()), "no conversion at all");
+        assert_eq!(importers(&[("file.importLottie", &given), ("file.open", &given), (CONVERT, &convert)]), Some(Vec::new()), "no other command is an import");
+        let referenced = serde_json::json!({"paths": ["/b/a.pdf"], "page": {"n": ["$1.page"]}});
+        assert_eq!(importers(&[("file.import", &given), ("file.import", &referenced), (CONVERT, &convert)]), None, "a `$` reference in one import");
+        assert_eq!(importers(&[("file.import", &given), (SETTINGS, &none), ("file.importRecent", &given), (CONVERT, &convert)]), None, "settings before one");
+        assert_eq!(
+            importers(&[("file.import", &given), (SETTINGS, &none), (CONVERT, &convert)]),
+            Some(vec![("file.import", &given)]),
+            "settings after the last import"
+        );
     }
 }
