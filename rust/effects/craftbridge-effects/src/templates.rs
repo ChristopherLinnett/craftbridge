@@ -21,7 +21,9 @@
 //! The import extracts a template's media beside the template, so a template whose folder the session
 //! may not write, such as one in the app bundle, is imported from a copy in the app's staged folder
 //! ([`staged`], through the one staging every such source goes through, [`crate::staging`]). A template
-//! whose folder lies inside the write root is imported where it is.
+//! whose folder lies inside the write root is imported where it is. A call that runs the import itself,
+//! `essential.importTemplate` through `exec`, `run`, a batch, a tool or a replay, is handed its copy by
+//! the imports' door instead ([`crate::imports::staged`]).
 //!
 //! The media the import extracts beside the template (`<stem> Media/<item>/<file>`) are not listed
 //! in the pending-export journal, though their names could be read from the template first. The
@@ -57,8 +59,11 @@ const OPEN: &str = "template.open";
 const RENDER: &str = "template.render";
 
 /// The command that brings the template into the project, which every failure of the setup that is
-/// no other command's is reported under.
-const IMPORT: &str = "essential.importTemplate";
+/// no other command's is reported under, and the parameter that names the template file it reads, and
+/// beside which it writes the template's media. The imports' door reads both for the call that runs the
+/// command itself ([`crate::imports`]).
+pub(crate) const IMPORT: &str = "essential.importTemplate";
+pub(crate) const IMPORT_PATH: &str = "path";
 
 /// The names the call's own parameters go under.
 const TEMPLATE: &str = "template";
@@ -222,7 +227,7 @@ pub(crate) fn staged(backend: &Backend, staged: &Path, method: &str, mut params:
 
 /// The parameters of the import of the template at `path`, which adds it to no comp.
 fn import_params(path: &str) -> Value {
-    object([("path", Value::from(path)), ("addToComp", Value::Bool(false))])
+    object([(IMPORT_PATH, Value::from(path)), ("addToComp", Value::Bool(false))])
 }
 
 /// The parameters of `essential.set` for one control of the instance, given as its value or as the

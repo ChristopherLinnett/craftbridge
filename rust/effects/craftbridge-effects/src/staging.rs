@@ -10,10 +10,11 @@
 //! land beside it inside the container. The copies belong to what a saved project may name, so they
 //! sit where the system will not clear them as it may clear the cache. [`stage`] knows nothing of
 //! what the file is: each caller names the source a command reads, and hands the command the path it
-//! answers. The callers are the template runner ([`crate::templates`]) and the imports that write their
-//! images beside a Lottie or a vector file ([`crate::imports`]). Each is handed the staged folder with
-//! the call it serves, as a parameter passed down from the app's own call, never as state of the
-//! thread or the process, so only a call of the app that owns the folder can copy into it.
+//! answers. The callers are the template runner ([`crate::templates`]) and the imports that write beside
+//! the file they read: the images beside a Lottie or a vector file and the media beside a template
+//! ([`crate::imports`]). Each is handed the staged folder with the call it serves, as a parameter passed
+//! down from the app's own call, never as state of the thread or the process, so only a call of the app
+//! that owns the folder can copy into it.
 //!
 //! A copy is named by what it holds, never by where its source sits. An app update installs the
 //! bundle at a new path on iOS, and may change a file at the same path on Android: a copy named by its

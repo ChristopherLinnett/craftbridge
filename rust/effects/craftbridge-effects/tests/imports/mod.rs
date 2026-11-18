@@ -1,10 +1,12 @@
-//! A Lottie file or a vector file in the app bundle, which the session may read and never write, is
-//! imported as the command line imports it from a writable folder, with every image its import writes
-//! beside it and every image it names, on every way a call reaches either command, and nothing is
-//! written under the bundle, whether the disk would refuse the write (iOS) or take it (Android).
+//! A Lottie file, a vector file or a template in the app bundle, which the session may read and never
+//! write, is imported as the command line imports it from a writable folder, with every image or medium
+//! its import writes beside it and every image it names, on every way a call reaches the commands, and
+//! nothing is written under the bundle, whether the disk would refuse the write (iOS) or take it
+//! (Android).
 
 use super::common::Scratch;
 use super::export::entries_under;
+use super::template::{FILE, make};
 use super::{cli_run, scrub, steps_document, tools_call};
 use craftbridge_core::{CraftApp, CraftError};
 use craftbridge_effects::EffectCraftApp;
@@ -1016,4 +1018,233 @@ fn a_conversion_after_an_import_of_a_bundled_folder_is_refused() {
         assert_eq!(names(&scratch.folders.staged).expect("the staged folder reads"), Vec::<String>::new(), "nothing was copied");
         assert_eq!(entries_under(&bundle, &[]).expect("the bundle reads"), before, "nothing was written under the bundle (read-only {read_only})");
     }
+}
+
+/// A template that holds a medium, made inside the container and put at `<root>/<folder>/card.ectemplate`,
+/// where `root` is a bundle's or the command line's folder: its path there.
+fn template_in(scratch: &Scratch, root: &Path, folder: &str) -> Result<PathBuf, String> {
+    let made = scratch.path().join(FILE);
+    if !made.is_file() {
+        make(scratch, (96, 64), 1.0, "Arial")?;
+    }
+    put(root, &format!("{folder}/{FILE}"), std::fs::read(&made).map_err(|e| e.to_string())?)
+}
+
+/// The step that imports the template at `file` and adds it to no comp.
+fn import_template(file: &Path) -> (String, Value) {
+    ("essential.importTemplate".to_string(), json!({"path": file.display().to_string(), "addToComp": false}))
+}
+
+/// Every file under `folder` with its bytes, by its path under `folder`, in order.
+fn contents(folder: &Path) -> Result<Vec<(PathBuf, Vec<u8>)>, String> {
+    let mut found = Vec::new();
+    for entry in entries_under(folder, &[])? {
+        if folder.join(&entry).is_file() {
+            found.push((entry.clone(), std::fs::read(folder.join(&entry)).map_err(|e| e.to_string())?));
+        }
+    }
+    Ok(found)
+}
+
+/// The folder of the one copy the staged folder holds.
+fn the_copy(scratch: &Scratch) -> Result<PathBuf, String> {
+    let copies: Vec<PathBuf> = std::fs::read_dir(&scratch.folders.staged).map_err(|e| e.to_string())?.flatten().map(|entry| entry.path()).collect();
+    match copies.as_slice() {
+        [copy] => Ok(copy.clone()),
+        other => Err(format!("one copy was made: {other:?}")),
+    }
+}
+
+/// A template in the bundle, imported plainly, has every medium it holds written inside the container,
+/// beside its copy, as the command line writes them beside the template in a writable folder: the same
+/// answer, the same media file for file with the same bytes, every item found, and nothing written under
+/// the bundle, whether the disk would refuse the write (iOS, where the media would come out missing) or
+/// take it (Android, where they would escape the confinement).
+#[test]
+fn a_template_in_the_bundle_imports_with_every_medium_inside_the_container_as_the_command_line_imports_it() {
+    for read_only in BUNDLES {
+        let (scratch, bundle, beside_cli) = folders().expect("the folders");
+        let (in_bundle, on_disk) =
+            (template_in(&scratch, &bundle, "tpl").expect("the template"), template_in(&scratch, &beside_cli, "tpl").expect("the template"));
+        let steps = |file: &Path| vec![import_template(file), missing()];
+        let (mine, wanted) = both(&scratch, read_only, &steps(&in_bundle), &steps(&on_disk)).expect("both ran");
+        assert_eq!(mine, wanted, "the import answers what the command line's does (read-only {read_only})");
+        assert_eq!(mine[1]["result"]["missing"], json!([]), "every medium is found (read-only {read_only})");
+        let copy = the_copy(&scratch).expect("the copy");
+        let (ours, theirs) = (contents(&copy).expect("the copy's folder reads"), contents(&beside_cli.join("tpl")).expect("the command line's folder reads"));
+        assert!(
+            ours.iter().any(|(path, _)| path.starts_with("card Media")),
+            "the media are beside the copy: {:?}",
+            ours.iter().map(|(path, _)| path).collect::<Vec<_>>()
+        );
+        assert_eq!(ours, theirs, "the template and its media, file for file, as the command line writes them (read-only {read_only})");
+    }
+}
+
+/// Every way a call reaches the template's import hands it the copy: the media are inside the container,
+/// every item is found, and nothing is written under the bundle.
+#[test]
+fn every_way_a_call_reaches_the_template_import_hands_it_the_copy() {
+    for (way, through) in ways() {
+        let (scratch, bundle, _) = folders().expect("the folders");
+        let template = template_in(&scratch, &bundle, "tpl").expect("the template");
+        let before = entries_under(&bundle, &[]).expect("the bundle reads");
+        let mut app = scratch.app().expect("the app starts");
+        with_bundle(&bundle, true, || through(&mut app, &[import_template(&template)]))
+            .expect("the bundle is read-only")
+            .unwrap_or_else(|e| panic!("{way}: {e}"));
+        assert_eq!(entries_under(&bundle, &[]).expect("the bundle reads"), before, "{way}: nothing was written under the bundle");
+        let lost = app.request("exec", json!({"command": "footage.missing"})).expect("the footage is checked");
+        assert_eq!(lost["missing"], json!([]), "{way}: every medium is found");
+        let media = contents(&the_copy(&scratch).expect("the copy").join("card Media")).expect("the media folder reads");
+        assert!(!media.is_empty(), "{way}: the media are beside the copy, inside the container");
+    }
+}
+
+/// Only the import of a template is handed a copy of it, only of the file its `path` names, and only a
+/// template the session may not write beside: a command that only reads one, a template of the bundle
+/// named under a parameter the import does not read, and a template in a folder the session may write,
+/// are read where they are, and the folder holding it is no more written for it than it is.
+#[test]
+fn only_the_import_of_a_template_in_the_bundle_is_handed_a_copy() {
+    let (scratch, bundle, _) = folders().expect("the folders");
+    let in_bundle = template_in(&scratch, &bundle, "tpl").expect("the template");
+    let mut app = scratch.app().expect("the app starts");
+    let info = ("essential.templateInfo".to_string(), json!({"path": in_bundle.display().to_string()}));
+    run(&mut app, &[info]).expect("the template's manifest is read");
+    assert_eq!(
+        names(&scratch.folders.staged).expect("the staged folder reads"),
+        Vec::<String>::new(),
+        "a command that only reads a template is handed no copy"
+    );
+    let inside = scratch.path().join(FILE);
+    let (path, other) = (inside.display().to_string(), in_bundle.display().to_string());
+    let named_elsewhere = json!({"path": path, "addToComp": false, "template": other, "file": other, "source": other});
+    let words = run(&mut app, &[("essential.importTemplate".to_string(), named_elsewhere)]).expect_err("a parameter the import does not read is refused");
+    assert!(words.contains("unknown parameter(s) `file`, `source`, `template`"), "the command's own words: {words}");
+    assert_eq!(
+        names(&scratch.folders.staged).expect("the staged folder reads"),
+        Vec::<String>::new(),
+        "a template named under a parameter the import does not read is handed no copy"
+    );
+    run(&mut app, &[import_template(&inside)]).expect("the template inside the container imports");
+    assert_eq!(
+        names(&scratch.folders.staged).expect("the staged folder reads"),
+        Vec::<String>::new(),
+        "a template that may be written beside is read where it is"
+    );
+    assert!(scratch.path().join("card Media").is_dir(), "its media are written beside it");
+    let words = run(&mut app, &[import_template(&bundle.join("tpl").join("absent.ectemplate"))]).expect_err("a template that is not there is refused");
+    assert!(words.contains("cannot read"), "the command's own words: {words}");
+    assert_eq!(names(&scratch.folders.staged).expect("the staged folder reads"), Vec::<String>::new(), "no copy of a file that is not there");
+}
+
+/// A template that holds a medium and shows a vector file of the bundle that could not be read when it was
+/// exported, which keeps naming the file where it lay: its import before a conversion is refused for that
+/// footage, as a project's is, and it holds a medium of its own, which the import's media folders are made
+/// for.
+fn template_with_media_and_bundled_footage(scratch: &Scratch, bundle: &Path) -> Result<PathBuf, String> {
+    let art = put(bundle, "art.pdf", vector(true))?;
+    let photo = scratch.path().join("photo.png");
+    image::RgbImage::from_pixel(8, 8, image::Rgb([200, 30, 30])).save(&photo).map_err(|e| e.to_string())?;
+    let template = scratch.path().join("shows.ectemplate");
+    let mut app = scratch.app().map_err(|e| e.to_string())?;
+    let shown = run(&mut app, &showing(&art))?;
+    let imported = run(&mut app, &[("file.import".to_string(), json!({"paths": [photo.display().to_string()]}))])?;
+    let item = imported.pointer("/0/result/items/0").ok_or("the photo's item")?;
+    run(&mut app, &[("layer.addItem".to_string(), json!({"comp": 1, "item": item, "time": 0}))])?;
+    let layer = shown.pointer("/2/result/layer").ok_or("the layer showing the file")?;
+    let control = json!({"comp": 1, "layer": layer, "path": "transform/opacity", "name": "Opacity"});
+    run(&mut app, &[("essential.addProperty".to_string(), control)])?;
+    let away = bundle.join("away.pdf");
+    std::fs::rename(&art, &away).map_err(|e| e.to_string())?;
+    let exported = run(&mut app, &[("essential.exportTemplate".to_string(), json!({"comp": 1, "path": template.display().to_string()}))]);
+    std::fs::rename(&away, &art).map_err(|e| e.to_string())?;
+    exported?;
+    put(bundle, "tpl/shows.ectemplate", std::fs::read(&template).map_err(|e| e.to_string())?)
+}
+
+/// The scratch session's probe of a template's import, which makes the folders of the template's media on
+/// the disk itself, leaves none behind: a call refused for its conversion, though the probe imported a
+/// template holding a medium, leaves the copy's folder holding the copy alone, the staged folder holding
+/// that folder alone, and the bundle as it was; and one that follows an import of the same template, whose
+/// media are there, leaves those as they were.
+#[test]
+fn a_refused_call_leaves_no_empty_media_folder_behind() {
+    for read_only in BUNDLES {
+        let (scratch, bundle, _) = folders().expect("the folders");
+        let template = template_with_media_and_bundled_footage(&scratch, &bundle).expect("the template");
+        let refused_call = [import_template(&template), convert_in(json!("C"))];
+        let before = entries_under(&bundle, &[]).expect("the bundle reads");
+        let words = batch_refused(&mut scratch.app().expect("the app starts"), &bundle, read_only, &refused_call).unwrap_or_else(|e| panic!("{e}"));
+        assert!(words.contains("open or import in one call and convert in the next"), "the call is refused for its conversion: {words}");
+        let copy = the_copy(&scratch).expect("the copy was made before the call was refused, and is all the staged folder holds");
+        assert!(alone(&copy.join("shows.ectemplate")).expect("the copy's folder reads"), "nothing beside the copy: {:?}", entries_under(&copy, &[]));
+        assert_eq!(entries_under(&bundle, &[]).expect("the bundle reads"), before, "nothing was written under the bundle (read-only {read_only})");
+        let mut app = scratch.app().expect("the app starts");
+        with_bundle(&bundle, read_only, || run(&mut app, &[import_template(&template)])).expect("the bundle is read").expect("the plain import runs");
+        let written = contents(&copy).expect("the copy's folder reads");
+        assert!(copy.join("shows Media").is_dir(), "the import wrote its media beside the copy: {written:?}");
+        let words = batch_refused(&mut app, &bundle, read_only, &refused_call).unwrap_or_else(|e| panic!("{e}"));
+        assert!(words.contains("open or import in one call and convert in the next"), "refused again: {words}");
+        assert_eq!(contents(&copy).expect("the copy's folder reads"), written, "the media an earlier import wrote stay as they were (read-only {read_only})");
+        assert_eq!(the_copy(&scratch).expect("the staged folder holds the copy's folder alone"), copy, "nothing else in the staged folder");
+    }
+}
+
+/// [`template_with_media_and_bundled_footage`], put in a folder of the container the session may write,
+/// with the call that imports it and converts, which is refused for its conversion.
+fn in_a_writable_folder(scratch: &Scratch, bundle: &Path) -> Result<(PathBuf, [(String, Value); 2]), String> {
+    let made = template_with_media_and_bundled_footage(scratch, bundle)?;
+    let template = put(scratch.path(), "docs/shows.ectemplate", std::fs::read(&made).map_err(|e| e.to_string())?)?;
+    let call = [import_template(&template), convert_in(json!("C"))];
+    Ok((template, call))
+}
+
+/// Whether the folder holding `template` holds it alone.
+fn alone(template: &Path) -> Result<bool, String> {
+    let folder = template.parent().ok_or("a folder")?;
+    Ok(entries_under(folder, &[])? == [PathBuf::from(template.file_name().ok_or("a name")?)])
+}
+
+/// A template in a folder the session may write is imported where it is, so the call hands no copy of it,
+/// and the probe of a call refused for its conversion still writes nothing beside it: the folder holds the
+/// template alone afterwards, as before, and the staged folder holds nothing, the probe's own folder gone.
+#[test]
+fn a_refused_call_leaves_nothing_beside_a_template_in_a_folder_the_session_may_write() {
+    for read_only in BUNDLES {
+        let (scratch, bundle, _) = folders().expect("the folders");
+        let (template, refused_call) = in_a_writable_folder(&scratch, &bundle).expect("the template");
+        let words = batch_refused(&mut scratch.app().expect("the app starts"), &bundle, read_only, &refused_call).unwrap_or_else(|e| panic!("{e}"));
+        assert!(words.contains("open or import in one call and convert in the next"), "the call is refused for its conversion: {words}");
+        assert!(
+            alone(&template).expect("the folder reads"),
+            "nothing beside the template (read-only {read_only}): {:?}",
+            template.parent().map(|folder| entries_under(folder, &[]))
+        );
+        assert_eq!(entries_under(&scratch.folders.staged, &[]).expect("the staged folder reads"), Vec::<PathBuf>::new(), "nothing in the staged folder");
+    }
+}
+
+/// A probe the disk will not make its own folder for refuses the call in the disk's words, as a copy that
+/// cannot be made does, before anything of it runs, rather than run its template's import where its
+/// folders would land beside the template.
+#[test]
+fn a_probe_the_disk_will_not_make_a_folder_for_refuses_the_call() {
+    let (scratch, bundle, _) = folders().expect("the folders");
+    let (template, refused_call) = in_a_writable_folder(&scratch, &bundle).expect("the template");
+    let mut app = scratch.app().expect("the app starts");
+    let call = json!({"command": "engine.batch", "params": {"steps": batch_steps(&refused_call)}});
+    let mode = |mode| std::fs::set_permissions(&scratch.folders.staged, std::os::unix::fs::PermissionsExt::from_mode(mode)).expect("the mode is set");
+    mode(0o555);
+    let answer = app.request("exec", call);
+    mode(0o755);
+    match answer {
+        Err(CraftError::Io { message }) => {
+            assert_eq!(message, "cannot make the link a probe of a template's import reads in the container's staged folder: Permission denied (os error 13)")
+        }
+        other => panic!("the disk's refusal: {other:?}"),
+    }
+    assert!(alone(&template).expect("the folder reads"), "nothing beside the template");
+    assert_eq!(item_names(&mut app).expect("the items"), Vec::<String>::new(), "nothing of the call ran");
 }
