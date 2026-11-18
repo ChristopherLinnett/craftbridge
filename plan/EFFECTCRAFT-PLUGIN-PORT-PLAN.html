@@ -1259,7 +1259,7 @@ pub fn craft_error_message(error: CraftError) -&gt; String;   // the words an er
 <tr>
 <td><code>rust/<wbr>craftbridge-process/<wbr></code></td>
 <td>NEW</td>
-<td>the host-only support crate the tools share: a process started in a group of its own and stopped as a group (<code>signal_group</code>, <code>group_has_live_process</code>, <code>stop_group</code>), and <code>Group</code>, whose guard ends the group when the program that started it ends first, a Ctrl-C to its terminal or a kill outright, and <code>rerun</code>, which runs one ignored test of the current test binary again in a child started with a changed environment; used by the conformance runner (§28) and the tools&#39; and the core&#39;s tests</td>
+<td>the host-only support crate the tools share: a process started in a group of its own and stopped as a group (<code>signal_group</code>, <code>group_has_live_process</code>, <code>stop_group</code>), and <code>Group</code>, whose guard and sweeper end the group when the program that started it ends first, a Ctrl-C to its terminal or a kill outright, and <code>rerun</code>, which runs one ignored test of the current test binary again in a child started with a changed environment; used by the conformance runner (§28) and the tools&#39; and the core&#39;s tests</td>
 </tr>
 <tr>
 <td><code>rust/<wbr>uniffi-bindgen/<wbr></code></td>

@@ -13,8 +13,13 @@ use std::time::Duration;
 /// for many seconds, so this is the bound the runner gives a step itself.
 const STARTS_WITHIN: Duration = Duration::from_secs(300);
 
-/// Longest the step's group may outlive the runner: its guard kills the group as the runner ends.
-const GONE_WITHIN: Duration = Duration::from_secs(60);
+/// Longest the step's group may outlive the runner. The wait ends on the group's own exit, at the first
+/// look that finds no live process in it, so nothing here waits a fixed time. The group's guard and sweeper
+/// end the group within moments of the runner's end however it ends (`craftbridge_process::Group`), so this
+/// bound is no budget for a loaded machine but a hang guard, as generous as the start bound above: it is
+/// reached only by a group they did not end whole, whether they died, were never armed, or left a process
+/// of it running.
+const GONE_WITHIN: Duration = Duration::from_secs(300);
 
 #[test]
 fn a_runner_that_ends_while_a_step_runs_leaves_nothing_of_the_step_running() {
@@ -52,10 +57,19 @@ fn a_runner_that_ends_while_a_step_runs_leaves_nothing_of_the_step_running() {
             runner.kill().expect("kill the runner");
         }
         let ended_by = runner.wait().expect("reap the runner");
+        // A `pgrep` that cannot tell keeps the wait going: the test's own failed look is not the group's exit,
+        // and the next look is one poll away. Whoever is left when the bound is reached is named in the
+        // failure, because a wait's timeout alone says nothing about what ran on, which is what a triage needs.
         let gone = poll_until(GONE_WITHIN, || !group_has_live_process(group).unwrap_or(true));
+        let ran_on = (!gone).then(|| {
+            Command::new("pgrep")
+                .args(["-l", "-f", "-g", &group.to_string()])
+                .output()
+                .map_or_else(|error| format!("pgrep could not name them: {error}"), |listing| String::from_utf8_lossy(&listing.stdout).trim().to_string())
+        });
         if !gone {
             let _ = signal_group(group, "KILL");
         }
-        assert!(gone, "{signal}: the runner ended ({ended_by}) and a process of its step's group {group} ran on");
+        assert!(gone, "{signal}: the runner ended ({ended_by}) and a process of its step's group {group} ran on: {}", ran_on.unwrap_or_default());
     }
 }
