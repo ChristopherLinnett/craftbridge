@@ -19,7 +19,8 @@ internal class Case(
 )
 
 /** Every check, in the order it runs: the folders first, since every engine starts in them. */
-private val cases: List<Case> = folderChecks + engineChecks + wordsChecks + hardwareDecodingChecks + frameChecks + previewChecks
+private val cases: List<Case> =
+    folderChecks + engineChecks + wordsChecks + hardwareDecodingChecks + frameChecks + previewChecks + apiChecks
 
 /**
  * The words of the instrumentation test protocol, which `am instrument -r` prints and every reader of a

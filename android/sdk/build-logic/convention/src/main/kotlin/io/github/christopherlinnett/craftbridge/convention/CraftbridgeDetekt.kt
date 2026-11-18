@@ -182,6 +182,7 @@ internal fun Project.configureDetekt() {
             writtenPackage.set(namespace)
             bindingsPackage.set(namespace.map { "${it.substringBeforeLast('.')}.ffi.${it.substringAfterLast('.')}" })
             moduleDirectory.set(projectDir.canonicalFile.invariantSeparatorsPath)
+            generatedFolder.set(projectDir.resolve(GENERATED_KOTLIN).canonicalFile.invariantSeparatorsPath)
             writtenConfig.set(layout.buildDirectory.file("craftbridge-detekt/written-packages.yml"))
             bindingsConfig.set(layout.buildDirectory.file("craftbridge-detekt/bindings-packages.yml"))
         }

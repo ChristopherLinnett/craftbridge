@@ -11,4 +11,7 @@ android {
 dependencies {
     // The core's types appear in this module's API, so apps get the core with it.
     api(project(":core"))
+    // The engine speaks JSON text; this reads and writes it with kotlinx's parser. No type of it is
+    // in this module's API, so apps that never name the text still carry it, and only as far as used.
+    implementation(libs.kotlinx.serialization.json)
 }

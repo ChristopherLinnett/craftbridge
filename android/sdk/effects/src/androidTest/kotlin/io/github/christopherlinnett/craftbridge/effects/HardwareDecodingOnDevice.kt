@@ -39,9 +39,13 @@ internal val hardwareDecodingChecks: List<Case> =
             // A process keeps the last list it was handed, so an earlier check's list must not stand in for the
             // one this start hands over.
             setDeviceCodecs(emptyList())
-            onEngine(context) { engine ->
-                val reported = hardwareDecoding(engine)
+            // The start an app calls, the plugin's own, which has to start through the core's to hand the list over.
+            val engine = EffectsEngine.start(context, gpu = GpuChoice.CPU_ONLY)
+            try {
+                val reported = hardwareDecoding(engine.core)
                 require(reported == expected) { "info.hardwareDecoding is $reported, but the platform lists a hardware decoder: $expected" }
+            } finally {
+                engine.shutDown()
             }
         },
         Case("an engine started with a list that names no decoder reports no hardware decoding") { context ->

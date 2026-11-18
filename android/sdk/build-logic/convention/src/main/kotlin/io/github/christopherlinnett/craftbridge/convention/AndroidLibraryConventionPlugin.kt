@@ -5,6 +5,7 @@ import org.gradle.api.GradleException
 import org.gradle.api.JavaVersion
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.artifacts.ModuleDependency
 import org.gradle.api.tasks.testing.Test
 import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.getByType
@@ -60,15 +61,25 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
             // skipped task prunes, so the module's tasks take turns at its build folder: otherwise a
             // module losing its last sources fails the build on some runs and not others.
             takeTurnsAtBuildFolder()
-            // JNA ships its native dispatch library in an AAR the POM does not name (see [JnaAar]); the
-            // catalog names the module once.
-            dependencies.components.withModule(
-                catalogLibrary("jna")
-                    .get()
-                    .module
-                    .toString(),
-                JnaAar::class.java,
-            )
+            // JNA ships its native dispatch library in an AAR beside the jar coordinate its POM names,
+            // and an app that resolves the bare coordinate gets the jar and no native library. Every
+            // dependency on it therefore asks for the AAR as an artifact — the selection an app's own
+            // `@aar` notation would make — so that the module resolves it right and the metadata it
+            // publishes tells its consumers the same: Gradle writes the POM's `type` and the module
+            // metadata's artifact selector from this one selection. A module build file may hold only a
+            // catalog alias (AGENTS §10), so the selection is made once here.
+            val handlers = dependencies
+            val jna = jnaModule()
+            configurations.configureEach {
+                withDependencies {
+                    withType(ModuleDependency::class.java).configureEach {
+                        if (group == jna.group && name == jna.name && artifacts.isEmpty()) {
+                            artifacts.add(handlers.aarSelectorOf(jna))
+                        }
+                    }
+                }
+            }
+            configurePublishing()
 
             extensions.configure<LibraryExtension> {
                 compileSdk = catalogVersion("android-compileSdk").toInt()

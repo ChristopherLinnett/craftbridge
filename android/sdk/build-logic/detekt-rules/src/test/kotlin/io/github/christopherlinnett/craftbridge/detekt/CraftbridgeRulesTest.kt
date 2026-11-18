@@ -448,3 +448,97 @@ class CraftbridgeConfigValidatorTest {
         )
     }
 }
+
+class GeneratedNameTakenTest {
+    // The rule asks the compiler which calls a type has, so it reads each file the way a full detekt run does.
+    private val environment = createEnvironment()
+
+    /** What a generated command facade declares: a namespace's word on the type it hangs off, and a
+     * namespace's type with its commands. The test engine names each such file `dependency_<n>.kt`. */
+    private val facade =
+        """
+        package p
+
+        val Engine.templates: TemplatesCommands get() = TemplatesCommands(this)
+        val Engine.script: ScriptCommands get() = ScriptCommands(this)
+
+        class TemplatesCommands(internal val engine: Engine) {
+            fun list(vararg named: Unit, thumbnails: Boolean? = null): Int = 0
+            fun delete(id: String): Int = 0
+            internal fun hidden(): Int = 0
+        }
+
+        class ScriptCommands(internal val engine: Engine)
+        """.trimIndent()
+
+    private fun lint(
+        code: String,
+        generated: (String) -> Boolean = { "dependency_" in it },
+    ) = GeneratedNameTaken(active, generated).lintWithContext(environment, code, facade)
+
+    @Test
+    fun `a call written by hand under a name the facade gives the same type is reported however it is spelt`() {
+        for (code in listOf(
+            // A namespace's word on the type it hangs off: a member function, which compiles beside it…
+            "package p\n\nclass Engine {\n    fun script(source: String): Int = 0\n}\n",
+            // …a member property, which the compiler also refuses as a shadowed extension…
+            "package p\n\nclass Engine {\n    val templates: Int = 1\n}\n",
+            // …and an extension function of the same type.
+            "package p\n\nclass Engine\n\nfun Engine.script(source: String): Int = 0\n",
+            // A command's name on a namespace's type, with other parameters, as a property, or through an alias.
+            "package p\n\nclass Engine\n\nfun TemplatesCommands.list(): Int = 0\n",
+            "package p\n\nclass Engine\n\nval TemplatesCommands.delete: Int get() = 0\n",
+            "package p\n\nclass Engine\n\ntypealias Spelt = TemplatesCommands\n\nfun Spelt.delete(id: Int): Int = 0\n",
+        )) {
+            assertFindings(1, lint(code), code)
+        }
+    }
+
+    @Test
+    fun `a name of its own, a call kept to the module, another type and the facade itself pass`() {
+        val legal =
+            """
+            package p
+
+            class Engine {
+                fun exec(): Int = 0
+
+                internal fun script(id: String): Int = 0
+            }
+
+            class Other {
+                fun script(): Int = 0
+            }
+
+            fun TemplatesCommands.open(): Int = 0
+
+            private fun TemplatesCommands.list(id: Int): Int = 0
+
+            fun TemplatesCommands.hidden(id: Int): Int = 0
+            """.trimIndent()
+        assertFindings(0, lint(legal), legal)
+        val generated = "package p\n\nclass Engine {\n    fun script(source: String): Int = 0\n}\n"
+        assertFindings(0, lint(generated) { true }, "a generated file is the generator's: $generated")
+    }
+
+    @Test
+    fun `a run wired without the generated folder fails rather than judging by guesswork`() {
+        val failure =
+            runCatching {
+                GeneratedNameTaken(
+                    active,
+                ).lintWithContext(environment, "package p\n\nfun f() = 1\n")
+            }.exceptionOrNull()
+        assertTrue(failure?.message.orEmpty().contains("generatedFolder"), "$failure")
+    }
+
+    @Test
+    fun `only a file inside the generated folder is generated`() {
+        assertTrue(underFolder("/x/effects/src/generated/kotlin", "/x/effects/src/generated/kotlin/io/x/TemplatesCommands.kt"))
+        assertTrue(underFolder("/x/effects/src/generated/kotlin/", "/x/effects/src/generated/kotlin/io/x/TemplatesCommands.kt"))
+        assertFalse(underFolder("/x/effects/src/generated/kotlin", "/x/effects/src/main/kotlin/io/x/Templates.kt"))
+        // A sibling whose name only starts the same is outside.
+        assertFalse(underFolder("/x/effects/src/generated/kotlin", "/x/effects/src/generated/kotlinx/io/x/T.kt"))
+        assertFalse(underFolder("/x/effects/src/generated/kotlin", "/x/effects/src/generated/kotlin"))
+    }
+}

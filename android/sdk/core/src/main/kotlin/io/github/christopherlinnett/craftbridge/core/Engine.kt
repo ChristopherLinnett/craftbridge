@@ -5,6 +5,7 @@ package io.github.christopherlinnett.craftbridge.core
 import android.graphics.Bitmap
 import android.hardware.HardwareBuffer
 import android.view.Surface
+import io.github.christopherlinnett.craftbridge.ffi.core.FrameBytes
 import io.github.christopherlinnett.craftbridge.ffi.core.PixelFormat
 import io.github.christopherlinnett.craftbridge.ffi.core.setDeviceCodecs
 import kotlinx.coroutines.CancellationException
@@ -34,9 +35,10 @@ import io.github.christopherlinnett.craftbridge.ffi.core.Folders as BoundaryFold
  * runs to its end there and only the wait for its answer stops.
  *
  * The preview and the frames are here too: [attachPreview] and [present] draw into a [Surface] the app
- * holds, and [frameBitmap] and [frameHardwareBuffer] answer a rendered frame as the pictures Android
- * draws with. What is not here is what an app cannot name yet: `mcp` belongs with the plugin that calls
- * it, and the policy that suspends the GPU when the app goes to the background with the issue that gives
+ * holds, [frameBitmap] and [frameHardwareBuffer] answer a rendered frame as the pictures Android draws
+ * with, and [frame] answers its raw bytes, which a Craft app plugin hands on as its own `frame` call.
+ * [mcp] is the line of the app's MCP transport that such a plugin answers. What is not here is the
+ * policy that suspends the GPU when the app goes to the background, which comes with the issue that gives
  * it somewhere to be used.
  */
 public class Engine internal constructor(
@@ -202,8 +204,28 @@ public class Engine internal constructor(
      */
     public suspend fun resumeGpu(): String? = mapped { boundary.resumeGpu() }
 
+    /**
+     * Render one frame: [params] is the engine's JSON text naming the comp and the moment, as the plan's
+     * table of the `frame` call gives them, and [format] the kind of bytes to answer with. The answer is
+     * the raw bytes, before the conversion to a picture that [frameBitmap] and [frameHardwareBuffer] make.
+     *
+     * @throws CraftException if the frame cannot be rendered or the bytes cannot be carried back.
+     */
+    public suspend fun frame(
+        params: String,
+        format: PixelFormat,
+    ): FrameBytes = mapped { boundary.frame(params, format) }
+
     /** The frame as the core's straight RGBA, which Android turns into its own premultiplied pictures. */
-    private suspend fun straightFrame(params: String) = mapped { boundary.frame(params, PixelFormat.RGBA8_STRAIGHT) }
+    private suspend fun straightFrame(params: String) = frame(params, PixelFormat.RGBA8_STRAIGHT)
+
+    /**
+     * Hand the engine one line of the app's MCP transport and answer the single line it answers, or
+     * `null` for a line that needs no answer. A Craft app plugin's `mcp` call is this line.
+     *
+     * @throws CraftException if the engine refuses the line.
+     */
+    public suspend fun mcp(line: String): String? = mapped { boundary.mcp(line) }
 
     /**
      * End the engine: its thread finishes, and every later call of this engine answers that it can no
