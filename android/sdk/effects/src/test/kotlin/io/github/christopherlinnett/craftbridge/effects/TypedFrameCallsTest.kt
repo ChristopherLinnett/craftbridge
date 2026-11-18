@@ -11,6 +11,10 @@ import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.microseconds
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.nanoseconds
+import kotlin.time.Duration.Companion.seconds
 
 /** The request every typed call makes of these arguments, written out once for the tests to read against. */
 private const val FULL_REQUEST = """{"comp":3.0,"time":1.5,"frame":12.0,"maxSide":512.0,"scale":0.5,"transparent":true}"""
@@ -91,7 +95,7 @@ class TypedFrameCallsTest {
         val boundary = RecordingBoundary()
         val engine = boundaryEngine(boundary)
         await { engine.frame(comp = comp, time = 1.5) }
-        await { engine.preview(comp = comp, time = 1.5) }
+        await { engine.preview(comp = comp, time = 1500.milliseconds) }
         val framed = boundary.frames.first().first
         assertEquals(JSONValue.Object(mapOf("comp" to comp, "time" to JSONValue.Number(1.5))), parsed(framed))
         assertEquals(listOf(framed), boundary.presents)
@@ -102,5 +106,51 @@ class TypedFrameCallsTest {
         val boundary = RecordingBoundary()
         await { boundaryEngine(boundary).preview() }
         assertEquals(listOf("{}"), boundary.presents)
+    }
+
+    @Test
+    fun aPreviewsDurationReachesTheEngineAsTheFramesSeconds() {
+        val boundary = RecordingBoundary()
+        val engine = boundaryEngine(boundary)
+        await { engine.frame(comp = comp, time = 2.5) }
+        await { engine.preview(comp = comp, time = 2500.milliseconds) }
+        await { engine.preview(comp = comp, time = 2.5.seconds + 0.milliseconds) }
+        val framed = boundary.frames.first().first
+        assertEquals(
+            listOf(framed, framed),
+            boundary.presents,
+            "however the time is named, the engine reads it in seconds, as `frame` hands it",
+        )
+    }
+
+    @Test
+    fun aPreviewsDurationBelowAMillisecondOrZeroIsTheFramesSecondsToo() {
+        val times = listOf(9.milliseconds to 0.009, 1.microseconds to 0.000001, (-1_500_000_001).nanoseconds to -1.500000001)
+        for ((duration, seconds) in times) {
+            val boundary = RecordingBoundary()
+            val engine = boundaryEngine(boundary)
+            await { engine.frame(comp = comp, time = seconds) }
+            await { engine.preview(comp = comp, time = duration) }
+            assertEquals(
+                listOf(boundary.frames.first().first),
+                boundary.presents,
+                "$duration reaches the engine as the $seconds seconds a frame names it by, as Swift's preview asks for it",
+            )
+        }
+    }
+
+    @Test
+    fun endingThePreviewGivesTheSurfaceUpAndTheHoldIsTheEnginesOwnAnswer() {
+        val boundary = RecordingBoundary()
+        val engine = boundaryEngine(boundary)
+        await { engine.endPreview() }
+        assertEquals(1, boundary.detachments, "ending a preview is the engine's one detach, no spares")
+        assertEquals(
+            false,
+            await { engine.core.hasPreviewSurface() }.getOrThrow(),
+            "the report is the engine's own answer, not a copy kept here",
+        )
+        boundary.holding = true
+        assertEquals(true, await { engine.core.hasPreviewSurface() }.getOrThrow(), "and it says yes when the engine holds a surface")
     }
 }

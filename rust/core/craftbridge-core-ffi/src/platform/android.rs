@@ -18,6 +18,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// The windows the app has handed us and not yet attached or released, each under the id the app holds.
 static WINDOWS: IdTable<NativeWindow> = IdTable::new();
 
+/// What a call answers for an id the table does not hold: never handed out, or already taken or released.
+const UNKNOWN_ID: &str = "no window of this process has that id";
+
 /// The app's window as the surface sees it: the window, and the size it last answered with, which it
 /// keeps reporting once its consumer is gone.
 struct AppWindow {
@@ -136,10 +139,20 @@ pub extern "system" fn Java_io_github_christopherlinnett_craftbridge_core_Native
     drop(WINDOWS.take(id));
 }
 
+/// The address of the window the `id` names, which no other live window shares: a `Surface` object can
+/// come to name another window — a `SurfaceView` hands out one object for every surface it makes — so
+/// whether the engine still previews into the window a `Surface` names now is told by this address, not
+/// by the object. The window stays in the table under its id; its address is compared, never followed.
+pub(super) fn address(id: i64) -> Result<i64, CraftError> {
+    // The bits of the address, kept whole: a tagged heap pointer sets the top byte, so it can read as a
+    // negative `i64`, and only equality is ever asked of it.
+    WINDOWS.read(id, |window| window.ptr().as_ptr().addr() as i64).ok_or_else(|| CraftError::not_found(UNKNOWN_ID))
+}
+
 /// The attach `Engine::attach_window` makes on Android: take the window out of the table, and hand the
 /// engine the call that makes its surface on the engine's device.
 pub(super) async fn attach(engine: &Engine, id: i64) -> Result<(), CraftError> {
-    let window = WINDOWS.take(id).ok_or_else(|| CraftError::not_found("no window of this process has that id"))?;
+    let window = WINDOWS.take(id).ok_or_else(|| CraftError::not_found(UNKNOWN_ID))?;
     let held = window.clone();
     let make: SurfaceMaker = Box::new(move |gpu: &GpuDevice| Surface::new(Box::new(preview(gpu, held)?), gpu));
     match engine.attach_surface(make).await {
@@ -319,6 +332,24 @@ mod tests {
         assert_eq!(pollster::block_on(engine.present("null".into())), Ok(()));
         assert_eq!(middle_pixel(&reader), [255, 0, 0, 255], "and the frame reached it");
         pollster::block_on(engine.detach_preview()).expect("the detach answers");
+    }
+
+    /// The address tells windows apart, not ids: two ids of one window read one address, another window
+    /// reads another, a read leaves the window under its id for the attach or release after it, and an id
+    /// the table does not hold is `NotFound` in the attach's words.
+    #[test]
+    fn a_window_reads_one_address_under_every_id_and_another_window_another() {
+        let reader = window_reader();
+        let window = reader.window().expect("the reader hands out its window");
+        let (first, again) = (WINDOWS.insert(window.clone()), WINDOWS.insert(window));
+        let other_reader = window_reader();
+        let other = WINDOWS.insert(other_reader.window().expect("the second reader hands out its window"));
+        let named = address(first).expect("the first id names a window");
+        assert_eq!(address(again), Ok(named), "one window, one address, whatever id it came in under");
+        assert_ne!(address(other), Ok(named), "another window has another address");
+        assert!(WINDOWS.take(first).is_some(), "the read left the window under its id");
+        assert_eq!(address(first), Err(CraftError::not_found(UNKNOWN_ID)), "a taken id names no window");
+        drop((WINDOWS.take(again), WINDOWS.take(other)));
     }
 
     /// A null `Surface` is no window: the acquire answers the zero that names none, without reading the

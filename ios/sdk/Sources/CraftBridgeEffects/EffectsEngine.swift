@@ -10,7 +10,8 @@ public final class EffectsEngine: Sendable {
     /// through the bindings' own calls. Named `handle` because the generated namespaces take `engine`.
     let handle: Engine
 
-    /// The layer the engine previews into, and whether it holds it: ``preview(_:into:at:)`` goes through it.
+    /// The layer the engine previews into, attached only when the engine does not hold it already:
+    /// ``preview(_:into:at:)`` goes through it.
     let previewTarget: PreviewTarget
 
     /// What the engine does with the GPU and with a running export when the app leaves the foreground:
@@ -18,15 +19,18 @@ public final class EffectsEngine: Sendable {
     public let background: BackgroundController
 
     /// An engine over the UniFFI handle `engine`. ``start`` makes the handle from the folders and GPU the
-    /// app names; tests pass a handle of their own, and a host of their own for the system.
+    /// app names; tests pass a handle of their own, a host of their own for the system, and a preview target
+    /// of their own when the handle is a stand-in no layer can be attached to.
     package init(
         engine: Engine,
         background policy: BackgroundPolicy = .default,
-        host: any BackgroundHost = UIKitHost()
+        host: any BackgroundHost = UIKitHost(),
+        previewTarget: PreviewTarget? = nil
     ) {
         handle = engine
-        previewTarget = PreviewTarget(engine: engine)
-        background = BackgroundController(engine: engine, policy: policy, preview: previewTarget, host: host)
+        let target = previewTarget ?? PreviewTarget(engine: engine)
+        self.previewTarget = target
+        background = BackgroundController(engine: engine, policy: policy, preview: target, host: host)
     }
 
     /// Sends one request of the engine's method table, such as `"exec"`, and returns its reply. Package-wide

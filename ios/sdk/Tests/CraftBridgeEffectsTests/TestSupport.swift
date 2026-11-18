@@ -44,6 +44,8 @@ final class FakeEngine: Engine, @unchecked Sendable {
     var frameReply = FrameBytes(width: 2, height: 2, format: .png, data: Data())
     /// The line an MCP call answers.
     var mcpReply: String?
+    /// What the engine reports of holding a preview surface.
+    var holdsPreview = false
     /// What a GPU suspend and resume throw, when a test sets it.
     var gpuRefusal: CraftError?
     /// What a GPU resume answers: nil is a device back, a note is the CPU's reason.
@@ -80,6 +82,14 @@ final class FakeEngine: Engine, @unchecked Sendable {
     override func frame(params: String, format: PixelFormat) async throws -> FrameBytes {
         await asked.record("frame", ["params": try JSONValue(jsonText: params), "format": .string("\(format)")])
         return frameReply
+    }
+
+    override func present(params: String) async throws {
+        await asked.record("present", try JSONValue(jsonText: params))
+    }
+
+    override func hasPreviewSurface() async throws -> Bool {
+        holdsPreview
     }
 
     override func mcp(line: String) async throws -> String? {

@@ -795,6 +795,15 @@ public protocol EngineProtocol: AnyObject, Sendable {
     func frame(params: String, format: PixelFormat) async throws -> FrameBytes
 
     /**
+     * Answer whether the engine holds a preview surface: from an `attach` of the app's layer or
+     * window until `detach_preview` gives it up, or the GPU goes with it — suspended for the
+     * background, or lost. A preview call skips its attach only while this answers yes and the
+     * surface held is its own, so one question, asked of the engine that holds the answer, serves
+     * both bindings; neither keeps a copy of the fact of its own.
+     */
+    func hasPreviewSurface() async throws -> Bool
+
+    /**
      * Answer one line of the app's MCP transport with the one line it replies with, or `None` for a
      * line that needs no reply. A closed engine and a caught panic throw, as `request` does.
      */
@@ -966,6 +975,29 @@ open class Engine: EngineProtocol, @unchecked Sendable {
                 completeFunc: ffi_craftbridge_core_ffi_rust_future_complete_rust_buffer,
                 freeFunc: ffi_craftbridge_core_ffi_rust_future_free_rust_buffer,
                 liftFunc: FfiConverterTypeFrameBytes_lift,
+                errorHandler: FfiConverterTypeCraftError_lift
+            )
+    }
+
+    /**
+     * Answer whether the engine holds a preview surface: from an `attach` of the app's layer or
+     * window until `detach_preview` gives it up, or the GPU goes with it — suspended for the
+     * background, or lost. A preview call skips its attach only while this answers yes and the
+     * surface held is its own, so one question, asked of the engine that holds the answer, serves
+     * both bindings; neither keeps a copy of the fact of its own.
+     */
+    open func hasPreviewSurface() async throws -> Bool {
+        return
+            try await uniffiRustCallAsync(
+                rustFutureFunc: {
+                    uniffi_craftbridge_core_ffi_fn_method_engine_has_preview_surface(
+                        self.uniffiCloneHandle()
+                    )
+                },
+                pollFunc: ffi_craftbridge_core_ffi_rust_future_poll_i8,
+                completeFunc: ffi_craftbridge_core_ffi_rust_future_complete_i8,
+                freeFunc: ffi_craftbridge_core_ffi_rust_future_free_i8,
+                liftFunc: FfiConverterBool.lift,
                 errorHandler: FfiConverterTypeCraftError_lift
             )
     }
@@ -2340,6 +2372,21 @@ public func attachMetalLayer(engine: Engine, layer: UInt64) async throws {
             errorHandler: FfiConverterTypeCraftError_lift
         )
 }
+/// The address of the window the `id` names — an id the JNI call handed out for the app's `Surface` —
+/// which no other live window shares (plan §20): the Kotlin SDK keeps the address of the window it
+/// attached last and compares it with this one's, to tell whether the engine previews into the window a
+/// `Surface` names now. The window stays under its id, for the attach or the release after. An id the
+/// table does not hold is `NotFound`, and on a platform with no Android window every call answers
+/// `Unsupported`.
+public func windowAddress(id: Int64) throws -> Int64 {
+    return try FfiConverterInt64.lift(
+        try rustCallWithError(FfiConverterTypeCraftError_lift) {
+            uniffiCallStatus in
+            uniffi_craftbridge_core_ffi_fn_func_window_address(
+                FfiConverterInt64.lower(id), uniffiCallStatus
+            )
+        })
+}
 
 private enum InitializationResult {
     case ok
@@ -2365,6 +2412,9 @@ private let initializationResult: InitializationResult = {
     if uniffi_craftbridge_core_ffi_checksum_func_attach_metal_layer() != 10328 {
         return InitializationResult.apiChecksumMismatch
     }
+    if uniffi_craftbridge_core_ffi_checksum_func_window_address() != 45084 {
+        return InitializationResult.apiChecksumMismatch
+    }
     if uniffi_craftbridge_core_ffi_checksum_method_canceltoken_cancel() != 5513 {
         return InitializationResult.apiChecksumMismatch
     }
@@ -2375,6 +2425,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_craftbridge_core_ffi_checksum_method_engine_frame() != 23683 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_craftbridge_core_ffi_checksum_method_engine_has_preview_surface() != 29847 {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_craftbridge_core_ffi_checksum_method_engine_mcp() != 14783 {

@@ -9,12 +9,19 @@ import android.graphics.Color
 import android.hardware.HardwareBuffer
 import android.media.ImageReader
 import android.os.Build
+import android.os.Parcel
+import android.view.Surface
 import io.github.christopherlinnett.craftbridge.core.CraftException
 import io.github.christopherlinnett.craftbridge.core.GpuException
+import io.github.christopherlinnett.craftbridge.core.InvalidParamsException
 import io.github.christopherlinnett.craftbridge.core.UnsupportedException
 import io.github.christopherlinnett.craftbridge.core.jsonValue
 import io.github.christopherlinnett.craftbridge.ffi.core.GpuChoice
 import io.github.christopherlinnett.craftbridge.ffi.core.PixelFormat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.seconds
 
 /** The frame request the core's own picture calls are given for the first comp, written by hand as the typed calls must not make an app. */
 private const val FIRST_COMP_TRANSPARENT = """{"comp":1,"transparent":true}"""
@@ -28,8 +35,11 @@ private val MISSING_COMP = 99.0.jsonValue
 /** The side of the second comp, smaller than the first, which the checks make active. */
 private const val OTHER_SIDE = 48.0
 
-/** The seconds by which the top layer of the first comp the preview checks make has faded in whole. */
-private const val LATE = 1.0
+/**
+ * The seconds by which the top layer of the first comp the preview checks make has faded in whole: a part
+ * of a second past a whole one, so a preview whose time lost its fraction on the way shows another frame.
+ */
+private const val LATE = 1.5
 
 /**
  * The two comps the preview checks draw: the first red under a green layer, which [timedComps] fades in from
@@ -107,6 +117,29 @@ private fun showed(
     require(shown == expected) { "$what drew $shown in the middle, not the core's frame of the comp and time it names, $expected" }
 }
 
+/** What [read] makes of [surface] written into a parcel, the way the platform hands a surface from one object to another. */
+private fun <T> parcelled(
+    surface: Surface,
+    read: (Parcel) -> T,
+): T {
+    val parcel = Parcel.obtain()
+    try {
+        surface.writeToParcel(parcel, 0)
+        parcel.setDataPosition(0)
+        return read(parcel)
+    } finally {
+        parcel.recycle()
+    }
+}
+
+/** A [Surface] object of its own naming [surface]'s window, which [nameWindowOf] can point at another window later. */
+private fun objectNaming(surface: Surface): Surface = parcelled(surface) { Surface.CREATOR.createFromParcel(it) }
+
+/** Point this [Surface] object at [surface]'s window, as a `SurfaceView` points its one object at each surface it makes. */
+private fun Surface.nameWindowOf(surface: Surface) {
+    parcelled(surface) { readFromParcel(it) }
+}
+
 /** That [call] is refused on a comp that does not exist as `frame` refuses that comp: the same row, in the same words. */
 private suspend fun EffectsEngine.refusesTheMissingCompAsFrameDoes(
     what: String,
@@ -126,16 +159,16 @@ internal val typedCallChecks: List<Case> =
             withEffects(context, GpuChoice.PREFERRED) { engine ->
                 val late = engine.timedComps()
                 val surface = reader()
-                engine.preview(surface.surface, comp = FIRST_COMP, time = LATE)
+                engine.preview(surface.surface, comp = FIRST_COMP, time = LATE.seconds)
                 showed(surface, late, "the preview into the Surface")
-                engine.preview(comp = FIRST_COMP, time = LATE)
+                engine.preview(comp = FIRST_COMP, time = LATE.seconds)
                 showed(surface, late, "the preview into the surface attached")
-                engine.preview(surface.surface, comp = FIRST_COMP, time = LATE)
+                engine.preview(surface.surface, comp = FIRST_COMP, time = LATE.seconds)
                 showed(surface, late, "the preview into the Surface attached again")
                 engine.refusesTheMissingCompAsFrameDoes("a preview") { preview(comp = MISSING_COMP) }
-                engine.preview(comp = FIRST_COMP, time = LATE)
+                engine.preview(comp = FIRST_COMP, time = LATE.seconds)
                 showed(surface, late, "the preview after a refused one")
-                engine.core.detachPreview()
+                engine.endPreview()
                 val refused = runCatching { engine.preview(comp = FIRST_COMP) }.exceptionOrNull()
                 require(refused is GpuException) { "a preview with no surface attached was answered $refused, not refused as `Gpu`" }
                 surface.close()
@@ -145,13 +178,14 @@ internal val typedCallChecks: List<Case> =
             withEffects(context, GpuChoice.PREFERRED) { engine ->
                 val late = engine.timedComps()
                 val surface = reader()
-                engine.preview(surface.surface, comp = FIRST_COMP, time = LATE)
+                engine.preview(surface.surface, comp = FIRST_COMP, time = LATE.seconds)
                 showed(surface, late, "the preview before the GPU was given up")
                 engine.core.suspendGpu()
-                require(answeredGpu { engine.preview(comp = FIRST_COMP, time = LATE) } != null) {
+                require(!engine.core.hasPreviewSurface()) { "the engine reports a surface the GPU took with it" }
+                require(answeredGpu { engine.preview(comp = FIRST_COMP, time = LATE.seconds) } != null) {
                     "a preview after the GPU was given up was not refused as `Gpu`"
                 }
-                require(answeredGpu { engine.preview(surface.surface, comp = FIRST_COMP, time = LATE) } != null) {
+                require(answeredGpu { engine.preview(surface.surface, comp = FIRST_COMP, time = LATE.seconds) } != null) {
                     "a preview into the Surface with no device to draw on was not refused as `Gpu`"
                 }
                 val bitmap = engine.frameBitmap(comp = FIRST_COMP, time = LATE)
@@ -162,13 +196,94 @@ internal val typedCallChecks: List<Case> =
                 bitmap.recycle()
                 val note = engine.core.resumeGpu()
                 require(note == null) { "the device was not taken again: $note" }
-                require(answeredGpu { engine.preview(comp = FIRST_COMP, time = LATE) } != null) {
+                require(answeredGpu { engine.preview(comp = FIRST_COMP, time = LATE.seconds) } != null) {
                     "the surface came back with the device, which holds only what is attached after it"
                 }
-                engine.preview(surface.surface, comp = FIRST_COMP, time = LATE)
+                engine.preview(surface.surface, comp = FIRST_COMP, time = LATE.seconds)
                 showed(surface, late, "the preview into the Surface once the GPU was back")
-                engine.core.detachPreview()
+                engine.endPreview()
                 surface.close()
+            }
+        },
+        Case(
+            "a typed preview names its Surface once: it reattaches only when the engine is not previewing into it, and endPreview makes it forget",
+        ) { context ->
+            withEffects(context, GpuChoice.PREFERRED) { engine ->
+                val late = engine.timedComps()
+                val held = TextureSurface()
+                require(!engine.core.holdsPreview(held.surface)) { "no preview yet, and the engine says it previews into this Surface" }
+                engine.preview(held.surface, comp = FIRST_COMP, time = LATE.seconds)
+                require(engine.core.holdsPreview(held.surface)) { "the preview attached the Surface, and the engine does not report it" }
+                held.texture.setDefaultBufferSize(SURFACE_SIDE, SURFACE_SIDE / 2)
+                val outdated = answeredGpu { engine.preview(held.surface, comp = FIRST_COMP, time = LATE.seconds) }
+                require(outdated?.detail == RESIZED) {
+                    "naming the held Surface again reattached it, answering ${outdated?.detail} instead of the resize's own"
+                }
+                engine.preview(held.surface, comp = FIRST_COMP, time = LATE.seconds)
+                val second = reader()
+                engine.preview(second.surface, comp = FIRST_COMP, time = LATE.seconds)
+                showed(second, late, "the preview naming a second Surface")
+                require(
+                    engine.core.holdsPreview(second.surface),
+                ) { "the engine does not report previewing into the Surface it last attached" }
+                require(
+                    !engine.core.holdsPreview(held.surface),
+                ) { "the engine still reports previewing into the Surface the second one replaced" }
+                engine.endPreview()
+                require(!engine.core.hasPreviewSurface()) { "endPreview left the engine holding a surface" }
+                require(
+                    !engine.core.holdsPreview(second.surface),
+                ) { "endPreview left the identity answer still yes for the surface it gave up" }
+                held.texture.setDefaultBufferSize(SURFACE_SIDE, SURFACE_SIDE)
+                engine.preview(held.surface, comp = FIRST_COMP, time = LATE.seconds)
+                require(engine.core.holdsPreview(held.surface)) { "the preview after endPreview did not attach the Surface afresh" }
+                held.close()
+                second.close()
+            }
+        },
+        Case(
+            "a typed preview attaches again a Surface that names another window since, and refuses one the app has released",
+        ) { context ->
+            withEffects(context, GpuChoice.PREFERRED) { engine ->
+                val late = engine.timedComps()
+                val first = reader()
+                val second = reader()
+                val named = objectNaming(first.surface)
+                engine.preview(named, comp = FIRST_COMP, time = LATE.seconds)
+                showed(first, late, "the preview into the Surface naming the first window")
+                require(engine.core.holdsPreview(named)) { "the preview attached the Surface, and the engine does not report it" }
+                named.nameWindowOf(second.surface)
+                require(
+                    !engine.core.holdsPreview(named),
+                ) { "the Surface names another window now, and the engine says it previews into it" }
+                engine.preview(named, comp = FIRST_COMP, time = LATE.seconds)
+                showed(second, late, "the preview into the same Surface object once it named the second window")
+                named.release()
+                require(!engine.core.holdsPreview(named)) { "the engine says it previews into a Surface the app has released" }
+                val refused = runCatching { engine.preview(named, comp = FIRST_COMP, time = LATE.seconds) }.exceptionOrNull()
+                require(
+                    refused is InvalidParamsException,
+                ) { "a preview into a released Surface was answered $refused, not refused as no live window" }
+                engine.endPreview()
+                first.close()
+                second.close()
+            }
+        },
+        Case("two Surfaces attached at once leave the engine previewing into the one it says it holds") { context ->
+            withEffects(context, GpuChoice.PREFERRED) { engine ->
+                val late = engine.timedComps()
+                val readers = listOf(reader(), reader())
+                coroutineScope {
+                    for (each in readers) {
+                        launch(Dispatchers.Default) { engine.core.attachPreview(each.surface) }
+                    }
+                }
+                val held = readers.filter { engine.core.holdsPreview(it.surface) }
+                require(held.size == 1) { "${held.size} of the two Surfaces read as the one the engine previews into" }
+                engine.preview(comp = FIRST_COMP, time = LATE.seconds)
+                showed(held.single(), late, "the preview into the Surface the engine says it holds")
+                engine.endPreview()
+                readers.forEach(ImageReader::close)
             }
         },
         Case("a frame as a Bitmap through the typed call is the core's premultiplied conversion of the comp it names") { context ->

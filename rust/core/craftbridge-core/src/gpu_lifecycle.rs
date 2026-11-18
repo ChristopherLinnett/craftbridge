@@ -72,6 +72,14 @@ impl GpuLifecycle {
         self.preview = None;
     }
 
+    /// Whether a surface is attached to preview into: whether a `present` has something to draw on.
+    /// The engine is the one holder of that answer — a device lost or a [`GpuLifecycle::suspend`]
+    /// takes the surface with no notice to anyone else — so a preview that attaches only when it
+    /// must asks here rather than keeping a copy of the fact of its own.
+    pub(crate) const fn holds_preview(&self) -> bool {
+        self.preview.is_some()
+    }
+
     /// Drop the GPU if the notice of the device the app holds has a report: the first device-lost
     /// or uncaptured error, which the app's own callbacks wrote there. It runs before every call the
     /// engine makes on the app, so no call runs on a device that already failed, and the render
@@ -627,6 +635,15 @@ mod tests {
         (lifecycle, app, shared, dropped)
     }
 
+    /// An engine on a device, previewing into a surface that flips `dropped` when it goes.
+    fn engine_with_preview() -> (Engine, Arc<Shared>, Arc<AtomicBool>) {
+        let (app, shared) = Probe::new();
+        let engine = Engine::start(app, GpuChoice::Preferred).expect("the engine starts");
+        let dropped = Arc::new(AtomicBool::new(false));
+        engine.attach_preview(flagged(dropped.clone())).expect("the surface attaches on the engine's device");
+        (engine, shared, dropped)
+    }
+
     #[test]
     fn suspending_drops_the_preview_surface() {
         let (mut lifecycle, mut app, _, dropped) = with_preview();
@@ -648,15 +665,25 @@ mod tests {
         assert_eq!(shared.events().last().map(String::as_str), Some("drop_gpu"));
     }
 
+    /// The engine's report of its preview surface is settled as every call is: a device whose notice
+    /// reported a failure since the last call is dropped, and its surface with it, before the report is
+    /// read, so a surface lost with its GPU never reads as held, though no call reached the app since.
+    #[test]
+    fn a_device_lost_since_the_last_call_takes_the_reported_surface_with_it() {
+        let (engine, shared, dropped) = engine_with_preview();
+        assert_eq!(engine.has_preview_surface(), Ok(true), "the attached surface is held");
+        assert!(shared.notice(0).report("planted device loss".to_string()));
+        assert_eq!(engine.has_preview_surface(), Ok(false), "the surface went with the lost device before the report was read");
+        assert!(dropped.load(Ordering::SeqCst), "the surface itself was dropped");
+        assert_eq!(shared.events(), [attached_host(), "drop_gpu".to_string()], "the report's own settle dropped the GPU, once");
+    }
+
     /// A preview attached, presented, dropped with the GPU on a suspend and attached again after a
     /// resume: the engine's one device carries it, nothing brings it back but the app's own attach,
     /// and while there is no device every attach and present answers so and makes nothing.
     #[test]
     fn a_preview_is_dropped_on_suspend_and_attaches_again_after_resume() {
-        let (app, shared) = Probe::new();
-        let engine = Engine::start(app, GpuChoice::Preferred).expect("the engine starts");
-        let dropped = Arc::new(AtomicBool::new(false));
-        engine.attach_preview(flagged(dropped.clone())).expect("the surface attaches on the engine's device");
+        let (engine, shared, dropped) = engine_with_preview();
         assert_eq!(engine.present(json!({})), Ok(()));
         engine.suspend_gpu().expect("the GPU is given up");
         assert!(dropped.load(Ordering::SeqCst), "the surface goes with the device");

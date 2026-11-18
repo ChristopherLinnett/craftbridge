@@ -12,7 +12,9 @@ import android.view.Surface
 import io.github.christopherlinnett.craftbridge.core.Engine
 import io.github.christopherlinnett.craftbridge.core.GpuException
 import io.github.christopherlinnett.craftbridge.core.InvalidParamsException
+import io.github.christopherlinnett.craftbridge.ffi.core.CraftException
 import io.github.christopherlinnett.craftbridge.ffi.core.GpuChoice
+import io.github.christopherlinnett.craftbridge.ffi.core.windowAddress
 
 /** The side of the square surfaces the checks preview into, in pixels. */
 internal const val SURFACE_SIDE = 64
@@ -23,8 +25,11 @@ private const val PRESENTS_TO_FIND_A_LOSS = 10
 /** How long a check waits for a frame it presented to arrive at the surface's reader. */
 private const val WAIT_FOR_FRAME_MILLIS = 30_000L
 
+/** How many of the first window ids a check asks the address of: far more than the checks of one run hand out. */
+private const val WINDOW_IDS_ASKED = 4096L
+
 /** What a present answers the first time it finds its surface a new size, in the core's words. */
-private const val RESIZED = "the preview surface changed size or format; it is configured again, so the next frame draws"
+internal const val RESIZED = "the preview surface changed size or format; it is configured again, so the next frame draws"
 
 /** A comp that is one flat red, so the pixel in the middle of any drawing of it is known. */
 private const val RED_COMP =
@@ -47,7 +52,7 @@ internal fun reader(): ImageReader = ImageReader.newInstance(SURFACE_SIDE, SURFA
  * A surface whose consumer is a [SurfaceTexture] the check holds: the platform's stand-in for a
  * `TextureView`'s, whose size the consumer sets and changes, and which the check abandons by releasing it.
  */
-private class TextureSurface {
+internal class TextureSurface {
     val texture = SurfaceTexture(false).apply { setDefaultBufferSize(SURFACE_SIDE, SURFACE_SIDE) }
     val surface = Surface(texture)
 
@@ -182,6 +187,45 @@ internal val previewChecks: List<Case> =
                 engine.present()
                 engine.detachPreview()
                 resized.close()
+            }
+        },
+        Case("an id that names no window answers NotFound and never a crash, and no preview leaves a window under an id") { context ->
+            previewing(context) { engine ->
+                val surface = reader()
+                engine.attachPreview(surface.surface)
+                require(engine.holdsPreview(surface.surface)) { "the engine does not report the surface it attached" }
+                engine.detachPreview()
+                surface.close()
+                // The attach took its window out of the table and the hold check gave its own id back, so
+                // every id the run handed out, and any that never was, names no window now.
+                val named =
+                    (listOf(0L, -1L, Long.MIN_VALUE, Long.MAX_VALUE) + (1L..WINDOW_IDS_ASKED)).filter { id ->
+                        val answer = runCatching { windowAddress(id) }
+                        require(answer.isSuccess || answer.exceptionOrNull() is CraftException.NotFound) {
+                            "the address of window id $id was answered ${answer.exceptionOrNull()}, not NotFound"
+                        }
+                        answer.isSuccess
+                    }
+                require(
+                    named.isEmpty(),
+                ) { "${named.size} ids, ${named.take(3)} first, still name a window the engine and the app have both let go" }
+            }
+        },
+        Case("the engine reports the preview surface it holds, from its attach until its detach, or the GPU's going") { context ->
+            previewing(context) { engine ->
+                require(!engine.hasPreviewSurface()) { "the engine reports holding a surface before one is attached" }
+                val surface = reader()
+                engine.attachPreview(surface.surface)
+                require(engine.hasPreviewSurface()) { "the engine does not report the surface it attached" }
+                engine.suspendGpu()
+                require(!engine.hasPreviewSurface()) { "the engine still reports the surface the GPU took with it" }
+                engine.resumeGpu()
+                require(!engine.hasPreviewSurface()) { "the device came back, and no surface came back with it" }
+                engine.attachPreview(surface.surface)
+                require(engine.hasPreviewSurface()) { "the second attach is held as the first was" }
+                engine.detachPreview()
+                require(!engine.hasPreviewSurface()) { "the detach gave the surface up, and the report says so" }
+                surface.close()
             }
         },
     )

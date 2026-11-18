@@ -712,6 +712,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_craftbridge_core_ffi_checksum_func_attach_metal_layer(
     ): Int
+    external fun uniffi_craftbridge_core_ffi_checksum_func_window_address(
+    ): Int
     external fun uniffi_craftbridge_core_ffi_checksum_method_canceltoken_cancel(
     ): Int
     external fun uniffi_craftbridge_core_ffi_checksum_method_canceltoken_is_cancelled(
@@ -719,6 +721,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_craftbridge_core_ffi_checksum_method_engine_detach_preview(
     ): Int
     external fun uniffi_craftbridge_core_ffi_checksum_method_engine_frame(
+    ): Int
+    external fun uniffi_craftbridge_core_ffi_checksum_method_engine_has_preview_surface(
     ): Int
     external fun uniffi_craftbridge_core_ffi_checksum_method_engine_mcp(
     ): Int
@@ -781,6 +785,8 @@ internal object UniffiLib {
     ): Long
     external fun uniffi_craftbridge_core_ffi_fn_method_engine_frame(`ptr`: Long,`params`: RustBuffer.ByValue,`format`: RustBuffer.ByValue,
     ): Long
+    external fun uniffi_craftbridge_core_ffi_fn_method_engine_has_preview_surface(`ptr`: Long,
+    ): Long
     external fun uniffi_craftbridge_core_ffi_fn_method_engine_mcp(`ptr`: Long,`line`: RustBuffer.ByValue,
     ): Long
     external fun uniffi_craftbridge_core_ffi_fn_method_engine_present(`ptr`: Long,`params`: RustBuffer.ByValue,
@@ -812,6 +818,8 @@ internal object UniffiLib {
     external fun uniffi_craftbridge_core_ffi_fn_func_craft_error_message(`error`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_craftbridge_core_ffi_fn_func_attach_metal_layer(`engine`: Long,`layer`: Long,
+    ): Long
+    external fun uniffi_craftbridge_core_ffi_fn_func_window_address(`id`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
     external fun ffi_craftbridge_core_ffi_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -941,6 +949,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_craftbridge_core_ffi_checksum_func_attach_metal_layer() and 0xFFFF) != 10328) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_craftbridge_core_ffi_checksum_func_window_address() and 0xFFFF) != 45084) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_craftbridge_core_ffi_checksum_method_canceltoken_cancel() and 0xFFFF) != 5513) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -951,6 +962,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_craftbridge_core_ffi_checksum_method_engine_frame() and 0xFFFF) != 23683) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_craftbridge_core_ffi_checksum_method_engine_has_preview_surface() and 0xFFFF) != 29847) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_craftbridge_core_ffi_checksum_method_engine_mcp() and 0xFFFF) != 14783) {
@@ -1801,6 +1815,15 @@ public interface EngineInterface {
     suspend fun `frame`(`params`: kotlin.String, `format`: PixelFormat): FrameBytes
     
     /**
+     * Answer whether the engine holds a preview surface: from an `attach` of the app's layer or
+     * window until `detach_preview` gives it up, or the GPU goes with it — suspended for the
+     * background, or lost. A preview call skips its attach only while this answers yes and the
+     * surface held is its own, so one question, asked of the engine that holds the answer, serves
+     * both bindings; neither keeps a copy of the fact of its own.
+     */
+    suspend fun `hasPreviewSurface`(): kotlin.Boolean
+    
+    /**
      * Answer one line of the app's MCP transport with the one line it replies with, or `None` for a
      * line that needs no reply. A closed engine and a caught panic throw, as `request` does.
      */
@@ -2037,6 +2060,34 @@ open class Engine: Disposable, AutoCloseable, EngineInterface
         { future -> UniffiLib.ffi_craftbridge_core_ffi_rust_future_free_rust_buffer(future) },
         // lift function
         { FfiConverterTypeFrameBytes.lift(it) },
+        // Error FFI converter
+        CraftException.ErrorHandler,
+    )
+    }
+
+    
+    /**
+     * Answer whether the engine holds a preview surface: from an `attach` of the app's layer or
+     * window until `detach_preview` gives it up, or the GPU goes with it — suspended for the
+     * background, or lost. A preview call skips its attach only while this answers yes and the
+     * surface held is its own, so one question, asked of the engine that holds the answer, serves
+     * both bindings; neither keeps a copy of the fact of its own.
+     */
+    @Throws(CraftException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `hasPreviewSurface`() : kotlin.Boolean {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_craftbridge_core_ffi_fn_method_engine_has_preview_surface(
+                uniffiHandle,
+                
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_craftbridge_core_ffi_rust_future_poll_i8(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_craftbridge_core_ffi_rust_future_complete_i8(future, continuation) },
+        { future -> UniffiLib.ffi_craftbridge_core_ffi_rust_future_free_i8(future) },
+        // lift function
+        { FfiConverterBoolean.lift(it) },
         // Error FFI converter
         CraftException.ErrorHandler,
     )
@@ -3517,5 +3568,25 @@ public object FfiConverterSequenceTypeRecoveryNote: FfiConverterRustBuffer<List<
         CraftException.ErrorHandler,
     )
     }
+
+        /**
+         * The address of the window the `id` names — an id the JNI call handed out for the app's `Surface` —
+         * which no other live window shares (plan §20): the Kotlin SDK keeps the address of the window it
+         * attached last and compares it with this one's, to tell whether the engine previews into the window a
+         * `Surface` names now. The window stays under its id, for the attach or the release after. An id the
+         * table does not hold is `NotFound`, and on a platform with no Android window every call answers
+         * `Unsupported`.
+         */
+    @Throws(CraftException::class) fun `windowAddress`(`id`: kotlin.Long): kotlin.Long {
+            return FfiConverterLong.lift(
+    uniffiRustCallWithError(CraftException) { _status ->
+    UniffiLib.uniffi_craftbridge_core_ffi_fn_func_window_address(
+    
+        
+        FfiConverterLong.lower(`id`),_status)
+}
+    )
+    }
+    
 
 

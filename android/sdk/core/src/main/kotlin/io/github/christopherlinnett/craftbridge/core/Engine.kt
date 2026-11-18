@@ -8,6 +8,7 @@ import android.view.Surface
 import io.github.christopherlinnett.craftbridge.ffi.core.FrameBytes
 import io.github.christopherlinnett.craftbridge.ffi.core.PixelFormat
 import io.github.christopherlinnett.craftbridge.ffi.core.setDeviceCodecs
+import io.github.christopherlinnett.craftbridge.ffi.core.windowAddress
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +18,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import io.github.christopherlinnett.craftbridge.ffi.core.CancelToken as BoundaryCancelToken
 import io.github.christopherlinnett.craftbridge.ffi.core.CraftException as BoundaryException
@@ -128,8 +131,57 @@ public class Engine internal constructor(
      * consumer is already gone cannot.
      */
     public suspend fun attachPreview(surface: Surface) {
-        attachingWindow(windowOf(surface), NativeSurfaces::release) { window -> mapped { boundary.attachWindow(window) } }
+        previewing.withLock {
+            attachingWindow(windowOf(surface), NativeSurfaces::release) { window ->
+                val address = mapped { windowAddress(window) }
+                // The engine gives the surface it held up before it makes this one, and an attach that
+                // fails leaves none, so nothing is remembered until this one is held.
+                attachedWindow = NO_WINDOW
+                mapped { boundary.attachWindow(window) }
+                attachedWindow = address
+            }
+        }
     }
+
+    /** Makes an attach and what it remembers, a detach and what it forgets, and [holdsPreview]'s reading of
+     * both one step each, in the order they were asked for: two attaches at once would otherwise leave the
+     * window remembered to whichever finished last, which need not be the one the engine took last. */
+    private val previewing = Mutex()
+
+    /** The address of the window the last [attachPreview] handed the engine, or [NO_WINDOW] since a detach
+     * or a failed attach: a window's, not a [Surface]'s, because one [Surface] object can name one window
+     * after another — a `SurfaceView` hands out the one object for every surface it makes — and an address
+     * keeps none of the app's surfaces alive. Only [holdsPreview] reads it, and only together with the engine's
+     * own report, so a window remembered that the engine no longer holds — given up, or lost with the GPU —
+     * never stands for one it holds. [previewing] guards it. */
+    private var attachedWindow = NO_WINDOW
+
+    /**
+     * Whether the engine holds a preview surface: from an [attachPreview] that attached one until a
+     * [detachPreview] gives it up, or the GPU goes with it — on [suspendGpu], or on a device lost.
+     * The engine is the one that answers this, for every binding: a preview call skips its attach only
+     * while the answer is yes and the surface held is its own ([holdsPreview]), so an attach runs on the
+     * engine's own hold, not on a copy of the fact kept by the app.
+     *
+     * @throws CraftException once the engine has been ended, as every call is after that.
+     */
+    public suspend fun hasPreviewSurface(): Boolean = mapped { boundary.hasPreviewSurface() }
+
+    /**
+     * Whether the engine is previewing into [surface]: it holds a preview surface, and that surface is the
+     * window [surface] names now — the window the app last [attached][attachPreview]. A call that previews
+     * into a surface can skip its attach when this answers yes: the engine already draws into that window.
+     * A surface the app released names no window, and one that names another window since — as a
+     * `SurfaceView`'s does once it makes a new surface — is not the one held, so both answer no and are
+     * attached afresh, which refuses a released one as [attachPreview] does. Holding is not health: a window
+     * whose consumer is gone, or that was resized, still answers [GpuException] at [present], with §17's
+     * answers, whatever this says.
+     *
+     * @throws UnsupportedException when the native library that holds the windows is not part of the app,
+     * and what [hasPreviewSurface], which it asks first, throws.
+     */
+    public suspend fun holdsPreview(surface: Surface): Boolean =
+        previewing.withLock { hasPreviewSurface() && attachedWindow != NO_WINDOW && addressOf(surface) == attachedWindow }
 
     /**
      * Give up the preview surface, if one is attached: [present] answers [GpuException] again until the
@@ -138,7 +190,10 @@ public class Engine internal constructor(
      * @throws CraftException when the engine has been shut down.
      */
     public suspend fun detachPreview() {
-        mapped { boundary.detachPreview() }
+        previewing.withLock {
+            mapped { boundary.detachPreview() }
+            attachedWindow = NO_WINDOW
+        }
     }
 
     /**
@@ -303,6 +358,10 @@ internal inline fun attachingWindow(
     }
 }
 
+/** What names no window: the id the native library hands out for a surface that is no live window, and
+ * the address no window has. */
+private const val NO_WINDOW = 0L
+
 /**
  * The id the native library holds the window of [surface] under, which `attachWindow` takes.
  *
@@ -310,14 +369,31 @@ internal inline fun attachingWindow(
  * already destroyed names no window, and a build without the native library cannot look one up.
  */
 internal fun windowOf(surface: Surface): Long {
-    val window =
-        try {
-            NativeSurfaces.acquire(surface)
-        } catch (absent: LinkageError) {
-            failWith(BoundaryException.Unsupported("the native library that holds preview windows is not in this app: ${absent.message}"))
-        }
-    if (window == 0L) {
+    val window = liveWindowOf(surface)
+    if (window == NO_WINDOW) {
         failWith(BoundaryException.InvalidParams("the surface is not a live window to preview on"))
     }
     return window
+}
+
+/** The id the native library holds the window of [surface] under, or [NO_WINDOW] when it names none. */
+private fun liveWindowOf(surface: Surface): Long =
+    try {
+        NativeSurfaces.acquire(surface)
+    } catch (absent: LinkageError) {
+        failWith(BoundaryException.Unsupported("the native library that holds preview windows is not in this app: ${absent.message}"))
+    }
+
+/** The address of the window [surface] names now, or [NO_WINDOW] when it names none, read under an id
+ * of its own that is given back before this answers. */
+private fun addressOf(surface: Surface): Long {
+    val window = liveWindowOf(surface)
+    if (window == NO_WINDOW) {
+        return NO_WINDOW
+    }
+    return try {
+        mapped { windowAddress(window) }
+    } finally {
+        NativeSurfaces.release(window)
+    }
 }

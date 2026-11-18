@@ -48,6 +48,7 @@ pub(crate) enum Message {
     PreviewAttach { make: SurfaceMaker, answer: Answering<()> },
     PreviewPresent { params: Value, answer: Answering<()> },
     PreviewDetach { answer: Answering<()> },
+    PreviewHolds { answer: Answering<bool> },
     Export { call: ExportCall },
     Close,
 }
@@ -130,6 +131,12 @@ impl Message {
     /// Emptying the preview slot, built once the engine gives it the channel its answer goes back on.
     pub(crate) fn preview_detach() -> impl FnOnce(Answering<()>) -> Message {
         move |answer| Message::PreviewDetach { answer }
+    }
+
+    /// Asking whether the engine holds a preview surface, built once the engine gives it the
+    /// channel its answer goes back on.
+    pub(crate) fn preview_holds() -> impl FnOnce(Answering<bool>) -> Message {
+        |answer| Message::PreviewHolds { answer }
     }
 }
 
@@ -481,6 +488,28 @@ impl Engine {
         self.send(Message::preview_detach())
     }
 
+    /// Ask the engine whether it holds a preview surface right now, and wait for its answer: from
+    /// the moment a surface is attached ([`Engine::attach_preview`]) until one is given up
+    /// ([`Engine::detach_preview`]), or the GPU goes with it — on [`Engine::suspend_gpu`] or on a
+    /// device lost. A preview call asks this and skips its attach only while the answer is yes and
+    /// the surface held is its own, so an attach runs on the engine's own hold, not on a copy of the
+    /// fact kept by the caller (plan §16, §17, §22, §23). The query runs on the engine thread as
+    /// every call does, behind the settling of a device that failed since the last call, so it
+    /// answers of the device the engine truly holds, never of one it has given up.
+    pub fn has_preview_surface(&self) -> Result<bool> {
+        self.send_has_preview_surface()?.wait()
+    }
+
+    /// Hand [`Engine::has_preview_surface`]'s query to the engine and answer with its [`Answer`],
+    /// without waiting for it, as [`Engine::send_request`] does for a plain call.
+    ///
+    /// # Errors
+    ///
+    /// What [`Engine::send_request`] refuses.
+    pub fn send_has_preview_surface(&self) -> Result<Answer<bool>> {
+        self.send(Message::preview_holds())
+    }
+
     /// Hand one call to the engine thread and answer with what its caller waits on.
     fn send<T>(&self, message: impl FnOnce(Answering<T>) -> Message) -> Result<Answer<T>> {
         Ok(Answer { waiting: self.submit(message)? })
@@ -635,6 +664,7 @@ fn run(mut app: Box<dyn CraftApp>, incoming: Receiver<Message>, closing: CancelT
                 gpu.detach_preview();
                 Ok(())
             }),
+            Message::PreviewHolds { answer } => answer_call(answer, || Ok(gpu.holds_preview())),
             Message::Export { call } => export::run_export(
                 &mut *app,
                 call,
@@ -1148,6 +1178,29 @@ mod tests {
         engine.detach_preview().unwrap();
         assert_eq!(call(&engine, "echo"), Ok(Value::Null), "the detach kept the session");
         engine.close().unwrap();
+    }
+
+    /// The report a preview call reads: no surface until one is attached, a surface from the
+    /// attach until a detach gives it up, and nothing held once the GPU went with it — on a
+    /// suspend, which drops it with no notice to anyone, and after a resume, which brings the
+    /// device back but never the surface with it.
+    #[test]
+    fn the_engine_reports_the_preview_surface_it_holds() {
+        let (app, _shared) = FakeApp::new();
+        let engine = Engine::start(app, GpuChoice::Preferred).unwrap();
+        assert_eq!(engine.has_preview_surface(), Ok(false), "nothing is attached yet");
+        attach_script(&engine, (16, 16));
+        assert_eq!(engine.has_preview_surface(), Ok(true), "the attached surface is held");
+        engine.suspend_gpu().unwrap();
+        assert_eq!(engine.has_preview_surface(), Ok(false), "the surface went with the device");
+        engine.resume_gpu().unwrap();
+        assert_eq!(engine.has_preview_surface(), Ok(false), "the device coming back brings no surface back");
+        attach_script(&engine, (16, 16));
+        assert_eq!(engine.has_preview_surface(), Ok(true), "attaching again is held again");
+        engine.detach_preview().unwrap();
+        assert_eq!(engine.has_preview_surface(), Ok(false), "the detach gave the surface up");
+        engine.close().unwrap();
+        assert_eq!(engine.has_preview_surface(), Err(closed()), "after close the query is refused as every call is");
     }
 
     /// A present waits its turn behind a call that has the engine: handed over while the engine is

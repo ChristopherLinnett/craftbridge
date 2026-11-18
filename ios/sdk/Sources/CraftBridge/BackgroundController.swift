@@ -41,7 +41,7 @@ public final class BackgroundController {
     private let host: any BackgroundHost
     private let lifecycle: Lifecycle
     private var running: [ObjectIdentifier: Running] = [:]
-    private var transitions: Task<Void, Never>?
+    private let transitions = Turns()
 
     /// A running export, and the system's grant that keeps the app running for it, when there is one.
     private struct Running {
@@ -85,7 +85,7 @@ public final class BackgroundController {
     /// Waits until every hand-over the controller started has answered, so a caller or a test reads the
     /// engine's state once the controller is done with it.
     public func settled() async {
-        await transitions?.value
+        await transitions.settled()
     }
 
     /// What the app entering the background asks of the controller: first the exports, at once, then the
@@ -93,10 +93,7 @@ public final class BackgroundController {
     package func enteredBackground() async {
         holdExports()
         guard policy == .cpuWhenBackgrounded else { return }
-        await next {
-            try await $0.engine.suspendGpu()
-            $0.preview.surfaceDropped()
-        }
+        await next { try await $0.engine.suspendGpu() }
     }
 
     /// What the app returning to the foreground asks of the controller: a device again, and the layer
@@ -137,9 +134,7 @@ public final class BackgroundController {
     /// Runs `step` once the hand-overs before it have answered, so a suspend and a resume reach the
     /// engine in the order the app made them, and keeps its failure.
     private func next(_ step: @escaping @MainActor (BackgroundController) async throws -> Void) async {
-        let before = transitions
-        let mine = Task { [weak self] in
-            await before?.value
+        await transitions.run { [weak self] in
             guard let self else { return }
             do {
                 try await step(self)
@@ -148,8 +143,6 @@ public final class BackgroundController {
                 lastFailure = error
             }
         }
-        transitions = mine
-        await mine.value
     }
 }
 

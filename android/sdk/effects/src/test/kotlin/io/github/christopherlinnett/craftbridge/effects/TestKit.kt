@@ -19,10 +19,14 @@ import io.github.christopherlinnett.craftbridge.ffi.core.Engine as BoundaryEngin
 internal fun fakeCore(): Engine = Engine.fromBoundary(BoundaryEngine(NoHandle))
 
 /** A boundary engine that records the frame and preview requests the core's calls hand it, and answers a
- * frame no picture can be made of, so a test reads the request and needs no Android to convert one. */
+ * frame no picture can be made of, so a test reads the request and needs no Android to convert one. Its
+ * report of a held preview surface and its count of detachments are what the preview calls of the typed
+ * facade answer through, so a test can read the one call each of them is. */
 internal class RecordingBoundary : BoundaryEngine(NoHandle) {
     val frames: MutableList<Pair<String, PixelFormat>> = mutableListOf()
     val presents: MutableList<String> = mutableListOf()
+    var detachments = 0
+    var holding = false
 
     override suspend fun frame(
         params: String,
@@ -35,6 +39,12 @@ internal class RecordingBoundary : BoundaryEngine(NoHandle) {
     override suspend fun present(params: String) {
         presents.add(params)
     }
+
+    override suspend fun detachPreview() {
+        detachments++
+    }
+
+    override suspend fun hasPreviewSurface(): Boolean = holding
 }
 
 /** The engine over a recording boundary: what its typed picture and preview calls ask of the core. */

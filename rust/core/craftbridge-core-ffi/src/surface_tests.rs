@@ -229,12 +229,15 @@ fn a_call_made_after_shut_down_is_refused_however_late_the_engine_thread_stops()
 }
 
 /// §17's empty answer through the boundary: a present with nothing attached throws `Gpu` with `no
-/// surface`, detaching nothing is `Ok`, and the engine answers on after both.
+/// surface`, detaching nothing is `Ok`, and the engine answers on after both. The same engine, never
+/// having attached one, answers its report no — and after the close it is refused as every call is.
 #[test]
 fn a_present_without_a_surface_throws_the_empty_answer() {
     let engine = engine();
+    assert_eq!(pollster::block_on(engine.has_preview_surface()), Ok(false), "an engine that never attached holds nothing");
     empty_preview_keeps_the_session(&engine);
     assert_eq!(pollster::block_on(engine.detach_preview()), Ok(()));
+    assert_eq!(pollster::block_on(engine.has_preview_surface()), Ok(false), "detaching nothing holds nothing");
 }
 
 /// The boundary's answer with the preview empty: a present says `no surface` and the engine answers
@@ -252,17 +255,23 @@ pub(crate) fn empty_preview_keeps_the_session(engine: &Engine) {
 /// `Ok` to show on the platform's own terms that the frame reached the surface.
 pub(crate) fn a_preview_follows_the_gpu(engine: &Engine, mut attach: impl FnMut() -> Result<(), CraftError>, drew: impl Fn()) {
     let no_surface = Err(CraftError::gpu("no surface"));
+    assert_eq!(pollster::block_on(engine.has_preview_surface()), Ok(false), "nothing is attached before the app attaches");
     assert_eq!(attach(), Ok(()), "the surface attaches on the engine's device");
+    assert_eq!(pollster::block_on(engine.has_preview_surface()), Ok(true), "the engine holds the surface it just attached");
     assert_eq!(pollster::block_on(engine.present("null".into())), Ok(()), "a real texture is drawn and shown");
     drew();
     assert_eq!(pollster::block_on(engine.suspend_gpu()), Ok(()));
+    assert_eq!(pollster::block_on(engine.has_preview_surface()), Ok(false), "the surface went with the GPU");
     assert_eq!(pollster::block_on(engine.present("null".into())), no_surface, "the surface went with the GPU");
     assert_eq!(pollster::block_on(engine.resume_gpu()), Ok(None), "the device is back");
+    assert_eq!(pollster::block_on(engine.has_preview_surface()), Ok(false), "a resume alone brings no surface back");
     assert_eq!(pollster::block_on(engine.present("null".into())), no_surface, "a resume alone brings no surface back");
     assert_eq!(attach(), Ok(()), "the app attaches its surface again");
+    assert_eq!(pollster::block_on(engine.has_preview_surface()), Ok(true), "the second attach is held as the first was");
     assert_eq!(pollster::block_on(engine.present("null".into())), Ok(()), "and a real texture is drawn and shown again");
     drew();
     assert_eq!(pollster::block_on(engine.detach_preview()), Ok(()));
+    assert_eq!(pollster::block_on(engine.has_preview_surface()), Ok(false), "the detach gave the surface up");
     empty_preview_keeps_the_session(engine);
 }
 
