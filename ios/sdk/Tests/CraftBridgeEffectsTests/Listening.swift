@@ -1,12 +1,7 @@
-// A call that reports progress, listened to and stopped as the scenario says. The engine cannot be told to
-// hold an export where the listener stops it, as the desktop runner holds one, so the stop reaches the
-// export when the engine's next beat brings it to the listener, and a quick export may have ended by then.
-// Neither the answer nor the folder says which: the core answers `Cancelled` and deletes the files an export
-// listed once it has been told to stop, whether or not the export ended while the stop was on its way. The
-// render queue says it: the exporter that meets a stop answers that it was cancelled, which the queue
-// records on the export's item as `UserStopped`, and one that had rendered every frame first records `Done`.
-// So a stopped call is judged by its item, never by how far the beats say it had got, which a stop slow to
-// reach the export would make it pass.
+// A call that reports progress, listened to and stopped as the scenario says. A stopped call is judged by its
+// export's item in the render queue: T22's comment in `conformance/effects/corpus.toml` says why its answer
+// and its folder cannot tell a stop the export met from one that came after its last frame. Nor is it judged
+// by how far the beats say the export had got, which a stop slow to reach the export would make it pass.
 
 import CraftBridge
 import CraftBridgeEffects
