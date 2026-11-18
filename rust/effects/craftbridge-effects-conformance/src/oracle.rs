@@ -66,8 +66,8 @@ impl Cli {
         let create = |path: &Path| File::create(path).map_err(|error| format!("cannot create {}: {error}", path.display()));
         // The step runs in a process group of its own, which is what a timeout stops: whatever the step
         // starts joins its group, and a kill of the step alone leaves those running. A terminal's Ctrl-C
-        // goes to the runner's group and so no longer reaches the step's, which the group's guard ends
-        // when the runner ends first, however it ends.
+        // goes to the runner's group and so no longer reaches the step's, which the group's guard and
+        // sweeper end when the runner ends first, however it ends.
         let mut step = Group::spawn(
             Command::new(&self.binary)
                 .args(&args)
@@ -234,7 +234,7 @@ mod tests {
 
     /// A step whose group loses its guard while it runs (here the step kills it, by its id, which is the
     /// group's) is failed at once, naming the guard, and its group is stopped before the runner answers:
-    /// unguarded, the group would outlive a runner that ended next.
+    /// a group whose watchers no longer both run is stopped rather than trusted to the one left.
     #[test]
     fn a_step_whose_guard_is_killed_is_failed_and_its_group_stopped() {
         let (group, error, left) = group_of_a_cut_short_step(&format!("kill -s KILL $(ps -o pgid= -p $$); sleep {}; true", OUTLASTING_STEP.as_secs()));
