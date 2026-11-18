@@ -328,7 +328,7 @@ mod tests {
 
     #[test]
     fn every_format_that_holds_a_comment_is_read_and_only_those_that_cannot_are_skipped() {
-        for name in ["commands.md", "Bridge.mm", "Plant.xcconfig", "Info.plist", "tool.mjs", "plant.rb", "Package.swift", "pre-push"] {
+        for name in ["commands.md", "Bridge.mm", "Plant.xcconfig", "Info.plist", "tool.mjs", "plant.rb", "Package.swift", "launch"] {
             assert!(can_carry_header(Path::new(name)), "{name} holds a comment");
         }
         for name in ["corpus.json", "Cargo.lock", "Package.resolved", "notes.txt", "gradlew", "gradlew.bat", "gradle-wrapper.jar"] {

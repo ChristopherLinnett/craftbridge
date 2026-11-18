@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# The gate: every check a change must pass before it is pushed or merged (AGENTS.md).
+# The gate: every check of the repository (AGENTS.md). Hosted CI runs every stage of it, each in one of
+# its jobs, on every pull request to main and every push to it (.github/workflows/ci.yml), and is the full
+# gate; locally a change runs only the stages for what it touches (AGENTS.md §12).
 #
-#   tools/ci.sh              every stage, the doctor first
-#   tools/ci.sh rules swift  only the named stages or groups (names below), and the doctor only if named
+#   tools/ci.sh                     every stage, the doctor first
+#   tools/ci.sh rules swift         only the named stages or groups (names below), and the doctor only if named
+#   tools/ci.sh --except rust swift every stage but the named ones, in the order below
 #
 # Every stage runs even when an earlier one fails, so one run reports everything that is broken. Every
-# name is checked before the first stage runs, so a misspelt one costs nothing.
+# name is checked before the first stage runs, so a misspelt one costs nothing. `--except` lets a job run
+# what another job leaves, so a stage added below runs there with no second list to extend.
 set -euo pipefail
 # Git exports its repository variables (GIT_DIR and the rest) to a hook and to whatever `git rebase --exec`
 # or `git bisect run` starts. Every git command the gate runs, the rules' and their tests', would then act
@@ -69,7 +73,7 @@ stage_rust_fmt() {
 # found. So this run builds xtask once into a folder of its own (tools/env.sh), where nothing else writes;
 # each later stage starts that same file.
 xtask_run="$(mktemp -d "${TMPDIR:-/tmp}/craftbridge-xtask.XXXXXX")"
-trap 'rm -rf "$xtask_run"' EXIT
+craftbridge_remove_on_exit "$xtask_run"
 build_xtask() {
   [ -x "$xtask_run/debug/xtask" ] || craftbridge_xtask_build "$xtask_run"
 }
@@ -350,6 +354,15 @@ stages=(doctor rules rust_fmt rust_clippy rust_test conformance rust_mobile rust
 # The stage groups the decision and plan §15 name: Rust and Swift are each several stages.
 group_rust=(rust_fmt rust_clippy rust_test rust_mobile rust_deny)
 group_swift=(swift_format swift_build swift_lint)
+except=0
+if [ "${1:-}" = --except ]; then
+  except=1
+  shift
+  if [ "$#" -eq 0 ]; then
+    echo "ci: --except names no stage to leave out: name them, or run tools/ci.sh alone for every stage" >&2
+    exit 2
+  fi
+fi
 selected=()
 for name in "$@"; do
   case "$name" in
@@ -364,7 +377,22 @@ for name in "$@"; do
       ;;
   esac
 done
-if [ ${#selected[@]} -eq 0 ]; then selected=("${stages[@]}"); fi
+if [ "$except" = 1 ]; then
+  kept=()
+  for name in "${stages[@]}"; do
+    case " ${selected[*]} " in
+      *" $name "*) ;;
+      *) kept+=("$name") ;;
+    esac
+  done
+  if [ ${#kept[@]} -eq 0 ]; then
+    echo "ci: --except leaves no stage to run" >&2
+    exit 2
+  fi
+  selected=("${kept[@]}")
+elif [ ${#selected[@]} -eq 0 ]; then
+  selected=("${stages[@]}")
+fi
 
 # The gate judges the change by one compiler set: the toolchain rust/rust-toolchain.toml pins, on stable
 # rules, with nothing in the environment switching what its tools check. rustup resolves rust/ to that pin
@@ -404,6 +432,7 @@ done
 echo
 if [ ${#failed[@]} -eq 0 ]; then
   echo "ci: ok (${selected[*]})"
+  craftbridge_passed=1
 else
   echo "ci: failed: ${failed[*]}"
   exit 1

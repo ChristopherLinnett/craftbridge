@@ -20,7 +20,7 @@ cd "$CRAFTBRIDGE_ROOT"
 craftbridge_refuse_switches || exit 1
 
 xtask_run="$(mktemp -d "${TMPDIR:-/tmp}/craftbridge-xtask.XXXXXX")"
-trap 'rm -rf "$xtask_run"' EXIT
+craftbridge_remove_on_exit "$xtask_run"
 craftbridge_xtask_build "$xtask_run"
 xtask="$xtask_run/debug/xtask"
 craftbridge_load_pins < <("$xtask" pins)
@@ -67,3 +67,4 @@ while IFS= read -r file; do libraries+=("$file"); done < <(find "$jni_libs" -nam
 "$xtask" elf-alignment "$readelf" "${libraries[@]}"
 
 "$xtask" generate
+craftbridge_passed=1

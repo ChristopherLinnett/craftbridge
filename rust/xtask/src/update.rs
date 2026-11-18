@@ -325,8 +325,7 @@ struct Live {
 
 impl Live {
     fn revs(&self) -> Result<Revs, String> {
-        let text = crate::scan::read_text(&self.root.join("rust/Cargo.toml"))?;
-        let pin = crate::upstream::pins_from_manifest(&text).map_err(|errors| errors.join("\n"))?;
+        let pin = crate::upstream::manifest_pin(&self.root)?;
         let effectcraft = crate::upstream::Cache::create()?.official_commit_fetching(&pin.effectcraft_rev)?;
         Ok(Revs { effectcraft, filmcraft: pin.filmcraft_rev })
     }

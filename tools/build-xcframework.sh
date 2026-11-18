@@ -38,7 +38,7 @@ esac
 # xtask is built into a folder of this run only, as the gate does: a concurrent build would replace the
 # shared binary this script is starting (tools/env.sh).
 work="$(mktemp -d "${TMPDIR:-/tmp}/craftbridge-xcframework.XXXXXX")"
-trap 'rm -rf "$work"' EXIT
+craftbridge_remove_on_exit "$work"
 craftbridge_xtask_build "$work"
 xtask="$work/debug/xtask"
 
@@ -48,3 +48,4 @@ if [ "$regenerate" = yes ]; then "$xtask" generate; fi
 # xtask hands the variable on to the cargo it starts.
 craftbridge_ios_target_env aarch64-apple-ios
 "$xtask" xcframework
+craftbridge_passed=1

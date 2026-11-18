@@ -63,7 +63,8 @@ fi
 # It is built into a folder of this run only, as the gate builds it: a concurrent build would replace the
 # shared binary this script is starting (tools/env.sh).
 xtask_run="$(mktemp -d "${TMPDIR:-/tmp}/craftbridge-upstream.XXXXXX")"
-trap 'rm -rf "$xtask_run"' EXIT
+craftbridge_remove_on_exit "$xtask_run"
 # A writer that does not build is a step that could not finish, never Cargo's own exit code.
 craftbridge_xtask_build "$xtask_run" || exit 1
 "$xtask_run/debug/xtask" upstream update "$1"
+craftbridge_passed=1

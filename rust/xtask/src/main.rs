@@ -43,7 +43,6 @@ mod machinery;
 mod meta;
 mod pins;
 mod plan_views;
-mod prepush;
 mod report;
 mod rust_syntax;
 mod scan;
@@ -235,6 +234,7 @@ fn dispatch(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
         ["dylint", arguments @ ..] => lints::run_dylint(&root, arguments),
         ["upstream", "update", rev] => update::run(&root, rev),
         ["upstream", "source"] => upstream::run_source(&root),
+        ["upstream", "pin"] => upstream::run_pin(&root),
         ["swift-format"] => swift_format::run(&root),
         ["swift-lint"] => swift_lint::run(&root),
         ["pins"] => pins::run(&root),
@@ -262,6 +262,7 @@ fn usage() {
     eprintln!("       cargo xtask files <swift|shell|duplicates>");
     eprintln!("       cargo xtask upstream update <rev>   (through tools/update-upstream.sh: plan \u{a7}24 to <rev>, a commit of official EffectCraft main)");
     eprintln!("       cargo xtask upstream source   (the official URL and the full commit the pin names on official main, for tools/oracle.sh)");
+    eprintln!("       cargo xtask upstream pin   (the EffectCraft revision rust/Cargo.toml pins, for tools/update-upstream.sh to fetch into a new cache)");
     eprintln!("       cargo <check|clippy|test> --message-format=json … | cargo xtask compiled");
     eprintln!("       cargo xtask dylint <cargo-dylint arguments…>   (cargo dylint, taking turns on the lock every lint library run shares)");
     eprintln!("       cargo xtask swift-format");
@@ -361,6 +362,123 @@ mod tests {
         let not_unicode = OsString::from_vec(vec![0xff]);
         assert_eq!(super::dispatch([OsString::from("upstream"), OsString::from("update"), not_unicode].into_iter()), ExitCode::from(64));
         assert_eq!(super::dispatch([OsString::from("upstream"), OsString::from("update")].into_iter()), ExitCode::from(64));
+    }
+
+    /// `upstream pin` is a command a script runs on the tree as it stands: it answers with the tree's pin,
+    /// never the usage a word the dispatch does not know gets.
+    #[test]
+    fn the_pin_is_answered_for_the_tree() {
+        assert_eq!(super::dispatch([OsString::from("upstream"), OsString::from("pin")].into_iter()), ExitCode::SUCCESS);
+    }
+
+    /// The gate refuses a selection it cannot run before any stage starts, in its own words: a stage name
+    /// it does not know, `--except` naming nothing, `--except` leaving nothing, and `--except` anywhere but
+    /// first, which is no stage. So a hosted job that misspells a stage, or whose list empties, fails rather
+    /// than passing on less. Every stage is read from the gate's own refusal, so no second list of them
+    /// stands here.
+    #[test]
+    fn the_gate_refuses_a_selection_it_cannot_run() {
+        let gate = |args: &[&str]| {
+            let output = std::process::Command::new("bash").arg(crate::repo_root().join("tools/ci.sh")).args(args).output().unwrap();
+            (output.status.code(), String::from_utf8_lossy(&output.stderr).trim_end().to_string())
+        };
+        let (code, misspelt) = gate(&["rust_fmtt"]);
+        assert_eq!(code, Some(2), "{misspelt}");
+        let stages = misspelt
+            .strip_prefix("ci: no stage 'rust_fmtt' (stages: ")
+            .and_then(|rest| rest.strip_suffix("; groups: rust, swift)"))
+            .unwrap_or_else(|| panic!("the refusal names every stage: {misspelt}"));
+        assert_eq!(gate(&["--except"]), (Some(2), "ci: --except names no stage to leave out: name them, or run tools/ci.sh alone for every stage".to_string()));
+        let every: Vec<&str> = std::iter::once("--except").chain(stages.split(' ')).collect();
+        assert_eq!(gate(&every), (Some(2), "ci: --except leaves no stage to run".to_string()));
+        let (code, late) = gate(&["shell", "--except", "rules"]);
+        assert!(code == Some(2) && late.starts_with("ci: no stage '--except' (stages: "), "{late}");
+    }
+
+    /// A script that removes its run's folder through `craftbridge_remove_on_exit` passes only by saying
+    /// so: one stopped by an unset variable under `set -u` fails, which bash 3.2 would otherwise end with
+    /// the 0 of its EXIT trap; one that exits with a status of its own keeps it; and every way out removes
+    /// the folder. A cleanup the script names runs on every way out, while the folder is still there, and
+    /// stops at its first failing command, however the script ended; one that fails, or that an unset
+    /// variable stops, fails a run that would have passed and still lets the folder go, as a folder that
+    /// will not go fails it. A second folder, and a cleanup that names no function, are refused at the call
+    /// in their own words, and both folders go. Run with the bash on the search path, macOS's 3.2 here, as
+    /// the scripts' `#!` line runs.
+    #[test]
+    fn a_script_s_run_folder_goes_and_only_a_finished_script_passes() {
+        use std::os::unix::fs::PermissionsExt;
+        let scratch = crate::scratch::Scratch::new("env-remove-on-exit");
+        let env = crate::repo_root().join("tools/env.sh");
+        let folder = scratch.0.join("run");
+        let marker = scratch.0.join("cleaned");
+        let run_said = |call: &str, body: &str| {
+            std::fs::create_dir_all(&folder).unwrap();
+            let _ = std::fs::remove_file(&marker);
+            let script = format!("set -euo pipefail\nsource \"$1\"\nfolder=\"$2\" marker=\"$3\"\n{call}\n{body}\n");
+            let output = std::process::Command::new("bash").arg("-c").arg(script).arg("bash").arg(&env).arg(&folder).arg(&marker).output().unwrap();
+            (output.status.code(), folder.exists(), marker.exists(), String::from_utf8_lossy(&output.stderr).trim_end().to_string())
+        };
+        let run = |cleanup: Option<&str>, body: &str| {
+            let call = match cleanup {
+                Some(cleanup) => format!("tidy() {{ {cleanup}; }}\ncraftbridge_remove_on_exit \"$folder\" tidy"),
+                None => "craftbridge_remove_on_exit \"$folder\"".to_string(),
+            };
+            let (code, left, cleaned, _) = run_said(&call, body);
+            (code, left, cleaned)
+        };
+        assert_eq!(run(None, "echo \"$craftbridge_no_such_variable\"\ncraftbridge_passed=1"), (Some(1), false, false), "stopped by an unset variable");
+        assert_eq!(
+            run(None, "f() { echo \"$craftbridge_no_such_variable\"; }\nif f; then :; fi\ncraftbridge_passed=1"),
+            (Some(1), false, false),
+            "inside a test"
+        );
+        assert_eq!(run(None, "true"), (Some(1), false, false), "ended without saying it passed");
+        assert_eq!(run(None, "exit 64"), (Some(64), false, false), "an exit of its own");
+        assert_eq!(run(None, "sh -c 'exit 2'\ncraftbridge_passed=1"), (Some(2), false, false), "a failure set -e stops on");
+        assert_eq!(run(None, "craftbridge_passed=1"), (Some(0), false, false), "finished");
+        let tidy = Some("[ -d \"$folder\" ] && touch \"$marker\"");
+        assert_eq!(run(tidy, "craftbridge_passed=1"), (Some(0), false, true), "the cleanup runs before the folder goes, and a pass stays one");
+        assert_eq!(
+            run(tidy, "echo \"$craftbridge_no_such_variable\"\ncraftbridge_passed=1"),
+            (Some(1), false, true),
+            "the cleanup runs after an unset variable"
+        );
+        assert_eq!(run(tidy, "exit 64"), (Some(64), false, true), "the cleanup runs after an exit of its own, which keeps its status");
+        assert_eq!(run(Some("false"), "craftbridge_passed=1"), (Some(1), false, false), "a cleanup that fails fails the run");
+        assert_eq!(run(Some("echo \"$craftbridge_no_such_variable\""), "craftbridge_passed=1"), (Some(1), false, false), "a cleanup an unset variable stops");
+        assert_eq!(run(Some("false"), "exit 64"), (Some(64), false, false), "a failed cleanup keeps a failure's own status");
+        let stops = Some("false\ntouch \"$marker\"");
+        assert_eq!(run(stops, "craftbridge_passed=1"), (Some(1), false, false), "a cleanup stops at its first failing command, which fails the run");
+        assert_eq!(run(stops, "f() { exit 0; }\nif f; then :; fi"), (Some(1), false, false), "and so it does when the script ended inside a test");
+        let kept = folder.join("kept");
+        assert_eq!(
+            run(None, "mkdir \"$folder/kept\"\ntouch \"$folder/kept/file\"\nchmod 500 \"$folder/kept\"\ncraftbridge_passed=1"),
+            (Some(1), true, false),
+            "a folder that will not go fails the run"
+        );
+        std::fs::set_permissions(&kept, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::remove_dir_all(&folder).unwrap();
+        let second = scratch.0.join("run.second");
+        assert_eq!(
+            run_said("craftbridge_remove_on_exit \"$folder\"", "mkdir \"$folder.second\"\ncraftbridge_remove_on_exit \"$folder.second\"\ncraftbridge_passed=1"),
+            (
+                Some(1),
+                false,
+                false,
+                format!(
+                    "bash: craftbridge_remove_on_exit is called once a run, and {} is this run's folder: make {} inside it",
+                    folder.display(),
+                    second.display()
+                )
+            ),
+            "a second folder is refused"
+        );
+        assert!(!second.exists(), "the refused folder goes too");
+        assert_eq!(
+            run_said("craftbridge_remove_on_exit \"$folder\" untidy", "craftbridge_passed=1"),
+            (Some(1), false, false, "bash: craftbridge_remove_on_exit names the cleanup untidy, which is no function".to_string()),
+            "a cleanup that names no function is refused"
+        );
     }
 }
 

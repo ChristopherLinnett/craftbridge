@@ -19,8 +19,8 @@ const GUARD: &str = "read -r held; kill -s KILL 0";
 /// Send `signal` to every process in the group `group` leads, as a terminal sends Ctrl-C. A group with
 /// nothing left alive in it is as gone as one that no longer exists: the signal has no one to reach,
 /// and that is no failure. Only a group that still holds a live process the signal did not reach is
-/// one, and the system's own words are the error. Nothing here panics: a push's `Drop` sends its kill
-/// while a failed test unwinds, where a panic would abort the whole suite.
+/// one, and the system's own words are the error. Nothing here panics: a [`Group`]'s `Drop` stops it
+/// through here while a failure unwinds, where a panic would abort the whole suite.
 pub fn signal_group(group: u32, signal: &str) -> Result<(), String> {
     let sent = output_of(Command::new("kill").args(["-s", signal, "--", &format!("-{group}")]))?;
     if sent.status.success() || !group_has_live_process(group)? {
@@ -205,7 +205,7 @@ mod tests {
     const OUTLASTING: &str = "120";
     const STUCK_AFTER: Duration = Duration::from_secs(60);
 
-    /// `program` started leading a group of its own, as the pre-push tests start a push.
+    /// `program` started leading a group of its own, unguarded, as [`stop_group`] takes its leader.
     fn leader(program: &str, args: &[&str]) -> Child {
         Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::null()).process_group(0).spawn().unwrap()
     }

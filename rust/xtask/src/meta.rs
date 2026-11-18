@@ -208,8 +208,7 @@ pub(crate) fn read(rust_dir: &Path, graph: Graph) -> Result<Vec<Crate>, String> 
 /// The folder cargo builds the workspace in, as `cargo metadata` names it. `cargo dylint` takes the folder
 /// it builds the lint library under from the same answer for the same workspace, so Cargo's own answer is
 /// the one that agrees with it however the folder is set: `CARGO_TARGET_DIR`, which `tools/env.sh` sets
-/// for every gate (to the pre-push hook's own folder in a hook), the configuration's `build.target-dir`,
-/// or the workspace's `target/`.
+/// for every gate, the configuration's `build.target-dir`, or the workspace's `target/`.
 pub(crate) fn target_directory(rust_dir: &Path) -> Result<PathBuf, String> {
     target_directory_of(&run(rust_dir, Graph::Workspace)?)
 }

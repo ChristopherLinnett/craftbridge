@@ -16,15 +16,16 @@ CraftBridge is an independent SDK, based on EffectCraft by the ArtCraft team (ht
 | `conformance/` | The scenarios every platform runs against the EffectCraft command line |
 | `tools/` | `doctor.sh` (prerequisites), `ci.sh` (the gate), `env.sh` (the build environment); the build and release scripts arrive with the waves that need them |
 | `plan/` | The plan of record |
+| `.github/` | The hosted CI workflow: the full gate, on every pull request to `main` and every push to it |
 
 ## Working on it
 
 ```bash
-tools/doctor.sh      # checks every prerequisite and prints the fix for each gap
-tools/ci.sh          # the gate: formatters, linters, tests and the rule checks
+tools/doctor.sh          # checks every prerequisite and prints the fix for each gap
+tools/ci.sh <stage>…     # the gate's stages for what a change touches: formatters, linters, tests, the rule checks
 ```
 
-The rules every change follows are in [`AGENTS.md`](AGENTS.md). The design, including the layout and the gate, is the plan of record in [`plan/`](plan/EFFECTCRAFT-PLUGIN-PORT-SCOPING.md).
+Hosted CI runs every stage of `tools/ci.sh` on each pull request to `main` and each push to it; locally a change runs only the stages for what it touches (`AGENTS.md` §12). The rules every change follows are in [`AGENTS.md`](AGENTS.md). The design, including the layout and the gate, is the plan of record in [`plan/`](plan/EFFECTCRAFT-PLUGIN-PORT-SCOPING.md).
 
 ## Licence
 

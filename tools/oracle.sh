@@ -24,10 +24,11 @@ cd "$CRAFTBRIDGE_ROOT"
 # xtask is built into a folder of this run only, as the gate does: a concurrent build would replace the
 # shared binary this script is starting (tools/env.sh).
 xtask_run="$(mktemp -d "${TMPDIR:-/tmp}/craftbridge-oracle.XXXXXX")"
-trap 'rm -rf "$xtask_run"' EXIT
+craftbridge_remove_on_exit "$xtask_run"
 craftbridge_xtask_build "$xtask_run"
 source_line="$("$xtask_run/debug/xtask" upstream source)"
 read -r url commit <<<"$source_line"
 oracle="$CARGO_TARGET_DIR/oracle"
 craftbridge_cargo install --git "$url" --rev "$commit" --locked --root "$oracle" --target-dir "$oracle-build" effectcraft-cli >&2
 echo "$oracle/bin/effectcraft-cli"
+craftbridge_passed=1

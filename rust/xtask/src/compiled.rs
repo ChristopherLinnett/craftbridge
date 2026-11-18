@@ -314,8 +314,7 @@ pub(crate) fn dep_info_files(text: &str) -> BTreeSet<String> {
 /// table, the crate's own manifest and `rust/clippy.toml`. Those hold no code, and `rules: lints` reads
 /// each. The lint library's run records the library it loads, as built by `cargo dylint` from the gate's
 /// own sources, which the rules read where they sit. That build is passed only where `cargo dylint` puts
-/// it, under `target_directory`, the folder cargo names for the workspace, which the pre-push hook moves
-/// for each gate.
+/// it, under `target_directory`, the folder cargo names for the workspace, wherever that folder is set.
 pub(crate) fn judge(
     root: &Path,
     workspace_dir: &Path,
@@ -696,25 +695,25 @@ mod tests {
         assert!(errors.iter().any(|e| e.starts_with("target/debug/libnever_crash_lints@")), "outside dylint's own folder: {errors:?}");
     }
 
-    /// The pre-push hook gates each commit with its own build folder, so `cargo dylint` builds the library
-    /// there, and the folder is the one cargo names, not `rust/target`.
+    /// `cargo dylint` builds the library under the folder cargo names for the workspace, wherever
+    /// `CARGO_TARGET_DIR` or the configuration sets it, so that folder is the one judged, not `rust/target`.
     #[test]
-    fn the_lint_library_built_in_the_folder_the_hook_names_is_accepted_and_one_built_outside_any_is_refused() {
+    fn the_lint_library_built_in_the_folder_cargo_names_is_accepted_and_one_built_outside_any_is_refused() {
         let scratch = Scratch::new("compiled-moved-target");
-        let moved = "pushed/target-7";
-        let in_the_hook_s_folder = built_under(&format!("../{moved}"), "never_crash_lints");
+        let moved = "elsewhere/target-7";
+        let in_the_named_folder = built_under(&format!("../{moved}"), "never_crash_lints");
         let in_the_default_folder = built_under("target", "never_crash_lints");
         let outside_any_build_folder = built_under("../unrelated", "never_crash_lints");
-        let errors = judged_in(&scratch, moved, &[&in_the_hook_s_folder, &in_the_default_folder, &outside_any_build_folder]);
+        let errors = judged_in(&scratch, moved, &[&in_the_named_folder, &in_the_default_folder, &outside_any_build_folder]);
+        assert!(!errors.iter().any(|e| e.starts_with(&format!("{moved}/"))), "the folder cargo names is accepted: {errors:?}");
         assert_eq!(errors.len(), 2, "{errors:?}");
         assert!(errors.iter().any(|e| e.starts_with("rust/target/dylint/libraries/") && e.contains("compilation reads it, but it is not")), "{errors:?}");
         assert!(errors.iter().any(|e| e.starts_with("unrelated/dylint/libraries/")), "{errors:?}");
-        assert!(!errors.iter().any(|e| e.contains("pushed/")), "the folder the hook names is accepted: {errors:?}");
     }
 
-    /// The child half of the test below, run with the build folder in `CARGO_TARGET_DIR` as the hook's gate
-    /// has it: the whole path from cargo's messages, through cargo's own answer for the build folder, to the
-    /// verdict on the library's dep-info, with the lint library's real crate.
+    /// The child half of the test below, run with the build folder moved by `CARGO_TARGET_DIR`, as a gate
+    /// run with that variable has it: the whole path from cargo's messages, through cargo's own answer for
+    /// the build folder, to the verdict on the library's dep-info, with the lint library's real crate.
     #[test]
     #[ignore = "run by the_build_folder_cargo_names_is_where_the_lint_library_is_accepted, in a gate's environment"]
     fn child_judges_the_lint_library_s_run_in_the_build_folder_cargo_names() {
@@ -723,7 +722,7 @@ mod tests {
         let root = crate::repo_root();
         let library = crate::meta::read(&root.join(crate::machinery::LINT_LIBRARY), crate::meta::Graph::Workspace).unwrap();
         let target = crate::meta::target_directory(&root.join("rust")).unwrap();
-        assert_eq!(target, scratch.join("pushed/target-7"), "cargo names the folder the environment sets");
+        assert_eq!(target, scratch.join("elsewhere/target-7"), "cargo names the folder the environment sets");
         let artifact = library_unit(&library[0].id, &scratch.join("deps/libnever_crash_lints-0123456789abcdef.rmeta"));
         let found = errors(&root, &root.join("rust"), &[artifact]).unwrap();
         assert_eq!(found.len(), 1, "{found:?}");
@@ -734,20 +733,20 @@ mod tests {
     fn the_build_folder_cargo_names_is_where_the_lint_library_is_accepted() {
         let scratch = Scratch::new("compiled-cargo-target");
         let under = |folder: &str| scratch.0.join(built_under(folder, "never_crash_lints"));
-        let in_the_hook_s_folder = under("pushed/target-7");
+        let in_the_named_folder = under("elsewhere/target-7");
         let outside_any_build_folder = under("unrelated");
-        for library in [&in_the_hook_s_folder, &outside_any_build_folder] {
+        for library in [&in_the_named_folder, &outside_any_build_folder] {
             std::fs::create_dir_all(library.parent().unwrap()).unwrap();
             std::fs::write(library, "").unwrap();
         }
         scratch.write(
             "deps/never_crash_lints-0123456789abcdef.d",
-            format!("deps/libnever_crash_lints-0123456789abcdef.rmeta: src/lib.rs {} {}\n", in_the_hook_s_folder.display(), outside_any_build_folder.display()),
+            format!("deps/libnever_crash_lints-0123456789abcdef.rmeta: src/lib.rs {} {}\n", in_the_named_folder.display(), outside_any_build_folder.display()),
         );
         scratch.write("deps/libnever_crash_lints-0123456789abcdef.rmeta", "");
         craftbridge_process::rerun(
             "compiled::tests::child_judges_the_lint_library_s_run_in_the_build_folder_cargo_names",
-            &[("XTASK_COMPILED_SCRATCH", scratch.0.as_os_str()), ("CARGO_TARGET_DIR", scratch.0.join("pushed/target-7").as_os_str())],
+            &[("XTASK_COMPILED_SCRATCH", scratch.0.as_os_str()), ("CARGO_TARGET_DIR", scratch.0.join("elsewhere/target-7").as_os_str())],
             "the run in the build folder cargo names did not accept the library there and refuse the one outside",
         )
         .unwrap();

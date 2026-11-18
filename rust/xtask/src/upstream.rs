@@ -1125,12 +1125,24 @@ fn source(cache: &Cache, pin: &Pin) -> Result<String, String> {
     Ok(format!("{} {}", app_url(effectcraft_app()?), pinned_commit(cache, pin)?))
 }
 
-/// `cargo xtask upstream source` as a command.
-pub(crate) fn run_source(root: &Path) -> std::process::ExitCode {
-    let line = crate::scan::read_text(&root.join("rust/Cargo.toml")).and_then(|text| {
-        let pin = pins_from_manifest(&text).map_err(|errors| errors.join("\n"))?;
-        source(&pin_cache(&pin.effectcraft_rev)?, &pin)
-    });
+/// The pins of the tree at `root`, read from its `rust/Cargo.toml`, or every reason they cannot be read
+/// there, one per line.
+pub(crate) fn manifest_pin(root: &Path) -> Result<Pin, String> {
+    let text = crate::scan::read_text(&root.join("rust/Cargo.toml"))?;
+    pins_from_manifest(&text).map_err(|errors| errors.join("\n"))
+}
+
+/// The EffectCraft revision the tree pins, spelt as `rust/Cargo.toml` spells it: the revision a machine
+/// with no upstream cache yet hands `tools/update-upstream.sh`, which makes the cache, fetches that
+/// revision into it and, on a tree that already holds it, writes nothing. So a fresh machine, a hosted CI
+/// runner among them, gets the cache the `upstream` rule and the oracle read, and the pin is written
+/// nowhere a second time.
+fn pin_line(root: &Path) -> Result<String, String> {
+    manifest_pin(root).map(|pin| pin.effectcraft_rev)
+}
+
+/// One line a script reads from stdout, or the reason there is none on stderr.
+fn print_line(line: Result<String, String>) -> std::process::ExitCode {
     match line {
         Ok(line) => {
             println!("{line}");
@@ -1141,6 +1153,16 @@ pub(crate) fn run_source(root: &Path) -> std::process::ExitCode {
             std::process::ExitCode::FAILURE
         }
     }
+}
+
+/// `cargo xtask upstream source` as a command.
+pub(crate) fn run_source(root: &Path) -> std::process::ExitCode {
+    print_line(manifest_pin(root).and_then(|pin| source(&pin_cache(&pin.effectcraft_rev)?, &pin)))
+}
+
+/// `cargo xtask upstream pin` as a command.
+pub(crate) fn run_pin(root: &Path) -> std::process::ExitCode {
+    print_line(pin_line(root))
 }
 
 /// The `upstream` rule check. The pinned revision's manifest and lock are read from the read-only cache
@@ -1320,8 +1342,10 @@ mod tests {
     }
 
     /// The dry run of E12: taking the revision the tree already holds again, by the abbreviated id the
-    /// manifest spells it with or in full, writes nothing, the lock included. The cache is a scratch one,
-    /// so the test needs neither the machine's cache nor the network.
+    /// manifest spells it with or in full, writes nothing, the lock included. The abbreviated id is the
+    /// line `cargo xtask upstream pin` prints, which a machine with no upstream cache hands the update
+    /// script to fetch the pin. The cache is a scratch one, so the test needs neither the machine's cache
+    /// nor the network.
     #[test]
     fn taking_the_revision_the_tree_holds_again_writes_nothing() {
         let upstream = upstream_manifest("d5ead4ba", "e7c3dda");
@@ -1332,7 +1356,9 @@ mod tests {
         let tree = Scratch::new("upstream-dry-run-tree");
         tree.write("rust/Cargo.toml", &manifest);
         tree.write("rust/Cargo.lock", lock);
-        for rev in [abbreviated, full.as_str()] {
+        let printed = pin_line(&tree.0).unwrap();
+        assert_eq!(printed, abbreviated, "`upstream pin` prints the EffectCraft pin as the manifest spells it");
+        for rev in [printed.as_str(), full.as_str()] {
             let said = pin_from(&tree.0, &cache, rev, &full).unwrap();
             assert!(said.contains("nothing written"), "{rev}: {said}");
             assert_eq!(std::fs::read_to_string(tree.0.join("rust/Cargo.toml")).unwrap(), manifest, "{rev}");

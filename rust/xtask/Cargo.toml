@@ -25,9 +25,8 @@ toml_edit.workspace = true
 roxmltree.workspace = true
 unicode-normalization.workspace = true
 
-# The pre-push tests start pushes in groups of their own and stop them as groups, and the tests that must
-# meet a changed environment run one of their own again in a child; that code is the support crate's,
-# shared with the conformance runner and the core's tests.
+# The tests that must meet a changed environment run one of their own again in a child; that code is the
+# support crate's, shared with the conformance runner and the core's tests.
 [dev-dependencies]
 craftbridge-process.workspace = true
 
