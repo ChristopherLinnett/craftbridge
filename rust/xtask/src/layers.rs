@@ -47,6 +47,18 @@ impl Kind {
     fn app(self) -> Option<&'static str> {
         if let Kind::App(noun) = self { Some(noun) } else { None }
     }
+
+    /// Does a crate of this kind ship, linked into an app through its native library? The core's crates,
+    /// the app plugins' and a combined distribution crate do; a host tool and the support crate run only
+    /// on the build host. The workspace's default members are exactly the crates that ship
+    /// ([`default_member_errors`]), and a crate that ships takes the support crate from its tests alone
+    /// ([`check_edge`]).
+    fn ships(self) -> bool {
+        match self {
+            Kind::Core | Kind::App(_) | Kind::Distribution => true,
+            Kind::Tool | Kind::Support => false,
+        }
+    }
 }
 
 /// One row of the table.
@@ -253,6 +265,8 @@ pub(crate) struct CrateInput {
     pub(crate) library_names: Vec<String>,
     /// The names of the package's binary targets, which are the commands it builds.
     pub(crate) binary_names: Vec<String>,
+    /// One of the workspace's default members, as Cargo resolves `default-members`.
+    pub(crate) default_member: bool,
 }
 
 /// The one folder the table says a crate lives in: `<app>/<name>` for an app plugin, `core/<name>` for
@@ -461,7 +475,7 @@ fn check_edge(row: &Entry, target: &Entry, dev: bool, at: &str, errors: &mut Vec
             target,
             "nothing but a host tool depends on a combined distribution crate, not even a crate's tests: it links every app it ships, so whatever took it would carry them all",
         )),
-        (_, Kind::Support) if !dev => {
+        (_, Kind::Support) if row.kind.ships() && !dev => {
             errors.push(edge(at, row, target, "a support crate is host code: a shipped crate takes it only from its tests (a dev-dependency)"));
         }
         _ if dev => {}
@@ -613,6 +627,36 @@ fn missing_crates(table: &[Entry], rust_dir: &Path, packages: &[&str]) -> Vec<St
     errors
 }
 
+/// The workspace's default members, what Cargo builds when no package is named, against the rows that
+/// ship ([`Kind::ships`]). The gate's phone-target runs, which alone compile what only a phone builds,
+/// name no package, so Cargo builds the default members with their tests and every feature, and of any
+/// other member only what a default member takes, with the features its takers turn on, which clippy's and
+/// the lint library's drivers read as the workspace's own code. A crate that ships but is left out of the
+/// list then has its tests and its other features read for no phone, and all of it when no default member
+/// takes it, as none takes a combined distribution crate; and a crate in the list that ships nothing is
+/// host code built for a phone it never runs on. Cargo reads the list only from the workspace manifest,
+/// which is written by hand but for what `tools/update-upstream.sh` copies from the pinned EffectCraft
+/// when the pin moves, so the rules hold the list to the table rather than a second writer keeping it.
+/// `at` names that manifest.
+fn default_member_errors(table: &[Entry], inputs: &[CrateInput], at: &str) -> Vec<String> {
+    let mut errors = Vec::new();
+    for input in inputs {
+        let ships = row_in(table, &input.name).is_some_and(|row| row.kind.ships());
+        if ships && !input.default_member {
+            errors.push(format!(
+                "{at}: default-members leaves out {}, which the layer table ({TABLE}) says ships: the phone targets' lint runs read a crate in full, its tests and every feature, only when it is a default member, and not at all when no default member takes it",
+                input.name
+            ));
+        } else if !ships && input.default_member {
+            errors.push(format!(
+                "{at}: default-members holds {}, which the layer table ({TABLE}) does not say ships: the default members are exactly the crates an app links, which the phone targets' runs build",
+                input.name
+            ));
+        }
+    }
+    errors
+}
+
 /// A crate folder whose name differs from the table's only in case. A case-insensitive disk lets Cargo
 /// find `rust/Core/…` through the members glob `core/*`, so the build passes here and the folder looks
 /// right to every name the rules compare; a case-sensitive checkout then finds no crate at all. The
@@ -679,6 +723,7 @@ fn inputs_from(crates: &[Crate], rust_dir: &Path, root: &Path) -> Vec<CrateInput
             crate_types: package.library_targets.iter().flat_map(|target| target.crate_types.iter().cloned()).collect(),
             library_names: package.library_targets.iter().map(|target| target.name.clone()).collect(),
             binary_names: package.binary_targets.clone(),
+            default_member: package.default_member,
         })
         .collect()
 }
@@ -750,6 +795,7 @@ fn check_against(root: &Path, table: &[Entry]) -> Result<Vec<String>, String> {
         errors.extend(check_crate(table, input));
     }
     errors.extend(folder_case_errors(&rust_dir, &inputs));
+    errors.extend(default_member_errors(table, &inputs, &crate::report::shown(root, &rust_dir.join("Cargo.toml"))));
     // A crate in the workspace but not in the table is reported by check_crate; a table row with no
     // crate is reported here.
     let names: Vec<&str> = crates.iter().map(|package| package.name.as_str()).collect();
@@ -788,6 +834,7 @@ mod tests {
             crate_types: crate_types.iter().map(|kind| kind.to_string()).collect(),
             library_names: if crate_types.is_empty() { Vec::new() } else { vec![name.replace('-', "_")] },
             binary_names: Vec::new(),
+            default_member: false,
         }
     }
 
@@ -896,6 +943,7 @@ mod tests {
             build_script: None,
             depends_on: depends_on.iter().map(|id| id.to_string()).collect(),
             member,
+            default_member: false,
             binary_targets: Vec::new(),
         };
         let resolved = [
@@ -1498,8 +1546,38 @@ mod tests {
         assert!(locked.status.success(), "{}", String::from_utf8_lossy(&locked.stderr));
     }
 
+    /// Push `entries` onto the list `key` (`members`, `default-members`) of the `[workspace]` table of the
+    /// workspace copied to `rust_dir`; with no entries, leave the list out of the table.
+    fn edit_list(rust_dir: &Path, key: &str, entries: &[&str]) {
+        let path = rust_dir.join("Cargo.toml");
+        let mut manifest: toml_edit::DocumentMut = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+        let workspace = manifest["workspace"].as_table_mut().unwrap();
+        if entries.is_empty() {
+            workspace.remove(key).unwrap();
+        } else {
+            let list = workspace[key].as_array_mut().unwrap();
+            entries.iter().for_each(|entry| list.push(*entry));
+        }
+        std::fs::write(&path, manifest.to_string()).unwrap();
+    }
+
+    /// What the rule says of a crate the table says ships that `default-members` leaves out.
+    fn left_out(name: &str) -> String {
+        format!(
+            "rust/Cargo.toml: default-members leaves out {name}, which the layer table (rust/xtask/src/layers.rs) says ships: the phone targets' lint runs read a crate in full, its tests and every feature, only when it is a default member, and not at all when no default member takes it"
+        )
+    }
+
+    /// What the rule says of a crate in `default-members` the table does not say ships.
+    fn held(name: &str) -> String {
+        format!(
+            "rust/Cargo.toml: default-members holds {name}, which the layer table (rust/xtask/src/layers.rs) does not say ships: the default members are exactly the crates an app links, which the phone targets' runs build"
+        )
+    }
+
     /// A planted `craftbridge-all-ffi`, a member of a copy of the workspace taking the effects app's native
     /// library and a stand-in second app's, read through `cargo metadata` as the gate reads the workspace:
+    /// left out of the default members with the stand-in app's library, both are named; listed there and
     /// filed as a combined distribution crate it passes, and filed as an app's crate or a core crate it
     /// fails the isolation rule that kind keeps, in that rule's words. Once the stand-in app's tests take
     /// it, the distribution rule refuses them.
@@ -1507,12 +1585,7 @@ mod tests {
     fn a_planted_distribution_crate_passes_as_one_and_fails_as_an_app_or_a_core_crate() {
         let copy = crate::scratch::rust_tree_copy("layers-distribution");
         let rust_dir = copy.0.join("rust");
-        let workspace_manifest = rust_dir.join("Cargo.toml");
-        let mut manifest: toml_edit::DocumentMut = std::fs::read_to_string(&workspace_manifest).unwrap().parse().unwrap();
-        let members = manifest["workspace"]["members"].as_array_mut().unwrap();
-        members.push("film/*");
-        members.push(ALL.name);
-        std::fs::write(&workspace_manifest, manifest.to_string()).unwrap();
+        edit_list(&rust_dir, "members", &["film/*", ALL.name]);
         let native = |name: &str, dependencies: &str| {
             format!(
                 "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\ncrate-type = [\"staticlib\", \"cdylib\", \"lib\"]\n{dependencies}"
@@ -1529,6 +1602,10 @@ mod tests {
             errors.sort();
             errors
         };
+        // Both ship, and the members' globs alone list neither as a default member, so the phone runs
+        // would lint neither.
+        assert_eq!(filed(ALL), [left_out(ALL.name), left_out(FILM_FFI.name)]);
+        edit_list(&rust_dir, "default-members", &["film/craftbridge-film-ffi", ALL.name]);
         assert_eq!(filed(ALL), Vec::<String>::new(), "filed as a combined distribution crate");
         let at = "rust/craftbridge-all-ffi/Cargo.toml: craftbridge-all-ffi";
         // Filed as an effects crate above the effects library, it reaches the film app's plugin.
@@ -1585,6 +1662,89 @@ mod tests {
         );
     }
 
+    /// Which kinds ship: what an app links, never what runs on the build host alone.
+    #[test]
+    fn the_core_the_plugins_and_a_combined_distribution_crate_ship_and_host_code_does_not() {
+        let kinds = [Kind::Core, Kind::App("effects"), Kind::Distribution, Kind::Tool, Kind::Support];
+        let shipped: Vec<bool> = kinds.iter().map(|kind| kind.ships()).collect();
+        assert_eq!(shipped, [true, true, true, false, false]);
+    }
+
+    /// The default members are exactly the rows that ship: a crate that ships and is no default member is
+    /// named as left out, and a default member that ships nothing, or has no row, as held, each once.
+    #[test]
+    fn the_default_members_are_exactly_the_crates_that_ship() {
+        /// A crate for each of `table`'s rows, a default member where `default_member` says so.
+        fn workspace(table: &[Entry], default_member: impl Fn(&Entry) -> bool) -> Vec<CrateInput> {
+            table
+                .iter()
+                .map(|row| CrateInput { default_member: default_member(row), ..input(row.name, &expected_folder(row), Vec::new(), Vec::new()) })
+                .collect()
+        }
+        let table = with_rows(&[FILM, FILM_FFI, ALL]);
+        let at = "rust/Cargo.toml";
+        let errors = |inputs: &[CrateInput]| default_member_errors(&table, inputs, at);
+        assert_eq!(errors(&workspace(&table, |row| row.kind.ships())), Vec::<String>::new(), "every crate that ships, and no other");
+        // The combined distribution crate, at rust/<name>, is under no glob that lists the plugins.
+        assert_eq!(errors(&workspace(&table, |row| row.kind.ships() && row.kind != Kind::Distribution)), [left_out(ALL.name)]);
+        assert_eq!(errors(&workspace(&table, |row| row.kind.ships() && row.name != "craftbridge-effects-ffi")), [left_out("craftbridge-effects-ffi")]);
+        assert_eq!(
+            errors(&workspace(&table, |row| row.kind.ships() && row.kind != Kind::Core)),
+            ["craftbridge-media", "craftbridge-core", "craftbridge-core-ffi"].map(left_out)
+        );
+        let with_hosts = workspace(&table, |row| row.kind.ships() || row.name == "xtask" || row.kind == Kind::Support);
+        assert_eq!(errors(&with_hosts), [held("craftbridge-process"), held("xtask")]);
+        // A default member with no row: the table says nothing of it, so it does not say it ships.
+        let mut stray = workspace(&table, |row| row.kind.ships());
+        stray.push(CrateInput { default_member: true, ..input("craftbridge-mystery", "core/craftbridge-mystery", Vec::new(), Vec::new()) });
+        assert_eq!(errors(&stray), [held("craftbridge-mystery")]);
+    }
+
+    /// The acceptance plants, in a copy of the workspace read through `cargo metadata` as the gate reads it,
+    /// whose answer resolves `default-members`' globs and paths: a crate the table says ships that the list
+    /// leaves out, and one in the list that the table does not say ships, or has no row for, each fail
+    /// naming it, and a workspace that leaves the list out, which makes every member a default one, fails
+    /// naming each host crate. The tree as it stands, and the planted crate once listed, pass.
+    #[test]
+    fn the_default_members_are_held_to_what_the_table_says_ships() {
+        let copy = crate::scratch::rust_tree_copy("layers-default-members");
+        let rust_dir = copy.0.join("rust");
+        let checked = |table: &[Entry]| {
+            let mut errors = check_against(&copy.0, table).unwrap();
+            errors.sort();
+            errors
+        };
+        assert_eq!(checked(ENTRIES), Vec::<String>::new(), "the tree as it stands");
+        // A new plugin crate: `effects/*` makes it a member, and the list names the effects crates one by one.
+        const EXTRA: Entry = Entry { name: "craftbridge-effects-extra", kind: Kind::App("effects"), rank: 2, ..FILM };
+        copy.write(
+            "rust/effects/craftbridge-effects-extra/Cargo.toml",
+            "[package]\nname = \"craftbridge-effects-extra\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        );
+        copy.write("rust/effects/craftbridge-effects-extra/src/lib.rs", "\n");
+        relock(&rust_dir);
+        let table = with_rows(&[EXTRA]);
+        assert_eq!(checked(&table), [left_out(EXTRA.name)], "in the table and left out of the list");
+        edit_list(&rust_dir, "default-members", &["effects/craftbridge-effects-extra"]);
+        assert_eq!(checked(&table), Vec::<String>::new(), "listed, it passes");
+        assert_eq!(
+            checked(ENTRIES),
+            [
+                held(EXTRA.name),
+                "rust/effects/craftbridge-effects-extra/Cargo.toml: craftbridge-effects-extra is not in the layer table (rust/xtask/src/layers.rs)".to_string()
+            ],
+            "in the list and not in the table"
+        );
+        edit_list(&rust_dir, "default-members", &["xtask"]);
+        assert_eq!(checked(&table), [held("xtask")], "in the list, and a host tool in the table");
+        edit_list(&rust_dir, "default-members", &[]);
+        assert_eq!(
+            checked(&table),
+            ["craftbridge-effects-codegen", "craftbridge-effects-conformance", "craftbridge-process", "uniffi-bindgen", "xtask"].map(held),
+            "no list: Cargo builds every member"
+        );
+    }
+
     /// `check_name` against a row and a name that may differ from the row's own, so a test can ask
     /// what the naming rule says about a crate the table does not contain verbatim.
     fn check_name_of(row: &'static Entry, name: &'static str) -> Vec<String> {
@@ -1614,6 +1774,7 @@ mod tests {
                 build_script: None,
                 depends_on: Vec::new(),
                 member: true,
+                default_member: true,
                 binary_targets: Vec::new(),
             },
             Crate {
@@ -1628,6 +1789,7 @@ mod tests {
                 build_script: None,
                 depends_on: Vec::new(),
                 member: true,
+                default_member: false,
                 binary_targets: Vec::new(),
             },
         ];
@@ -1640,6 +1802,7 @@ mod tests {
         assert_eq!(inputs[0].dependencies[2].outside.as_deref(), Some("/elsewhere/effectcraft/crates/time"), "a path outside the workspace is refused");
         assert_eq!(inputs[0].crate_types, ["lib"]);
         assert_eq!(inputs[0].library_names, ["craftbridge_core"]);
+        assert!(inputs[0].default_member && !inputs[1].default_member, "each crate's default membership is Cargo's");
         assert_eq!(manifest_folder(Path::new("/repo/rust"), "/repo/rust-other/x/Cargo.toml"), None);
     }
 

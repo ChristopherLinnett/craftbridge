@@ -38,6 +38,11 @@ pub(crate) struct Crate {
     pub(crate) depends_on: Vec<String>,
     /// A member of the workspace, as `cargo metadata`'s `workspace_members` lists them.
     pub(crate) member: bool,
+    /// A default member of the workspace, what Cargo builds when no package is named, as `cargo metadata`'s
+    /// `workspace_default_members` lists them. Cargo's own answer, so `default-members`' globs and paths
+    /// are read as Cargo resolves them, and a workspace that leaves the list out, which makes every member
+    /// a default one, is read as Cargo builds it.
+    pub(crate) default_member: bool,
     /// The names of the package's binary targets, which are the commands it builds.
     pub(crate) binary_targets: Vec<String>,
 }
@@ -79,7 +84,8 @@ fn parse(stdout: &[u8]) -> Result<Metadata, String> {
 /// Turn the `packages` array into the small shape the rules use.
 fn packages(metadata: &Metadata) -> Result<Vec<Crate>, String> {
     let list = metadata.get("packages").and_then(Metadata::as_array).ok_or("cargo metadata has no `packages` array")?;
-    let members = metadata.get("workspace_members").and_then(Metadata::as_array).map(Vec::as_slice).unwrap_or_default();
+    let ids = |key: &str| metadata.get(key).and_then(Metadata::as_array).map(Vec::as_slice).unwrap_or_default();
+    let (members, default_members) = (ids("workspace_members"), ids("workspace_default_members"));
     let mut crates = Vec::with_capacity(list.len());
     for package in list {
         let text = |key: &str| package.get(key).and_then(Metadata::as_str).unwrap_or_default().to_string();
@@ -140,7 +146,8 @@ fn packages(metadata: &Metadata) -> Result<Vec<Crate>, String> {
             .collect();
         let id = text("id");
         let depends_on = resolved_dependencies(metadata, &id);
-        let member = members.iter().any(|member| member.as_str() == Some(id.as_str()));
+        let listed = |list: &[Metadata]| list.iter().any(|listed| listed.as_str() == Some(id.as_str()));
+        let (member, default_member) = (listed(members), listed(default_members));
         crates.push(Crate {
             name: text("name"),
             id,
@@ -153,6 +160,7 @@ fn packages(metadata: &Metadata) -> Result<Vec<Crate>, String> {
             build_script,
             depends_on,
             member,
+            default_member,
             binary_targets,
         });
     }
@@ -271,6 +279,20 @@ mod tests {
         assert_eq!(parsed[0].library_targets[0].name, "film_x");
         assert_eq!(parsed[0].dependencies[0].source.as_deref(), Some("git+https://github.com/storytold/effectcraft?rev=1#1"));
         assert!(!parsed[0].member);
+    }
+
+    /// A member Cargo leaves out of `workspace_default_members` is a member and no default one, and a
+    /// package in no list is neither.
+    #[test]
+    fn a_default_member_is_the_one_cargo_lists_as_one() {
+        let json = r#"{"packages": [
+            {"name": "shipped", "id": "shipped#1", "version": "1", "manifest_path": "/x/shipped/Cargo.toml"},
+            {"name": "tool", "id": "tool#1", "version": "1", "manifest_path": "/x/tool/Cargo.toml"},
+            {"name": "outside", "id": "outside#1", "version": "1", "manifest_path": "/y/outside/Cargo.toml"}],
+            "workspace_members": ["shipped#1", "tool#1"], "workspace_default_members": ["shipped#1"]}"#;
+        let parsed = packages(&serde_json::from_str::<Metadata>(json).unwrap()).unwrap();
+        let flags: Vec<(&str, bool, bool)> = parsed.iter().map(|package| (package.name.as_str(), package.member, package.default_member)).collect();
+        assert_eq!(flags, [("shipped", true, true), ("tool", true, false), ("outside", false, false)]);
     }
 
     #[test]

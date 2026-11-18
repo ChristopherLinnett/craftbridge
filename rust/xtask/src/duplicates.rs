@@ -87,6 +87,7 @@ fn package(name: &str, id: &str, source: Option<&str>) -> Crate {
         build_script: None,
         depends_on: Vec::new(),
         member: false,
+        default_member: false,
         binary_targets: Vec::new(),
     }
 }
