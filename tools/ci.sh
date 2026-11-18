@@ -439,7 +439,9 @@ stage_android() {
   # next run.
   # The tests' Kotlin compiles too, under the same warnings-as-errors rules as the code it tests, and the
   # unit tests run, on the TestNG craftbridge.android.library gives every module; a library variant of
-  # AGP 9 builds unit tests for the debug build type alone.
+  # AGP 9 builds unit tests for the debug build type alone. Every test task carries its own verifyTestCounts
+  # finalizer, which names any test the build compiled that TestNG did not run and prints the counts of
+  # written and run tests per module (android/sdk/build-logic/shared).
   # A task a module's build file disables, or guards with `onlyIf`, checks nothing and still lets the
   # build succeed; `cargo xtask skipped-tasks` reads Gradle's log and fails on any such task of the SDK's
   # projects (rust/xtask/src/gradle_log.rs). --console=plain makes Gradle print every task's outcome even

@@ -29,9 +29,11 @@ dependencies {
     compileOnly(libs.kotlin.gradle.plugin)
     compileOnly(libs.spotless.gradle.plugin)
     // A dependency rather than a copy: `runtimeLicences` prints what `LicenceListing` collects, and
-    // so does `gateToolLicences` in `:detekt-rules`, from the other side of the build boundary
-    // (`:licence-listing` is why the one definition can sit where both can load it).
-    implementation("io.github.christopherlinnett.craftbridge.build:licence-listing")
+    // so does `gateToolLicences` in `:detekt-rules`, from the other side of the build boundary, and
+    // this plugin wires the written-against-run test count onto every module's unit tests as
+    // `:detekt-rules` wires it onto its own (`shared` is why each one definition can sit where both
+    // can load it).
+    implementation("io.github.christopherlinnett.craftbridge.build:shared")
 }
 
 gradlePlugin {
