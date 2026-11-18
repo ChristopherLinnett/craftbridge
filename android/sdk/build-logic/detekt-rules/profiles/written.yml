@@ -1,7 +1,8 @@
 # The rules every source set a module writes by hand is held to, its tests included, on top of
 # base.yml: the JNI confinement of AGENTS.md §4, the refusals of §10 — no suppression over a whole
-# file, none on an item for a rule the gate enforces, and none of a compiler error — and §9's rule that a
-# public call written by hand takes no name the generated facade gives the same type. The generated
+# file, none on an item for a rule the gate enforces, and none of a compiler error — §9's rule that a
+# public call written by hand takes no name the generated facade gives the same type, and the refusal
+# of a `@Test` TestNG never runs, whose absence no report of a test run could name. The generated
 # bindings are the generator's code, checked through the generator (§6), so they are given base.yml alone,
 # and theirs is the one folder that may suppress the errors explicit API mode reports.
 craftbridge:
@@ -14,4 +15,6 @@ craftbridge:
   ErrorSuppression:
     active: true
   GeneratedNameTaken:
+    active: true
+  UnrunTest:
     active: true

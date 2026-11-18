@@ -22,8 +22,8 @@ import kotlin.test.assertTrue
 
 // The rules' own tests: each banned form is shown to fire and each legal form shown to pass, as every
 // rule is proven. `active` comes from the profiles the convention plugin hands detekt; these rules
-// are built straight from a config here. Only FileWideSuppression and ErrorSuppression read the compiler's
-// analysis, so only their tests compile their snippets.
+// are built straight from a config here. Only FileWideSuppression, ErrorSuppression, GeneratedNameTaken
+// and UnrunTest read the compiler's analysis, so only their tests compile their snippets.
 
 private val active = TestConfig("active" to true)
 
@@ -213,34 +213,69 @@ class ErrorSuppressionTest {
     }
 }
 
-class ErrorSuppressionProfileTest {
-    private fun section(profile: Path): Config? =
+class ProfileActivationTest {
+    private fun section(
+        profile: Path,
+        rule: String,
+    ): Config? =
         Files
             .newBufferedReader(profile)
             .use { YamlConfig.load(it) }
             .subConfig(CraftbridgeRuleSetProvider.RULE_SET)
-            .takeIf { "ErrorSuppression" in it.subConfigKeys() }
-            ?.subConfig("ErrorSuppression")
+            .takeIf { rule in it.subConfigKeys() }
+            ?.subConfig(rule)
+
+    private val profiles: List<Path> =
+        Files.list(Path.of("profiles")).use { files -> files.filter { it.toString().endsWith(".yml") }.sorted().toList() }
 
     @Test
-    fun `the refusal runs on all written code and on no run of the generated bindings`() {
-        // The convention plugin quiets the compiler's own warning about suppressing an error for every
-        // file, so this rule is the only refusal of one: it must run wherever the bindings do not. A run
-        // takes its profiles in order and the last that names a rule decides it, so written.yml switches
-        // it on and no other profile names it: base.yml, the bindings' whole profile, would switch it on
-        // there, and one read after written.yml, as shipped.yml is, could switch it off for written code.
-        val profiles = Files.list(Path.of("profiles")).use { files -> files.filter { it.toString().endsWith(".yml") }.sorted().toList() }
+    fun `every rule of the rule set is switched on by a profile`() {
+        // detekt leaves off every rule no profile names, so a rule switched on with one line, whose
+        // absence no module can fail for (clean code passes without it), goes unheard with that line
+        // gone: this is the only check that its activation stands. The rules are the rule set's own,
+        // as detekt loads them, so a rule added to it is held to this without being listed again.
+        val rules =
+            CraftbridgeRuleSetProvider()
+                .instance()
+                .rules.keys
+                .map { it.value }
+        assertTrue(rules.isNotEmpty(), "the rule set holds no rule")
+        for (rule in rules) {
+            assertTrue(
+                profiles.any { section(it, rule)?.valueOrNull<Any>(Config.ACTIVE_KEY) == true },
+                "no profile switches $rule on, so detekt never runs it",
+            )
+        }
+    }
+
+    @Test
+    fun `each rule the written profile alone must decide is switched there and named nowhere else`() {
+        // Two rules must be switched on by written.yml alone, each for its own reason. A run takes
+        // its profiles in order and the last that names a rule decides it, so written.yml switches
+        // them on and no other profile names them: base.yml, the bindings' whole profile, would
+        // switch them on there too, and one read after written.yml, as shipped.yml is, could switch
+        // them off for written code.
+        val rules =
+            linkedMapOf(
+                // The convention plugin quiets the compiler's own warning about suppressing an error
+                // for every file, so this rule is the only refusal of one.
+                "ErrorSuppression" to "nothing else refuses a suppressed compiler error",
+                // A test TestNG never runs says nothing in any report, so no test run could name it.
+                "UnrunTest" to "nothing else refuses a @Test TestNG never runs",
+            )
         assertTrue(profiles.any { it.fileName.toString() == "written.yml" }, "no written.yml among $profiles")
-        for (profile in profiles) {
-            val switch = section(profile)?.valueOrNull<Any>(Config.ACTIVE_KEY)
-            if (profile.fileName.toString() == "written.yml") {
-                assertEquals(
-                    true,
-                    switch,
-                    "written.yml does not switch ErrorSuppression on, and nothing else refuses a suppressed compiler error",
-                )
-            } else {
-                assertEquals(null, section(profile), "$profile names ErrorSuppression, which written.yml alone decides")
+        for (rule in rules) {
+            for (profile in profiles) {
+                val switch = section(profile, rule.key)?.valueOrNull<Any>(Config.ACTIVE_KEY)
+                if (profile.fileName.toString() == "written.yml") {
+                    assertEquals(
+                        true,
+                        switch,
+                        "written.yml does not switch ${rule.key} on, and ${rule.value}",
+                    )
+                } else {
+                    assertEquals(null, section(profile, rule.key), "$profile names ${rule.key}, which written.yml alone decides")
+                }
             }
         }
     }
@@ -351,6 +386,254 @@ class GateRuleSuppressionTest {
     }
 }
 
+class UnrunTestTest {
+    // The rule resolves the `@Test` and `@Ignore` annotations, their arguments and the function's return
+    // type, so it reads each snippet the way a full detekt run does — beside a file declaring TestNG's own
+    // annotations, which kotlin-test's `Test` and `Ignore` are typealiases of.
+
+    private val environment = createEnvironment()
+
+    private val testng =
+        """
+        package org.testng.annotations
+
+        annotation class Test(val enabled: Boolean = true, val invocationCount: Int = 1)
+
+        annotation class Ignore(val reason: String = "")
+
+        annotation class BeforeMethod
+        """.trimIndent()
+
+    private fun lint(code: String) = UnrunTest(active).lintWithContext(environment, code, testng)
+
+    private fun snippet(body: String) = "package p\n\nimport org.testng.annotations.Ignore\nimport org.testng.annotations.Test\n\n$body\n"
+
+    @Test
+    fun `a test whose method is not void is reported, however the value, or its absence, appears`() {
+        for (body in listOf(
+            "@Test fun f(): String = \"x\"",
+            "@Test fun f() = 1",
+            "@Test fun f(): Int {\n    return 1\n}",
+            // `Nothing` compiles to a method returning `java.lang.Void`, `Unit?` to one returning
+            // `kotlin.Unit` and `suspend` to one returning `Object`: none is `void`, so TestNG drops each.
+            "@Test fun f(): Nothing = error(\"x\")",
+            "@Test fun f(): Unit? = null",
+            "@Test suspend fun f() {}",
+            // A property's accessor carries the `@Test`, through a use-site target or on the accessor itself.
+            "class A {\n    @get:Test val x: Int get() = 1\n}",
+            "class A {\n    val x: Int\n        @Test get() = 1\n}",
+        )) {
+            assertFindings(1, lint(snippet(body)), body)
+        }
+    }
+
+    @Test
+    fun `a test bounded to plain Unit passes, and so does any other function`() {
+        for (body in listOf(
+            "@Test fun f() {}",
+            "@Test fun f(): Unit = println(\"x\")",
+            "typealias Done = Unit\n\n@Test fun f(): Done {}",
+            "class A {\n    @Test private fun f() {}\n}",
+            "fun helper(): String = \"x\"",
+        )) {
+            assertFindings(0, lint(snippet(body)), body)
+        }
+    }
+
+    @Test
+    fun `an ignore over the class is reported on the class once, a class switched off passes, and a class with no test under it passes`() {
+        val ignored = snippet("@Ignore\nclass A {\n    @Test fun a() {}\n    @Test fun b(): String = \"x\"\n}")
+        assertFindings(1, lint(ignored), ignored)
+        // Each method's own `@Test` wins over the class's switched-off `@Test`: TestNG runs the methods
+        // all the same, so the shape is legal and passes.
+        val switched = snippet("@Test(enabled = false)\nclass A {\n    @Test fun a() {}\n}")
+        assertFindings(0, lint(switched), switched)
+        val noTests = snippet("@Ignore\nclass A {\n    fun helper(): String = \"x\"\n}")
+        assertFindings(0, lint(noTests), noTests)
+        // TestNG reads an `@Ignore` on the class it is written over, not on a class nested in it.
+        val nested = snippet("@Ignore\nclass A {\n    class B {\n        @Test fun b() {}\n    }\n}")
+        assertFindings(0, lint(nested), nested)
+    }
+
+    @Test
+    fun `a test over the class makes a test of every public method, run as it says`() {
+        val members =
+            snippet(
+                """
+                @Test
+                class A {
+                    fun runs() {}
+
+                    fun value(): Int = 1
+
+                    internal fun stillPublic(): String = "x"
+
+                    val property = 1
+
+                    suspend fun later() {}
+
+                    private fun hidden(): Int = 1
+
+                    @JvmField val field = 1
+
+                    @org.testng.annotations.BeforeMethod fun configuration(): Int = 1
+                }
+                """.trimIndent(),
+            )
+        val findings = lint(members)
+        assertFindings(4, findings, members)
+        for (dropped in listOf("`fun value()`", "`fun stillPublic()`", "of `property`", "`fun later()`")) {
+            assertTrue(findings.any { dropped in it.message }, "$dropped: ${findings.joinToString { it.message }}")
+        }
+        val switchedOff = snippet("@Test(enabled = false)\nclass A {\n    fun dropped() {}\n\n    @Test fun runs() {}\n}")
+        assertFindings(1, lint(switchedOff), switchedOff)
+        val variable = snippet("@Test\nclass A {\n    var count = 1\n}")
+        assertEquals(listOf("`var count`"), lint(variable).map { it.message.substringBefore(',') }, variable)
+        val ignored = snippet("@Ignore\n@Test\nclass A {\n    fun a() {}\n\n    val b = 1\n}")
+        assertEquals(
+            listOf("`@Ignore` over this class runs none of the 2 tests"),
+            lint(ignored).map { it.message.substringBefore(" TestNG") },
+            ignored,
+        )
+    }
+
+    @Test
+    fun `a switch TestNG honors is reported, however written and under whatever name the file gives it`() {
+        for (body in listOf(
+            "@Ignore\n@Test fun f() {}",
+            "@Test(enabled = false) fun f() {}",
+            "const val OFF = false\n\n@Test(enabled = OFF) fun f() {}",
+            "@Test(enabled = !true) fun f() {}",
+            "@Test(invocationCount = 0) fun f() {}",
+            "@Test(invocationCount = -1) fun f() {}",
+            "const val NEVER = 0\n\n@Test(invocationCount = NEVER) fun f() {}",
+        )) {
+            assertFindings(1, lint(snippet(body)), body)
+        }
+        for (code in listOf(
+            "package p\n\nimport org.testng.annotations.Test as Case\n\n@Case fun f(): String = \"x\"\n",
+            "package p\n\nimport org.testng.annotations.Test\n\nprivate typealias Case = Test\n\n@Case fun f() = 1\n",
+        )) {
+            assertFindings(1, lint(code), code)
+        }
+    }
+
+    @Test
+    fun `a switch TestNG reads as on passes`() {
+        for (body in listOf("@Test(enabled = true) fun f() {}", "@Test(invocationCount = 1) fun f() {}")) {
+            assertFindings(0, lint(snippet(body)), body)
+        }
+    }
+
+    @Test
+    fun `a switch on a getter's own test names the switch, not the getter's return`() {
+        // The switch is read of a getter's own `@Test` as of a function's, and a getter switched off is
+        // named for its switch, not for a return that never came up for TestNG. A getter of `Unit` is
+        // refused as every getter is: a property's getter always returns the property, and a `Unit` one
+        // compiles to a method returning the `Unit` object — no property getter compiles to a `void` one.
+        val off = snippet("class A {\n    @get:Test(enabled = false)\n    val off: Unit get() = println(\"x\")\n}")
+        val switched = lint(off)
+        assertFindings(1, switched, off)
+        assertTrue("enabled = false" in switched.single().message, switched.single().message)
+        val zero = snippet("class A {\n    @get:Test(invocationCount = 0)\n    val zero: Int get() = 1\n}")
+        val counted = lint(zero)
+        assertFindings(1, counted, zero)
+        assertTrue("invocationCount = 0" in counted.single().message, counted.single().message)
+        val gone = snippet("class A {\n    @get:Ignore\n    @get:Test val gone: Unit get() = println(\"x\")\n}")
+        val ignored = lint(gone)
+        assertFindings(1, ignored, gone)
+        assertTrue("`@Ignore`" in ignored.single().message, ignored.single().message)
+        // An `@Ignore` written on the accessor, beside the `@Test` there, is the getter's own switch too.
+        val onAccessor = snippet("class A {\n    val gone: Int\n        @Ignore\n        @Test\n        get() = 1\n}")
+        val accessorIgnored = lint(onAccessor)
+        assertFindings(1, accessorIgnored, onAccessor)
+        assertTrue("`@Ignore`" in accessorIgnored.single().message, accessorIgnored.single().message)
+        for (finding in switched + counted + ignored + accessorIgnored) {
+            assertTrue("write the test as a function" !in finding.message, finding.message)
+        }
+        val unit = snippet("class A {\n    @get:Test val u: Unit get() = println(\"x\")\n}")
+        val returns = lint(unit)
+        assertFindings(1, returns, unit)
+        assertTrue("returns the property's value" in returns.single().message, returns.single().message)
+    }
+
+    @Test
+    fun `a test on the setter is TestNG's own to report, and only that method's switch silences it`() {
+        // A `@Test` read on a property's setter is TestNG's test of the setter method: that method takes a
+        // value TestNG cannot supply unless a data provider fills it, so the run fails the method or runs
+        // it, and says so itself either way — no silence for this rule to name. The switch that brings
+        // TestNG's silence back is written on that same method, and is read as the getter's is.
+        val live = snippet("class A {\n    @set:Test\n    var x: Int = 0\n}")
+        assertFindings(0, lint(live), live)
+        val gone = snippet("class A {\n    @set:Ignore\n    @set:Test\n    var x: Int = 0\n}")
+        val ignored = lint(gone)
+        assertFindings(1, ignored, gone)
+        assertTrue("`@Ignore`" in ignored.single().message, ignored.single().message)
+        val off = snippet("class A {\n    @set:Test(enabled = false)\n    var x: Int = 0\n}")
+        val switched = lint(off)
+        assertFindings(1, switched, off)
+        assertTrue("enabled = false" in switched.single().message, switched.single().message)
+        // An `@Ignore` switches off the method it sits on and no other: crossed over, the getter's own
+        // `@Test` is as live as TestNG reads it, and drops the way a getter's test always does.
+        val crossed = snippet("class A {\n    @get:Test\n    @set:Ignore\n    var x: Int = 0\n}")
+        val crossing = lint(crossed)
+        assertFindings(1, crossing, crossed)
+        assertTrue("returns the property's value" in crossing.single().message, crossing.single().message)
+    }
+
+    @Test
+    fun `each accessor's own test is read apart, whichever is written first`() {
+        // TestNG reads the getter's `@Test` and the setter's as two tests: a setter's written first hides
+        // nothing of the getter's, which drops as a getter's test always does.
+        for (body in listOf(
+            "class A {\n    @set:Test\n    @get:Test\n    var x: Int = 0\n}",
+            "class A {\n    var x: Int = 0\n        @Test\n        set(value) {\n            field = value\n        }\n\n" +
+                "        @Test\n        get() = field\n}",
+        )) {
+            val findings = lint(snippet(body))
+            assertFindings(1, findings, body)
+            assertTrue("returns the property's value" in findings.single().message, findings.single().message)
+        }
+        val both = snippet("class A {\n    @set:Test(enabled = false)\n    @get:Test(invocationCount = 0)\n    var x: Int = 0\n}")
+        assertEquals(
+            listOf("`@Test var x` says `invocationCount = 0`", "the setter test of `var x` says `enabled = false`"),
+            lint(both).map { it.message.substringBefore(':') }.sorted(),
+            both,
+        )
+    }
+
+    @Test
+    fun `under the test over its class a member's own ignore switches nothing, and an ignored class carrying a test is refused`() {
+        // TestNG reads a member's `@Ignore` only beside the member's own `@Test`: under the class's, the
+        // member runs, so a `Unit` one passes and a getter drops for its return, not for the `@Ignore`.
+        val runs = snippet("@Test\nclass A {\n    @Ignore\n    fun runs() {}\n}")
+        assertFindings(0, lint(runs), runs)
+        val getter = snippet("@Test\nclass A {\n    @get:Ignore\n    val v = 1\n}")
+        val dropped = lint(getter)
+        assertFindings(1, dropped, getter)
+        assertTrue("returns the property's value" in dropped.single().message, dropped.single().message)
+        // The `@Test` an `@Ignore` switches off is read over every other class whose `@Test` says the same,
+        // so a class carrying both is refused even when it holds no test itself.
+        val empty = snippet("@Ignore\n@Test\nclass A")
+        val silencing = lint(empty)
+        assertFindings(1, silencing, empty)
+        assertTrue("says the same" in silencing.single().message, silencing.single().message)
+        // Each method is a test of its own: a `var`'s getter and public setter, and each accessor's own `@Test`.
+        for ((body, count) in listOf(
+            "@Ignore\n@Test\nclass A {\n    var v = 1\n}" to 2,
+            "@Ignore\n@Test\nclass A {\n    var v = 1\n        private set\n}" to 1,
+            "@Ignore\nclass A {\n    @get:Test\n    @set:Test\n    var v = 1\n}" to 2,
+        )) {
+            val code = snippet(body)
+            assertEquals(
+                listOf("`@Ignore` over this class runs none of the $count tests"),
+                lint(code).map { it.message.substringBefore(" TestNG") },
+                code,
+            )
+        }
+    }
+}
+
 class CraftbridgeConfigValidatorTest {
     private fun problems(vararg rules: Pair<String, Any>) =
         CraftbridgeConfigValidator().validate(TestConfig("craftbridge" to mapOf("active" to true, *rules))).map { it.message }
@@ -367,6 +650,8 @@ class CraftbridgeConfigValidatorTest {
                 "FileWideSuppression",
                 "GateRuleSuppression",
                 "ErrorSuppression",
+                "GeneratedNameTaken",
+                "UnrunTest",
             )
         assertEquals(emptyList(), problems(*all.map { it to mapOf("active" to true) }.toTypedArray()))
         assertEquals(emptyList(), problems("NotNullAssertion" to mapOf("active" to false)))
