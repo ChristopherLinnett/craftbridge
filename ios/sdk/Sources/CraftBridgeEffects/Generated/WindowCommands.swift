@@ -185,23 +185,6 @@ extension EffectsEngine.WindowCommands {
         )
     }
 
-    /// Restore ScriptUI Panels.
-    ///
-    /// The engine describes its parameters as: {} → reopens the ScriptUI panels open when EffectCraft last quit (frontends call it at launch) → {opened: [name], failed: [{name, error}]}
-    ///
-    /// - Parameter extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func restoreScriptPanels(
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "window.restoreScriptPanels",
-            [:],
-            extra: extra
-        )
-    }
-
     /// Save Changes to this Workspace.
     ///
     /// The engine describes its parameters as: {}
@@ -234,28 +217,6 @@ extension EffectsEngine.WindowCommands {
     ) async throws -> JSONValue {
         try await self.engine.command(
             "window.saveWorkspaceAs",
-            [
-                "name": name.jsonValue
-            ],
-            extra: extra
-        )
-    }
-
-    /// ScriptUI Panel.
-    ///
-    /// The engine describes its parameters as: {name (a script in the ScriptUI Panels folder, e.g. `Layer Tools.jsx`, or `Folder/Panel.jsx` in a subfolder)} → opens it as a dockable panel
-    ///
-    /// - Parameters:
-    ///   - name: The key `name`: name (a script in the ScriptUI Panels folder, e.g. `Layer Tools.jsx`, or `Folder/Panel.jsx` in a subfolder)
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func scriptPanel(
-        name: JSONValue,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "window.scriptPanel",
             [
                 "name": name.jsonValue
             ],

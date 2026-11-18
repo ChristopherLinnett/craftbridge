@@ -18,57 +18,6 @@ extension EffectsEngine {
 }
 
 extension EffectsEngine.ContentFillCommands {
-    /// The values the engine accepts for the key `method` of `contentFill.generate`.
-    public struct GenerateMethod: Sendable, Hashable, JSONStringRepresentable {
-        /// The word the engine takes for this value.
-        public let rawValue: String
-
-        /// The value of a word, one listed here or one the engine added since; the engine checks it.
-        public init(rawValue: String) {
-            self.rawValue = rawValue
-        }
-        /// The value `object`.
-        public static let object = GenerateMethod(rawValue: "object")
-        /// The value `surface`.
-        public static let surface = GenerateMethod(rawValue: "surface")
-        /// The value `edgeBlend`.
-        public static let edgeBlend = GenerateMethod(rawValue: "edgeBlend")
-    }
-
-    /// The values the engine accepts for the key `range` of `contentFill.generate`.
-    public struct GenerateRange: Sendable, Hashable, JSONStringRepresentable {
-        /// The word the engine takes for this value.
-        public let rawValue: String
-
-        /// The value of a word, one listed here or one the engine added since; the engine checks it.
-        public init(rawValue: String) {
-            self.rawValue = rawValue
-        }
-        /// The value `workArea`.
-        public static let workArea = GenerateRange(rawValue: "workArea")
-        /// The value `entire`.
-        public static let entire = GenerateRange(rawValue: "entire")
-    }
-
-    /// The values the engine accepts for the key `lightingCorrection` of `contentFill.generate`.
-    public struct GenerateLightingCorrection: Sendable, Hashable, JSONStringRepresentable {
-        /// The word the engine takes for this value.
-        public let rawValue: String
-
-        /// The value of a word, one listed here or one the engine added since; the engine checks it.
-        public init(rawValue: String) {
-            self.rawValue = rawValue
-        }
-        /// The value `none`.
-        public static let noneValue = GenerateLightingCorrection(rawValue: "none")
-        /// The value `subtle`.
-        public static let subtle = GenerateLightingCorrection(rawValue: "subtle")
-        /// The value `moderate`.
-        public static let moderate = GenerateLightingCorrection(rawValue: "moderate")
-        /// The value `strong`.
-        public static let strong = GenerateLightingCorrection(rawValue: "strong")
-    }
-
     /// The values the engine accepts for the key `method` of `contentFill.set`.
     public struct SetMethod: Sendable, Hashable, JSONStringRepresentable {
         /// The word the engine takes for this value.
@@ -118,52 +67,6 @@ extension EffectsEngine.ContentFillCommands {
         public static let moderate = SetLightingCorrection(rawValue: "moderate")
         /// The value `strong`.
         public static let strong = SetLightingCorrection(rawValue: "strong")
-    }
-
-    /// Generate Fill Layer.
-    ///
-    /// The engine describes its parameters as: {layer?, method?: object|surface|edgeBlend, range?: workArea|entire, alphaExpansion? (px), lightingCorrection?: none|subtle|moderate|strong, referenceLayer?, referenceTime? (s), outputDir?, wait?: bool}
-    ///
-    /// - Parameters:
-    ///   - layer: The key `layer`: layer?
-    ///   - method: The key `method`: method?: object|surface|edgeBlend
-    ///   - range: The key `range`: range?: workArea|entire
-    ///   - alphaExpansion: The key `alphaExpansion`: alphaExpansion? (px)
-    ///   - lightingCorrection: The key `lightingCorrection`: lightingCorrection?: none|subtle|moderate|strong
-    ///   - referenceLayer: The key `referenceLayer`: referenceLayer?
-    ///   - referenceTime: The key `referenceTime`: referenceTime? (s)
-    ///   - outputDir: The key `outputDir`: outputDir?
-    ///   - wait: The key `wait`: wait?: bool
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func generate(
-        layer: JSONValue? = nil,
-        method: GenerateMethod? = nil,
-        range: GenerateRange? = nil,
-        alphaExpansion: Double? = nil,
-        lightingCorrection: GenerateLightingCorrection? = nil,
-        referenceLayer: JSONValue? = nil,
-        referenceTime: Double? = nil,
-        outputDir: JSONValue? = nil,
-        wait: Bool? = nil,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "contentFill.generate",
-            [
-                "layer": layer?.jsonValue,
-                "method": method?.jsonValue,
-                "range": range?.jsonValue,
-                "alphaExpansion": alphaExpansion?.jsonValue,
-                "lightingCorrection": lightingCorrection?.jsonValue,
-                "referenceLayer": referenceLayer?.jsonValue,
-                "referenceTime": referenceTime?.jsonValue,
-                "outputDir": outputDir?.jsonValue,
-                "wait": wait?.jsonValue,
-            ],
-            extra: extra
-        )
     }
 
     /// Content-Aware Fill Settings.

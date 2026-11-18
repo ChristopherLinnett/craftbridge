@@ -901,28 +901,6 @@ extension EffectsEngine.RenderQueueCommands {
         )
     }
 
-    /// Render.
-    ///
-    /// The engine describes its parameters as: {wait?: bool (default true; the UI renders in the background)}
-    ///
-    /// - Parameters:
-    ///   - wait: The key `wait`: wait?: bool (default true; the UI renders in the background)
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func render(
-        wait: Bool? = nil,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "renderQueue.render",
-            [
-                "wait": wait?.jsonValue
-            ],
-            extra: extra
-        )
-    }
-
     /// Save Template.
     ///
     /// The engine describes its parameters as: {kind: renderSettings|outputModule, name, item?|index? (save from this item), from?: template to copy, module?, params?: {setRenderSettings / setOutputModule keys}}

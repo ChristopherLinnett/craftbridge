@@ -18,34 +18,6 @@ extension EffectsEngine {
 }
 
 extension EffectsEngine.EffectPluginsCommands {
-    /// Install Effect Plug-in.
-    ///
-    /// The engine describes its parameters as: {path (.wasm plug-in: copied into the Plug-ins folder and loaded on every start) | folder (a plug-in bundle: every .wasm goes into the Plug-ins folder and every .jsx becomes a ScriptUI panel), bundle? (the menu: ask for a folder)}
-    ///
-    /// - Parameters:
-    ///   - path: The key `path`: path (.wasm plug-in: copied into the Plug-ins folder and loaded on every start) | folder (a plug-in bundle: every .wasm goes into the Plug-ins folder and every .jsx becomes a ScriptUI panel)
-    ///   - folder: The key `folder`: path (.wasm plug-in: copied into the Plug-ins folder and loaded on every start) | folder (a plug-in bundle: every .wasm goes into the Plug-ins folder and every .jsx becomes a ScriptUI panel)
-    ///   - bundle: The key `bundle`: bundle? (the menu: ask for a folder)
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func install(
-        path: JSONValue? = nil,
-        folder: JSONValue? = nil,
-        bundle: JSONValue? = nil,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "effect.plugins.install",
-            [
-                "path": path?.jsonValue,
-                "folder": folder?.jsonValue,
-                "bundle": bundle?.jsonValue,
-            ],
-            extra: extra
-        )
-    }
-
     /// List Effect Plug-ins.
     ///
     /// The engine describes its parameters as: {} → {api, wasm, helpers, plugins: [{id, name, category, version, author, source, params, error}]}

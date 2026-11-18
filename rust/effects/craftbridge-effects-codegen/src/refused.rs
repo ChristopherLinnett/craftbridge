@@ -34,6 +34,13 @@
 //!   - A bridge-only tool answers the bridge's own refusal on a headless backend and comes back not
 //!     refused: such a tool is hidden from a headless engine anyway, and the surface already says so
 //!     with `bridgeOnly`.
+//!   - A tool is marked only by the refusal of its own name, never because the commands it runs are
+//!     refused, as `run_script`'s one command `script.run` is. Which commands a tool runs is written
+//!     only in its own code, which EffectCraft keeps private, and a tool's answer to the arguments it is
+//!     asked with names only the command those arguments took it to: `open_project` runs `file.open`
+//!     when it is given a path and `file.newProject` when it is told to start a new one. So no answer
+//!     read here says that every call of a tool is refused, and such a tool is judged as one an app can
+//!     call.
 
 use effectcraft_automation::confine::Confinement;
 use effectcraft_automation::tools::{self, ToolDef};

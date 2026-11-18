@@ -315,57 +315,6 @@ extension EffectsEngine.LayerCommands {
         public static let twoNode = NewCameraType(rawValue: "twoNode")
     }
 
-    /// The values the engine accepts for the key `method` of `layer.newContentAwareFill`.
-    public struct NewContentAwareFillMethod: Sendable, Hashable, JSONStringRepresentable {
-        /// The word the engine takes for this value.
-        public let rawValue: String
-
-        /// The value of a word, one listed here or one the engine added since; the engine checks it.
-        public init(rawValue: String) {
-            self.rawValue = rawValue
-        }
-        /// The value `object`.
-        public static let object = NewContentAwareFillMethod(rawValue: "object")
-        /// The value `surface`.
-        public static let surface = NewContentAwareFillMethod(rawValue: "surface")
-        /// The value `edgeBlend`.
-        public static let edgeBlend = NewContentAwareFillMethod(rawValue: "edgeBlend")
-    }
-
-    /// The values the engine accepts for the key `range` of `layer.newContentAwareFill`.
-    public struct NewContentAwareFillRange: Sendable, Hashable, JSONStringRepresentable {
-        /// The word the engine takes for this value.
-        public let rawValue: String
-
-        /// The value of a word, one listed here or one the engine added since; the engine checks it.
-        public init(rawValue: String) {
-            self.rawValue = rawValue
-        }
-        /// The value `workArea`.
-        public static let workArea = NewContentAwareFillRange(rawValue: "workArea")
-        /// The value `entire`.
-        public static let entire = NewContentAwareFillRange(rawValue: "entire")
-    }
-
-    /// The values the engine accepts for the key `lightingCorrection` of `layer.newContentAwareFill`.
-    public struct NewContentAwareFillLightingCorrection: Sendable, Hashable, JSONStringRepresentable {
-        /// The word the engine takes for this value.
-        public let rawValue: String
-
-        /// The value of a word, one listed here or one the engine added since; the engine checks it.
-        public init(rawValue: String) {
-            self.rawValue = rawValue
-        }
-        /// The value `none`.
-        public static let noneValue = NewContentAwareFillLightingCorrection(rawValue: "none")
-        /// The value `subtle`.
-        public static let subtle = NewContentAwareFillLightingCorrection(rawValue: "subtle")
-        /// The value `moderate`.
-        public static let moderate = NewContentAwareFillLightingCorrection(rawValue: "moderate")
-        /// The value `strong`.
-        public static let strong = NewContentAwareFillLightingCorrection(rawValue: "strong")
-    }
-
     /// The values the engine accepts for the key `kind` of `layer.newLight`.
     public struct NewLightKind: Sendable, Hashable, JSONStringRepresentable {
         /// The word the engine takes for this value.
@@ -2029,52 +1978,6 @@ extension EffectsEngine.LayerCommands {
         )
     }
 
-    /// Content-Aware Fill Layer.
-    ///
-    /// The engine describes its parameters as: {layer?, method?: object|surface|edgeBlend, range?: workArea|entire, alphaExpansion? (px), lightingCorrection?: none|subtle|moderate|strong, referenceLayer?, referenceTime? (s), outputDir?, wait?: bool}
-    ///
-    /// - Parameters:
-    ///   - layer: The key `layer`: layer?
-    ///   - method: The key `method`: method?: object|surface|edgeBlend
-    ///   - range: The key `range`: range?: workArea|entire
-    ///   - alphaExpansion: The key `alphaExpansion`: alphaExpansion? (px)
-    ///   - lightingCorrection: The key `lightingCorrection`: lightingCorrection?: none|subtle|moderate|strong
-    ///   - referenceLayer: The key `referenceLayer`: referenceLayer?
-    ///   - referenceTime: The key `referenceTime`: referenceTime? (s)
-    ///   - outputDir: The key `outputDir`: outputDir?
-    ///   - wait: The key `wait`: wait?: bool
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func newContentAwareFill(
-        layer: JSONValue? = nil,
-        method: NewContentAwareFillMethod? = nil,
-        range: NewContentAwareFillRange? = nil,
-        alphaExpansion: Double? = nil,
-        lightingCorrection: NewContentAwareFillLightingCorrection? = nil,
-        referenceLayer: JSONValue? = nil,
-        referenceTime: Double? = nil,
-        outputDir: JSONValue? = nil,
-        wait: Bool? = nil,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "layer.newContentAwareFill",
-            [
-                "layer": layer?.jsonValue,
-                "method": method?.jsonValue,
-                "range": range?.jsonValue,
-                "alphaExpansion": alphaExpansion?.jsonValue,
-                "lightingCorrection": lightingCorrection?.jsonValue,
-                "referenceLayer": referenceLayer?.jsonValue,
-                "referenceTime": referenceTime?.jsonValue,
-                "outputDir": outputDir?.jsonValue,
-                "wait": wait?.jsonValue,
-            ],
-            extra: extra
-        )
-    }
-
     /// Light.
     ///
     /// The engine describes its parameters as: {kind?: Parallel|Spot|Point|Ambient|Environment (default Spot; Environment lights and reflects from an equirectangular image layer: prop.set its lightOptions/source to that layer's id, or leave it empty for the comp's Environment Layer or a flat default environment of its colour and intensity, see layer.environment; an Environment light switches a Classic 3D comp to Advanced 3D), name?, color?, intensity?, coneAngle?, coneFeather?, falloff?: None|Smooth|Inverse Square Clamped, radius?, falloffDistance?, castsShadows?, shadowDarkness?, shadowDiffusion?, position? [x,y,z], poi? [x,y,z]}
@@ -2542,28 +2445,6 @@ extension EffectsEngine.LayerCommands {
     ) async throws -> JSONValue {
         try await self.engine.command(
             "layer.openLayer",
-            [
-                "layer": layer?.jsonValue
-            ],
-            extra: extra
-        )
-    }
-
-    /// Open Layer Source.
-    ///
-    /// The engine describes its parameters as: {layer?}
-    ///
-    /// - Parameters:
-    ///   - layer: The key `layer`: layer?
-    ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func openSource(
-        layer: JSONValue? = nil,
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "layer.openSource",
             [
                 "layer": layer?.jsonValue
             ],

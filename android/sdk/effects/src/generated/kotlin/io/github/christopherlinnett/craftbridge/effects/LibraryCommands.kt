@@ -16,35 +16,6 @@ public class LibraryCommands internal constructor(
     internal val engine: EffectsEngine,
 ) {
     /**
-     * Install Plug-in.
-     *
-     * The engine describes its parameters as: {id, version?, wait?} — downloads the release, checks its SHA-256 against the catalog,
-     *  loads it
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param id The key `id`: id
-     * @param version The key `version`: version?
-     * @param wait The key `wait`: wait?
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun install(
-        vararg namedOnly: NamedArguments,
-        id: JSONValue,
-        version: JSONValue? = null,
-        wait: JSONValue? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "library.install",
-            extra,
-            "id" to id.jsonValue,
-            "version" to version?.jsonValue,
-            "wait" to wait?.jsonValue,
-        )
-
-    /**
      * Plug-in Library.
      *
      * The engine describes its parameters as: {query?, tag?, installed?: bool} → {catalog, fetched, packages: [{id, name, author,
@@ -75,25 +46,6 @@ public class LibraryCommands internal constructor(
         )
 
     /**
-     * Load Installed Plug-ins.
-     *
-     * The engine describes its parameters as: {} → {loaded, errors} (the app runs it at start-up)
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun loadInstalled(
-        vararg namedOnly: NamedArguments,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "library.loadInstalled",
-            extra,
-        )
-
-    /**
      * Missing Effects in the Plug-in Library.
      *
      * The engine describes its parameters as: {} → {effects: [{effect, packages: [package id]}]} — effects the project uses that aren't
@@ -111,108 +63,5 @@ public class LibraryCommands internal constructor(
         this.engine.command(
             "library.missing",
             extra,
-        )
-
-    /**
-     * Preview Plug-in.
-     *
-     * The engine describes its parameters as: {id, version?, wait?} → {id, version, width, height, fps, frames, changes, animated,
-     *  effect: manifest} — downloads the release (checked like an install) and renders its effect on a sample frame at default
-     *  settings, without installing it
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param id The key `id`: id
-     * @param version The key `version`: version?
-     * @param wait The key `wait`: wait?
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun preview(
-        vararg namedOnly: NamedArguments,
-        id: JSONValue,
-        version: JSONValue? = null,
-        wait: JSONValue? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "library.preview",
-            extra,
-            "id" to id.jsonValue,
-            "version" to version?.jsonValue,
-            "wait" to wait?.jsonValue,
-        )
-
-    /**
-     * Refresh Plug-in Catalog.
-     *
-     * The engine describes its parameters as: {catalog?: https:// or file:// URL of an index.json (default: the community catalog),
-     *  wait?}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param catalog The key `catalog`: catalog?: https:// or file:// URL of an index.json (default: the community catalog)
-     * @param wait The key `wait`: wait?
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun refresh(
-        vararg namedOnly: NamedArguments,
-        catalog: JSONValue? = null,
-        wait: JSONValue? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "library.refresh",
-            extra,
-            "catalog" to catalog?.jsonValue,
-            "wait" to wait?.jsonValue,
-        )
-
-    /**
-     * Remove Plug-in.
-     *
-     * The engine describes its parameters as: {id} — its effects stay registered until the next start
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param id The key `id`: id
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun uninstall(
-        vararg namedOnly: NamedArguments,
-        id: JSONValue,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "library.uninstall",
-            extra,
-            "id" to id.jsonValue,
-        )
-
-    /**
-     * Update Plug-ins.
-     *
-     * The engine describes its parameters as: {id? (default: every package with an update), wait?}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param id The key `id`: id? (default: every package with an update)
-     * @param wait The key `wait`: wait?
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun update(
-        vararg namedOnly: NamedArguments,
-        id: JSONValue? = null,
-        wait: JSONValue? = null,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "library.update",
-            extra,
-            "id" to id?.jsonValue,
-            "wait" to wait?.jsonValue,
         )
 }

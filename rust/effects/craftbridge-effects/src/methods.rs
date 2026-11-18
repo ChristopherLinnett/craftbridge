@@ -145,6 +145,19 @@ pub(crate) fn withheld(command: &str, params: &Value) -> Option<String> {
     wants_a_process(command, params).map(starts_a_process).or_else(|| unlisted_write(command, params).map(starts_an_unlisted_write))
 }
 
+/// Whether the door withholds `command` whatever it is given, so that every path that hands an app's
+/// call of it to the engine — `exec`, each step of `run`, each line of `replay`, each tool call of
+/// `mcp`, and each step of an `engine.batch` in any of them — answers `Unsupported` before the engine
+/// sees it: a model download, or a render or a fill nothing has listed, which only a runner starts,
+/// past the door, once it has listed ([`execute_listed`]). The API surface marks each such command,
+/// and neither facade offers a method for it, since every call of one could only be refused (plan
+/// §21). It is the door's own answer, [`withheld`], for the command given nothing, less the one command
+/// whose own parameters can let it through ([`read_by_its_parameters`]): no list is kept here beside
+/// the door's.
+pub fn withheld_outright(command: &str) -> bool {
+    withheld(command, &Value::Null).is_some() && !read_by_its_parameters(command)
+}
+
 /// What the confinement refuses of a command that is to run later, asked without running it, for
 /// the paths that run commands past [`Backend::exec`] and so past the checks it makes (`replay`
 /// runs its lines on the session itself). The confinement already checks commands that run later
@@ -180,7 +193,11 @@ pub(crate) const RENDER: &str = "renderQueue.render";
 /// nothing ([`writes_no_render`]), because whether any other Export Timeline pre-renders turns on
 /// the project's layers, and what an `engine.batch` fills in from earlier steps as it runs is not
 /// written until after the door has read the call.
-const UNLISTED_RENDERS: [&str; 5] = [RENDER, "file.watchFolder", "file.watchFolder.poll", "render.saveCurrentPreview", "file.exportTimeline"];
+const UNLISTED_RENDERS: [&str; 5] = [RENDER, "file.watchFolder", "file.watchFolder.poll", "render.saveCurrentPreview", EXPORT_TIMELINE];
+
+/// Export Timeline, the one withheld render whose own parameters can say it renders nothing
+/// ([`writes_no_render`]).
+const EXPORT_TIMELINE: &str = "file.exportTimeline";
 
 /// The command that generates a Content-Aware Fill: it writes a sequence of frames into a folder on a
 /// background task (`crates/engine/src/cmd/content_fill.rs`:495-598 at the pin), outside the exporter,
@@ -262,13 +279,19 @@ fn unlisted_write<'a>(command: &'a str, params: &'a Value) -> Option<&'a str> {
 /// the door has read, so no reading of it is the door's, and it is refused. The spellings are read
 /// from the pin, not invented here: a pin that parses `prerender` differently moves this reading.
 fn writes_no_render(withheld: &str, given: &Value) -> bool {
-    match (withheld, given.get("prerender")) {
-        ("file.exportTimeline", Some(Value::Bool(false))) => true,
-        ("file.exportTimeline", Some(Value::String(spelling))) => {
-            matches!(spelling.to_ascii_lowercase().replace([' ', '_', '-'], "").as_str(), "none" | "off" | "false" | "no")
+    read_by_its_parameters(withheld)
+        && match given.get("prerender") {
+            Some(Value::Bool(false)) => true,
+            Some(Value::String(spelling)) => matches!(spelling.to_ascii_lowercase().replace([' ', '_', '-'], "").as_str(), "none" | "off" | "false" | "no"),
+            _ => false,
         }
-        _ => false,
-    }
+}
+
+/// Whether the door reads a withheld command's own parameters to let a call of it through: only
+/// Export Timeline's ([`writes_no_render`]). Every other withheld command is refused whatever it is
+/// given, which is what [`withheld_outright`] answers.
+fn read_by_its_parameters(withheld: &str) -> bool {
+    withheld == EXPORT_TIMELINE
 }
 
 /// Run one EffectCraft automation tool and answer its document. Every §14 row whose result is a
@@ -489,6 +512,7 @@ pub(crate) fn empty_params() -> Value {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::collections::BTreeSet;
 
     /// The engine's own sentences, as its commands word them: each that names a missing comp, layer,
     /// item or property, and each that opens with the same words about something else.
@@ -683,6 +707,35 @@ mod tests {
             Some("roto.model.download"),
             "every step is read for a download too"
         );
+    }
+
+    /// What the door refuses whatever it is given, and so what the API surface marks, is exactly the
+    /// two model downloads, the renders nothing lists but Export Timeline, which a call saying it
+    /// renders nothing passes, and the two fills: asked of every command of the pinned registry, so a
+    /// command the door comes to withhold, or one it lets through, moves this list. A batch is no such
+    /// command, since the door refuses it only for the steps it is given.
+    #[test]
+    fn only_what_no_call_gets_past_the_door_is_withheld_outright() {
+        let outright: BTreeSet<&str> = effectcraft_engine::command_specs().iter().map(|spec| spec.id).filter(|id| withheld_outright(id)).collect();
+        let expected = [
+            "contentFill.generate",
+            "face.model.download",
+            "file.watchFolder",
+            "file.watchFolder.poll",
+            "layer.newContentAwareFill",
+            "render.saveCurrentPreview",
+            "renderQueue.render",
+            "roto.model.download",
+        ];
+        assert_eq!(outright, BTreeSet::from(expected));
+        for id in expected {
+            for given in [Value::Null, json!({}), json!({"prerender": "none"}), json!({"prerender": false})] {
+                assert!(withheld(id, &given).is_some(), "`{id}` given {given} passes the door");
+            }
+        }
+        assert!(withheld("file.exportTimeline", &json!({})).is_some(), "an Export Timeline that may render is withheld");
+        assert_eq!(withheld("file.exportTimeline", &json!({"prerender": "none"})), None, "one that renders nothing passes");
+        assert!(withheld("engine.batch", &json!({"steps": [{"command": "renderQueue.render"}]})).is_some() && !withheld_outright("engine.batch"));
     }
 
     /// Both model downloads are withheld however a call reaches them and nothing else is: a step's

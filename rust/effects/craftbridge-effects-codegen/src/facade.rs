@@ -1,13 +1,15 @@
 //! What every facade emitter shares: the surface's commands grouped into namespaces, and the names and
 //! documentation a typed call is given.
 //!
-//! A facade is one typed method for each command, in one type for each namespace. Everything that does
-//! not depend on the language is decided here once, so the Swift and the Kotlin facade name, group, order
-//! and describe the same things alike: the namespace of a command is its id without the last segment, the
-//! method is the last segment, a key is a parameter of the same name, the keys keep the order of the
-//! `params` text, and every sentence of the documentation is written here. Only how a language spells a
-//! name it reserves, how a type is written and how a comment is laid out is the emitter's, through
-//! [`Dialect`].
+//! A facade is one typed method for each command an app can call, in one type for each namespace. A
+//! command the surface marks refused under confinement or withheld by the plugin has none
+//! ([`Command::callable`]): every call of it is answered with that refusal, so a method could only fail.
+//! Everything that does not depend on the language is decided here once, so the Swift and the Kotlin
+//! facade name, group, order and describe the same things alike: the namespace of a command is its id
+//! without the last segment, the method is the last segment, a key is a parameter of the same name, the
+//! keys keep the order of the `params` text, and every sentence of the documentation is written here. Only
+//! how a language spells a name it reserves, how a type is written and how a comment is laid out is the
+//! emitter's, through [`Dialect`].
 //!
 //! Names come out as plain identifiers in lower or upper camel case that start with a letter. Two things
 //! that would take one name are an error naming both, never a silent pick: a facade that compiled with one
@@ -134,12 +136,13 @@ pub(crate) struct EnumCase {
     pub(crate) doc: String,
 }
 
-/// Group `commands` into namespaces, every namespace and its methods in the order of their ids. A
-/// namespace holds the namespaces below it too, so a namespace with commands of its own and one without
-/// are both here.
+/// Group the commands of `commands` an app can call into namespaces, every namespace and its methods in
+/// the order of their ids; a command no app can call is no method (module docs). A namespace holds the
+/// namespaces below it too, so a namespace with commands of its own and one without are both here, and
+/// one left with no method of its own or below it is none.
 pub(crate) fn plan(commands: &[Command]) -> Result<Vec<Namespace>, String> {
     let mut by_path: BTreeMap<Vec<&str>, Namespace> = BTreeMap::new();
-    for command in commands {
+    for command in commands.iter().filter(|command| command.callable()) {
         let segments: Vec<&str> = command.id.split('.').collect();
         let Some((last, namespace)) = segments.split_last().filter(|(_, namespace)| !namespace.is_empty()) else {
             return Err(format!("`{}` has no namespace: a command id is a namespace and a name joined by `.`", command.id));
@@ -186,9 +189,9 @@ fn namespace_of(path: &[&str]) -> Result<Namespace, String> {
 
 fn method_of(command: &Command, last: &str, namespace: &str) -> Result<Method, String> {
     // Read whole, so a field the surface gains stops this build until the facade says what it does with
-    // it, as the diff must; `journal` and the confinement's refusal change nothing a call is typed by:
-    // a refused command keeps a typed method, and the confined engine itself answers the call's refusal.
-    let Command { id, label, params, journal: _, refused_under_confinement: _, keys } = command;
+    // it, as the diff must; `journal` changes nothing a call is typed by, and the refusal marks were read
+    // by `plan`, which makes no method of a command they keep from apps.
+    let Command { id, label, params, journal: _, refused_under_confinement: _, withheld_by_plugin: _, keys } = command;
     let name = member_name(last, namespace).map_err(|error| format!("command `{id}`: {error}"))?;
     let typed = keys.iter().map(|key| param_of(id, &name, key)).collect::<Result<Vec<_>, _>>()?;
     let mut seen = BTreeSet::new();
@@ -411,9 +414,10 @@ pub(crate) fn assert_facade_names_are_refused(check: fn(&[Namespace]) -> Result<
 }
 
 /// Test-only: the pin's promise proved against a renderer: one file per namespace, one call per
-/// command (`call_marker` is the language's spelling of a method), and each command id written on
-/// exactly one id line, which both layouts indent alike. The rendered files come back for a test to
-/// weigh whatever else its language bans.
+/// command an app can call (`call_marker` is the language's spelling of a method), and each such
+/// command's id written on exactly one id line, which both layouts indent alike, while the id of a
+/// command no app can call is written on none. The rendered files come back for a test to weigh
+/// whatever else its language bans.
 #[cfg(test)]
 pub(crate) fn assert_pin_emitted_once(render: fn(&[Namespace]) -> Vec<(String, String)>, call_marker: &str) -> Vec<(String, String)> {
     let commands = crate::surface::commands().unwrap();
@@ -421,12 +425,23 @@ pub(crate) fn assert_pin_emitted_once(render: fn(&[Namespace]) -> Vec<(String, S
     let emitted = render(&namespaces);
     assert_eq!(emitted.len(), namespaces.len());
     let methods: usize = emitted.iter().map(|(_, text)| text.matches(call_marker).count()).sum();
-    assert_eq!(methods, commands.len());
+    assert_eq!(methods, callable_at_the_pin());
     for command in &commands {
         let needle = format!("            \"{}\",\n", command.id);
-        assert_eq!(emitted.iter().map(|(_, text)| text.matches(&needle).count()).sum::<usize>(), 1, "{}", command.id);
+        let lines = emitted.iter().map(|(_, text)| text.matches(&needle).count()).sum::<usize>();
+        assert_eq!(lines, usize::from(command.callable()), "{} is callable: {}", command.id, command.callable());
     }
     emitted
+}
+
+/// Test-only: how many commands of the pin an app can call, which is how many methods each facade has.
+/// Some command of the pin is not one, so a facade that emitted every command would fail on the count.
+#[cfg(test)]
+pub(crate) fn callable_at_the_pin() -> usize {
+    let commands = crate::surface::commands().unwrap();
+    let callable = commands.iter().filter(|command| command.callable()).count();
+    assert!(callable < commands.len(), "every command of the pin is callable, so the count proves nothing");
+    callable
 }
 
 /// Test-only: a command whose id, key and word each carry a line break where the registry might write
@@ -524,6 +539,20 @@ mod tests {
         assert_eq!(namespaces.first().unwrap().parent, None);
         let text = namespaces.first().unwrap().methods.first().unwrap();
         assert_eq!((text.id.as_str(), text.name.as_str()), ("layer.newText", "newText"));
+    }
+
+    /// A command the surface marks refused under confinement, withheld by the plugin, or both, is no
+    /// method of either facade, and a namespace that holds nothing else, itself or below it, is none.
+    #[test]
+    fn a_command_no_app_can_call_is_no_method() {
+        let refused = Command { refused_under_confinement: true, ..command("layer.run", vec![]) };
+        let withheld = Command { withheld_by_plugin: true, ..command("layer.render", vec![]) };
+        let both = Command { refused_under_confinement: true, withheld_by_plugin: true, ..command("layer.both", vec![]) };
+        let alone = Command { withheld_by_plugin: true, ..command("script.inner.run", vec![]) };
+        let namespaces = plan(&[refused, command("layer.newText", vec![]), withheld, both, alone]).unwrap();
+        let paths: Vec<&str> = namespaces.iter().map(|namespace| namespace.path.as_str()).collect();
+        assert_eq!(paths, ["layer"]);
+        assert_eq!(names(namespaces.iter().flat_map(|namespace| &namespace.methods)), ["newText"]);
     }
 
     #[test]
@@ -643,7 +672,7 @@ mod tests {
         let commands = crate::surface::commands().unwrap();
         let namespaces = plan(&commands).unwrap();
         let methods: usize = namespaces.iter().map(|namespace| namespace.methods.len()).sum();
-        assert_eq!(methods, commands.len());
+        assert_eq!(methods, callable_at_the_pin());
         assert!(namespaces.iter().all(|namespace| namespace.parent.as_ref().is_none_or(|parent| namespaces.iter().any(|other| &other.type_name == parent))));
     }
 }

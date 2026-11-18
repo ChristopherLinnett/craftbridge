@@ -695,6 +695,7 @@ dependencies = [
 name = "craftbridge-effects-codegen"
 version = "0.1.0"
 dependencies = [
+ "craftbridge-effects",
  "effectcraft-automation",
  "effectcraft-engine",
  "serde",

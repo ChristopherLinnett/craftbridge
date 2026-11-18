@@ -245,23 +245,6 @@ extension EffectsEngine.HelpCommands {
         )
     }
 
-    /// Reveal Logging File.
-    ///
-    /// The engine describes its parameters as: {}
-    ///
-    /// - Parameter extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func revealLogFile(
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "help.revealLogFile",
-            [:],
-            extra: extra
-        )
-    }
-
     /// Other ArtCraft Apps.
     ///
     /// The engine describes its parameters as: {app: photocraft|vectorcraft|filmcraft|lightcraft|pdfcraft|designcraft, kind?: page|github}
