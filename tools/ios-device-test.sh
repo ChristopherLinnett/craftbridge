@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Runs a package's cargo test binaries on the acceptance iPhone and reports each binary's result.
+# Runs a package's cargo test binaries, or the Swift package's Swift Testing suite, on the acceptance iPhone and
+# reports each binary's, or each test's, result.
 #
 #   tools/ios-device-test.sh <package>… [-- <test harness flags>]
+#   tools/ios-device-test.sh --swift [-- <Swift Testing flags>]
 #
 # Each test binary is built for aarch64-apple-ios, wrapped in an app, signed, installed, launched with
 # `xcrun devicectl` (started stopped and then resumed, so the system's 20-second allowance for an app's launch,
@@ -15,6 +17,7 @@
 #   CRAFTBRIDGE_SIGNING_IDENTITY       the codesign identity (`security find-identity -v -p codesigning`)
 #   CRAFTBRIDGE_PROVISIONING_PROFILE   the development profile file, which names the team and the phone
 #   CRAFTBRIDGE_DEVICE_LOGS            where each launch's output is kept (default: a new folder under $TMPDIR)
+#   CRAFTBRIDGE_DEVICE_TEST_LIMIT      the seconds a Swift test may run before it counts as hung (default 300)
 # The tests are built as the gate builds, so a switch the gate refuses (tools/env.sh) is refused here too.
 #
 # A binary the system ends before its harness does when it runs whole (past the app's memory limit, say) is
@@ -24,6 +27,20 @@
 # run in a launch of its own instead. A launch that runs past its limit is ended like a killed one, so a test
 # that hangs fails instead of holding the run; one whose app never starts its harness is tried again, and
 # stops the run if it still does not start.
+#
+# The Swift mode (`--swift`) builds the Swift package's tests for the device, as the gate's Swift builds do, and
+# wraps the bundle of each of the package's test targets in the host app tools/ios-test-host.swift (compiled
+# here with `swiftc`, no Xcode project), with the Swift Testing frameworks they link and `conformance/effects`,
+# which `Corpus.file` reads from the app's bundle there. The host runs the suite through Swift Testing's entry
+# point for tools and prints each test's result in the shape of a Rust harness's, which the steps below read as
+# they read a Rust binary's. Its flags are Swift Testing's own (`--filter`, `--skip`), and the runner always passes
+# `--no-parallel`, as the Rust runs pass `--test-threads=1`: no test runs beside the one that sends the app to
+# the background, whose trip would otherwise interrupt a render or an export another test has in flight. The
+# host keeps the screen from locking, since a locked phone suspends an app and every test in it hangs, and it
+# fails by name a test that runs past CRAFTBRIDGE_DEVICE_TEST_LIMIT. A test that needs the app in the
+# background prints the line the runner put in its environment (CRAFTBRIDGE_RUNNER_BACKGROUND_REQUEST), and the
+# runner then brings a second app of its own, the host's executable under another bundle id, to the front for a
+# few seconds and brings the host back.
 #
 # Exit status 0 when every binary passed, 1 when a test failed, a binary could not run or no test ran at all.
 set -euo pipefail
@@ -42,6 +59,15 @@ excluded_tests=tools/device-tests.tsv
 # The longest one launch may run, in seconds, before devicectl abandons it as a failure (its own
 # `--timeout`): many times what any launch has needed, so only a test that hangs reaches it.
 launch_limit=1800
+# The seconds one Swift test may run before the host abandons it as hung and fails it by name: the launch limit
+# above ends a run that hangs but cannot say which test did.
+test_limit="${CRAFTBRIDGE_DEVICE_TEST_LIMIT:-300}"
+# What a test of the Swift suite prints to ask for the app to be sent to the background: the runner tells the
+# app the line, so it is defined here alone. `cover` is the bundle id of the second app that does it, which
+# is on the phone for the run.
+background_request="craftbridge-runner: send the app to the background"
+cover_seconds=6
+cover=""
 phone_hint="If the phone is locked, unlock it; if it asks to trust this computer, trust it; then run again"
 
 die() {
@@ -49,19 +75,27 @@ die() {
   exit 1
 }
 
+usage="usage: tools/ios-device-test.sh <package>… [-- <test harness flags>] | --swift [-- <Swift Testing flags>]"
+swift_mode=no
 packages=()
 while [ "$#" -gt 0 ] && [ "$1" != -- ]; do
-  packages+=("$1")
+  if [ "$1" = --swift ]; then swift_mode=yes; else packages+=("$1"); fi
   shift
 done
 if [ "$#" -gt 0 ]; then shift; fi
 harness_flags=("$@")
-[ "${#packages[@]}" -gt 0 ] || die "usage: tools/ios-device-test.sh <package>… [-- <test harness flags>]"
+if [ "$swift_mode" = yes ]; then
+  [ "${#packages[@]}" -eq 0 ] || die "$usage"
+else
+  [ "${#packages[@]}" -gt 0 ] || die "$usage"
+fi
 
 for variable in CRAFTBRIDGE_DEVICE_ID CRAFTBRIDGE_SIGNING_IDENTITY CRAFTBRIDGE_PROVISIONING_PROFILE; do
   [ -n "${!variable:-}" ] || die "$variable is not set: see the header of tools/ios-device-test.sh"
 done
 [ -r "$CRAFTBRIDGE_PROVISIONING_PROFILE" ] || die "cannot read the profile $CRAFTBRIDGE_PROVISIONING_PROFILE"
+# A limit the host could not read would leave a hung test to the launch limit, naming nothing.
+[[ "$test_limit" =~ ^0*[1-9][0-9]*$ ]] || die "CRAFTBRIDGE_DEVICE_TEST_LIMIT is $test_limit, which is no whole number of seconds above 0"
 for tool in jq xcrun codesign security; do
   command -v "$tool" >/dev/null 2>&1 || die "no $tool on PATH"
 done
@@ -98,18 +132,22 @@ fi
 work="$(mktemp -d "${TMPDIR:-/tmp}/craftbridge-device-work.XXXXXX")"
 logs="${CRAFTBRIDGE_DEVICE_LOGS:-$(mktemp -d "${TMPDIR:-/tmp}/craftbridge-device-logs.XXXXXX")}"
 mkdir -p "$logs"
+# Every app this run has put on the phone, by bundle id, and the one the launches below start.
+on_phone=()
 installed=""
 # The installed app's executable as the phone names it, from the end of its path: `<bundle folder>/<executable>`.
 installed_executable=""
 launch_status=0
 
-# An app still on the phone when the run ends, however it ends, is uninstalled.
+# Every app still on the phone when the run ends, however it ends, is uninstalled.
 uninstall() {
-  if [ -n "$installed" ]; then
-    xcrun devicectl device uninstall app --device "$device" "$installed" >"$logs/uninstall.log" 2>&1 </dev/null ||
-      echo "ios-device-test: could not uninstall $installed from the phone: see $logs/uninstall.log" >&2
-    installed=""
-  fi
+  local bundle
+  for bundle in ${on_phone[@]+"${on_phone[@]}"}; do
+    xcrun devicectl device uninstall app --device "$device" "$bundle" >"$logs/uninstall.log" 2>&1 </dev/null ||
+      echo "ios-device-test: could not uninstall $bundle from the phone: see $logs/uninstall.log" >&2
+  done
+  on_phone=()
+  installed=""
 }
 craftbridge_remove_on_exit "$work" uninstall
 trap 'exit 1' INT TERM
@@ -172,6 +210,31 @@ resume_app() {
   [ -n "$resumed" ]
 }
 
+# Serves what a running app asks of the runner through its output, while the launch's devicectl, `<devicectl
+# pid>`, waits on it: an app that needs to be in the background prints `$background_request`, and the runner
+# brings the cover app to the front, which sends the app to the background, and after `$cover_seconds` the app
+# itself, which returns. Each request is served once, in the order they are printed, and the log is read every
+# second until the launch ends and once more after, so a request printed last is not lost. The log still has
+# the console's carriage returns, so a line is matched by its start.
+# `serve_requests <devicectl pid> <log>`.
+serve_requests() {
+  local launcher="$1" log="$2" served=0 asked running=yes
+  while [ "$running" = yes ]; do
+    kill -0 "$launcher" 2>/dev/null || running=no
+    asked="$(grep -c "^$background_request" "$log" 2>/dev/null || true)"
+    while [ "$served" -lt "${asked:-0}" ]; do
+      served=$((served + 1))
+      echo "ios-device-test: sending the app to the background (request $served)" >&2
+      xcrun devicectl device process launch --device "$device" "$cover" >"$log.cover" 2>&1 </dev/null ||
+        echo "ios-device-test: could not bring the cover app to the front: see $log.cover" >&2
+      sleep "$cover_seconds"
+      xcrun devicectl device process launch --device "$device" "$installed" >>"$log.cover" 2>&1 </dev/null ||
+        echo "ios-device-test: could not bring the app back to the front: see $log.cover" >&2
+    done
+    [ "$running" = no ] || sleep 1
+  done
+}
+
 # One app launch of the wrapped test binary: `launch <log> <environment word>… -- <harness argument>…`, each
 # environment word NAME=value. The output, the console of the app, goes to the log.
 #
@@ -182,7 +245,7 @@ resume_app() {
 # for a debugger is not held to that allowance. The app still runs in the foreground, where it may use the GPU and
 # the hardware encoders, as an app's export does.
 launch() {
-  local log="$1" word console
+  local log="$1" word console server
   local -a environment=()
   shift
   while [ "$1" != -- ]; do
@@ -196,6 +259,8 @@ launch() {
     --start-stopped --timeout "$launch_limit" --device "$device" "$installed" "$@" >"$log" 2>&1 </dev/null &
   console=$!
   rm -f "$log.resume"
+  serve_requests "$console" "$log" &
+  server=$!
   if resume_app "$console" "$log"; then
     wait "$console" || launch_status=$?
   else
@@ -211,6 +276,9 @@ launch() {
     } >>"$log"
   fi
   rm -f "$log.resume"
+  # The console has ended, so the server's last pass over the log is its last: it is waited for, never killed
+  # with a request half served.
+  wait "$server" || true
   # The console ends each line with a carriage return, which no line of the harness's output should keep.
   tr -d '\r' <"$log" >"$log.lf" && mv "$log.lf" "$log"
 }
@@ -244,15 +312,29 @@ listed_tests() {
   sed -n 's/^\(.*\): test$/\1/p' "$1"
 }
 
-# Wrap one test binary in an app, sign it, and install it: `install_app <app name> <executable>`.
+# The system version a binary was built to run on, which an app's plist must not claim to exceed, and which
+# the host app is built for so that it runs wherever the test bundle it loads does: `built_for <binary>`.
+built_for() {
+  xcrun vtool -show-build "$1" | awk '$1 == "minos" || $1 == "version" { print $2; exit }'
+}
+
+# Wrap one test binary in an app, sign it, and install it: `install_app <app name> <executable> [<folder>]`.
+# The folder's contents, if one is given, are put in the app first (frameworks, plug-ins, resources), and
+# every framework, library and bundle in it is signed before the app, inside out, since the app's signature
+# covers theirs.
 install_app() {
-  local name="$1" executable="$2" app="$work/$1.app" bundle minimum
+  local name="$1" executable="$2" payload="${3:-}" app="$work/$1.app" bundle minimum nested attempt=1
   bundle="$bundle_prefix$name"
   mkdir -p "$app"
   cp "$executable" "$app/$name"
+  if [ -n "$payload" ]; then
+    cp -R "$payload/." "$app/"
+    while IFS= read -r nested; do
+      codesign --force --sign "$CRAFTBRIDGE_SIGNING_IDENTITY" "$nested" >&2 || die "cannot sign ${nested#"$app"/}"
+    done < <(find "$app" -depth \( -name '*.framework' -o -name '*.dylib' -o -name '*.xctest' \))
+  fi
   cp "$CRAFTBRIDGE_PROVISIONING_PROFILE" "$app/embedded.mobileprovision"
-  # The system version the binary was built to run on, which the app's plist must not claim to exceed.
-  minimum="$(xcrun vtool -show-build "$executable" | awk '$1 == "minos" || $1 == "version" { print $2; exit }')"
+  minimum="$(built_for "$executable")"
   [ -n "$minimum" ] || die "cannot read the system version $executable was built for"
   rm -f "$app/Info.plist" "$work/entitlements.plist"
   "$plist_buddy" -c "Add :CFBundleIdentifier string $bundle" -c "Add :CFBundleExecutable string $name" \
@@ -263,10 +345,16 @@ install_app() {
   "$plist_buddy" -c "Add :application-identifier string $team.$bundle" -c "Add :com.apple.developer.team-identifier string $team" \
     -c "Add :get-task-allow bool true" "$work/entitlements.plist" >/dev/null
   codesign --force --sign "$CRAFTBRIDGE_SIGNING_IDENTITY" --entitlements "$work/entitlements.plist" "$app" >&2 || die "cannot sign $name"
-  if ! xcrun devicectl device install app --device "$device" "$app" >"$logs/$name.install.log" 2>&1 </dev/null; then
-    cat "$logs/$name.install.log" >&2
-    die "cannot install $name on the phone. $phone_hint"
-  fi
+  # A phone another run is using, or whose connection dropped, may refuse an install that the next try takes.
+  while ! xcrun devicectl device install app --device "$device" "$app" >"$logs/$name.install.log" 2>&1 </dev/null; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -gt 3 ]; then
+      cat "$logs/$name.install.log" >&2
+      die "cannot install $name on the phone. $phone_hint"
+    fi
+    sleep 10
+  done
+  on_phone+=("$bundle")
   installed="$bundle"
   installed_executable="${app##*/}/$name"
 }
@@ -275,6 +363,27 @@ install_app() {
 # (the app was killed before the harness finished).
 result_of() {
   sed -n 's/^test result: [A-Za-z]*\. \([0-9]*\) passed; \([0-9]*\) failed;.*/\1 \2/p' "$1" | tail -n 1
+}
+
+# What a launch's harness says it ran, into `passed` and `failed`: the counts of its `test result:` line, or,
+# when the app was killed before the harness finished, the tests it said it finished; fails in that case.
+# `read_results <log>`.
+read_results() {
+  local result
+  result="$(result_of "$1")"
+  if [ -n "$result" ]; then
+    passed="${result% *}"
+    failed="${result#* }"
+    return 0
+  fi
+  passed="$(grep -c '^test .* \.\.\. ok$' "$1" || true)"
+  failed="$(grep -c '^test .* \.\.\. FAILED$' "$1" || true)"
+  return 1
+}
+
+# The tests a launch's harness says failed, a line each: `failed_tests <log>`.
+failed_tests() {
+  grep '^test .* \.\.\. FAILED$' "$1" | sed 's/^test \(.*\) \.\.\. FAILED$/  FAILED \1/' || true
 }
 
 # Run one test binary, wrapped as the installed app: `run_binary <package> <target> <executable>`. Prints one
@@ -328,16 +437,10 @@ run_binary() {
   if [ "${#selected[@]}" -gt 0 ]; then
     log="$logs/$name.log"
     launched started "$name did not start its tests" "$log" -- --test-threads=1 ${harness_flags[@]+"${harness_flags[@]}"} ${skips[@]+"${skips[@]}"}
-    result="$(result_of "$log")"
-    if [ -n "$result" ]; then
-      passed="${result% *}"
-      failed="${result#* }"
-    else
+    if ! read_results "$log"; then
       # The system ended the app before the harness did. Whatever the output shows finished keeps its
       # result; every other test, the one that was running included, is launched alone.
       echo "  the app ended before its harness did: the rest of $name runs one test per launch"
-      passed="$(grep -c '^test .* \.\.\. ok$' "$log" || true)"
-      failed="$(grep -c '^test .* \.\.\. FAILED$' "$log" || true)"
       for test in "${selected[@]}"; do
         if ! grep -Fxq -- "test $test ... ok" "$log" && ! grep -Fxq -- "test $test ... FAILED" "$log" &&
           ! grep -Fxq -- "test $test ... ignored" "$log"; then
@@ -367,7 +470,7 @@ run_binary() {
         fi
       done
     fi
-    grep '^test .* \.\.\. FAILED$' "$logs/$name.log" | sed 's/^test \(.*\) \.\.\. FAILED$/  FAILED \1/' || true
+    failed_tests "$logs/$name.log"
   fi
 
   for row in "${!children[@]}"; do
@@ -387,10 +490,106 @@ run_binary() {
   uninstall
 }
 
-craftbridge_ios_target_env "$target"
+# Copies into `<folder>` every library the test bundles link through `@rpath` that the iPhone platform ships for
+# tests (Swift Testing, XCTest, which the bundle links whatever its sources import, and what they link), read
+# from each binary's own load commands, transitively: `test_libraries <folder> <binary>…`. The phone holds none
+# of them, and the app's loader finds them in its Frameworks folder. The rest are the system's own Swift
+# libraries, which the loader finds on the phone through the binaries' `/usr/lib/swift` search path and the
+# SDK has a stub of; a library that is neither stops the run with its name, since the bundle would not load.
+test_libraries() {
+  local developer sdk destination="$1" i=0 name source seen=""
+  local -a pending
+  shift
+  pending=("$@")
+  developer="$(xcrun --sdk iphoneos --show-sdk-platform-path)/Developer"
+  sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
+  mkdir -p "$destination"
+  while [ "$i" -lt "${#pending[@]}" ]; do
+    while IFS= read -r name; do
+      case " $seen " in *" $name "*) continue ;; esac
+      seen+=" $name"
+      case "$name" in
+        */*) source="$developer/Library/Frameworks/${name%%/*}"
+          [ -e "$source" ] || source="$developer/Library/PrivateFrameworks/${name%%/*}" ;;
+        *) source="$developer/usr/lib/$name" ;;
+      esac
+      if [ ! -e "$source" ]; then
+        [ -e "$sdk/usr/lib/swift/${name%.dylib}.tbd" ] ||
+          die "${pending[$i]##*/} links @rpath/$name, which neither $developer nor the system holds"
+        continue
+      fi
+      cp -R "$source" "$destination/"
+      pending+=("$destination/$name")
+    done < <(otool -L "${pending[$i]}" | sed -n 's/^[[:space:]]*@rpath\/\([^ ]*\) (.*/\1/p')
+    i=$((i + 1))
+  done
+}
+
+# Run the Swift package's Swift Testing suite on the phone, as the header says. Prints the lines the host
+# printed that name a failure's cause, and sets `passed` and `failed` for the caller.
+run_swift_suite() {
+  local derived=ios/sdk/.build/device-tests products tests target xctest binary minimum payload host log
+  passed=0
+  failed=0
+  # The package's binary target is the XCFramework nobody commits, and SwiftPM builds nothing without it.
+  tools/build-xcframework.sh --keep-bindings >&2 || die "the XCFramework did not build"
+  (cd ios/sdk && xcodebuild -scheme CraftBridge-Package -destination generic/platform=iOS -configuration Debug \
+    -derivedDataPath .build/device-tests -quiet build-for-testing ARCHS=arm64 CODE_SIGNING_ALLOWED=NO) >&2 ||
+    die "the build of the Swift package's tests for the device failed"
+  products="$derived/Build/Products/Debug-iphoneos"
+  # The bundles of the package's own test targets, as SwiftPM describes the package: the build folder keeps the
+  # bundle of a test target the package has since lost or renamed, which would otherwise run among its tests.
+  tests="$(cd ios/sdk && xcrun swift package describe --type json | jq -r '.targets[] | select(.type == "test") | .name')" ||
+    die "SwiftPM did not describe the package's test targets"
+  [ -n "$tests" ] || die "the package has no test target"
+  payload="$work/payload"
+  mkdir -p "$payload/PlugIns" "$payload/conformance"
+  while IFS= read -r target; do
+    [ -d "$products/$target.xctest" ] || die "no test bundle $target.xctest in $products"
+    cp -R "$products/$target.xctest" "$payload/PlugIns/"
+  done <<<"$tests"
+  cp -R conformance/effects "$payload/conformance/effects"
+  for xctest in "$payload"/PlugIns/*.xctest; do
+    binary="$xctest/$(basename "$xctest" .xctest)"
+    test_libraries "$payload/Frameworks" "$binary"
+    minimum="$(built_for "$binary")"
+  done
+  host="$work/host"
+  xcrun --sdk iphoneos swiftc -swift-version 5 -target "arm64-apple-ios$minimum" tools/ios-test-host.swift -o "$host" \
+    -Xlinker -rpath -Xlinker @executable_path/Frameworks >&2 ||
+    die "cannot build tools/ios-test-host.swift"
+  install_app swift-tests.cover "$host"
+  cover="$installed"
+  install_app swift-tests "$host" "$payload"
+
+  log="$logs/swift-tests.log"
+  launched started "swift-tests did not start its tests" "$log" "CRAFTBRIDGE_RUNNER_BACKGROUND_REQUEST=$background_request" \
+    "CRAFTBRIDGE_RUNNER_TEST_LIMIT=$test_limit" -- \
+    --no-parallel ${harness_flags[@]+"${harness_flags[@]}"}
+  if ! read_results "$log"; then
+    echo "  the app ended before its host did (killed by the system, or past the launch limit): see $log"
+    failed=$((failed + 1))
+  fi
+  grep '^cases ' "$log" | sed 's/^cases \(.*\): \([0-9]*\)$/  \1: \2 cases/' || true
+  grep '^the Swift run takes ' "$log" | sed 's/^/  /' || true
+  grep '^failure ' "$log" | sed 's/^failure /  cause of /' || true
+  failed_tests "$log"
+  uninstall
+}
+
 total_tests=0
 status=0
 echo "ios-device-test: the output of each launch is kept in $logs"
+# The XCFramework's own build sets the device CPU target, which the gate refuses to find already set.
+if [ "$swift_mode" = yes ]; then
+  echo "swift-tests"
+  run_swift_suite
+  echo "swift-tests: $passed passed, $failed failed"
+  [ "$failed" -eq 0 ] && [ "$passed" -gt 0 ] || exit 1
+  craftbridge_passed=1
+  exit 0
+fi
+craftbridge_ios_target_env "$target"
 for package in "${packages[@]}"; do
   build="$(craftbridge_cargo test --no-run --locked --target "$target" --package "$package" --message-format=json-render-diagnostics)" ||
     die "the build of $package for $target failed"

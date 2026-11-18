@@ -54,7 +54,7 @@ pub(crate) fn listed(root: &Path, kind: &str) -> Result<Vec<String>, String> {
             let extension = file.path.extension().and_then(|extension| extension.to_str()).unwrap_or_default();
             let shell = || shown != GRADLE_WRAPPER && is_shell_script(&file.path);
             let wanted = match kind {
-                "swift" => *tree == "ios" && extension == "swift",
+                "swift" => extension == "swift",
                 "shell" => shell(),
                 "duplicates" => !crate::generated::in_generated(&file.components) && (COMPARED_EXTENSIONS.contains(&extension) || shell()),
                 _ => return Err(format!("no file list `{kind}` (swift, shell, duplicates)")),
@@ -104,6 +104,7 @@ mod tests {
         scratch.write("android/sdk/effects/src/generated/kotlin/x/Layer.kt", "\n");
         scratch.write("android/sdk/gradlew", "#!/bin/sh\n");
         scratch.write("tools/ci.sh", "\n");
+        scratch.write("tools/host.swift", "\n");
         scratch.write("tools/generated/run.sh", "\n");
         scratch.write("tools/launch", "#!/usr/bin/env bash\n");
         scratch.write("conformance/run", "#!/usr/bin/env sh\n");
@@ -118,6 +119,7 @@ mod tests {
                 "ios/sdk/Sources/CraftBridge/CraftBridge.swift",
                 "ios/sdk/Sources/CraftBridge/build/Inside.swift",
                 "ios/sdk/Sources/CraftBridgeEffects/Generated/LayerCommands.swift",
+                "tools/host.swift",
             ]
         );
         assert_eq!(listed(&scratch.0, "shell").unwrap(), ["conformance/run", "tools/ci.sh", "tools/generated/run.sh", "tools/launch"]);
@@ -132,6 +134,7 @@ mod tests {
                 "ios/sdk/Sources/CraftBridge/build/Inside.swift",
                 "rust/core/x/src/lib.rs",
                 "tools/ci.sh",
+                "tools/host.swift",
                 "tools/launch",
             ]
         );
