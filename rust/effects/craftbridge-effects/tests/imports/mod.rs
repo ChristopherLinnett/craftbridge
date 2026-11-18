@@ -112,16 +112,26 @@ fn with_bundle<T>(bundle: &Path, read_only: bool, body: impl FnOnce() -> T) -> R
     Ok(done)
 }
 
-/// The steps of a vector file's conversion: a comp, the file as footage, a layer of it and the
-/// conversion of that layer.
-fn conversion(file: &Path) -> Vec<(String, Value)> {
+/// The steps of a comp that shows `file` as a footage layer: what a project that shows a vector file holds.
+fn showing(file: &Path) -> Vec<(String, Value)> {
     let file = file.display().to_string();
     vec![
         ("comp.new".to_string(), json!({"name": "C", "width": 64, "height": 64, "duration": 1})),
         ("file.import".to_string(), json!({"paths": [file]})),
         ("layer.addItem".to_string(), json!({"comp": 1, "item": 2, "time": 0})),
-        ("layer.create".to_string(), json!({"comp": 1, "op": "shapesFromVector", "layers": [1]})),
     ]
+}
+
+/// The step that converts the layer of the vector file a comp shows.
+fn convert() -> (String, Value) {
+    ("layer.create".to_string(), json!({"comp": 1, "op": "shapesFromVector", "layers": [1]}))
+}
+
+/// The steps of a vector file's conversion: a comp showing the file, then the conversion of its layer.
+fn conversion(file: &Path) -> Vec<(String, Value)> {
+    let mut steps = showing(file);
+    steps.push(convert());
+    steps
 }
 
 /// The step of a Lottie file's import.
@@ -223,8 +233,16 @@ fn last_alone<'a>(app: &mut EffectCraftApp, steps: &'a [(String, Value)]) -> Res
 
 /// One line of `mcp`, answered as a tool call that did not fail, whose answer is read from its text.
 fn tool(app: &mut EffectCraftApp, name: &str, arguments: Value) -> Result<Value, String> {
-    let line = app.mcp(&tools_call(name, &arguments).to_string()).ok_or("the line is answered")?;
-    let reply: Value = serde_json::from_str(&line).map_err(|e| format!("the answer is JSON: {e}"))?;
+    tool_sent(app, name, arguments, false)
+}
+
+/// [`tool`], with the call sent, when `batched`, as the one message of a batch of lines, which the server
+/// answers message by message, in a batch holding the one reply.
+fn tool_sent(app: &mut EffectCraftApp, name: &str, arguments: Value, batched: bool) -> Result<Value, String> {
+    let call = tools_call(name, &arguments);
+    let line = app.mcp(&if batched { json!([call]) } else { call }.to_string()).ok_or("the line is answered")?;
+    let answered: Value = serde_json::from_str(&line).map_err(|e| format!("the answer is JSON: {e}"))?;
+    let reply = if batched { answered.get(0).cloned().ok_or("a reply to the one message")? } else { answered };
     if reply.pointer("/result/isError") != Some(&json!(false)) {
         return Err(format!("`{name}` failed: {reply}"));
     }
@@ -503,4 +521,289 @@ fn a_later_import_repoints_only_the_items_its_call_made() {
         [bundle.join("b").join(NAMED[0]), bundle.join("b").join(NAMED[1])].into_iter().map(|path| path.display().to_string()).collect();
     wanted.sort();
     assert_eq!(lost, wanted, "only the second call's own images are missing, beside its own file; the first call's items still name theirs");
+}
+
+/// The steps of one call that opens `project` and converts the layer of the vector file it shows.
+fn open_and_convert(project: &Path) -> Vec<(String, Value)> {
+    vec![("file.open".to_string(), json!({"path": project.display().to_string()})), convert()]
+}
+
+/// The steps that make a comp showing `file`, as it was saved before a later call opened it.
+fn save_showing(file: &Path, project: &Path) -> Vec<(String, Value)> {
+    let mut steps = showing(file);
+    steps.push(("file.save".to_string(), json!({"path": project.display().to_string()})));
+    steps
+}
+
+/// A project inside the container that shows a vector file from the bundle, saved by an app of `scratch`
+/// and left where it lies, so a later call has to open it.
+fn project_showing(scratch: &Scratch, bundle: &Path) -> Result<PathBuf, String> {
+    let file = put(bundle, "art.pdf", vector(true))?;
+    let project = scratch.path().join("shows.ecproj");
+    let mut app = scratch.app().map_err(|e| e.to_string())?;
+    run(&mut app, &save_showing(&file, &project)).map(drop)?;
+    Ok(project)
+}
+
+/// One way a single call reaches both the open and the conversion: it answers the words the call refused
+/// with, or that it ran instead.
+type Refusal = fn(&mut EffectCraftApp, &[(String, Value)]) -> Result<String, String>;
+
+/// The words a method call refused with, or that it ran instead.
+fn refused(answer: Result<Value, CraftError>) -> Result<String, String> {
+    match answer {
+        Ok(answer) => Err(format!("the call ran: {answer}")),
+        Err(error) => Ok(error.to_string()),
+    }
+}
+
+/// The words a tool call refused with, or that it ran instead.
+fn tool_refused(answer: Result<Value, String>) -> Result<String, String> {
+    match answer {
+        Ok(answer) => Err(format!("the call ran: {answer}")),
+        Err(words) => Ok(words),
+    }
+}
+
+/// The ways one call reaches both an open and a conversion, by name: an `engine.batch` through `exec`
+/// and as a step of `run`; each MCP tool that runs a list of commands, whose steps the tool runs itself,
+/// and one sent in a batch of lines, each message of which reaches the door on its own; and a `replay`,
+/// whose `start` project the script opens before its first line.
+fn open_ways() -> Vec<(&'static str, Refusal)> {
+    vec![
+        ("engine.batch through exec", |app, steps| refused(app.request("exec", json!({"command": "engine.batch", "params": {"steps": batch_steps(steps)}})))),
+        ("engine.batch as a step of run", |app, steps| {
+            refused(app.request("run", json!({"steps": [{"command": "engine.batch", "params": {"steps": batch_steps(steps)}}]})))
+        }),
+        ("mcp command_batch", |app, steps| tool_refused(tool(app, "command_batch", json!({"steps": steps_document(steps)})))),
+        ("mcp batch, its steps as text", |app, steps| tool_refused(tool(app, "batch", json!({"steps": batch_steps(steps).to_string()})))),
+        ("mcp command_batch, in a batch of lines", |app, steps| tool_refused(tool_sent(app, "command_batch", json!({"steps": steps_document(steps)}), true))),
+        ("replay", |app, steps| {
+            let (open, rest) = steps.split_first().ok_or("a step")?;
+            let mut script = vec![json!({"start": {"project": open.1.get("path")}}).to_string()];
+            script.extend(rest.iter().map(|(command, params)| json!({"command": command, "params": params}).to_string()));
+            refused(app.request("replay", json!({"script": script.join("\n")})))
+        }),
+    ]
+}
+
+/// A call that converts vector footage of the very project it opens cannot be handed a copy of what that
+/// project shows, which lies in the folder the session may read and never write: every way one call
+/// reaches both is refused, its words naming the call that works, and nothing is copied or written under
+/// the bundle.
+#[test]
+fn a_call_that_opens_a_project_and_converts_what_it_shows_names_the_call_that_works() {
+    for read_only in BUNDLES {
+        let (scratch, bundle, _) = folders().expect("the folders");
+        let project = project_showing(&scratch, &bundle).expect("the project");
+        let before = entries_under(&bundle, &[]).expect("the bundle reads");
+        for (way, through) in open_ways() {
+            let mut app = scratch.app().expect("the app starts");
+            let words = with_bundle(&bundle, read_only, || through(&mut app, &open_and_convert(&project)))
+                .expect("the call is answered")
+                .unwrap_or_else(|e| panic!("{way}: {e}"));
+            assert!(words.contains("`layer.create` is not available in this build"), "{way}: the refusal says what is not available: {words}");
+            assert!(words.contains("open the project in one call and convert in the next"), "{way}: the refusal names the call that works: {words}");
+            assert_eq!(names(&scratch.folders.staged).expect("the staged folder reads"), Vec::<String>::new(), "{way}: nothing was copied");
+        }
+        assert_eq!(entries_under(&bundle, &[]).expect("the bundle reads"), before, "nothing was written under the bundle (read-only {read_only})");
+    }
+}
+
+/// The call the refusal names works: the open in one call and the conversion in the next is handed the
+/// copy, writes every image the conversion makes inside the container, and answers what the command
+/// line's same two calls do.
+#[test]
+fn a_conversion_in_a_call_after_the_open_is_handed_the_copy() {
+    for read_only in BUNDLES {
+        let (scratch, bundle, beside_cli) = folders().expect("the folders");
+        let project = project_showing(&scratch, &bundle).expect("the project");
+        let on_disk = put(&beside_cli, "art.pdf", vector(true)).expect("the file");
+        let saved = beside_cli.join("shows.ecproj");
+        cli_run(scratch.root(), &save_showing(&on_disk, &saved)).expect("the command line saved its project");
+        let (mine, wanted) = both(&scratch, read_only, &open_and_convert(&project), &open_and_convert(&saved)).expect("both ran");
+        assert_eq!(mine, wanted, "the open and the conversion answer what the command line's do (read-only {read_only})");
+        assert_eq!(mine[1]["result"]["skipped"], json!([]), "no image was skipped");
+        let staged = names(&scratch.folders.staged).expect("the staged folder reads");
+        assert!(staged.contains(&"art Image 1.png".to_string()), "the image lies beside the copy, inside the container: {staged:?}");
+    }
+}
+
+/// An open that comes after the conversion is no reason to refuse the call: what the conversion converts
+/// was in the project before the call, so it is handed its copy as every other conversion is.
+#[test]
+fn a_conversion_before_the_open_is_handed_the_copy() {
+    for read_only in BUNDLES {
+        let (scratch, bundle, _) = folders().expect("the folders");
+        let file = put(&bundle, "art.pdf", vector(true)).expect("the file");
+        let project = scratch.path().join("shows.ecproj");
+        let mut app = scratch.app().expect("the app starts");
+        run(&mut app, &save_showing(&file, &project)).expect("the project is saved and still open");
+        let mut steps = open_and_convert(&project);
+        steps.swap(0, 1);
+        let call = json!({"command": "engine.batch", "params": {"steps": batch_steps(&steps)}});
+        with_bundle(&bundle, read_only, || app.request("exec", call)).expect("the call is answered").expect("the call ran");
+        let staged = names(&scratch.folders.staged).expect("the staged folder reads");
+        assert!(staged.contains(&"art Image 1.png".to_string()), "the image lies beside the copy, inside the container: {staged:?}");
+    }
+}
+
+/// A project whose footage lies where the session may write has nothing to copy, so the same call that
+/// opens it and converts what it shows runs, on an app that ships a bundle as on one that ships none: it
+/// answers what the command line answers and writes its image beside the file it read, exactly where the
+/// command line writes it.
+#[test]
+fn a_call_with_nothing_to_copy_runs_as_the_command_line_runs_it() {
+    for scratch in [Scratch::new(), Scratch::with_bundle()] {
+        let scratch = scratch.expect("the folders");
+        let file = put(scratch.path(), "art.pdf", vector(true)).expect("the file");
+        let project = scratch.path().join("shows.ecproj");
+        cli_run(scratch.path(), &save_showing(&file, &project)).expect("the command line saved a project");
+        let steps = vec![("engine.batch".to_string(), json!({"steps": batch_steps(&open_and_convert(&project))}))];
+        let mut app = scratch.app().expect("the app starts");
+        let mut mine = run(&mut app, &steps).expect("the call ran");
+        let mut wanted = cli_run(scratch.path(), &steps).expect("the command line ran it").doc().expect("a document");
+        scrub(&mut mine, &[scratch.path()]);
+        scrub(&mut wanted, &[scratch.path()]);
+        let shipped = scratch.bundle().is_some();
+        assert_eq!(mine, wanted, "the call that opens a project and converts what it shows answers what the command line's does (bundle {shipped})");
+        assert!(names(scratch.path()).expect("the folder reads").contains(&"art Image 1.png".to_string()), "the image was written beside the file it read");
+    }
+}
+
+/// Each command that reads a document into the session, with the parameters that have it read the saved
+/// `project`, and the steps an earlier call takes so that it does: `file.openRecent` is there to run only
+/// once the session has opened a project, `file.revert` reads the project the session has open again,
+/// and `file.newProject` the template project the settings name.
+fn openings(project: &Path) -> Vec<(&'static str, Value, Vec<(String, Value)>)> {
+    let path = project.display().to_string();
+    let named = json!({"path": path});
+    let opened = vec![("file.open".to_string(), named.clone())];
+    let template = json!({"values": {"project.useTemplate": true, "project.templatePath": path}});
+    vec![
+        ("file.open", named.clone(), Vec::new()),
+        ("file.openRecent", named.clone(), opened.clone()),
+        ("file.revert", json!({}), opened),
+        ("file.newProject", json!({}), vec![("prefs.set".to_string(), template)]),
+        ("file.importProject", named, Vec::new()),
+    ]
+}
+
+/// Reading into the session a project, or another document's footage, brings what it shows from its file,
+/// so a conversion after any command that does is refused when what it brings in lies where the session
+/// may read and never write: it is the command that reads a file into the session that the door cannot
+/// see past, not the one that replaces the project whole. `file.importAep` is held to the rule by the
+/// door's own unit test: EffectCraft's export writes no vector footage into an After Effects project, so
+/// no such file can be made here.
+#[test]
+fn a_conversion_after_any_command_that_reads_a_project_is_refused() {
+    for read_only in BUNDLES {
+        let (scratch, bundle, _) = folders().expect("the folders");
+        let project = project_showing(&scratch, &bundle).expect("the project");
+        for (command, params, earlier) in openings(&project) {
+            let mut app = scratch.app().expect("the app starts");
+            if !earlier.is_empty() {
+                run(&mut app, &earlier).unwrap_or_else(|e| panic!("`{command}`: {e}"));
+            }
+            let call = json!({"command": "engine.batch", "params": {"steps": batch_steps(&[(command.to_string(), params), convert()])}});
+            let words = with_bundle(&bundle, read_only, || refused(app.request("exec", call)))
+                .expect("the call is answered")
+                .unwrap_or_else(|e| panic!("`{command}`: {e}"));
+            assert!(words.contains("open the project in one call and convert in the next"), "`{command}`: the refusal names the call that works: {words}");
+        }
+        assert_eq!(names(&scratch.folders.staged).expect("the staged folder reads"), Vec::<String>::new(), "nothing was copied");
+    }
+}
+
+/// What a document read in by the call brings in is told apart from what the project showed before the
+/// call: a project imported beside bundled footage the session already shows, whose own footage lies
+/// where the session may write, needs no copy, so the call runs, and the conversion of the bundled
+/// footage is handed its copy as every other is.
+#[test]
+fn an_import_that_brings_in_nothing_to_copy_runs_beside_footage_that_needs_one() {
+    for read_only in BUNDLES {
+        let (scratch, bundle, _) = folders().expect("the folders");
+        let project = project_showing(&scratch, &bundle).expect("the project");
+        let beside = scratch.path().join("beside");
+        let imported = beside.join("beside.ecproj");
+        run(&mut scratch.app().expect("the app starts"), &save_showing(&put(&beside, "own.pdf", vector(true)).expect("the file"), &imported))
+            .expect("the project to import is saved");
+        let mut app = scratch.app().expect("the app starts");
+        let mut steps = open_and_convert(&project);
+        run(&mut app, steps.get(..1).unwrap_or_default()).expect("the project is open");
+        steps[0] = ("file.importProject".to_string(), json!({"path": imported.display().to_string()}));
+        let call = json!({"command": "engine.batch", "params": {"steps": batch_steps(&steps)}});
+        let answer = with_bundle(&bundle, read_only, || app.request("exec", call)).expect("the call is answered").expect("the call ran");
+        assert_eq!(answer["results"][1]["skipped"], json!([]), "no image was skipped (read-only {read_only})");
+        let staged = names(&scratch.folders.staged).expect("the staged folder reads");
+        assert!(staged.contains(&"art Image 1.png".to_string()), "the image lies beside the copy, inside the container: {staged:?}");
+    }
+}
+
+/// A conversion after the open is refused though another comes before it: the one before converts what
+/// the project showed before the call, the one after what the open brought in.
+#[test]
+fn a_conversion_after_the_open_is_refused_though_another_comes_before_it() {
+    for read_only in BUNDLES {
+        let (scratch, bundle, _) = folders().expect("the folders");
+        let project = project_showing(&scratch, &bundle).expect("the project");
+        let mut app = scratch.app().expect("the app starts");
+        let mut steps = open_and_convert(&project);
+        run(&mut app, steps.get(..1).unwrap_or_default()).expect("the project is open, so the first conversion has a layer to convert");
+        steps.insert(0, convert());
+        let call = json!({"command": "engine.batch", "params": {"steps": batch_steps(&steps)}});
+        let words = with_bundle(&bundle, read_only, || refused(app.request("exec", call))).expect("the call is answered").unwrap_or_else(|e| panic!("{e}"));
+        assert!(words.contains("open the project in one call and convert in the next"), "the refusal names the call that works: {words}");
+    }
+}
+
+/// What a command reads into the session can turn on an earlier step of the same call: here a change of
+/// the settings names the template a new project loads. The door cannot read that before the call, so
+/// the call is refused whatever the new project would show.
+#[test]
+fn an_open_an_earlier_step_decides_is_refused() {
+    let (scratch, bundle, _) = folders().expect("the folders");
+    let project = project_showing(&scratch, &bundle).expect("the project");
+    let (command, params, mut steps) = openings(&project).into_iter().find(|(command, ..)| *command == "file.newProject").expect("the new project");
+    steps.extend([(command.to_string(), params), convert()]);
+    let call = json!({"command": "engine.batch", "params": {"steps": batch_steps(&steps)}});
+    let words = refused(scratch.app().expect("the app starts").request("exec", call)).unwrap_or_else(|e| panic!("{e}"));
+    assert!(words.contains("open the project in one call and convert in the next"), "the refusal names the call that works: {words}");
+}
+
+/// A step of `run` is refused as every other row of a `run` is: the command it names, then its failure,
+/// then the step it is, so a caller reading a `run`'s failure knows which row to split.
+#[test]
+fn a_step_that_opens_a_project_and_converts_what_it_shows_is_refused_as_a_step() {
+    let (scratch, bundle, _) = folders().expect("the folders");
+    let project = project_showing(&scratch, &bundle).expect("the project");
+    let batch = json!({"steps": batch_steps(&open_and_convert(&project))});
+    let words = refused(scratch.app().expect("the app starts").request("run", json!({"steps": [{"command": "engine.batch", "params": batch}]})))
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(words.starts_with("engine.batch: "), "the refusal names the row that failed: {words}");
+    assert!(words.ends_with("(step 0)"), "the refusal gives the row's number: {words}");
+}
+
+/// A call the confinement refuses keeps the confinement's own words even when it is also a call that opens
+/// a project and converts what it shows: the door's advice is for a call this build could run at all.
+/// It holds where the door reads the document first, and where the call's own steps leave nothing to read:
+/// here a second document read in before the conversion.
+#[test]
+fn a_call_the_confinement_refuses_is_not_told_to_split_its_open_from_its_conversion() {
+    for read_only in BUNDLES {
+        let (scratch, bundle, _) = folders().expect("the folders");
+        let project = project_showing(&scratch, &bundle).expect("the project");
+        let outside = ("file.open".to_string(), json!({"path": scratch.outside_file().expect("a file outside the container")}));
+        let mut read_first = open_and_convert(&project);
+        read_first[0] = outside.clone();
+        let mut undecided = open_and_convert(&project);
+        undecided.insert(0, outside);
+        for steps in [read_first, undecided] {
+            let mut app = scratch.app().expect("the app starts");
+            let call = json!({"command": "engine.batch", "params": {"steps": batch_steps(&steps)}});
+            let refused = with_bundle(&bundle, read_only, || app.request("exec", call)).expect("the call is answered");
+            assert!(matches!(refused, Err(CraftError::Io { .. })), "the confinement answers in its own words: {refused:?}");
+        }
+        assert_eq!(names(&scratch.folders.staged).expect("the staged folder reads"), Vec::<String>::new(), "nothing was copied");
+    }
 }

@@ -36,15 +36,25 @@
 //! an image is not copied beside the copy: the copy's folder is named by the Lottie file's bytes alone,
 //! so an image that changed would be written over under a project that names it, and an image a `..`
 //! leads to lies outside the copy's folder altogether.
+//!
+//! A call that converts vector footage after reading into the session a document that shows such a
+//! file where it must be read from a copy — a `replay`'s `start` project, a `file.open` step of a batch
+//! — is handed no copy and refused instead, in the words of a capability this build lacks. What that
+//! document shows is in no file the call names and is not in the project before the call, the opened
+//! document goes on naming the file where it lies, and EffectCraft runs a batch's and a replay's steps on
+//! the session itself, with no call between them the door could stand in (AD22). The refusal names the
+//! call that works: the open in one call, the conversion in the next, which is handed a copy as every
+//! other conversion is. Whether the document shows such a file is told before the call by the command
+//! that reads it in, run on a scratch session, so a call whose document needs no copy runs as it came.
 
 use std::io;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use craftbridge_core::Result;
+use craftbridge_core::{CraftError, Result};
 use effectcraft_automation::Backend;
 use effectcraft_automation::confine::Confinement;
-use effectcraft_engine::project::{ItemId, ItemKind};
+use effectcraft_engine::project::{ItemId, ItemKind, Project};
 use effectcraft_engine::{Services, Session, vector};
 use serde_json::Value;
 
@@ -125,22 +135,31 @@ struct Lottie {
 /// or a server no app holds), and behind a bridge, which has no files of its own to stage, every call
 /// goes on as it came.
 pub(crate) fn staged(backend: &mut Backend, folder: Option<&Path>, calls: &mut [(&str, &mut Value)]) -> Result<Staged> {
-    let mut imports: Vec<Value> = Vec::new();
-    let mut converts = false;
-    for (command, params) in calls.iter() {
-        for (reached, given) in crate::methods::reached(command, params) {
-            if reached == LOTTIE {
-                imports.push(given.clone());
-            }
-            converts |= reached == CONVERT && converts_vector(given);
-        }
-    }
+    let reaches: Vec<(&str, &Value)> = calls.iter().flat_map(|call| crate::methods::reached(call.0, call.1)).collect();
+    let imports: Vec<Value> = reaches.iter().filter(|(reached, _)| *reached == LOTTIE).map(|(_, given)| (*given).clone()).collect();
+    let converts = reaches.iter().any(|(reached, given)| converting(reached, given));
     if imports.is_empty() && !converts {
         return Ok(Staged::none());
     }
     let (Some(folder), Some(confinement)) = (folder, backend.confinement().cloned()) else { return Ok(Staged::none()) };
     if calls.iter().any(|(command, params)| confinement.check_command(command, params).is_err()) {
         return Ok(Staged::none());
+    }
+    // A conversion of vector footage a document read in by the same call shows cannot be handed a
+    // copy: the door hands copies before the call, and the document goes on naming the file where it
+    // lies, since its paths are written in the file the command reads. EffectCraft runs a batch's and a
+    // replay's steps on the session itself, with no call between them for the door to stand in (AD22),
+    // so such a call is refused in these words, which name the call that works. Only one whose document
+    // shows such footage is: the command itself tells what the document shows, before the call, and a
+    // call that reads in nothing needing a copy runs as the command line's does. Where the call's own
+    // earlier steps decide what is read in, nothing can tell it before the call, and it is refused.
+    let refused = match opening(&reaches) {
+        Opening::Nothing => false,
+        Opening::Undecided => true,
+        Opening::Reads(opener, given) => reads_in_what_needs_a_copy(backend, &confinement, opener, given),
+    };
+    if refused {
+        return Err(CraftError::unsupported(opened_and_converted()));
     }
     let mut lotties: Vec<Lottie> = Vec::new();
     for params in imports {
@@ -191,6 +210,83 @@ fn converts_vector(params: &Value) -> bool {
     params.get(CONVERT_OP).and_then(Value::as_str).is_some_and(|op| op == FROM_VECTOR || op.starts_with('$'))
 }
 
+/// Whether the command the call reaches is the conversion that writes beside the vector file it reads.
+fn converting(reached: &str, params: &Value) -> bool {
+    reached == CONVERT && converts_vector(params)
+}
+
+/// The commands that read a project, or another document, into the session from a file: `file.open`
+/// the one its `path` names, `file.openRecent` one of the recent projects, `file.revert` the project's
+/// own file again, `file.newProject` the template project the settings name, when they name one, and
+/// `file.importProject` and `file.importAep` the footage of another document, added to the project that
+/// is open. What each shows comes from the file it reads, so none of it is in the project before the call.
+const OPENS_A_PROJECT: [&str; 6] = ["file.open", "file.openRecent", "file.revert", "file.newProject", "file.importProject", "file.importAep"];
+
+/// The command that changes the settings, among them the template project `file.newProject` reads.
+const SETTINGS: &str = "prefs.set";
+
+/// What the door can tell before the call of a document the call reads into the session ahead of a
+/// conversion of vector footage.
+#[derive(Debug, PartialEq)]
+enum Opening<'a> {
+    /// No command reads one in before a conversion: a conversion before such a command converts what
+    /// the project showed before the call, which the door reads as it always does.
+    Nothing,
+    /// The one command that does, with its parameters, which read the same document before the call as
+    /// in it.
+    Reads(&'a str, &'a Value),
+    /// What is read in turns on what the call itself does first, which nothing can read before it runs:
+    /// a parameter given as a `$` reference, which a batch fills in as it runs, a change of the
+    /// settings, which name the template a new project reads, or a document read in before it, which
+    /// changes the recent projects and the project's own file.
+    Undecided,
+}
+
+/// The document the call reads into the session before its last conversion of vector footage, in the
+/// order the call reaches its commands, so a conversion after the open is seen however many come before.
+fn opening<'a>(reaches: &[(&'a str, &'a Value)]) -> Opening<'a> {
+    let Some(last) = reaches.iter().rposition(|(reached, given)| converting(reached, given)) else { return Opening::Nothing };
+    let before = reaches.get(..last).unwrap_or_default();
+    let mut openers = before.iter().enumerate().filter(|(_, (reached, _))| OPENS_A_PROJECT.contains(reached));
+    let Some((at, &(opener, given))) = openers.next() else { return Opening::Nothing };
+    let mut referenced = false;
+    each_string(given, &mut |text| referenced |= text.starts_with('$'));
+    let settled = before.iter().take(at).any(|(reached, _)| *reached == SETTINGS);
+    if referenced || settled || openers.next().is_some() { Opening::Undecided } else { Opening::Reads(opener, given) }
+}
+
+/// Whether the document `opener` reads into the session with `given` shows vector footage that must be
+/// read from a copy ([`vector_footage_to_copy`]). What a document shows is EffectCraft's to read, so the
+/// command itself tells it, run once on a scratch session ([`scratch`]) that starts from an empty
+/// project, so that what it holds after is what the document brought in, and that refuses every write.
+/// A command the scratch session refuses reads in nothing the door could tell.
+fn reads_in_what_needs_a_copy(backend: &mut Backend, confinement: &Confinement, opener: &str, given: &Value) -> bool {
+    let Some(session) = backend.session() else { return false };
+    let probe = Arc::new(Probe { inner: session.services.clone(), writes: Mutex::new(Vec::new()) });
+    let mut scratch = scratch(session, probe, confinement, false);
+    if scratch.exec(opener, given.clone()).is_err() {
+        return false;
+    }
+    scratch.session().is_some_and(|opened| vector_footage_to_copy(&opened.project, confinement).next().is_some())
+}
+
+/// The refusal of a call that converts vector footage in the same call that opens a project, in the
+/// words of a capability this build was put together without, naming at the end the call that works.
+fn opened_and_converted() -> String {
+    format!(
+        "`{CONVERT}` is not available in this build in a call that opens a project: what that project shows is not there before the call, so no copy can be handed over of a file it shows in a folder this build may read and never write, beside which its images would land; open the project in one call and convert in the next"
+    )
+}
+
+/// The file of each footage item of `project` that is vector footage, as the engine tells it
+/// ([`vector::is_vector`]), and must be read from a copy ([`staging::needs_copy`]).
+fn vector_footage_to_copy<'a>(project: &'a Project, confinement: &'a Confinement) -> impl Iterator<Item = &'a str> {
+    project.items.values().filter_map(move |item| match &item.kind {
+        ItemKind::Footage(footage) if vector::is_vector(footage) && staging::needs_copy(confinement, &footage.path).is_some() => Some(footage.path.as_str()),
+        _ => None,
+    })
+}
+
 /// Add to `sources` every vector file, as the engine tells one ([`vector::is_vector`]), that must be
 /// read from a copy ([`staging::needs_copy`]) and that the project's footage shows or a string of the
 /// call names: the import a conversion's footage may come from is a step of the same call.
@@ -201,14 +297,7 @@ fn vector_files(backend: &mut Backend, confinement: &Confinement, calls: &[(&str
             sources.push(path.to_string());
         }
     };
-    for item in session.project.items.values() {
-        if let ItemKind::Footage(footage) = &item.kind
-            && vector::is_vector(footage)
-            && staging::needs_copy(confinement, &footage.path).is_some()
-        {
-            add(&footage.path);
-        }
-    }
+    vector_footage_to_copy(&session.project, confinement).for_each(&mut add);
     let Some(importer) = session.importer.clone() else { return };
     for (_, params) in calls {
         each_string(params, &mut |text| {
@@ -250,7 +339,7 @@ fn substitute(value: &mut Value, source: &str, copy: &str) -> bool {
 fn probe(backend: &mut Backend, confinement: &Confinement, params: &Value) -> (Vec<String>, Vec<String>) {
     let Some(session) = backend.session() else { return (Vec::new(), Vec::new()) };
     let probe = Arc::new(Probe { inner: session.services.clone(), writes: Mutex::new(Vec::new()) });
-    let mut scratch = scratch(session, probe.clone(), confinement);
+    let mut scratch = scratch(session, probe.clone(), confinement, true);
     let made = scratch.exec(LOTTIE, params.clone()).ok();
     let ids = made.as_ref().and_then(|made| made.get("items")).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64);
     let project = scratch.session().map(|scratch| scratch.project.clone());
@@ -263,15 +352,20 @@ fn probe(backend: &mut Backend, confinement: &Confinement, params: &Value) -> (V
     (noted(&probe.writes), shown)
 }
 
-/// A scratch session that shares the project, the editor state and the file service of `session`,
-/// through `probe`, and is confined as `session` is, so the confinement checks every command and every
-/// read the scratch makes as it checks the real session's, and the probe sees what the session may
-/// see and no more.
-fn scratch(session: &Session, probe: Arc<Probe>, confinement: &Confinement) -> Backend {
+/// A scratch session that shares the file service of `session`, through `probe`, its project's path
+/// and its settings, and, `with_project`, its project and editor state, and is confined as `session`
+/// is, so the confinement checks every command and every read the scratch makes as it checks the real
+/// session's, and the probe sees what the session may see and no more. Without the project it starts
+/// from an empty one, so what a command reads into it is all it holds.
+fn scratch(session: &Session, probe: Arc<Probe>, confinement: &Confinement, with_project: bool) -> Backend {
     let mut scratch = Session::new();
     scratch.services = probe;
-    scratch.project = session.project.clone();
-    scratch.state = session.state.clone();
+    scratch.path = session.path.clone();
+    scratch.prefs = session.prefs.clone();
+    if with_project {
+        scratch.project = session.project.clone();
+        scratch.state = session.state.clone();
+    }
     let mut scratch = Backend::headless(scratch);
     scratch.confine(confinement.clone());
     scratch
@@ -376,7 +470,7 @@ mod tests {
         let confinement = Confinement::new(std::slice::from_ref(&inside), &[]).expect("the confinement");
         let beneath = Arc::new(Nothing::default());
         let probe = Arc::new(Probe { inner: beneath.clone(), writes: Mutex::new(Vec::new()) });
-        let mut scratch = scratch(&Session::new(), probe.clone(), &confinement);
+        let mut scratch = scratch(&Session::new(), probe.clone(), &confinement, true);
         let services = scratch.session().expect("a session").services.clone();
         let file = |folder: &Path| folder.join("there.txt").display().to_string();
         assert!(services.read_file(&file(&inside)).is_err(), "a file is read by the service beneath");
@@ -411,5 +505,46 @@ mod tests {
         {
             assert!(!converts_vector(&params), "{params}");
         }
+        let convert = serde_json::json!({"op": "shapesFromVector"});
+        assert!(converting(CONVERT, &convert), "the conversion is the layer command's own");
+        assert!(!converting("layer.addItem", &convert), "the same `op` on another command converts nothing");
+    }
+
+    /// A conversion after a command that reads a document into the session may convert what it brings in,
+    /// which is read from the command and its parameters, unless the call itself decides it first; a
+    /// conversion of what the project showed before the call, and a call missing either, reads nothing in.
+    #[test]
+    fn only_a_conversion_after_an_open_converts_what_the_call_reads_in() {
+        let open = serde_json::json!({"path": "/b/shows.ecproj"});
+        let none = serde_json::json!({});
+        let convert = serde_json::json!({"op": "shapesFromVector"});
+        let text = serde_json::json!({"op": "editableText"});
+        for opener in ["file.open", "file.openRecent", "file.revert", "file.newProject", "file.importProject", "file.importAep"] {
+            assert_eq!(opening(&[(opener, &open), (CONVERT, &convert)]), Opening::Reads(opener, &open), "the conversion converts what `{opener}` brings in");
+        }
+        assert_eq!(
+            opening(&[(LOTTIE, &open), ("file.open", &open), (CONVERT, &convert)]),
+            Opening::Reads("file.open", &open),
+            "a command before them both changes nothing of the order"
+        );
+        assert_eq!(
+            opening(&[(CONVERT, &convert), ("file.open", &open), (CONVERT, &convert)]),
+            Opening::Reads("file.open", &open),
+            "a conversion before the open leaves the one after it to convert what the open brought in"
+        );
+        let decided = [
+            [(SETTINGS, &open), ("file.newProject", &none), (CONVERT, &convert)],
+            [("file.open", &open), ("file.openRecent", &none), (CONVERT, &convert)],
+            [("comp.new", &none), ("file.importAep", &serde_json::json!({"path": "/b/a.aep", "allowLosses": "$1.comp"})), (CONVERT, &convert)],
+        ];
+        for call in &decided {
+            assert_eq!(opening(call), Opening::Undecided, "what is read in turns on the call itself: {call:?}");
+        }
+        assert_eq!(opening(&[(CONVERT, &convert), ("file.open", &open)]), Opening::Nothing, "the conversion converts what the project already showed");
+        assert_eq!(opening(&[(SETTINGS, &open), (CONVERT, &convert), ("file.newProject", &none)]), Opening::Nothing, "nothing is read in before it");
+        assert_eq!(opening(&[("file.importProject", &open), (CONVERT, &text)]), Opening::Nothing, "a conversion of another kind is handed its copy");
+        assert_eq!(opening(&[("file.open", &open)]), Opening::Nothing, "no conversion at all");
+        assert_eq!(opening(&[(CONVERT, &convert)]), Opening::Nothing, "no open at all");
+        assert_eq!(opening(&[]), Opening::Nothing, "nothing at all");
     }
 }
