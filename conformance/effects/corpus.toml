@@ -19,11 +19,8 @@
 #                            call must not finish before that stop reaches it: the desktop runner holds the
 #                            export at that point until it does, whatever the machine's speed, and fails the
 #                            step of a call it held nowhere, as a fill, or whose stop never came. A runner
-#                            that reaches the engine only through the SDK, as a phone's does, has no exporter
-#                            to hold: it stops the call at the first beat past the fraction and fails the step
-#                            unless the render queue says an export of the call met the stop (`UserStopped`,
-#                            where one that rendered every frame first is `Done`), so a call it cannot hold is
-#                            named a race and never passed)
+#                            that reaches the engine only through the SDK has no exporter to hold, and T22
+#                            says what its stop is then judged by)
 #                            kind = "frame": params, format = "png" | "rgba8", out
 #                            kind = "mcp": every line of stdin, each reply printed
 #   [[scenario.expect]]      step, output, pointer (RFC 6901), equals or length: a value in a JSON document
@@ -774,14 +771,23 @@ title = "cancel an export at 50 %: Cancelled, and no output file left"
 sides = "plugin"
 # The command line stops a render only by its process being killed, so there is no oracle to compare. The
 # first step is the same export left alone, which writes its file: what the cancelled one leaves out would
-# have been there. The listener answers at its first tenth-of-a-second beat past half the frames, and the
+# have been there. The listener answers at its first tenth-of-a-second beat past half the frames. The
 # desktop runner holds the export at the first frames that reach half, asking again until the plug-in's
 # stop has come, so the exporter always meets that stop with frames left to render and removes the file it
 # opened: the folder holds the control's file alone, however fast or slow the machine is. Three hundred
 # frames leave a whole batch of at most 16 after the one that passes half, so the stop is always met before
-# the last. The export is the demo's whole length at half size, and not a short one, for the runners that
-# cannot hold an export: the engine's beat then sees it progress by a small part of its frames, so the stop
-# they make at the first beat past half meets an export with most of its second half still to render.
+# the last.
+# On a device the run is bounded, and this is why. The SDKs cannot hold an export: a seam for it that no app
+# could call would need a second native build of every library for the tests alone, since the tests link
+# the library an app links. So the export renders on while the stop is on its way: the listener hears it
+# only on the engine's beat, and the stop it makes at the first beat past half may reach an export that has
+# ended; neither the answer (`Cancelled`) nor the folder says which. The render queue's record does, and the
+# step is judged by it: the export's item says `UserStopped` when the exporter met the stop, which passes,
+# and `Done` when it had rendered every frame first. A device that renders the second half of the export
+# before the stop reaches it reports that race, and never passes, so the desktop runner's hold is what
+# makes T22 deterministic. The export is the demo's whole length at half size, and not a short one, so that
+# the beat sees it progress by a small part of its frames and the stop meets most of its second half still
+# to render.
 [[scenario.step]]
 [[scenario.step.call]]
 kind = "request"
