@@ -6,13 +6,17 @@
 //! the call returns, which keeps the pictures VideoToolbox emits, in decoding order, inside the call that fed
 //! the sample: [`crate::order::Sequence`] then puts them in presentation order, as FilmCraft's software decoders emit them,
 //! and each picture is read out of its surface into the planar layout those decoders produce
-//! ([`biplanar`]). Every status VideoToolbox, CoreMedia and CoreVideo return is checked and becomes the
-//! decoder's error, which [`crate::Fallback`] answers by switching to the software decoder.
+//! ([`biplanar`]). A surface is the coded picture from its corner, reported at the picture's size with the rest
+//! of the coded picture held to the right and below as extended pixels, so the picture is read at its crop,
+//! wherever the crop starts. Every status VideoToolbox, CoreMedia and CoreVideo return is checked and becomes
+//! the decoder's error, which [`crate::Fallback`] answers by switching to the software decoder.
 //!
 //! FilmCraft's own VideoToolbox decoder, `filmcraft_platform::videotoolbox::VtDecoder`, is built for macOS
 //! only, in the crate whose wrapper [`crate::Fallback`] does not use for the dependencies it brings; this one
 //! follows its behaviour on iOS in code of its own: the streams it declines, a session per decoding run, the
-//! RASL pictures a run leaves out, the reorder buffer and the copy out of a biplanar surface.
+//! RASL pictures a run leaves out, the reorder buffer and the copy out of a biplanar surface, bar the crop of a
+//! surface of the picture's size, which `VtDecoder` reads from the surface's corner: for a crop that starts off
+//! the coded picture's corner, that is another window of the picture.
 //!
 //! The rules for this module's `unsafe` (AGENTS.md §4): every block carries a `// SAFETY:` comment, no
 //! pointer leaves the module, and nothing here panics, in the output callback least of all, because
@@ -34,9 +38,9 @@ use objc2_core_media::{
     kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms, kCMVideoCodecType_AV1,
 };
 use objc2_core_video::{
-    CVImageBuffer, CVPixelBuffer, CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferGetHeight,
-    CVPixelBufferGetHeightOfPlane, CVPixelBufferGetPixelFormatType, CVPixelBufferGetPlaneCount, CVPixelBufferGetWidth, CVPixelBufferLockBaseAddress,
-    CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress, kCVPixelBufferPixelFormatTypeKey,
+    CVImageBuffer, CVPixelBuffer, CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferGetExtendedPixels,
+    CVPixelBufferGetHeight, CVPixelBufferGetHeightOfPlane, CVPixelBufferGetPixelFormatType, CVPixelBufferGetPlaneCount, CVPixelBufferGetWidth,
+    CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress, kCVPixelBufferPixelFormatTypeKey,
 };
 use objc2_video_toolbox::{
     VTDecodeFrameFlags, VTDecodeInfoFlags, VTDecompressionOutputCallbackRecord, VTDecompressionSession, VTIsHardwareDecodeSupported,
@@ -186,17 +190,22 @@ impl<'a> Locked<'a> {
         Ok(Self(surface))
     }
 
-    /// Plane `index`, readable while the guard lives.
-    fn plane(&self, index: usize) -> std::result::Result<Plane<'_>, Failure> {
+    /// Plane `index`, readable while the guard lives, with its share of the `below` rows of extended pixels the
+    /// surface has under its `height` rows: all of them for a plane of the surface's height, half for 4:2:0
+    /// chroma.
+    fn plane(&self, index: usize, below: usize, height: usize) -> std::result::Result<Plane<'_>, Failure> {
         let base = CVPixelBufferGetBaseAddressOfPlane(self.0, index).cast::<u8>().cast_const();
         let stride = CVPixelBufferGetBytesPerRowOfPlane(self.0, index);
         let rows = CVPixelBufferGetHeightOfPlane(self.0, index);
-        let size = stride.checked_mul(rows).ok_or("the decoded picture's plane size overflows")?;
+        let extended = below.checked_mul(rows).and_then(|share| share.checked_div(height));
+        let size = extended.and_then(|extended| rows.checked_add(extended)).and_then(|rows| stride.checked_mul(rows));
+        let size = size.ok_or("the decoded picture's plane size overflows")?;
         if base.is_null() || size == 0 {
             return Err(format!("the decoded picture's plane {index} is not mapped"));
         }
-        // SAFETY: while the base address is locked CoreVideo maps `bytes per row * rows` bytes from each
-        // plane's base address, and the slice borrows the guard, so it cannot outlive the lock.
+        // SAFETY: while the base address is locked CoreVideo maps `bytes per row` bytes for each of a plane's
+        // rows and of the extended rows below them from the plane's base address, and the slice borrows the
+        // guard, so it cannot outlive the lock.
         let data = unsafe { std::slice::from_raw_parts(base, size) };
         Ok(Plane { data, stride })
     }
@@ -209,6 +218,19 @@ impl Drop for Locked<'_> {
     }
 }
 
+/// The extended pixels to the right of and below a surface's own size, as columns and rows: where VideoToolbox
+/// holds the rest of the coded picture. Those to the left and above lie before the surface's origin and are never
+/// read. CoreVideo documents extended pixels only as padding the surface's memory holds, and the clean aperture
+/// (`CVImageBufferGetCleanRect`) as the part of a surface that is the picture; VideoToolbox's surface attaches no
+/// clean aperture, so its clean rectangle is the whole surface, wherever the crop starts. The crop therefore comes
+/// from the stream, and the extended pixels say whether the surface holds the coded picture it is a window of.
+fn extended_pixels(surface: &CVPixelBuffer) -> (usize, usize) {
+    let (mut left, mut right, mut top, mut bottom) = (0, 0, 0, 0);
+    // SAFETY: `surface` is a pixel buffer that stays alive for the call, which writes the four counts.
+    unsafe { CVPixelBufferGetExtendedPixels(surface, &mut left, &mut right, &mut top, &mut bottom) };
+    (right, bottom)
+}
+
 /// The picture in a decoded surface, as the frame FilmCraft's software decoder makes for the stream.
 fn read_picture(surface: &CVPixelBuffer, layout: &Layout) -> std::result::Result<VideoFrame, Failure> {
     let format = CVPixelBufferGetPixelFormatType(surface);
@@ -216,9 +238,11 @@ fn read_picture(surface: &CVPixelBuffer, layout: &Layout) -> std::result::Result
         return Err(format!("the decoded picture is in format {format:#x}, not {:#x}", layout.pixel_format));
     }
     let (width, height) = (CVPixelBufferGetWidth(surface), CVPixelBufferGetHeight(surface));
-    let crop = layout.crop_in(width, height).ok_or_else(|| format!("the decoded picture is {width}x{height}, not the stream's size"))?;
+    let extended = extended_pixels(surface);
+    let crop = layout.crop_in((width, height), extended)?;
+    let below = extended.1;
     let locked = Locked::new(surface)?;
-    let pixels = biplanar::to_pixels(locked.plane(0)?, locked.plane(1)?, crop, layout.depth)?;
+    let pixels = biplanar::to_pixels(locked.plane(0, below, height)?, locked.plane(1, below, height)?, crop, layout.depth)?;
     Ok(layout.frame(pixels))
 }
 
@@ -389,4 +413,300 @@ pub(crate) fn decoder(entry: &SampleEntry, stream: &StreamInfo) -> Result<VtDeco
     let (depth, codec) = (layout.reorder, layout.codec);
     let raw = RawSession { layout, format, session: Some(session) };
     Ok(HardwareDecoder::new(raw, stream.clone(), depth, BACKEND, codec))
+}
+
+/// These run where VideoToolbox decodes, on an iPhone and in the iOS Simulator: each stream of the media tests'
+/// set, and T23's footage, through a real session, frame by frame against FilmCraft's software decoder. Each
+/// test says which branch it took. Where VideoToolbox has a hardware decoder for the codec, every picture is
+/// the session's; where it has none (the Simulator, which has none at all, and an iPhone whose chip decodes no
+/// AV1), the start is refused, the factory declines the stream, and the registry's software decoder must give
+/// the same pictures.
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+    use std::io::Cursor;
+
+    use filmcraft_codecs::hw::hw_stats;
+    use filmcraft_codecs::{CodecError, VideoDecoder, make_video_decoder, software_video_decoder};
+
+    use super::*;
+    use crate::fixtures::{self, Stream, counters, text};
+    use crate::{ColourCodes, HardwareEncoder, Movie, RateControl, VideoCodec, VideoSpec, Yuv420};
+
+    /// The type of a stream of `codec` as CoreMedia names it: its four-character code.
+    fn kind(codec: Codec) -> String {
+        String::from_utf8_lossy(&codec.fourcc().to_be_bytes()).into_owned()
+    }
+
+    /// The name of this device's hardware decoder for `codec`, the name its decoders carry; `None` where
+    /// VideoToolbox says the device has none.
+    fn hardware_name(codec: Codec) -> Option<String> {
+        hardware_available(codec).then(|| format!("{BACKEND} {}", codec.name()))
+    }
+
+    /// [`fixtures::hardware_start`] for a stream of `codec` on this device, whose hardware decoder for the
+    /// codec is the one VideoToolbox says it has.
+    fn hardware_start(codec: Codec, start: Result<VtDecoder>) -> std::result::Result<Option<VtDecoder>, String> {
+        fixtures::hardware_start(&kind(codec), hardware_name(codec).as_deref(), start)
+    }
+
+    fn codec_of(entry: &SampleEntry) -> Codec {
+        Layout::for_stream(&fixtures::stream(entry)).unwrap().codec
+    }
+
+    /// Which way a test's stream went on this device.
+    enum Branch {
+        /// The device's hardware decoder took it, through a session of its own: the decoder's name.
+        Hardware(String),
+        /// Its start was refused on a device with no hardware decoder for its codec, so the factory declined
+        /// it and FilmCraft's registry opened it with the software decoder: why the start was refused.
+        Declined(String),
+    }
+
+    impl Branch {
+        /// What a test says of `stream` on this branch, having compared `compared` pictures.
+        fn says(&self, stream: &str, compared: usize) -> String {
+            let pictures = format!("{compared} pictures, each the software decoder's");
+            match self {
+                Self::Hardware(decoder) => format!("{stream}: hardware, {decoder}: {pictures}"),
+                Self::Declined(why) => format!("{stream}: declined ({why}), so FilmCraft's registry opened it with the software decoder: {pictures}"),
+            }
+        }
+    }
+
+    /// The decoder a test compares `entry`'s stream through, and its branch: the device's hardware decoder, in a
+    /// session of its own; or, where the start is refused on a device with no hardware decoder for the codec,
+    /// the decoder FilmCraft's registry opens the stream with once the factory has declined it, the decline
+    /// counted. On a device with a hardware decoder for the codec a refused start fails the test, naming the
+    /// type and the decoder. The caller holds [`counters`], since the decline counter is process-wide.
+    fn on_this_device(entry: &SampleEntry) -> (Box<dyn VideoDecoder>, Branch) {
+        let codec = codec_of(entry);
+        let start = decoder(entry, &fixtures::stream(entry));
+        let why = start.as_ref().err().map(ToString::to_string).unwrap_or_default();
+        if let Some(hardware) = hardware_start(codec, start).unwrap() {
+            let name = hardware.name().to_string();
+            return (Box::new(hardware), Branch::Hardware(name));
+        }
+        crate::register(true);
+        let declined = hw_stats().declined;
+        let through_registry = make_video_decoder(entry).unwrap();
+        let software = software_video_decoder(entry).unwrap();
+        assert_eq!((through_registry.name(), hw_stats().declined), (software.name(), declined + 1), "the factory declined the stream");
+        (through_registry, Branch::Declined(why))
+    }
+
+    /// Holds the front pictures of `ours` and `theirs` to each other while both have one, `before` pictures
+    /// having been compared already: how many it compared. A picture that differs is named, not printed, since
+    /// a large one prints as megabytes.
+    fn same_so_far(name: &str, ours: &mut VecDeque<DecodedFrame>, theirs: &mut VecDeque<DecodedFrame>, before: usize) -> usize {
+        let mut compared = 0;
+        while let (Some(mine), Some(reference)) = (ours.front(), theirs.front()) {
+            let same = text(std::slice::from_ref(mine)) == text(std::slice::from_ref(reference));
+            assert!(same, "{name}: picture {}, at {}, is not the software decoder's", before + compared, reference.pts);
+            ours.pop_front();
+            theirs.pop_front();
+            compared += 1;
+        }
+        compared
+    }
+
+    /// Feeds `samples` to `decoder` and to a new software decoder for `entry` alike, and holds each of `decoder`'s
+    /// pictures to the software decoder's in turn, as they come, so a long stream is never held whole: how many
+    /// it compared, which is every picture each gave.
+    fn compared_with_software(name: &str, decoder: &mut dyn VideoDecoder, entry: &SampleEntry, samples: &[(i64, Vec<u8>)]) -> usize {
+        let mut software = software_video_decoder(entry).unwrap();
+        let (mut ours, mut theirs) = (VecDeque::new(), VecDeque::new());
+        let mut compared = 0;
+        for (pts, sample) in samples {
+            ours.extend(decoder.decode(sample, *pts).unwrap());
+            theirs.extend(software.decode(sample, *pts).unwrap());
+            compared += same_so_far(name, &mut ours, &mut theirs, compared);
+        }
+        ours.extend(decoder.flush());
+        theirs.extend(software.flush());
+        compared += same_so_far(name, &mut ours, &mut theirs, compared);
+        let counts = (compared + ours.len(), compared + theirs.len());
+        assert_eq!(counts.0, counts.1, "{name}: the device's pictures, and the software decoder's");
+        compared
+    }
+
+    /// The pictures of `stream` on this device, frame by frame against the software decoder's: the branch it
+    /// took, which [`settle`] says and holds to the device's.
+    fn check(stream: &Stream) -> Branch {
+        let (mut decoder, branch) = on_this_device(&stream.entry);
+        let compared = compared_with_software(stream.name, decoder.as_mut(), &stream.entry, &stream.samples);
+        settle(stream, &branch, compared);
+        branch
+    }
+
+    /// Says `branch` of `stream`, `compared` pictures compared, and fails a run that compared none where the
+    /// device has a hardware decoder for the codec, or one whose branch is not the device's: the hardware one,
+    /// through the device's hardware decoder, exactly where VideoToolbox says it has one for the codec, so what a
+    /// test says of its branch is what it took.
+    fn settle(stream: &Stream, branch: &Branch, compared: usize) {
+        let codec = codec_of(&stream.entry);
+        let hardware = hardware_name(codec);
+        fixtures::hardware_compared(&kind(codec), hardware.as_deref(), compared).unwrap();
+        let taken = match branch {
+            Branch::Hardware(decoder) => Some(decoder.as_str()),
+            Branch::Declined(_) => None,
+        };
+        assert_eq!(taken, hardware.as_deref(), "{}: the branch is the device's for the codec", stream.name);
+        eprintln!("{}", branch.says(stream.name, compared));
+    }
+
+    #[test]
+    fn each_branch_is_said_in_its_own_words() {
+        assert_eq!(
+            Branch::Hardware("VideoToolbox HEVC".into()).says("HEVC", 12),
+            "HEVC: hardware, VideoToolbox HEVC: 12 pictures, each the software decoder's"
+        );
+        assert_eq!(
+            Branch::Declined("unsupported codec: no session".into()).says("AV1", 6),
+            "AV1: declined (unsupported codec: no session), so FilmCraft's registry opened it with the software decoder: 6 pictures, each the software decoder's"
+        );
+    }
+
+    #[test]
+    fn a_refused_start_fails_where_videotoolbox_has_a_hardware_decoder_for_the_codec_naming_the_type_and_the_decoder() {
+        let why = "the session refused the stream";
+        let refused = || Err(CodecError::Unsupported(why.into()));
+        for (codec, fourcc, decoder) in
+            [(Codec::H264, *b"avc1", "VideoToolbox H.264"), (Codec::Hevc, *b"hvc1", "VideoToolbox HEVC"), (Codec::Av1, *b"av01", "VideoToolbox AV1")]
+        {
+            // Where the rule applies is VideoToolbox's own answer, asked here, not through the tests' helpers.
+            // SAFETY: a query that takes a four-character code and returns a flag.
+            let device_has_one = unsafe { VTIsHardwareDecodeSupported(u32::from_be_bytes(fourcc)) };
+            let kind = String::from_utf8_lossy(&fourcc).into_owned();
+            let rule = format!(
+                "{kind}: the device's hardware decoder {decoder} gave no picture compared with the software decoder's: its start was refused (Unsupported({why:?}))"
+            );
+            let start = hardware_start(codec, refused()).map(|decoder| decoder.is_some());
+            assert_eq!(start, if device_has_one { Err(rule) } else { Ok(false) }, "{kind}");
+        }
+    }
+
+    #[test]
+    fn h264_through_a_real_session_gives_the_pictures_the_software_decoder_gives() {
+        let _counters = counters();
+        for stream in [fixtures::h264(), fixtures::h264_with_b_pictures(), fixtures::h264_with_b_pictures_from_before_zero()] {
+            check(&stream);
+        }
+    }
+
+    #[test]
+    fn hevc_with_b_pictures_through_a_real_session_gives_the_pictures_the_software_decoder_gives() {
+        let _counters = counters();
+        check(&fixtures::hevc());
+    }
+
+    #[test]
+    fn ten_bit_hevc_with_b_pictures_through_a_real_session_gives_the_pictures_the_software_decoder_gives() {
+        let _counters = counters();
+        check(&fixtures::hevc10());
+    }
+
+    #[test]
+    fn a_crop_that_starts_off_the_corner_gives_the_window_the_software_decoder_gives() {
+        let _counters = counters();
+        for stream in [fixtures::h264_with_an_offset_crop(), fixtures::hevc_with_an_offset_crop()] {
+            check(&stream);
+        }
+    }
+
+    #[test]
+    fn a_seek_to_an_hevc_cra_gives_the_pictures_the_software_decoder_gives_from_it() {
+        let _counters = counters();
+        let stream = fixtures::hevc();
+        let StreamInfo::Nal(info) = fixtures::stream(&stream.entry) else { panic!("HEVC is a stream of NAL units") };
+        // A CRA in mid-stream (21), whose RASL picture refers back past it and is left out of a run that starts there.
+        let cra = stream.samples.iter().position(|(_, sample)| info.nal_types(sample).contains(&21)).filter(|&at| at > 0).unwrap();
+        let (mut decoder, branch) = on_this_device(&stream.entry);
+        let from_the_cra = Stream { name: "HEVC from its CRA", entry: stream.entry.clone(), samples: stream.samples[cra..].to_vec() };
+        // Sought to from the stream's start, from part way through the run before it, and from its end.
+        for before in [0..0, 0..3, 0..stream.samples.len()] {
+            for (pts, sample) in &stream.samples[before.clone()] {
+                decoder.decode(sample, *pts).unwrap();
+            }
+            decoder.reset();
+            let compared = compared_with_software(from_the_cra.name, decoder.as_mut(), &stream.entry, &from_the_cra.samples);
+            assert_eq!(compared, from_the_cra.samples.len() - 1, "after samples {before:?}: every picture from the CRA on but its RASL picture");
+            settle(&from_the_cra, &branch, compared);
+        }
+    }
+
+    #[test]
+    fn av1_takes_the_decline_path_where_the_chip_has_no_av1_decoder() {
+        let _counters = counters();
+        // `check` holds the branch to VideoToolbox's answer for AV1, so a declined stream is one on a chip with none.
+        if let Branch::Declined(why) = check(&fixtures::av1()) {
+            assert_eq!(why, "unsupported codec: this device has no hardware decoder for the stream's codec");
+        }
+    }
+
+    /// The pictures of T23's footage: 1080 by 1080, the running example's size (plan §5).
+    const T23_SIDE: usize = 1080;
+    /// The running example's 6 seconds at 30 frames a second.
+    const T23_FRAMES: u64 = 180;
+
+    /// `plane`, `width` samples wide, scaled to `side` by `side` samples by taking the nearest one.
+    fn scaled(plane: &[u8], width: usize, side: usize) -> Vec<u8> {
+        let height = plane.len() / width;
+        (0..side * side).map(|at| plane[(at / side) * height / side * width + (at % side) * width / side]).collect()
+    }
+
+    /// T23's footage: the running example's movie (plan §5) as a phone's hardware export writes it, by the
+    /// device's hardware encoder and [`Movie`]: 1080 by 1080 at 30 frames a second for 6 seconds, H.264 at
+    /// 10 Mbit/s with a key frame every 2 seconds, tagged BT.709. Its pictures are the HEVC stream's of the set,
+    /// in turn, scaled up to the size, so they move and every plane varies. `None` on the Simulator when its Mac
+    /// lends it no H.264 encoder; a phone has one.
+    fn running_example_footage() -> Option<Stream> {
+        let spec = VideoSpec {
+            codec: VideoCodec::H264,
+            width: T23_SIDE as u32,
+            height: T23_SIDE as u32,
+            rate_num: 30,
+            rate_den: 1,
+            rate_control: RateControl::Bitrate { kbps: 10_000 },
+            keyframe_interval: 60,
+            colour: ColourCodes { primaries: 1, transfer: 1, matrix: 1 },
+        };
+        let encoder = match HardwareEncoder::start(spec) {
+            Ok(encoder) => encoder,
+            Err(error) if cfg!(target_abi = "sim") => {
+                eprintln!("T23: the Simulator's Mac lends it no H.264 encoder to make the footage with ({error})");
+                return None;
+            }
+            Err(error) => panic!("a phone has a hardware H.264 encoder: {error}"),
+        };
+        let source = fixtures::hevc();
+        let pictures: Vec<Yuv420> = fixtures::pictures(software_video_decoder(&source.entry).unwrap().as_mut(), &source.samples)
+            .iter()
+            .map(|picture| {
+                let [y, u, v] = [0, 1, 2].map(|plane| fixtures::eight_bit_plane(picture, plane));
+                let chroma = T23_SIDE / 2;
+                Yuv420 { y: scaled(y.0, y.1, T23_SIDE), u: scaled(u.0, u.1, chroma), v: scaled(v.0, v.1, chroma) }
+            })
+            .collect();
+        let mut movie = Movie::new(encoder, Cursor::new(Vec::new()), spec, T23_FRAMES, None).unwrap();
+        for (index, picture) in (0..T23_FRAMES).zip(pictures.iter().cycle()) {
+            movie.push_frame(index, picture.clone()).unwrap();
+        }
+        let bytes = movie.finish().unwrap().out.into_inner();
+        let file = filmcraft_isobmff::open(bytes.clone()).unwrap();
+        let track = file.tracks.first().unwrap();
+        let samples = track.samples.iter().enumerate().map(|(at, sample)| (sample.pts, file.read_sample(&bytes, 0, at).unwrap())).collect();
+        Some(Stream { name: "T23, the running example's footage", entry: track.entries.first().unwrap().clone(), samples })
+    }
+
+    #[test]
+    fn t23_the_running_examples_footage_gives_the_pictures_the_software_decoder_gives() {
+        let _counters = counters();
+        let Some(footage) = running_example_footage() else { return };
+        assert_eq!(footage.samples.len() as u64, T23_FRAMES);
+        let (mut decoder, branch) = on_this_device(&footage.entry);
+        let compared = compared_with_software(footage.name, decoder.as_mut(), &footage.entry, &footage.samples);
+        assert_eq!(compared as u64, T23_FRAMES, "every frame");
+        settle(&footage, &branch, compared);
+    }
 }

@@ -489,10 +489,10 @@ pub(crate) mod tests {
     use ndk::hardware_buffer::{HardwareBufferDesc, HardwareBufferRef};
 
     use super::*;
-    use crate::fallback::{Fallback, stream_info};
+    use crate::fallback::Fallback;
     use crate::fixtures::{
-        av1_entry, av1_samples, counters, decoded, hevc_entry, hevc_samples, hevc10_entry, hevc10_samples, pictures, reordered_entry, reordered_samples, text,
-        through_a_failed_drain, tiny_entry, tiny_samples, two_runs,
+        av1_entry, av1_samples, counters, decoded, h264_with_b_pictures_from_before_zero, hevc_entry, hevc_samples, hevc10_entry, hevc10_samples, pictures,
+        reordered_entry, reordered_samples, stream, text, through_a_failed_drain, tiny_entry, tiny_samples, two_runs,
     };
     use crate::mediacodec_input::{AV1_MIME, H264_MIME, HEVC_MIME};
 
@@ -578,10 +578,6 @@ pub(crate) mod tests {
         set_device_codecs(device_codecs().to_vec());
     }
 
-    fn stream(entry: &SampleEntry) -> StreamInfo {
-        stream_info(entry).unwrap().unwrap()
-    }
-
     /// The device's hardware decoder for `mime`, chosen from the device's list.
     fn listed(mime: &str) -> std::result::Result<MediaCodec, Failure> {
         listed_hardware_codec(mime, device_codecs())
@@ -595,25 +591,16 @@ pub(crate) mod tests {
         mediacodec_input::hardware_decoders(device_codecs(), mime).first().map(|name| name.to_string())
     }
 
-    /// Whether a test that compared `compared` pictures of a `mime` stream with the software decoder's may pass:
-    /// where the device's codec list names a hardware decoder for the type, only having compared some, since a
-    /// test that passed having compared none would hide that the hardware decoded nothing; on a device with none,
-    /// whose streams the factory hands to the software decoder, whatever it compared.
+    /// [`crate::fixtures::hardware_compared`] for a `mime` stream on this device, whose hardware decoder for the
+    /// type is the first its codec list names.
     fn hardware_compared(mime: &str, compared: usize) -> std::result::Result<(), String> {
-        match hardware_name(mime) {
-            Some(name) if compared == 0 => Err(format!("{mime}: the device's hardware decoder {name} gave no picture compared with the software decoder's")),
-            _ => Ok(()),
-        }
+        crate::fixtures::hardware_compared(mime, hardware_name(mime).as_deref(), compared)
     }
 
-    /// The decoder `start` made over the device's hardware decoder for `mime`; `None` for a start that was
-    /// refused, which compares no picture: on a device whose codec list names a hardware decoder for the type,
-    /// that is an error saying what the platform answered.
+    /// [`crate::fixtures::hardware_start`] for a `mime` stream on this device, whose hardware decoder for the
+    /// type is the first its codec list names.
     fn hardware_start<T>(mime: &str, start: std::result::Result<T, impl std::fmt::Debug>) -> std::result::Result<Option<T>, String> {
-        match start {
-            Ok(decoder) => Ok(Some(decoder)),
-            Err(why) => hardware_compared(mime, 0).map(|()| None).map_err(|rule| format!("{rule}: its start was refused ({why:?})")),
-        }
+        crate::fixtures::hardware_start(mime, hardware_name(mime).as_deref(), start)
     }
 
     /// The device's hardware decoder for `entry`'s stream, which the factory declines the stream without: none
@@ -686,7 +673,7 @@ pub(crate) mod tests {
     fn the_device_decodes_h264_to_the_pictures_the_software_decoder_gives() {
         // The last stream starts two pictures before time zero, where negative composition offsets can put a
         // stream's first pictures: the codec hands every presentation time back as it was given.
-        let before_zero = reordered_samples().into_iter().map(|(pts, sample)| (pts - 2, sample)).collect();
+        let before_zero = h264_with_b_pictures_from_before_zero().samples;
         for (entry, samples) in [(tiny_entry(), tiny_samples()), (reordered_entry(), reordered_samples()), (reordered_entry(), before_zero)] {
             for mut decoder in device_decoders(&entry, H264_MIME) {
                 assert_eq!(decoder.name(), "MediaCodec H.264");
