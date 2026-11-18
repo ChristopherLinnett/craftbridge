@@ -160,6 +160,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(target_os = "macos"), ignore = "runs swift-format through xcrun, which only macOS has")]
     fn the_swift_of_both_crates_is_written_and_nothing_a_target_does_not_compile() {
         let scratch = crate::scratch::Scratch::new("swift-generate");
         generate(&scratch.0).unwrap();

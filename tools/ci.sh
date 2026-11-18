@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# The gate: every check of the repository (AGENTS.md). Hosted CI runs every stage of it, each in one of
-# its jobs, on every pull request to main and every push to it (.github/workflows/ci.yml), and is the full
+# The gate: every check of the repository (AGENTS.md). Hosted CI runs every stage of it, each in at least one
+# of its jobs, on every pull request to main and every push to it (.github/workflows/ci.yml), and is the full
 # gate; locally a change runs only the stages for what it touches (AGENTS.md §12).
 #
 #   tools/ci.sh                     every stage, the doctor first
 #   tools/ci.sh rules swift         only the named stages or groups (names below), and the doctor only if named
 #   tools/ci.sh --except rust swift every stage but the named ones, in the order below
+#   tools/ci.sh --hosted            the stages of the hosted job of the runner's system, which RUNNER_OS names
+#                                   as GitHub sets it, Linux or macOS (the split below)
+#   tools/ci.sh --list <selection>  prints the stages a selection above runs, one line, and runs none
 #
 # Every stage runs even when an earlier one fails, so one run reports everything that is broken. Every
 # name is checked before the first stage runs, so a misspelt one costs nothing. `--except` lets a job run
@@ -116,27 +119,43 @@ lint_library() {
 # test target. The library is gate machinery written in Rust, so it is held as the workspace is: the same
 # two clippy runs over its targets, under the workspace's table its manifest carries (AGENTS.md §3), and
 # its own lint over what it ships.
-# The shipping targets, which clippy's first run and the lint library's run read: `"${shipping[@]}"`.
-shipping=(--workspace --lib --bins --examples --all-features --locked --message-format=json)
+# The shipping targets of a selection of packages, which clippy's first run and the lint library's run read:
+# `"${shipping[@]}"`.
+shipping=(--lib --bins --examples --all-features --locked --message-format=json)
 # The levels the tests are linted at, on the host and on every phone target: `"${tests_lints[@]}"`.
 tests_lints=(-D warnings -A clippy::disallowed_methods -A clippy::disallowed_macros)
-# Clippy's two runs through one cargo runner: `clippy_runs compiling` for the workspace, `clippy_runs
-# in_library` for the lint library.
+# Clippy's two runs over a selection of packages through one cargo runner: `clippy_runs compiling
+# --workspace` for the workspace, `clippy_runs in_library --workspace` for the lint library, and
+# `clippy_runs compiling "${host_tools[@]}"` for the host tools.
 clippy_runs() {
   local run="$1" status=0
-  "$run" clippy "${shipping[@]}" -- -D warnings || status=1
-  "$run" clippy --workspace --tests --benches --all-features --locked --message-format=json -- "${tests_lints[@]}" || status=1
+  shift
+  "$run" clippy "$@" "${shipping[@]}" -- -D warnings || status=1
+  "$run" clippy "$@" --tests --benches --all-features --locked --message-format=json -- "${tests_lints[@]}" || status=1
   return "$status"
 }
 stage_rust_clippy() {
   local status=0
-  clippy_runs compiling || status=1
-  lint_library "${shipping[@]}" || status=1
-  clippy_runs in_library || status=1
-  lint_library --manifest-path "$CRAFTBRIDGE_LINT_LIBRARY/Cargo.toml" "${shipping[@]}" || status=1
+  clippy_runs compiling --workspace || status=1
+  lint_library --workspace "${shipping[@]}" || status=1
+  clippy_runs in_library --workspace || status=1
+  lint_library --manifest-path "$CRAFTBRIDGE_LINT_LIBRARY/Cargo.toml" --workspace "${shipping[@]}" || status=1
   return "$status"
 }
 stage_rust_test() { compiling test --workspace --locked --message-format=json; }
+# The host tools whose code reads the host they run on: craftbridge-process (the process group's liveness,
+# read from `/proc` on Linux and from `pgrep` elsewhere), the conformance runner and xtask. Their clippy and
+# lint library runs and their tests are the part of `rust_clippy` and `rust_test` that holds on Linux too,
+# where nothing the workspace ships is built, so the hosted Linux job lints and tests the code only Linux
+# compiles (`cfg(target_os = "linux")`); the macOS job takes them through the two whole-workspace stages.
+host_tools=(--package craftbridge-process --package craftbridge-effects-conformance --package xtask)
+stage_rust_host_clippy() {
+  local status=0
+  clippy_runs compiling "${host_tools[@]}" || status=1
+  lint_library "${host_tools[@]}" "${shipping[@]}" || status=1
+  return "$status"
+}
+stage_rust_host_test() { compiling test --locked --message-format=json "${host_tools[@]}"; }
 # The desktop conformance corpus against the EffectCraft command line (plan §28). Its own stage, after the
 # Rust tests: it needs the runner built and the tests of the code that compares green first, and the oracle
 # is an EffectCraft build of its own (tools/oracle.sh: minutes cold, a second warm), which the Rust stages
@@ -350,10 +369,91 @@ stage_duplicates() {
 
 # `rules` runs before every cargo stage that compiles the workspace: what it reads needs no build, and a
 # build script runs as soon as cargo compiles its crate.
-stages=(doctor rules rust_fmt rust_clippy rust_test conformance rust_mobile rust_deny generated plan_views swift_format swift_build swift_lint android shell duplicates)
+stages=(doctor rules rust_fmt rust_clippy rust_host_clippy rust_test rust_host_test conformance rust_mobile rust_deny generated plan_views swift_format swift_build swift_lint android shell duplicates)
 # The stage groups the decision and plan §15 name: Rust and Swift are each several stages.
 group_rust=(rust_fmt rust_clippy rust_test rust_mobile rust_deny)
 group_swift=(swift_format swift_build swift_lint)
+# The hosted jobs' split of the stages (.github/workflows/ci.yml), made here and nowhere else: each job runs
+# `tools/ci.sh --hosted`, which takes its stages from its runner's system. The Linux job runs `linux_only`,
+# the stages that read the same on Linux and need nothing of macOS; the macOS job runs every other stage, so
+# every stage runs in at least one job: a stage added above runs there, and says below why it is left to
+# macOS, or joins the Linux job.
+linux_only=(rust_fmt rust_host_clippy rust_host_test rust_deny plan_views android duplicates)
+# Why each stage the Linux job does not run is left to macOS: `<stage>…: <reason>`.
+left_to_macos=(
+  "doctor: it checks Xcode, the NDK and the phone targets"
+  "rules: they ask SwiftPM through xcrun"
+  "generated: it formats the Swift bindings with the Xcode toolchain"
+  "rust_clippy: the whole workspace's lints, whose shipping crates are built for iOS and Android and tested on macOS alone: built for Linux, they hold code only those systems call (craftbridge-media's encoder tests, craftbridge-core-ffi's surface), which -D warnings refuses as dead; its host tools' part runs on Linux as rust_host_clippy"
+  "rust_test: the whole workspace's tests, among them the core's that draw on the host's GPU (rust/core/craftbridge-core/src/testing.rs), which a hosted Linux runner lacks; its host tools' part runs on Linux as rust_host_test"
+  "conformance: its steps that ask for the GPU fail where the machine gives none (rust/effects/craftbridge-effects-conformance/src/host.rs), and the oracle they are compared with is an EffectCraft build of its own (tools/oracle.sh)"
+  "rust_mobile: the iOS targets need Xcode's SDKs, and the Android targets the NDK r28 tools/env.sh pins, which the macOS image carries and Ubuntu's does not"
+  "swift_format swift_build swift_lint: Xcode and SwiftPM"
+  "shell: Homebrew's shellcheck is the release the doctor's fix installs, while Ubuntu's is an older one whose checks differ"
+)
+# Is `name` one of the items after it: `among <name> <item>…`.
+among() {
+  local name="$1" item
+  shift
+  for item in "$@"; do
+    if [ "$item" = "$name" ]; then return 0; fi
+  done
+  return 1
+}
+# The split is held before any name is read, whatever the selection, so no change loses a stage from both jobs
+# or leaves one unexplained: every stage function is a stage `stages` lists, which the macOS job reads; and
+# every stage the Linux job does not run has one reason in `left_to_macos`, which gives none for a stage the
+# Linux job runs or for no stage at all.
+split=()
+for name in $(compgen -A function stage_); do
+  among "${name#stage_}" "${stages[@]}" || split+=("$name is a stage \`stages\` does not list, so no hosted job runs it")
+done
+reasoned=()
+for entry in "${left_to_macos[@]}"; do
+  read -r -a names <<<"${entry%%: *}"
+  if [ "${entry#*: }" = "$entry" ] || [ -z "${entry#*: }" ] || [ ${#names[@]} -eq 0 ]; then
+    split+=("left_to_macos holds '$entry', which is no '<stage>…: <reason>'")
+    continue
+  fi
+  for name in "${names[@]}"; do
+    if ! among "$name" "${stages[@]}"; then
+      split+=("left_to_macos gives a reason for $name, which is no stage")
+    elif among "$name" "${linux_only[@]}"; then
+      split+=("left_to_macos gives a reason for $name, which the Linux job runs")
+    elif among "$name" ${reasoned[@]+"${reasoned[@]}"}; then
+      split+=("left_to_macos gives $name a second reason")
+    fi
+    reasoned+=("$name")
+  done
+done
+for name in "${stages[@]}"; do
+  among "$name" "${linux_only[@]}" ${reasoned[@]+"${reasoned[@]}"} || split+=("$name runs in no Linux job, and left_to_macos gives no reason it is left to macOS")
+done
+if [ ${#split[@]} -gt 0 ]; then
+  printf 'ci: %s\n' "${split[@]}" >&2
+  exit 2
+fi
+list=0
+if [ "${1:-}" = --list ]; then
+  list=1
+  shift
+fi
+# A hosted job names no stage, so the workflow holds no list or group to get wrong: its runner's system,
+# which GitHub sets in RUNNER_OS, chooses them.
+if [ "${1:-}" = --hosted ]; then
+  if [ "$#" -gt 1 ]; then
+    echo "ci: --hosted names no stage: RUNNER_OS, the runner's system, chooses the hosted job's stages" >&2
+    exit 2
+  fi
+  case "${RUNNER_OS:-}" in
+    Linux) set -- "${linux_only[@]}" ;;
+    macOS) set -- --except "${linux_only[@]}" ;;
+    *)
+      echo "ci: --hosted runs the hosted job of the runner's system, which RUNNER_OS names Linux or macOS; it names '${RUNNER_OS:-}'" >&2
+      exit 2
+      ;;
+  esac
+fi
 except=0
 if [ "${1:-}" = --except ]; then
   except=1
@@ -380,10 +480,7 @@ done
 if [ "$except" = 1 ]; then
   kept=()
   for name in "${stages[@]}"; do
-    case " ${selected[*]} " in
-      *" $name "*) ;;
-      *) kept+=("$name") ;;
-    esac
+    among "$name" "${selected[@]}" || kept+=("$name")
   done
   if [ ${#kept[@]} -eq 0 ]; then
     echo "ci: --except leaves no stage to run" >&2
@@ -392,6 +489,13 @@ if [ "$except" = 1 ]; then
   selected=("${kept[@]}")
 elif [ ${#selected[@]} -eq 0 ]; then
   selected=("${stages[@]}")
+fi
+# What a selection runs, asked without running it: a test reads each hosted job's stages here, where they are
+# chosen.
+if [ "$list" = 1 ]; then
+  echo "${selected[*]}"
+  craftbridge_passed=1
+  exit 0
 fi
 
 # The gate judges the change by one compiler set: the toolchain rust/rust-toolchain.toml pins, on stable

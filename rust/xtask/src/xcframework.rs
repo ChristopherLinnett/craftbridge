@@ -370,6 +370,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(target_os = "macos"), ignore = "reads the framework with plutil, which only macOS has")]
     fn a_framework_is_joined_again_only_when_a_library_or_its_headers_changed() {
         let scratch = Scratch::new("xcframework-held");
         let map = |links: &str| format!("module a_ffiFFI {{}}\nmodule a_ffiFFI.NativeStaticLibs {{\n    link \"{links}\"\n}}\n");
