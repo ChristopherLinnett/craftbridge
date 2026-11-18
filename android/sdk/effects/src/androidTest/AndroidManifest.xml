@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        The device checks run on the platform's own Instrumentation. The usual instrumented-test runner
+        is androidx.test's, which needs JUnit 4, and JUnit 4's EPL-1.0 is on no branch of the licence
+        allowlist (rust/deny.toml) that the licence check reads the test classpaths against.
+    -->
+    <instrumentation
+        android:name="io.github.christopherlinnett.craftbridge.effects.CraftBridgeInstrumentation"
+        android:label="CraftBridge device checks"
+        android:targetPackage="io.github.christopherlinnett.craftbridge.effects.test" />
+</manifest>
