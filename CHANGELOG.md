@@ -4,6 +4,10 @@ Every artifact (the Rust crates, the Swift package and both Maven artifacts) sha
 
 ## [Unreleased]
 
+### Fixed
+
+- The MediaCodec decoder no longer shows the wrong window of a stream whose crop starts off the coded picture's corner: it takes the window from the decoded image's own crop rectangle only where that is the stream's own corner, and a decoder that describes such a picture at the origin, as the Android 14 emulator's H.264 hardware decoder does, is refused with the reason named, so the software decoder gives the stream's pictures.
+
 ### Added
 
 - `EffectCraftApp::with_exporter`, which hands the session's exporter to a function of the host's and uses the exporter it answers, so a host tool can decide when an export may finish. The conformance runner holds each export at the fraction its listener stops it at until the stop reaches it, so scenario T22 cancels its export the same way on every run, however busy the machine is, and fails the step of a call whose stop never came within a minute, or that it held nowhere, as a fill, so no stop of the runner's own, and no race with the machine's speed, passes a scenario.

@@ -491,7 +491,7 @@ mod tests {
         fixtures::hardware_compared(&kind(codec), hardware.as_deref(), compared).unwrap();
         let taken = match branch {
             Branch::Hardware(decoder) => Some(decoder.as_str()),
-            Branch::Declined(_) => None,
+            Branch::Declined(_) | Branch::Switched(..) => None,
         };
         assert_eq!(taken, hardware.as_deref(), "{}: the branch is the device's for the codec", stream.name);
         eprintln!("{}", branch.says(stream.name, compared));

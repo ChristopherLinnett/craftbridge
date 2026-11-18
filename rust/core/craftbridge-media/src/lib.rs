@@ -1261,6 +1261,9 @@ pub(crate) mod fixtures {
         /// The device has no hardware decoder for it, or its start was refused, so the factory declined it and
         /// FilmCraft's registry opened it with the software decoder: why there was none.
         Declined(String),
+        /// The device's hardware decoder started and then refused a picture of the stream, saying why, so
+        /// FilmCraft's fallback gave the whole stream to the software decoder: the decoder's name, and why.
+        Switched(String, String),
     }
 
     impl Branch {
@@ -1270,6 +1273,9 @@ pub(crate) mod fixtures {
             match self {
                 Self::Hardware(decoder) => format!("{stream}: hardware, {decoder}: {pictures}"),
                 Self::Declined(why) => format!("{stream}: declined ({why}), so FilmCraft's registry opened it with the software decoder: {pictures}"),
+                Self::Switched(decoder, why) => {
+                    format!("{stream}: switched ({decoder} refused a picture: {why}), so FilmCraft's fallback gave it to the software decoder: {pictures}")
+                }
             }
         }
     }
@@ -1631,6 +1637,10 @@ mod tests {
         assert_eq!(
             fixtures::Branch::Declined("unsupported codec: no session".into()).says("AV1", 6),
             "AV1: declined (unsupported codec: no session), so FilmCraft's registry opened it with the software decoder: 6 pictures, each the software decoder's"
+        );
+        assert_eq!(
+            fixtures::Branch::Switched("c2.example.avc.decoder".into(), "no window".into()).says("H.264", 6),
+            "H.264: switched (c2.example.avc.decoder refused a picture: no window), so FilmCraft's fallback gave it to the software decoder: 6 pictures, each the software decoder's"
         );
     }
 

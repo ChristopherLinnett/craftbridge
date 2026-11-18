@@ -195,6 +195,12 @@ impl Layout {
         (self.crop.width, self.crop.height)
     }
 
+    /// Where the picture starts in the coded picture, in luma samples: its crop's corner.
+    #[cfg(any(target_os = "android", test))]
+    pub(crate) fn offset(&self) -> (usize, usize) {
+        (self.crop.x, self.crop.y)
+    }
+
     /// The picture's size as the signed integers the platforms' frameworks take; `None` when a side does not
     /// fit one, which a picture bounded by [`MAX_SIDE`] never is.
     pub(crate) fn size_i32(&self) -> Option<(i32, i32)> {
