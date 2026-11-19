@@ -476,6 +476,79 @@ fn a_cancelled_export_answers_cancelled_and_leaves_no_output() {
     engine.close().expect("the engine closes");
 }
 
+/// The files of the acceptance's export: a sequence long enough that an app could not wait out its
+/// start, which is what makes the cancel during it worth testing.
+const MANY_FILES: u32 = 18_000;
+
+/// How long after its start an export of [`MANY_FILES`] files is cancelled: the wait an app that has
+/// just asked for an export gives it before taking it back. The bound on the answer, from that stop,
+/// is [`STOPPED_BY`].
+const CANCEL_AFTER: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// The bound on the first progress report, from the export's start: the export reports before the
+/// journal looks at a single file, so a stop has a beat to land on from the moment the app asked, not
+/// once the listing of its thousands of files happens to be finished.
+const FIRST_REPORT_BY: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// The bound on the answer, from the cancel: what the stop has to wind down a render and take back
+/// what the call had listed, none of which an export stopped in its listing has to do.
+const STOPPED_BY: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The acceptance of the issue: an export of thousands of files, cancelled a second after its start,
+/// has already reported — so the cancel had a beat to land on — is answered within a bound of the
+/// cancel, and leaves no file and no folder behind, here as on an iPhone (`ExportStartTests`). A host
+/// can be quick enough to be past the listing in that second, and to report soon after it even if it
+/// reported nothing before, so these are the acceptance's numbers rather than the rules' pins: the
+/// beat before every chunk, the cancel taken there, and a listing that costs the folders rather than
+/// the files are each held by a test of their own, in the runner and in the journal, which fails on
+/// any machine when its rule is broken.
+#[test]
+fn an_export_of_many_files_cancelled_a_second_in_reports_at_once_and_leaves_nothing() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let engine = start_engine(&scratch).expect("the engine starts");
+    // 16 by 16 at ten frames a second: the frames are the least an export can be asked to draw, so
+    // what the export spends its time on is the files themselves — the listing and the journal.
+    let long = json!({"command": "comp.new", "params": {"name": "Many", "width": 16, "height": 16, "frameRate": 10, "duration": MANY_FILES as f64 / 10.0}});
+    engine.request("exec", long).expect("the long comp builds");
+    let before = contents_in(&scratch).expect("the container reads");
+    let out = scratch.path().join("many").join("frame.png");
+    let request = json!({"comp": "Many", "output": out.display().to_string(), "format": "png", "resolution": 1.0, "audio": "off"});
+
+    let token = CancelToken::new();
+    let cancel = token.clone();
+    let started = std::time::Instant::now();
+    let (first, stop) = (Arc::new(Mutex::new(None)), Arc::new(Mutex::new(None)));
+    let (heard, answered) = (first.clone(), stop.clone());
+    let answer = engine.request_with_progress(
+        "export",
+        request,
+        move |_, _, _| {
+            let since = started.elapsed();
+            if let Ok(mut moment) = heard.lock()
+                && moment.is_none()
+            {
+                *moment = Some(since);
+            }
+            // The cancel comes once, a second in, on the beat of whatever report is then being heard.
+            if since >= CANCEL_AFTER && answered.lock().map(|stop| stop.is_none()).unwrap_or(false) {
+                if let Ok(mut moment) = answered.lock() {
+                    *moment = Some(since);
+                }
+                cancel.cancel();
+            }
+        },
+        &token,
+    );
+    let first = first.lock().expect("the first report's moment").expect("an export reports, or nothing could cancel it");
+    assert!(first <= FIRST_REPORT_BY, "the first progress report came {first:?} after the export's start, over the bound of {FIRST_REPORT_BY:?}");
+    assert_eq!(answer, Err(CraftError::Cancelled), "a cancel a second into an export of {MANY_FILES} files ends it");
+    let stopped_at = stop.lock().expect("the stop's moment").expect("the cancel was asked, so its moment was noted");
+    let ended = started.elapsed();
+    assert!(ended - stopped_at <= STOPPED_BY, "the export was answered {:?} after the cancel, over the bound of {STOPPED_BY:?}", ended - stopped_at);
+    assert_eq!(contents_in(&scratch).expect("the container reads"), before, "an export cancelled in its start leaves no file and no folder behind");
+    engine.close().expect("the engine closes");
+}
+
 /// A fill stopped at its first report answers `Cancelled`, and the engine takes away every frame and
 /// the folders the call made, from what the runner listed: the runner itself takes nothing away for a
 /// stop. A fill left alone keeps its frames.

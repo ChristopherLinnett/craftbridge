@@ -63,7 +63,16 @@ pub(crate) fn export(backend: &mut Backend, params: &Value, on_progress: Progres
     let attempted: Vec<u64> = session(backend)?.project.render_queue.iter().filter(|item| item.is_queued()).map(|item| item.id).collect();
     // The file names are known only now: the render writes `card_00000.png` on for a PNG sequence asked
     // for at `card.png`. A refusal to list stops the export before any file is written.
-    outputs::list_queued(session(backend)?, list_outputs)?;
+    //
+    // The listing of a sequence of thousands of files is the export's longest step before its first
+    // frame, and the render's own watch reports only once it is over, so the listing keeps the beat
+    // itself: each chunk is reported before the journal is handed it, the first before the journal
+    // looks at a single file, and a listener that answers `false` stops the export there, where
+    // nothing is written and nothing has to be taken back. Nothing is done yet and no frame has been
+    // timed, so each of those reports says so and carries no estimate.
+    outputs::list_queued(session(backend)?, &mut |paths| {
+        if on_progress(0, 0, None) { list_outputs(paths) } else { Err(CraftError::Cancelled) }
+    })?;
     if let Err(refused) = execute_listed(backend, RENDER, object([("wait", Value::Bool(false))])) {
         // The engine refuses a render whose every item is refused with a sentence about an empty
         // queue; the reason each item got is the one that says why.
@@ -138,12 +147,15 @@ fn report(session: &Session, attempted: &[u64]) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
     use std::path::Path;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
     use effectcraft_engine::project::render_queue::OutputFormat;
     use effectcraft_engine::render_queue::{CANCELLED, ExportJob, ExportResult, Exporter};
+
+    use crate::outputs::tests::files_below;
 
     /// How long the fake exporter takes over a frame: the code under test is slowed, never the
     /// machine, so the runner's beats fall inside the export however fast the machine is.
@@ -189,10 +201,15 @@ mod tests {
     }
 
     fn rig(frames: u64) -> Rig {
+        rig_on(frames, |slow| Arc::new(slow))
+    }
+
+    /// The rig, with the session exporting through what `exporter` makes of its slow exporter.
+    fn rig_on(frames: u64, exporter: impl FnOnce(Slow) -> Arc<dyn Exporter>) -> Rig {
         let dir = tempfile::tempdir().expect("a scratch folder");
         let (written, started) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicU64::new(0)));
-        let exporter = Slow { frames, written: written.clone(), started: started.clone() };
-        let session = Session { exporter: Some(Arc::new(exporter)), ..Default::default() };
+        let exporter = exporter(Slow { frames, written: written.clone(), started: started.clone() });
+        let session = Session { exporter: Some(exporter), ..Default::default() };
         let mut backend = Backend::headless(session);
         for (command, params) in [
             ("comp.new", serde_json::json!({"name": "A", "width": 16, "height": 16, "duration": 1, "frameRate": 10})),
@@ -254,6 +271,130 @@ mod tests {
             export(&mut rig.backend, &serde_json::json!({"queue": true, "output": "ignored"}), &mut |_, _, _| true, &mut unlisted).expect("the queue renders");
         assert_eq!(answer["rendered"].as_array().map(Vec::len), Some(1));
         assert_eq!(queue(&mut rig).len(), 1, "nothing was added");
+    }
+
+    /// The files of a long sequence's export: more than one chunk of the listing, so a cancel can
+    /// fall inside the listing, and the count the acceptance names.
+    const MANY: u32 = 18_000;
+
+    /// The comp of [`MANY`] frames, queued as a sequence of files: the export's own listing is what
+    /// takes the time before its first frame, so a test of the cancel reaching it needs a sequence,
+    /// not the short ones the other tests of this module export.
+    fn queue_many(rig: &mut Rig) -> String {
+        rig.backend
+            .exec("comp.new", serde_json::json!({"name": "Long", "width": 16, "height": 16, "duration": 1800, "frameRate": 10}))
+            .expect("the long comp builds");
+        out(rig, "many.png")
+    }
+
+    /// The export's start answers a cancel however many files it writes: the listing reports as it
+    /// goes, and a listener that answers `false` on one of those reports stops the export there —
+    /// the render never starts, so there is nothing to take back out again. The listing of a
+    /// sequence of thousands of files is the longest step between the export's start and its first
+    /// frame, and an export deaf through it can be ended by the system, a background task's time
+    /// run out, before any cancel reaches it.
+    #[test]
+    fn an_export_cancelled_while_its_files_are_listed_never_starts_the_render() {
+        let mut rig = rig(1);
+        let output = queue_many(&mut rig);
+        // The listing counts itself, and the listener stops at the first report that finds files
+        // listed. A report can find some files listed only while they are being listed: the render's
+        // reports come after the last of them, by when the render has already started. The stop
+        // stays stopped, as a cancel does, so a build that hears the answer and goes on regardless
+        // is stopped by the next report too.
+        let (listed, stopped) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
+        let (told, asked) = (listed.clone(), stopped.clone());
+        let answer = export(
+            &mut rig.backend,
+            &serde_json::json!({"comp": "Long", "output": output, "format": "png"}),
+            &mut |_, _, _| {
+                if told.load(Ordering::SeqCst) > 0 {
+                    asked.store(true, Ordering::SeqCst);
+                }
+                !asked.load(Ordering::SeqCst)
+            },
+            &mut |paths| {
+                told.fetch_add(paths.len(), Ordering::SeqCst);
+                Ok(())
+            },
+        );
+        assert_eq!(answer, Err(CraftError::Cancelled), "the cancel taken in the listing ends the export");
+        assert_eq!(rig.started.load(Ordering::SeqCst), 0, "a cancel taken in the listing never starts the render");
+        let listed = listed.load(Ordering::SeqCst);
+        assert!(listed > 0 && listed < MANY as usize, "the listing stopped where the cancel came, not ran out: {listed} of {MANY} files were listed");
+        assert_eq!(files_below(rig.dir.path()), BTreeSet::new(), "an export stopped in its listing leaves no file behind");
+    }
+
+    /// The listing keeps the export's beat: the first report comes before the journal is handed a
+    /// single file, and every chunk after it is reported before it is handed over, so a listener has
+    /// a report to answer `false` to before every look the journal takes.
+    #[test]
+    fn the_listing_reports_before_the_journal_is_handed_a_file_and_before_every_chunk() {
+        let mut rig = rig(1);
+        let output = queue_many(&mut rig);
+        // Each report, as `None`, and each chunk handed to the journal, as its count of files.
+        let heard = std::cell::RefCell::new(Vec::new());
+        export(
+            &mut rig.backend,
+            &serde_json::json!({"comp": "Long", "output": output, "format": "png"}),
+            &mut |_, _, _| {
+                heard.borrow_mut().push(None);
+                true
+            },
+            &mut |paths| {
+                heard.borrow_mut().push(Some(paths.len()));
+                Ok(())
+            },
+        )
+        .expect("the export renders");
+        let heard = heard.into_inner();
+        let chunks: Vec<usize> = heard.iter().flatten().copied().collect();
+        assert!(chunks.len() > 1 && chunks.iter().sum::<usize>() > MANY as usize, "every file was listed, in chunks: {chunks:?}");
+        // One report per chunk, not two: a second report with no chunk between says nothing the
+        // listener has not just heard, and a start that reported twice before its first file was such a noise.
+        let last_chunk = heard.iter().rposition(Option::is_some).expect("the export handed over a chunk");
+        let expected: Vec<Option<usize>> = chunks.iter().flat_map(|files| [None, Some(*files)]).collect();
+        assert_eq!(&heard[..=last_chunk], &expected[..], "the listing reported once before every chunk, and only once: {heard:?}");
+    }
+
+    /// Whether the memory of [`too_little_memory`] has been asked for its figure.
+    static MEMORY_ASKED: AtomicBool = AtomicBool::new(false);
+
+    /// A device whose memory holds no frame at all, which notes that it was asked.
+    fn too_little_memory() -> std::result::Result<u64, String> {
+        MEMORY_ASKED.store(true, Ordering::SeqCst);
+        Ok(1)
+    }
+
+    /// An export whose frame the device's memory cannot hold is refused by the exporter as each job
+    /// starts, from the job the render makes, which exists only once the render has begun: so the
+    /// listing comes first, and every file of the export is listed while the memory has not yet been
+    /// asked. The refusal is the export's answer, the exporter that writes is never reached, and
+    /// nothing is written; the core clears the entries of an export that fails as it clears every
+    /// export's, so nothing of it stays listed either.
+    #[test]
+    fn an_export_the_memory_cannot_hold_is_listed_before_it_is_refused_and_writes_nothing() {
+        let mut rig = rig_on(1, |slow| Arc::new(crate::exporter::PooledExporter::over(Arc::new(slow), too_little_memory)));
+        let output = out(&rig, "card.png");
+        let mut listed = 0;
+        let answer = export(&mut rig.backend, &serde_json::json!({"output": output, "format": "png"}), &mut |_, _, _| true, &mut |paths| {
+            // Time for a render started before the listing ended to have asked the memory.
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            assert!(!MEMORY_ASKED.load(Ordering::SeqCst), "the memory was asked before every file of the export was listed");
+            listed += paths.len();
+            Ok(())
+        });
+        assert!(listed > 0 && MEMORY_ASKED.load(Ordering::SeqCst), "the export was listed, {listed} files, and then held to the memory");
+        assert_eq!(
+            answer,
+            Err(CraftError::command_failed(
+                RENDER,
+                "A: a frame of 16x16 needs 16384 bytes to render on the CPU and write, and the device reports 1 bytes available",
+                None
+            ))
+        );
+        assert_eq!(rig.started.load(Ordering::SeqCst), 0, "the refused export reached the exporter that writes");
+        assert_eq!(files_below(rig.dir.path()), BTreeSet::new(), "a refused export writes nothing");
     }
 
     #[test]

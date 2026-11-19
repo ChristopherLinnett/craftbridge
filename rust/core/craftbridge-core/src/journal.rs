@@ -130,7 +130,7 @@
 use crate::Result;
 use crate::engine::lock;
 use crate::error::CraftError;
-use crate::folders::{Confinement, Folders, entry_in, resolved, written_file};
+use crate::folders::{Confined, Confinement, Folders, resolved};
 use serde_json::{Map, Value};
 use std::cell::RefCell;
 use std::collections::btree_map::Entry as Slot;
@@ -139,6 +139,7 @@ use std::ffi::OsStr;
 use std::fs::{self, File, TryLockError};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -413,6 +414,16 @@ enum PathId {
 /// start, one export's end — and kept for it: telling a missing path asks what the disk says of each
 /// name of it from the container down, and a listing of a long sequence would ask it of every path
 /// once per rule that asks, so each path gets one answer per operation instead.
+///
+/// The answers are kept *per folder*, not per path, because what the disk says of a folder is one
+/// answer however many paths lie in it: one export of thousands of frames asks the same of the
+/// thousandth as of the first, and an export whose every file is asked for at length spends so long
+/// in its start that no cancel can reach it. So a folder is looked at once — its own numbers, and,
+/// when the disk will list it, the names it holds — and a name a listed folder does not hold needs no
+/// look of its own: it is nowhere for the operation. Every operation that tells paths holds the
+/// journal's lock throughout, which no export of the process lists or ends without, so what an export
+/// put up and ended with is in the listing; what a running export's writer puts up after it, taking
+/// no lock, is claimed by that export's own entries.
 struct Paths {
     root: PathBuf,
     /// The container's own numbers, which head every folded path below it; none for a container
@@ -421,7 +432,36 @@ struct Paths {
     /// The volume whose rules were read, with those rules ([`VolumeRules::read`]); the names on any
     /// other volume fold by [`VolumeRules::default`].
     read: Option<(u64, VolumeRules)>,
-    asked: RefCell<BTreeMap<String, PathId>>,
+    asked: RefCell<BTreeMap<String, Told>>,
+    /// Each folder of or below the container this operation has looked at, by the path it was asked
+    /// under ([`Paths::folder`]). Shared, never copied, with every path told from it: a folder's
+    /// listing holds a name for every file in it, so a copy for each path told would cost each file
+    /// of a sequence the whole sequence again.
+    folders: RefCell<BTreeMap<PathBuf, Rc<Folder>>>,
+    /// Where each folder of them lands, so the files beside it are confined by the same look and not
+    /// by one of their own ([`Confined`]).
+    confined: Confined,
+}
+
+/// One folder of or below the container, told once for the operation.
+struct Folder {
+    /// The volume's and the deepest folder of it that is there; none when the container itself cannot
+    /// be looked at, whose names then fold by [`VolumeRules::default`], the reading that loses no work.
+    head: Option<(u64, u64)>,
+    /// This folder's own names below `head`, folded as that volume folds them; none below when the
+    /// folder itself is there.
+    below: Vec<String>,
+    /// The names it holds, folded as its volume folds them, when it is there and its listing tells
+    /// every name from every other; none when it is not, or when the listing says nothing of them,
+    /// which leaves each name below to be looked at on its own.
+    held: Option<BTreeSet<String>>,
+}
+
+/// What one path of the container was told: where it lies, and whether nothing can be at it.
+#[derive(Clone)]
+struct Told {
+    id: PathId,
+    absent: bool,
 }
 
 impl Paths {
@@ -437,39 +477,140 @@ impl Paths {
     /// all, folds by [`VolumeRules::default`], the reading that loses no work.
     fn with(root: &Path, read: Option<(u64, VolumeRules)>) -> Self {
         let anchor = fs::symlink_metadata(root).ok().as_ref().and_then(identity_of);
-        Self { root: root.to_path_buf(), anchor, read, asked: RefCell::new(BTreeMap::new()) }
+        Self {
+            root: root.to_path_buf(),
+            anchor,
+            read,
+            asked: RefCell::new(BTreeMap::new()),
+            folders: RefCell::new(BTreeMap::new()),
+            confined: Confined::default(),
+        }
+    }
+
+    /// Where `output`, a file an export is about to write, lands below the container, resolved name
+    /// and all, as a link at its own name must be ([`Confined::written`]).
+    fn written(&self, output: &Path) -> Result<PathBuf, CraftError> {
+        self.confined.written(&self.root, output)
+    }
+
+    /// Where the file `output` lands below the container when no link stands at its own name, its
+    /// folder looked at once for every file beside it, without the disk being asked of the name at
+    /// all ([`Confined::landing`]).
+    fn landing(&self, output: &Path) -> Result<Option<PathBuf>, CraftError> {
+        self.confined.landing(&self.root, output)
+    }
+
+    /// Where the entry `entry` lies, to be dealt with, each folder of it looked at once for every
+    /// entry beside it ([`Confined::entry`]).
+    fn target(&self, entry: &Path) -> Result<PathBuf, CraftError> {
+        self.confined.entry(&self.root, entry)
+    }
+
+    /// Whether nothing can be at the entry path `path`, told by the folder it lies in ([`Paths::tell`]).
+    fn absent(&self, path: &str) -> bool {
+        self.tell(path).absent
+    }
+
+    /// The folder `at`, at or below the container, looked at once however many paths lie in it: every
+    /// folder above it that nothing has looked at yet is looked at on the way, from the container down,
+    /// because a folder that is not there is folded under the deepest folder of it that is, exactly
+    /// as a name below it is. `None` when `at` is below nothing the container can be walked down to,
+    /// which leaves each path of it to the disk itself.
+    fn folder(&self, at: &Path) -> Option<Rc<Folder>> {
+        let names: Vec<&OsStr> = at.strip_prefix(&self.root).ok()?.iter().collect();
+        let mut known = self.folders.borrow_mut();
+        // The container stands where its own numbers do, read as itself, so a container reached
+        // through a link is folded under the link's numbers, as every path below it is told. It is
+        // listed once for the operation, since every folder below it is reached through it and it
+        // holds the names of everything beside them.
+        let mut current = match known.get(&self.root) {
+            Some(container) => Rc::clone(container),
+            None => {
+                let container = Rc::new(Folder { head: self.anchor, below: Vec::new(), held: self.held_of(self.root.as_path(), self.anchor) });
+                known.insert(self.root.clone(), Rc::clone(&container));
+                container
+            }
+        };
+        let mut here = self.root.clone();
+        for name in names {
+            here.push(name);
+            if let Some(hit) = known.get(&here) {
+                current = Rc::clone(hit);
+                continue;
+            }
+            // A folder is looked at through a link, as the writer's open and a start's removal reach
+            // what lies in it; one the disk shows but will not list holds its names to themselves.
+            current = Rc::new(match fs::metadata(&here).ok().as_ref().and_then(identity_of) {
+                Some(numbers) => Folder { head: Some(numbers), below: Vec::new(), held: self.held_of(&here, Some(numbers)) },
+                None => {
+                    let mut below = current.below.clone();
+                    below.push(self.fold(name, current.head.map(|(device, _)| device)));
+                    Folder { head: current.head, below, held: None }
+                }
+            });
+            known.insert(here.clone(), Rc::clone(&current));
+        }
+        Some(current)
+    }
+
+    /// The names of the folder whose numbers are `numbers`, folded as that volume folds them, or none
+    /// when there is no folder to list, none to be read, or two names that fold alike: a listing that
+    /// cannot tell one name from another says nothing of any of them.
+    fn held_of(&self, at: &Path, numbers: Option<(u64, u64)>) -> Option<BTreeSet<String>> {
+        let (device, _) = numbers?;
+        let mut held = BTreeSet::new();
+        for entry in fs::read_dir(at).ok()? {
+            if !held.insert(self.fold(&entry.ok()?.file_name(), Some(device))) {
+                return None;
+            }
+        }
+        Some(held)
     }
 
     /// Where the path `path` — an entry's, below the container — lies, told by the volume: [`PathId`].
     fn id(&self, path: &str) -> PathId {
-        if let Some(asked) = self.asked.borrow().get(path) {
-            return asked.clone();
+        self.tell(path).id
+    }
+
+    /// What the volume says of the entry path `path`: where it lies, and whether nothing can be at it.
+    /// One answer per path per operation, however many rules ask it, because each answer is told from
+    /// the folder the path lies in, and the folder has been looked at once for the operation
+    /// ([`Paths::folder`]).
+    fn tell(&self, path: &str) -> Told {
+        if let Some(told) = self.asked.borrow().get(path) {
+            return told.clone();
         }
-        let names: Vec<&OsStr> = Path::new(path).iter().collect();
-        let last = names.len().saturating_sub(1);
-        let mut here = self.root.clone();
-        let mut anchor = self.anchor;
-        let mut below: Vec<String> = Vec::new();
-        for (at, name) in names.into_iter().enumerate() {
-            here.push(name);
-            // The disk is asked only down to the first name that is not there: no name below a name
-            // that is not there can be, and the deepest folder that is there is the volume whose
-            // rules will fold the names below it. A folder of the path is looked at through a link,
-            // as the writer's open and a start's removal reach what lies in it; the path's own name
-            // is looked at as itself, as a start deals with a link there.
-            if below.is_empty() {
-                let found = if at == last { fs::symlink_metadata(&here) } else { fs::metadata(&here) };
-                if let Some(found) = found.ok().as_ref().and_then(identity_of) {
-                    anchor = Some(found);
-                    continue;
+        let (parent, name) = (Path::new(path).parent().unwrap_or(Path::new("")), Path::new(path).file_name());
+        let folder = self.folder(&self.root.join(parent)).unwrap_or_else(|| Rc::new(Folder { head: self.anchor, below: Vec::new(), held: None }));
+        // The name as its volume tells it, which is what both questions below read. A name a folder
+        // the disk listed holds nothing of is not there, and nothing lies below a folder that is not
+        // there at all, so the disk is not asked of the name. Every other name is asked of itself —
+        // the folder was reached through its links, as the writer's open and a start's removal reach
+        // what lies in it, while the path's own name is looked at as itself, as a start deals with a
+        // link there.
+        let folded = name.map(|name| self.fold(name, folder.head.map(|(device, _)| device)));
+        let absent = !folder.below.is_empty()
+            || match (&folder.held, &folded) {
+                (Some(held), Some(folded)) => !held.contains(folded),
+                _ => false,
+            };
+        let found = match absent {
+            true => None,
+            false => fs::symlink_metadata(self.root.join(path)).ok().as_ref().and_then(identity_of),
+        };
+        let id = match found {
+            Some((device, inode)) => PathId::There(device, inode),
+            None => {
+                let mut below = folder.below.clone();
+                if let Some(folded) = folded {
+                    below.push(folded);
                 }
+                PathId::Below(folder.head.unwrap_or(NO_FOLDER), below)
             }
-            below.push(self.fold(name, anchor.map(|(device, _)| device)));
-        }
-        let head = anchor.unwrap_or(NO_FOLDER);
-        let id = if below.is_empty() { PathId::There(head.0, head.1) } else { PathId::Below(head, below) };
-        self.asked.borrow_mut().insert(path.to_string(), id.clone());
-        id
+        };
+        let told = Told { id, absent };
+        self.asked.borrow_mut().insert(path.to_string(), told.clone());
+        told
     }
 
     /// A name as the volume of the number `device` sees it when it asks whether two names are one:
@@ -951,16 +1092,20 @@ impl Journal {
                 held.push(entry);
                 continue;
             }
-            let target = match entry_in(&self.root, Path::new(&entry.path)) {
+            let target = match paths.target(Path::new(&entry.path)) {
                 Ok(target) => target,
                 Err(refusal) => {
                     recovery.refused.push((PathBuf::from(entry.path), refusal.to_string()));
                     continue;
                 }
             };
+            // The folder the entry lies in has been told for this operation, and a name its listing
+            // holds nothing of is nowhere and left alone: a file put up after the listing, by a writer
+            // that takes no journal lock, is never deleted for an entry, the side that loses no work.
+            let absent = paths.absent(&entry.path);
             let settled = match entry.kind {
-                Kind::File(found) => settle(&target, found),
-                Kind::Folder => settle_folder(&target),
+                Kind::File(found) => settle(&target, found, absent),
+                Kind::Folder => settle_folder(&target, absent),
             };
             match settled {
                 Ok(Settled::Absent) => {}
@@ -1072,22 +1217,57 @@ impl Journal {
     /// The entry of `output`, a file the export numbered `export` is about to write: where its
     /// writer's open lands, below the container, and the file that is there now, if any. Refused when
     /// that is outside the container, or is anything but a file or nothing: a start would refuse to
-    /// touch it.
-    fn entry_of(&self, output: &Path, export: u64) -> Result<Entry> {
-        let below = written_file(&self.root, output)?;
+    /// touch it. `paths` is the operation's own, so the folders of `output` are looked at once for
+    /// every file beside them, and a file none of them holds a name of is not looked at at all.
+    fn entry_of(&self, paths: &Paths, output: &Path, export: u64) -> Result<Entry> {
+        // Where the name lands is told by its folder, which is looked at once for the operation however
+        // many files lie in it: a name lands where its folder lands with the name below it, which is
+        // where its writer puts it once it has made the folder, unless a link stands at the name, and
+        // only the name can say where a link points. So a name a listed folder holds nothing of is
+        // nowhere and is not looked at; one that may be there is looked at once, as itself, which both
+        // tells whether a link stands there and gives the file's stamp; and only a link, or a name whose
+        // folder cannot answer for it, is resolved on its own.
+        let landing = paths.landing(output)?;
+        let (below, found) = match landing {
+            Some(below) if below.to_str().is_some_and(|spelled| paths.absent(spelled)) => (below, None),
+            Some(below) => {
+                let looked = fs::symlink_metadata(self.root.join(&below));
+                match looked {
+                    Ok(found) if found.file_type().is_symlink() => self.resolved_entry(paths, output)?,
+                    looked => {
+                        let found = self.stamp_at(&below, looked)?;
+                        (below, found)
+                    }
+                }
+            }
+            None => self.resolved_entry(paths, output)?,
+        };
         let path = below.to_str().ok_or_else(|| {
             CraftError::io(format!("the output file {} cannot be listed in the pending-export journal: its path is not UTF-8", output.display()))
         })?;
-        let target = self.root.join(&below);
-        let found = match fs::symlink_metadata(&target) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-            Err(error) => return Err(CraftError::io(format!("cannot look at the output file {}: {error}", target.display()))),
-            Ok(found) if found.is_file() => Some(Stamp::of(&found)),
+        Ok(Entry { path: path.to_string(), kind: Kind::File(found), export: Some(export) })
+    }
+
+    /// Where `output` lands below the container with its own name resolved as well, a link at it
+    /// followed as its writer's open follows it, and the file that is there now, if any.
+    fn resolved_entry(&self, paths: &Paths, output: &Path) -> Result<(PathBuf, Option<Stamp>)> {
+        let below = paths.written(output)?;
+        let found = self.stamp_at(&below, fs::symlink_metadata(self.root.join(&below)))?;
+        Ok((below, found))
+    }
+
+    /// The stamp of the file `looked` found at `below`, a path inside the container looked at without
+    /// following its name: none when nothing is there, and refused when what is there is no file.
+    fn stamp_at(&self, below: &Path, looked: io::Result<fs::Metadata>) -> Result<Option<Stamp>> {
+        let target = self.root.join(below);
+        match looked {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(CraftError::io(format!("cannot look at the output file {}: {error}", target.display()))),
+            Ok(found) if found.is_file() => Ok(Some(Stamp::of(&found))),
             // A link the resolution could not follow points at nothing yet: the writer would create
             // its target wherever it points.
-            Ok(_) => return Err(CraftError::io(format!("the output file {} is a folder or a link, not a file an export writes", target.display()))),
-        };
-        Ok(Entry { path: path.to_string(), kind: Kind::File(found), export: Some(export) })
+            Ok(_) => Err(CraftError::io(format!("the output file {} is a folder or a link, not a file an export writes", target.display()))),
+        }
     }
 
     /// The folders of the path `file` (an entry's, below the container) that are not there now, the
@@ -1289,18 +1469,29 @@ impl Pending {
     /// app waits for the export that holds the log, or writes its outputs under names whose logs
     /// differ; a refused listing wrote nothing, so waiting for the holder costs nothing.
     pub(crate) fn list(&mut self, outputs: &[PathBuf]) -> Result<()> {
-        let (mut entries, mut seen) = (Vec::with_capacity(outputs.len()), BTreeSet::new());
-        for output in outputs {
-            let file = self.journal.entry_of(output, self.export)?;
-            let made = self.journal.made_folders(&file.path, &self.looked, &mut seen, self.export);
-            entries.push(file);
-            entries.extend(made);
-        }
-        if entries.is_empty() {
+        if outputs.is_empty() {
             return Ok(());
         }
+        // Every look this listing takes at the disk is taken under the journal's lock, which no export
+        // of this process can end or list without, so a file another export put up and finished before
+        // the record is seen as there, and kept by this export's cancel, kill or failure. Looked at
+        // before the lock, it could be nothing yet, and that export could finish it and end, its entry
+        // gone, before this one is recorded: nothing would refuse this listing, and its cancel would
+        // delete the finished file as its own. A folder's listing answers for every name in it for the
+        // whole operation, so a look before the lock would hold that window open for every file of a
+        // sequence at once.
         let mut known = lock(&KNOWN);
         let state = self.journal.hold(&mut known)?;
+        let listed = self.list_held(state, outputs);
+        // A process with no export running holds no lock.
+        if state.running.is_empty() {
+            known.remove(&self.journal.file);
+        }
+        listed
+    }
+
+    /// [`Pending::list`] with the journal held, as `state`.
+    fn list_held(&mut self, state: &mut Known, outputs: &[PathBuf]) -> Result<()> {
         let paths = self.journal.paths();
         // A path a running export of this process has listed belongs to that export alone until it
         // ends. Two exports writing one path at once leave no defined file there, and once two exports
@@ -1323,15 +1514,23 @@ impl Pending {
         // second export of that one file passes this check, and a start splits the same way
         // between the claims it gathers and the deletions it weighs after them. The journal's own
         // lock cannot wait the creation out: the writer creates a file, not a journal entry, and
-        // takes no journal lock, while this call already holds this journal's from this check to
-        // its record. And one path within one call is told one way, each path being looked up
-        // once, so the window needs two paths of one file spelt apart, one looked at before the
-        // putting up and the other after. Closing it needs an identity that stays one across a
-        // file being put up; the filesystem's numbers, which are identity here, exist only once a
-        // file is there.
+        // takes no journal lock, while this call already holds this journal's from its first look
+        // to its record. And the paths of one folder are told from one listing of it, kept for the
+        // call, so two spellings of a name in one folder are told alike; the window needs two
+        // paths of one file whose folders are spelt apart, one folder looked at before the putting
+        // up and the other after. Closing it needs an identity that stays one across a file being
+        // put up; the filesystem's numbers, which are identity here, exist only once a file is
+        // there.
         let mut others: BTreeMap<PathId, bool> = BTreeMap::new();
         for listed in state.running.iter().filter(|listed| listed.export != Some(self.export)) {
             *others.entry(paths.id(&listed.path)).or_default() |= matches!(listed.kind, Kind::File(_));
+        }
+        let (mut entries, mut seen) = (Vec::with_capacity(outputs.len()), BTreeSet::new());
+        for output in outputs {
+            let file = self.journal.entry_of(&paths, output, self.export)?;
+            let made = self.journal.made_folders(&file.path, &self.looked, &mut seen, self.export);
+            entries.push(file);
+            entries.extend(made);
         }
         let clash = entries.iter().find(|entry| others.get(&paths.id(&entry.path)).is_some_and(|&file| file || matches!(entry.kind, Kind::File(_))));
         if let Some(entry) = clash {
@@ -1343,18 +1542,11 @@ impl Pending {
         let held = taken_over(&state.held, &mut entries, &paths);
         let mut listed: Vec<Entry> = held.iter().chain(&state.running).cloned().collect();
         listed.extend(entries.iter().cloned());
-        let written = self.journal.write(&listed, &state.taken);
-        if written.is_ok() {
-            state.held = held;
-            state.running.extend(entries.iter().cloned());
-        }
-        // A process with no export running holds no lock.
-        if state.running.is_empty() {
-            known.remove(&self.journal.file);
-        }
-        written.map_err(|error| {
+        self.journal.write(&listed, &state.taken).map_err(|error| {
             CraftError::io(format!("cannot list the export's files in the pending-export journal {}: {error}", self.journal.file.display()))
         })?;
+        state.held = held;
+        state.running.extend(entries.iter().cloned());
         self.listed.extend(entries);
         self.looked.extend(seen);
         Ok(())
@@ -1512,9 +1704,11 @@ impl Stamp {
 
 /// Deal with the listed file at `target`, a path inside the container whose own name is not
 /// followed: leave it when it is missing or is still the file `found` describes, delete it when
-/// the export wrote it, and refuse anything that is not a regular file.
-fn settle(target: &Path, found: Option<Stamp>) -> std::result::Result<Settled, Refusal> {
-    let Some(now) = found_at(target)? else { return Ok(Settled::Absent) };
+/// the export wrote it, and refuse anything that is not a regular file. `absent` says the folder it
+/// lies in has been listed for this operation and holds nothing of the name, which is the same answer
+/// as looking at the name and finding nothing.
+fn settle(target: &Path, found: Option<Stamp>, absent: bool) -> std::result::Result<Settled, Refusal> {
+    let Some(now) = found_at(target, absent)? else { return Ok(Settled::Absent) };
     let kind = now.file_type();
     if !kind.is_file() {
         return Err(Refusal::NotAFile(what_is(kind)));
@@ -1529,9 +1723,9 @@ fn settle(target: &Path, found: Option<Stamp>) -> std::result::Result<Settled, R
 /// followed: remove it when it is a folder that holds nothing, leave it when it holds anything, and
 /// refuse anything that is not a folder. The system's removal of a folder removes only an empty one
 /// and never follows a link at its name, so nothing a folder holds, or a link reaches, is touched
-/// even if the folder changed since it was looked at.
-fn settle_folder(target: &Path) -> std::result::Result<Settled, Refusal> {
-    let Some(now) = found_at(target)? else { return Ok(Settled::Absent) };
+/// even if the folder changed since it was looked at. `absent` is as in [`settle`].
+fn settle_folder(target: &Path, absent: bool) -> std::result::Result<Settled, Refusal> {
+    let Some(now) = found_at(target, absent)? else { return Ok(Settled::Absent) };
     let kind = now.file_type();
     if !kind.is_dir() {
         return Err(Refusal::NotAFolder(what_is(kind)));
@@ -1545,8 +1739,12 @@ fn settle_folder(target: &Path) -> std::result::Result<Settled, Refusal> {
 }
 
 /// What is at `target` now, its own name not followed, or `None` when nothing is: a folder of its
-/// path that is now a file holds nothing either.
-fn found_at(target: &Path) -> std::result::Result<Option<fs::Metadata>, Refusal> {
+/// path that is now a file holds nothing either. When the folder of the name has been listed for this
+/// operation and holds nothing of it (`absent`), the disk is not asked again.
+fn found_at(target: &Path, absent: bool) -> std::result::Result<Option<fs::Metadata>, Refusal> {
+    if absent {
+        return Ok(None);
+    }
     match fs::symlink_metadata(target) {
         Err(error) if matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => Ok(None),
         Err(error) => Err(Refusal::Disk(error.to_string())),
@@ -1687,6 +1885,242 @@ mod tests {
     use tempfile::TempDir;
 
     type Test = std::result::Result<(), Box<dyn std::error::Error>>;
+
+    // The journal's lock is one for the whole process, and these listings are measured by the
+    // clock: one export's listing of thousands of files must not lengthen another timed test's
+    // every look, so the timed listings take their turns, never side by side.
+    static TIMED_LISTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// What a listing costs the folders, not the files: the same count of files, once gathered in one
+    /// folder and once spread over as many folders, tells them apart by itself, on any machine, because
+    /// each side pays for what the disk is asked of and the counts of files are equal. A sequence of
+    /// frames in one folder is one folder: one that is not there answers for every name below it, one
+    /// that is there is listed once and answers for every name it does not hold, and a name it holds is
+    /// looked at once, as itself, never resolved through every folder above it again. So the listing of
+    /// a sequence costs the files and not the folders above them, whether the export writes it new or
+    /// writes it over the one it wrote before, which is what lets an export of thousands of files
+    /// start, and be cancelled, in the time its files take.
+    #[test]
+    fn the_listing_of_a_sequence_asks_its_folder_once_not_of_every_file() -> Test {
+        let _turn = TIMED_LISTING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        /// The files of the phone's measured start: enough that a cost for each file outweighs a cost
+        /// for each folder many times over.
+        const FILES: usize = 6_000;
+        for there in [false, true] {
+            let (one, many) = (listing_of(FILES, 1, there)?, listing_of(FILES, FILES, there)?);
+            assert!(
+                one * 4 <= many,
+                "{FILES} files {}in one folder cost {one:?}, the same {FILES} files in {FILES} folders cost {many:?}: a folder is looked at once, however many files lie in it",
+                if there { "already there " } else { "" }
+            );
+        }
+        Ok(())
+    }
+
+    /// The time a listing of `files` files takes, gathered into `folders` folders below the container —
+    /// one file per folder at most — and already there when `there`: the faster of two listings of
+    /// them, each by an export that then ends, so a pause of the machine's own costs no side its bound.
+    /// The container lies deeper than a phone's does, so a resolution of a name, which looks at every
+    /// folder above it, costs many looks of the name itself, as it does on the phone's disk.
+    fn listing_of(files: usize, folders: usize, there: bool) -> std::result::Result<std::time::Duration, Box<dyn std::error::Error>> {
+        let deep = std::iter::repeat_n("deep", 24).chain(std::iter::once("container")).collect::<Vec<_>>().join("/");
+        let sand = Sandbox::at(TempDir::new()?, &deep)?;
+        let paths: Vec<_> = (0..files)
+            .map(|file| {
+                let (folder, name) = match folders {
+                    1 => ("seq".to_string(), format!("frame_{file:05}.png")),
+                    _ => (format!("folder_{file:05}"), "frame.png".to_string()),
+                };
+                sand.folders.container.join(folder).join(name)
+            })
+            .collect();
+        if there {
+            for path in &paths {
+                fs::create_dir_all(path.parent().ok_or("a frame lies in a folder")?)?;
+                fs::write(path, b"an earlier frame")?;
+            }
+        }
+        let mut fastest = std::time::Duration::MAX;
+        for _ in 0..2 {
+            let mut export = sand.journal().pending();
+            let then = std::time::Instant::now();
+            export.list(&paths)?;
+            fastest = fastest.min(then.elapsed());
+            export.clear()?;
+        }
+        println!("{files} files in {folders} folders, already there: {there}: {fastest:?} ({:.3} us each)", fastest.as_micros() as f64 / files as f64);
+        Ok(fastest)
+    }
+
+    /// A folder's listing, taken once for an operation, answers for every name it lacks for the whole
+    /// of it: such a name is told absent without a look of its own, so a sequence of thousands of names
+    /// in one folder costs the disk one listing. A name it holds, folded as the folder's volume folds
+    /// names, is looked at as itself, so another spelling of a file the volume holds as one is that
+    /// file; and a listing in which two names fold alike, as they do under the reading a volume whose
+    /// rules were never read is given, says nothing of any name, each of which is then looked at.
+    #[test]
+    fn a_folders_listing_answers_for_the_names_it_lacks_and_folds_the_names_it_holds() -> Test {
+        let sand = Sandbox::new()?;
+        sand.put("out/there.png", b"a file");
+        let paths = sand.journal().paths();
+        assert!(!paths.absent("out/there.png"), "a name the folder holds was told absent");
+        assert!(paths.absent("out/missing.png"), "a name the folder's listing lacks was not told absent by it");
+        sand.put("out/later.png", b"put up after the folder was listed");
+        assert!(paths.absent("out/later.png"), "one operation listed the folder again, or asked the disk of a name its listing lacks");
+        assert!(!sand.journal().paths().absent("out/later.png"), "the next operation did not list the folder for itself");
+        for (spelt, other) in spellings_folding_to_one(&sand) {
+            let (spelt, other) = (format!("out/{spelt}"), format!("out/{other}"));
+            sand.put(&spelt, b"one file, two spellings");
+            let paths = sand.journal().paths();
+            assert!(!paths.absent(&other) && paths.id(&other) == paths.id(&spelt), "{other} was not told as the file {spelt} its volume holds it as");
+        }
+        // Under the reading that folds case, these two are one name; only a volume that keeps them
+        // apart holds both, and there no name is told by a listing that cannot tell them apart.
+        sand.put("apart/Apart.png", b"one");
+        sand.put("apart/APART.png", b"two");
+        if fs::read_dir(sand.folders.container.join("apart"))?.count() == 2 {
+            let unread = Paths::with(&sand.journal().root, None);
+            assert!(!unread.absent("apart/missing.png"), "a listing whose names fold alike answered for a name it lacks");
+        }
+        Ok(())
+    }
+
+    /// An output whose folder the volume will not resolve refuses the listing in words that name the
+    /// folder as the folder it is, since it is the folder that was asked of the disk.
+    #[cfg(unix)]
+    #[test]
+    fn an_output_whose_folder_cannot_be_resolved_is_refused_naming_its_folder() -> Test {
+        let sand = Sandbox::new()?;
+        if !permissions_hold(&sand)? {
+            return Ok(());
+        }
+        let locked = sand.folders.container.join("locked");
+        fs::create_dir_all(locked.join("sub"))?;
+        set_mode(&locked, 0o000)?;
+        let refused = sand.journal().pending().list(&[locked.join("sub/frame.png")]);
+        set_mode(&locked, 0o700)?;
+        let folder = locked.join("sub");
+        assert_eq!(refused, Err(CraftError::io(format!("cannot resolve the output file's folder {}: Permission denied (os error 13)", folder.display()))));
+        Ok(())
+    }
+
+    /// A file another export finishes while a listing waits for the journal is seen by that listing as
+    /// the file it is: every look the listing takes is taken under the journal's lock, so the export
+    /// that finished it could not end between the listing's look and its record, and the listing's
+    /// cancel, or the start after its kill, keeps the file as a finished file it never reached. Looked
+    /// at before the lock, the name was nothing yet, and the cancel or the start deleted the finished
+    /// file as one the listing's export had written.
+    #[test]
+    fn a_file_finished_while_a_listing_waits_for_the_journal_outlives_the_listings_end() -> Test {
+        for cancelled in [true, false] {
+            let sand = Sandbox::new()?;
+            // The folder holds something already, so its listing is what tells the name.
+            sand.put("out/earlier.png", b"an earlier file");
+            let journal = sand.journal();
+            let late = sand.folders.container.join("out/late.png");
+            let held = lock(&KNOWN);
+            let listing = {
+                let (late, mut export) = (late.clone(), journal.pending());
+                thread::spawn(move || export.list(&[late]).map(|()| export))
+            };
+            // Time for a listing that looks before it takes the lock to have looked.
+            thread::sleep(std::time::Duration::from_millis(300));
+            fs::write(&late, b"finished by another export")?;
+            drop(held);
+            let export = listing.join().map_err(|_| "the listing panicked")??;
+            match cancelled {
+                true => export.remove()?,
+                false => {
+                    export.killed();
+                    sand.start()?;
+                }
+            }
+            assert_eq!(
+                fs::read(&late).ok().as_deref(),
+                Some(&b"finished by another export"[..]),
+                "the file finished while the listing waited was deleted by the listing's {}",
+                if cancelled { "cancel" } else { "kill" }
+            );
+        }
+        Ok(())
+    }
+
+    /// The listing of one export holds the journal for one chunk of its files at a time, so the
+    /// rest of the app is answered while it lists: another export's own listing is answered within
+    /// the bound a start is given, its progress reports are answered while the first export is
+    /// still listing, its cancel is answered, and its ending takes back what it listed, all while
+    /// the first export lists eighteen thousand files.
+    #[test]
+    fn another_export_while_another_lists_its_files() -> Test {
+        const FILES: usize = 18_000;
+        const CHUNK: usize = 8_192;
+        let _turn = TIMED_LISTING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let sand = Sandbox::new()?;
+        let paths: Vec<PathBuf> = (0..FILES).map(|file| sand.folders.container.join(format!("seq/frame_{file:05}.png"))).collect();
+        for path in &paths {
+            fs::create_dir_all(path.parent().unwrap())?;
+            fs::write(path, b"an earlier frame")?;
+        }
+        // Both engines start before either export runs: a start, and a start while another export
+        // holds the journal's file lock, are questions of their own.
+        let long_paths = paths.clone();
+        let chunks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let chunked = chunks.clone();
+        let long_engine = sand.start_running(Box::new(move |on_progress, list_outputs| {
+            for chunk in long_paths.chunks(CHUNK) {
+                if !on_progress(0, 0, None) {
+                    return Err(CraftError::Cancelled);
+                }
+                list_outputs(chunk)?;
+                chunked.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok(Value::Null)
+        }))?;
+        let mine = sand.folders.container.join("other/frame.png");
+        let listed_for = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let cost = listed_for.clone();
+        let reports = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let told = reports.clone();
+        let short_engine = sand.start_running(Box::new(move |on_progress, list_outputs| {
+            let then = std::time::Instant::now();
+            list_outputs(std::slice::from_ref(&mine))?;
+            cost.store(then.elapsed().as_micros() as u64, Ordering::SeqCst);
+            while on_progress(1, 10, None) {
+                told.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(CraftError::Cancelled)
+        }))?;
+        let long_thread = thread::spawn(move || long_engine.request_with_progress("export", Value::Null, |_, _, _| {}, &CancelToken::new()));
+        let short_cancel = CancelToken::new();
+        let ask_short = short_cancel.clone();
+        let worker = thread::spawn(move || {
+            let began = std::time::Instant::now();
+            let answer = short_engine.request_with_progress("export", Value::Null, |_, _, _| {}, &short_cancel);
+            (answer, began.elapsed())
+        });
+        // The cancel is asked once the other export has a report of its own and the listing still
+        // has a chunk to hand over, so it lands while the journal is held between looks at files.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while (reports.load(Ordering::SeqCst) == 0 || chunks.load(Ordering::SeqCst) < FILES / CHUNK) && std::time::Instant::now() < deadline {
+            thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let asked = std::time::Instant::now();
+        ask_short.cancel();
+        let (answer, _) = worker.join().map_err(|_| "the other export panicked")?;
+        let long_answer = long_thread.join().unwrap();
+        assert_eq!(answer, Err(CraftError::Cancelled), "the cancel of an export running beside another's listing of {FILES} files was not answered");
+        assert!(asked.elapsed() <= std::time::Duration::from_secs(3), "the other export's cancel took {:?} to be answered", asked.elapsed());
+        assert!(reports.load(Ordering::SeqCst) >= 1, "the other export heard no progress report of its own while the first export was still listing");
+        assert!(
+            listed_for.load(Ordering::SeqCst) <= 3_000_000,
+            "the other export's own listing waited {:?} us, over the bound a start gives any export",
+            listed_for.load(Ordering::SeqCst)
+        );
+        assert!(long_answer.is_ok(), "the listing export failed: {long_answer:?}");
+        assert!(!sand.file().exists(), "an export that ended while another listed left its entries in the journal");
+        Ok(())
+    }
 
     /// An export the test writes: it gets the progress callback and the lister an app's export gets.
     type Script = Box<dyn FnMut(&mut dyn FnMut(u64, u64, Option<f64>) -> bool, &mut dyn FnMut(&[PathBuf]) -> Result<()>) -> Result<Value> + Send>;

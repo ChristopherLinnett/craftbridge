@@ -91,7 +91,7 @@ fn files_of(session: &Session, segment: RenderQueueItem, path: String) -> impl I
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::runner::export;
     use crate::session;
@@ -163,7 +163,9 @@ mod tests {
         path.strip_prefix(dir.path()).expect("a path below the scratch folder").display().to_string()
     }
 
-    fn files_below(root: &Path) -> BTreeSet<String> {
+    /// Every file below `root`, by its path from it, whatever folders lie between: what a render or
+    /// an export has left there.
+    pub(crate) fn files_below(root: &Path) -> BTreeSet<String> {
         let mut found = BTreeSet::new();
         let mut folders = vec![root.to_path_buf()];
         while let Some(folder) = folders.pop() {
