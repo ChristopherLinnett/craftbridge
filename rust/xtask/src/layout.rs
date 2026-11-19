@@ -198,7 +198,26 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     errors.extend(hidden_package_folders(root)?);
     errors.extend(build_files_outside_their_folders(root)?);
     errors.extend(hand_written_java(root)?);
+    errors.extend(kept_templates(root)?);
     Ok(errors)
+}
+
+/// The extension of an EffectCraft template.
+const TEMPLATE_EXTENSION: &str = "ectemplate";
+
+/// Every template the repository holds, its extension in any case a disk folds: the running example's template is
+/// made from its recipe, `conformance/effects/birthday-card.jsonl`, by `tools/birthday-card.sh` whenever a sample is
+/// built, so a kept one is a second template, made some other way, that a sample could bundle in its place.
+fn kept_templates(root: &Path) -> Result<Vec<String>, String> {
+    Ok(crate::hygiene::repository_files(root)?
+        .into_iter()
+        .filter(|file| Path::new(file).extension().and_then(|extension| extension.to_str()).is_some_and(|extension| extension.eq_ignore_ascii_case(TEMPLATE_EXTENSION)))
+        .map(|file| {
+            format!(
+                "{file}: a kept template: the running example's template is made from its recipe, conformance/effects/birthday-card.jsonl, by tools/birthday-card.sh whenever a sample is built, and the repository keeps no copy of one (AGENTS.md §10)"
+            )
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -328,6 +347,19 @@ mod tests {
         scratch.write("ios/e\u{301}tude/notes.md", "x\n");
         let errors = check(&scratch.0).unwrap();
         assert_eq!(errors, ["ios/e\u{301}tude is not allowed here: only `sdk` and `samples` belong in ios/"]);
+    }
+
+    #[test]
+    fn a_kept_template_is_refused_in_any_case_of_its_extension() {
+        let scratch = Scratch::new("templates");
+        scratch.write("android/samples/card/app/src/main/assets/Birthday Card.ectemplate", "x");
+        scratch.write("ios/samples/Card/Card.ECTemplate", "x");
+        scratch.write("conformance/effects/fixtures/card.ectemplate.json", "{}");
+        let mut errors: Vec<String> = check(&scratch.0).unwrap().into_iter().filter(|error| error.contains("template")).collect();
+        errors.sort();
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(errors[0].starts_with("android/samples/card/app/src/main/assets/Birthday Card.ectemplate: a kept template"), "{errors:?}");
+        assert!(errors[1].starts_with("ios/samples/Card/Card.ECTemplate: a kept template"), "{errors:?}");
     }
 
     #[test]

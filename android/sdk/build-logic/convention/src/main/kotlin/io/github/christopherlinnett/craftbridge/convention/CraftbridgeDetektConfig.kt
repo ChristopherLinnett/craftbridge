@@ -58,7 +58,7 @@ abstract class CraftbridgeDetektConfig : DefaultTask() {
                 parentFile.mkdirs()
                 writeText(
                     """
-                    |# Written by craftbridge.android.library from this module's namespace and folder; the
+                    |# Written by the Android convention plugin from this module's namespace and folder; the
                     |# rules themselves live in android/sdk/build-logic/detekt-rules/profiles.
                     |# Validation is on, and leaves nothing out, whatever the profiles say: detekt merges the configs in
                     |# order and the last wins, and a run with validation off, or a property path excluded from it,

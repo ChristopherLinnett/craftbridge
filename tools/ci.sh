@@ -293,7 +293,7 @@ stage_swift_build() {
   local builds configuration destination architectures status=0 build=0 folder graphs=() library libraries=() project projects=()
   xcframework || return 1
   # The sample apps, each an Xcode project of its own that takes the package by local path, as an app
-  # does, listed by `cargo xtask swift-samples` (rust/xtask/src/licences.rs), the one list of them, whose
+  # does, listed by `cargo xtask swift-samples` (rust/xtask/src/samples.rs), the one list of them, whose
   # pins the licence check reads. Each bundles the running example's template from the `Template` folder
   # beside its project, which git ignores and the sample's build refuses to start without: it is made here
   # from its recipe by the EffectCraft command line at the pin (tools/birthday-card.sh), so no sample holds
@@ -465,6 +465,17 @@ swift_suite_on() {
   rm -rf "$run_folder"
   return "$status"
 }
+# One run of Gradle, through android/sdk's wrapper, on one build of the repository, its log kept for
+# `cargo xtask skipped-tasks`: `android_gradle <log> <build folder> <task>…`, the folder from android/sdk. One
+# wrapper (one Gradle version, §5) runs every build, the SDK's and each sample's.
+android_gradle() {
+  local log="$1" project="$2"
+  shift 2
+  (cd android/sdk && ./gradlew -p "$project" --no-daemon --continue --warning-mode=fail --console=plain "$@") | tee -a "$log"
+}
+# What every Android build's modules are checked with; the SDK's also compiles its instrumented checks, and a
+# sample builds no instrumented-test APK.
+android_checks=(lint lintRelease assembleRelease compileDebugUnitTestSources testDebugUnitTest)
 stage_android() {
   # A fresh JVM every run: ktlint keeps the .editorconfig files it has parsed for the life of the
   # Gradle daemon, so a warm daemon would go on checking against rules that have since changed.
@@ -486,17 +497,35 @@ stage_android() {
   # installation home path") when the two start together.
   local log status=0
   log="$(mktemp)"
-  gradle_build() {
-    (cd android/sdk && ./gradlew --no-daemon --continue --warning-mode=fail --console=plain "$@") | tee -a "$log"
-  }
-  gradle_build spotlessCheck || status=1
+  android_gradle "$log" . spotlessCheck || status=1
   # detekt runs in a build of its own too, and its command line in a JVM of its own (plan D-28): its
   # analysis starts the Kotlin compiler's IntelliJ core, which sets IntelliJ's JVM-wide settings as
   # ktlint does, so it never shares a JVM with Lint. detektMain and detektTest are what
   # craftbridge.android.library registers over every variant and every test component of a module, and
   # the build's rule jar carries its own tests, run here beside the rules they check.
-  gradle_build detektMain detektTest :build-logic:detekt-rules:test || status=1
-  gradle_build lint lintRelease assembleRelease compileDebugUnitTestSources testDebugUnitTest compileDebugAndroidTestSources || status=1
+  android_gradle "$log" . detektMain detektTest :build-logic:detekt-rules:test || status=1
+  android_gradle "$log" . "${android_checks[@]}" compileDebugAndroidTestSources || status=1
+  xtask skipped-tasks "$log" || status=1
+  rm -f "$log"
+  return "$status"
+}
+# The Android samples' own builds, each a Gradle build that takes the SDK as an included build and the SDK's
+# convention plugins and detekt rules from build-logic, so a sample's sources are held to the rules of the SDK's
+# modules by the same code, in the same three runs as the SDK's and for the same reasons (stage_android). They are
+# listed by `cargo xtask android-samples` (rust/xtask/src/samples.rs), the one list the licence check and the
+# build-file rules read too. Each bundles the running example's template, which its build makes with
+# tools/birthday-card.sh, and so with the EffectCraft command line at the pin (tools/oracle.sh): a stage of its
+# own, so the hosted job that builds that command line for the conformance stage builds the samples with it too.
+stage_android_samples() {
+  local log status=0 build builds
+  items_of "Android sample builds" android-samples || return 1
+  builds=("${items[@]}")
+  log="$(mktemp)"
+  for build in "${builds[@]}"; do
+    android_gradle "$log" "$CRAFTBRIDGE_ROOT/$build" spotlessCheck || status=1
+    android_gradle "$log" "$CRAFTBRIDGE_ROOT/$build" detektMain detektTest || status=1
+    android_gradle "$log" "$CRAFTBRIDGE_ROOT/$build" "${android_checks[@]}" || status=1
+  done
   xtask skipped-tasks "$log" || status=1
   rm -f "$log"
   return "$status"
@@ -542,7 +571,7 @@ stage_duplicates() {
 
 # `rules` runs before every cargo stage that compiles the workspace: what it reads needs no build, and a
 # build script runs as soon as cargo compiles its crate.
-stages=(doctor rules rust_fmt rust_clippy rust_host_clippy rust_test rust_host_test conformance rust_mobile rust_deny generated plan_views swift_format swift_build swift_test swift_lint android shell duplicates)
+stages=(doctor rules rust_fmt rust_clippy rust_host_clippy rust_test rust_host_test conformance rust_mobile rust_deny generated plan_views swift_format swift_build swift_test swift_lint android android_samples shell duplicates)
 # The stage groups the decision and plan §15 name: Rust and Swift are each several stages.
 group_rust=(rust_fmt rust_clippy rust_test rust_mobile rust_deny)
 group_swift=(swift_format swift_build swift_test swift_lint)
@@ -563,6 +592,7 @@ left_to_macos=(
   "rust_mobile: the iOS targets need Xcode's SDKs, and the Android targets the NDK r28 tools/env.sh pins, which the macOS image carries and Ubuntu's does not"
   "swift_format swift_build swift_lint: Xcode and SwiftPM"
   "swift_test: the suite runs on the iOS Simulator, which is macOS's own, so the hosted macOS job runs it on the runner's simulator"
+  "android_samples: each sample bundles the running example's template, which the EffectCraft command line at the pin makes (tools/birthday-card.sh): the macOS job builds that command line once, for conformance, and the Linux job would build it a second time, cold"
   "shell: Homebrew's shellcheck is the release the doctor's fix installs, while Ubuntu's is an older one whose checks differ"
 )
 # Is `name` one of the items after it: `among <name> <item>…`.

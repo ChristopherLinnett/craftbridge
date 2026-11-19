@@ -7,7 +7,8 @@
 //! Swift Testing suite runs on, `cargo xtask swift-suite`, and the iPhone simulator it runs on, shared
 //! with every other run on the machine, `cargo xtask simulator -- <program>…`; the package's library products,
 //! which an app's own extension links too, `cargo xtask swift-products`, and the samples' Xcode projects,
-//! `cargo xtask swift-samples`; the Swift stage's formatter check,
+//! `cargo xtask swift-samples`, and the Android samples' builds, `cargo xtask android-samples`; the Swift stage's
+//! formatter check,
 //! `cargo xtask swift-format`, and its check of the names hand-written Swift gives beside generated Swift,
 //! `cargo xtask swift-api <graphs>…`; the XCFramework `tools/build-xcframework.sh` builds,
 //! `cargo xtask xcframework`; and for `tools/build-android.sh`, the native library the SDK ships,
@@ -53,6 +54,7 @@ mod pins;
 mod plan_views;
 mod report;
 mod rust_syntax;
+mod samples;
 mod scan;
 mod scratch;
 mod simulator;
@@ -253,7 +255,8 @@ fn dispatch(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
         ["swift-builds"] => pins::builds(&root),
         ["swift-suite"] => pins::suite(&root),
         ["swift-products"] => pins::products(&root),
-        ["swift-samples"] => licences::samples(&root),
+        ["swift-samples"] => samples::run_swift(&root),
+        ["android-samples"] => samples::run_android(&root),
         ["device-lock", device, "--", program, arguments @ ..] => device_lock::run(device, program, arguments),
         ["simulator", "--", program @ ..] => simulator::run(program),
         ["xcframework"] => xcframework::run(&root),
@@ -293,6 +296,9 @@ fn usage() {
     eprintln!("       cargo xtask swift-products   (the Swift package's library products, as its manifest lists them: what an app's extension links)");
     eprintln!(
         "       cargo xtask swift-samples   (the Xcode projects of the iOS samples, which the Swift build builds and the licence check reads the pins of)"
+    );
+    eprintln!(
+        "       cargo xtask android-samples   (the Gradle builds of the Android samples, which the gate builds and the licence check and the build-file rules read)"
     );
     eprintln!(
         "       cargo xtask simulator -- <program> <argument>...   (the program on one of the machine's iPhone simulators, its id where an argument says {{simulator}})"
@@ -489,6 +495,7 @@ mod tests {
             "swift_build",
             "swift_test",
             "swift_lint",
+            "android_samples",
             "shell",
         ] {
             assert!(macos.contains(&stage.to_string()) && !linux.contains(&stage.to_string()), "{stage} runs on macOS alone: linux {linux:?}, macos {macos:?}");
