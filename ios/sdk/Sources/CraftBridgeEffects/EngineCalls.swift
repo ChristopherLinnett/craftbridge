@@ -253,6 +253,19 @@ extension EffectsEngine {
     public func mcp(_ line: String) async throws -> String? {
         try await handle.mcp(line: line)
     }
+
+    /// What the start made of the files an export left behind when the system killed the app: the files
+    /// and folders it deleted, the ones it left untouched because the export never reached them, the ones it
+    /// refused because they were not the export's to take, the ones its deleting could not remove, and what
+    /// it found of the journals themselves. The start has done all of it by the time the engine is in hand,
+    /// so this only tells it back: it answers the same at any time, after the engine has ended too, and
+    /// changes nothing (plan §16, D-17).
+    ///
+    /// - Throws: ``CraftError/Io(detail:)`` for a path the report names that is not valid Unicode, which
+    ///   no text can carry.
+    public func recovery() throws -> Recovery {
+        try handle.recovery()
+    }
 }
 
 /// `time` in the seconds the engine reads: its nearest whole nanoseconds over a billion, rounded once,

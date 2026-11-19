@@ -7,6 +7,7 @@ import android.hardware.HardwareBuffer
 import android.view.Surface
 import io.github.christopherlinnett.craftbridge.ffi.core.FrameBytes
 import io.github.christopherlinnett.craftbridge.ffi.core.PixelFormat
+import io.github.christopherlinnett.craftbridge.ffi.core.Recovery
 import io.github.christopherlinnett.craftbridge.ffi.core.setDeviceCodecs
 import io.github.christopherlinnett.craftbridge.ffi.core.windowAddress
 import kotlinx.coroutines.CancellationException
@@ -281,6 +282,18 @@ public class Engine internal constructor(
      * @throws CraftException if the engine refuses the line.
      */
     public suspend fun mcp(line: String): String? = mapped { boundary.mcp(line) }
+
+    /**
+     * What the start made of the files an export left behind when the system killed the app: the listed
+     * files and folders the start deleted, the ones it left untouched because the export never reached
+     * them, the ones it refused because they were not the export's to take, the ones its deleting could
+     * not remove, and what it found of the journals themselves. The start has already done all of it by
+     * the time an engine is in hand — this only tells it back — so it answers the same at any time,
+     * even after [shutDown], and changes nothing (plan §16, D-17).
+     *
+     * @throws IoException for a path the report names that is not valid Unicode, which no text can carry.
+     */
+    public fun recovery(): Recovery = mapped { boundary.recovery() }
 
     /**
      * End the engine: its thread finishes, and every later call of this engine answers that it can no

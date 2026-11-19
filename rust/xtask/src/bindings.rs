@@ -119,6 +119,13 @@ pub(crate) fn with_run<T>(language: &str, keep: impl FnOnce(&Path) -> Result<T, 
     kept
 }
 
+/// The host build of the distribution library itself: what a generator reads from the library rather
+/// than from the bindings written out of it, such as the boundary's surface of
+/// [`crate::boundary_surface`]. The one library is built the one time, beside the bindgen.
+pub(crate) fn distribution_library() -> Result<PathBuf, String> {
+    Ok(host_build()?.library.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
