@@ -164,6 +164,23 @@ extension EffectsEngine.PathCommands {
         )
     }
 
+    /// Closed.
+    ///
+    /// The engine describes its parameters as: {}
+    ///
+    /// - Parameter extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
+    /// - Returns: The engine's reply.
+    /// - Throws: Whatever the engine refuses the call with.
+    public func toggleClosed(
+        extra: [String: JSONValue] = [:]
+    ) async throws -> JSONValue {
+        try await self.engine.command(
+            "path.toggleClosed",
+            [:],
+            extra: extra
+        )
+    }
+
     /// Ungroup Shapes.
     ///
     /// The engine describes its parameters as: {layer?, items?: [group uid]}

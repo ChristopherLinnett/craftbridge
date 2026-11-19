@@ -106,11 +106,12 @@ public class ProjectCommands internal constructor(
     /**
      * New Folder.
      *
-     * The engine describes its parameters as: {name?, parent?}
+     * The engine describes its parameters as: {name?, parent?, items?: [id|name] (moved into it)}
      *
      * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
      * @param name The key `name`: name?
      * @param parent The key `parent`: parent?
+     * @param items The key `items`: items?: [id|name] (moved into it)
      * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
      * @return The engine's reply.
      * @throws kotlin.Throwable Whatever the engine refuses the call with.
@@ -119,6 +120,7 @@ public class ProjectCommands internal constructor(
         vararg namedOnly: NamedArguments,
         name: JSONValue? = null,
         parent: JSONValue? = null,
+        items: JSONValue? = null,
         extra: Map<String, JSONValue>? = null,
     ): JSONValue =
         this.engine.command(
@@ -126,6 +128,7 @@ public class ProjectCommands internal constructor(
             extra,
             "name" to name?.jsonValue,
             "parent" to parent?.jsonValue,
+            "items" to items?.jsonValue,
         )
 
     /**

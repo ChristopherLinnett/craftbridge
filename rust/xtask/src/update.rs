@@ -22,7 +22,7 @@ use crate::effects_api::SurfaceDiff;
 use crate::upstream::Written;
 use crate::versions::Newer;
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -248,24 +248,40 @@ fn from_the_pin(steps: &dyn Steps, rev: &str, old: &Revs) -> Result<Outcome, Str
 
 /// The caches of the official repositories read for two revisions: what [`Revisions`] asks of git.
 struct CacheRevisions {
-    /// Each repository whose revision the update compares, with its cache and its old and new commits. A
-    /// repository not here kept the revision it had, so nothing in it is compared or looked up.
-    changed: Vec<(Repository, crate::upstream::Cache, String, String)>,
+    /// Each repository whose revision the update compares, with its cache and its old and new commits,
+    /// and the Craft library package the pair belongs to once a repository is the libraries: an app
+    /// builds those package by package, so each moves on its own. A repository, or a package of one,
+    /// not here kept the revision it had, so nothing in it is compared or looked up.
+    changed: Vec<(Repository, Option<String>, crate::upstream::Cache, String, String)>,
+    /// The folder each Craft library package sits in, as [`library_folders`] reads them: a place in the
+    /// libraries is compared between the revisions of the package that holds the file it names.
+    folders: BTreeMap<String, String>,
 }
 
 impl CacheRevisions {
-    fn of(&self, repository: Repository) -> Option<(&crate::upstream::Cache, &str, &str)> {
-        self.changed.iter().find(|(known, ..)| *known == repository).map(|(_, cache, old, new)| (cache, old.as_str(), new.as_str()))
+    /// The pair to read a place in `repository` between, if its repository, or the package of the
+    /// libraries whose folder holds its file, moved.
+    fn of(&self, repository: Repository, file: &str) -> Option<(&crate::upstream::Cache, &str, &str)> {
+        let package = if repository.is_libraries() { self.package_of(file) } else { None };
+        self.changed
+            .iter()
+            .find(|(known, held, ..)| *known == repository && *held == package)
+            .map(|(_, _, cache, old, new)| (cache, old.as_str(), new.as_str()))
+    }
+
+    /// The package holding a file of the libraries.
+    fn package_of(&self, file: &str) -> Option<String> {
+        package_holding(&self.folders, file).map(str::to_string)
     }
 }
 
 impl Revisions for CacheRevisions {
     fn holds(&self, repository: Repository, file: &str) -> Result<bool, String> {
-        Ok(self.of(repository).is_none_or(|(cache, old, _)| cache.git(&["cat-file", "-e", &format!("{old}:{file}")]).is_ok()))
+        Ok(self.of(repository, file).is_none_or(|(cache, old, _)| cache.git(&["cat-file", "-e", &format!("{old}:{file}")]).is_ok()))
     }
 
     fn diff(&self, repository: Repository, file: &str) -> Result<String, String> {
-        let Some((cache, old, new)) = self.of(repository) else { return Ok(String::new()) };
+        let Some((cache, old, new)) = self.of(repository, file) else { return Ok(String::new()) };
         // `--text`: a file git would call binary is still compared line by line, never passed over as
         // unchanged.
         cache.git(&["diff", "--no-color", "--no-ext-diff", "--text", "-U0", old, new, "--", file])
@@ -284,54 +300,146 @@ fn library_sides(list: &[Adaptation]) -> Vec<Repository> {
     sides
 }
 
-/// The commits the resolved graph builds the Craft libraries at for `side`'s app: each library package
-/// one of the app's own crates depends on, at the commit Cargo resolved it to.
-fn library_commits(crates: &[crate::meta::Crate], side: Repository) -> Result<BTreeSet<String>, String> {
+/// The files of the places a list reads in `side`'s build of the Craft libraries.
+fn side_files(list: &[Adaptation], side: Repository) -> Vec<String> {
+    list.iter()
+        .flat_map(|adaptation| adaptation.relies.iter())
+        .flat_map(|relies| relies.at.iter())
+        .filter(|location| location.repository == side)
+        .map(|location| location.file.clone())
+        .collect()
+}
+
+/// The commits each Craft library package resolves to among the dependencies of `side`'s app: each
+/// library package one of the app's own crates depends on, at every commit Cargo resolved it to. A
+/// package the app resolves at two commits is kept whole, so the refusal can name it: only a package
+/// resolved at one commit says which revision a place in it is read at.
+fn library_commits(crates: &[crate::meta::Crate], side: Repository) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
     let app = side.app().spelt().ok_or("the layer table names no repository for the app")?;
     let prefix = crate::upstream::library_source_prefix();
-    Ok(crates
-        .iter()
-        .filter(|krate| krate.source.as_deref().is_some_and(|source| crate::layers::from_repository(source, app)))
-        .flat_map(|krate| &krate.depends_on)
-        .filter_map(|id| crates.iter().find(|library| &library.id == id))
-        .filter_map(|library| library.source.as_deref().filter(|source| source.starts_with(&prefix)))
-        .filter_map(|source| source.split_once('#').map(|(_, commit)| commit.to_string()))
-        .collect())
-}
-
-/// The one commit `commits` holds for `side`, which a place in the libraries is read at. An app that built
-/// the libraries at two revisions would leave a place unable to say which it means.
-fn the_one_commit(commits: BTreeSet<String>, side: Repository) -> Result<String, String> {
-    let named: Vec<String> = commits.iter().cloned().collect();
-    let mut each = commits.into_iter();
-    match (each.next(), each.next()) {
-        (Some(commit), None) => Ok(commit),
-        _ => Err(format!(
-            "{}'s crates build the Craft libraries at {} revisions ({}), so a place in the libraries cannot say which it is read at",
-            side.app().spelt().unwrap_or("an app"),
-            named.len(),
-            named.join(", ")
-        )),
+    let mut commits: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for krate in crates.iter().filter(|krate| krate.source.as_deref().is_some_and(|source| crate::layers::from_repository(source, app))) {
+        for id in &krate.depends_on {
+            if let Some(library) = crates.iter().find(|library| &library.id == id)
+                && let Some(commit) =
+                    library.source.as_deref().filter(|source| source.starts_with(&prefix)).and_then(|source| source.split_once('#').map(|(_, commit)| commit))
+            {
+                commits.entry(library.name.clone()).or_default().insert(commit.to_string());
+            }
+        }
     }
+    Ok(commits)
 }
 
-/// The commit each library side of `list` is built at in the workspace as it stands.
-fn library_revisions(root: &Path, list: &[Adaptation]) -> Result<Vec<(Repository, String)>, String> {
+/// The folder each Craft library package sits in, relative to the library repository: Cargo builds a
+/// git checkout under a folder named for the repository and holds each revision under a folder named
+/// for its commit, so everything a package's manifest path holds below those two is its folder in the
+/// repository. A place in the libraries names a file under exactly one package's folder.
+fn library_folders(crates: &[crate::meta::Crate]) -> BTreeMap<String, String> {
+    let marker = crate::upstream::library_url().rsplit('/').next().unwrap_or_default().to_string();
+    let mut folders = BTreeMap::new();
+    for krate in crates {
+        if !krate.source.as_deref().is_some_and(|source| source.starts_with(&crate::upstream::library_source_prefix())) {
+            continue;
+        }
+        let path = Path::new(&krate.manifest_path);
+        let checkout = path.ancestors().find(|dir| {
+            dir.parent().is_some_and(|held| held.file_name().is_some_and(|name| name.to_str().is_some_and(|name| name.starts_with(&format!("{marker}-")))))
+        });
+        let Some(relative) = checkout
+            .and_then(|checkout| path.strip_prefix(checkout).ok())
+            .and_then(|relative| relative.parent())
+            .map(|folder| folder.display().to_string().replace('\\', "/"))
+        else {
+            continue;
+        };
+        if !relative.is_empty() {
+            folders.insert(krate.name.clone(), relative);
+        }
+    }
+    folders
+}
+
+/// The commit each listed place of each Craft-library side is read at, in the workspace at `root`.
+fn library_revisions(root: &Path, list: &[Adaptation]) -> Result<Vec<(Repository, BTreeMap<String, String>)>, String> {
+    if library_sides(list).is_empty() {
+        return Ok(Vec::new());
+    }
+    let crates = crate::meta::read(&root.join("rust"), crate::meta::Graph::Resolved)?;
+    listed_revisions(&crates, list)
+}
+
+/// The package of `folders` holding `file`: the longest package folder the file lies under, as a path,
+/// so a folder whose name only begins the file's folder holds nothing of it.
+fn package_holding<'a>(folders: &'a BTreeMap<String, String>, file: &str) -> Option<&'a str> {
+    folders
+        .iter()
+        .filter(|(_, folder)| file == *folder || file.starts_with(&format!("{folder}/")))
+        .max_by_key(|(_, folder)| folder.len())
+        .map(|(package, _)| package.as_str())
+}
+
+/// The same, from the resolved graph: a package built at two revisions is refused by name, and a place
+/// no library package holds is refused too — either leaves the place unable to say which revision it
+/// is read at.
+fn listed_revisions(crates: &[crate::meta::Crate], list: &[Adaptation]) -> Result<Vec<(Repository, BTreeMap<String, String>)>, String> {
     let sides = library_sides(list);
     if sides.is_empty() {
         return Ok(Vec::new());
     }
-    let crates = crate::meta::read(&root.join("rust"), crate::meta::Graph::Resolved)?;
-    sides.into_iter().map(|side| Ok((side, the_one_commit(library_commits(&crates, side)?, side)?))).collect()
+    let folders = library_folders(crates);
+    let mut revisions = Vec::new();
+    for side in sides {
+        let commits = library_commits(crates, side)?;
+        let mut read_at: BTreeMap<String, String> = BTreeMap::new();
+        for file in side_files(list, side) {
+            let Some(package) = package_holding(&folders, &file) else {
+                return Err(format!(
+                    "{} lists a place at {file}, which no Craft library package holds: it cannot say which revision it is read at",
+                    side.app().spelt().unwrap_or("an app")
+                ));
+            };
+            let named: Vec<String> = commits.get(package).map(|commits| commits.iter().cloned().collect()).unwrap_or_default();
+            match named.as_slice() {
+                [commit] => {
+                    read_at.insert(package.to_string(), commit.clone());
+                }
+                [] => {
+                    return Err(format!(
+                        "{} builds no {package}, so a place of its libraries at {file} has no revision it is read at",
+                        side.app().spelt().unwrap_or("an app")
+                    ));
+                }
+                many => {
+                    return Err(format!(
+                        "{}'s crates build {package} at {} revisions ({}), so a place in the libraries cannot say which it is read at",
+                        side.app().spelt().unwrap_or("an app"),
+                        many.len(),
+                        many.join(", ")
+                    ));
+                }
+            }
+        }
+        revisions.push((side, read_at));
+    }
+    Ok(revisions)
 }
+
+/// The gate's stages an update runs (plan §24, step 5): `conformance`, the new revision's CLI against the
+/// plug-in; `rust_mobile`, the phones' type-checks; and `rules`, which holds the duplicate-crate check and
+/// the pin's own rules over the new lock, with `duplicates`, which a local change always runs beside
+/// `rules` (AGENTS §12). Never the whole gate: an update is a local change, and the whole gate is hosted
+/// CI's.
+const GATE_STAGES: [&str; 4] = ["rules", "duplicates", "conformance", "rust_mobile"];
 
 /// The steps as a real run does them, in the repository at `root`.
 struct Live {
     root: PathBuf,
     /// The surface the tree held before the pin moved, kept for step 4.
     kept: RefCell<Option<PathBuf>>,
-    /// The commit each Craft-library side of the list was built at before the pin moved, kept for step 3.
-    libraries: RefCell<Vec<(Repository, String)>>,
+    /// The revision each listed package of each Craft-library side was read at before the pin moved,
+    /// kept for step 3.
+    libraries: RefCell<Vec<(Repository, BTreeMap<String, String>)>>,
 }
 
 impl Live {
@@ -361,7 +469,10 @@ impl Steps for Live {
         let cache = crate::upstream::Cache::create()?;
         let list = crate::adaptations::read(&self.root)?;
         *self.libraries.borrow_mut() = library_revisions(&self.root, &list)?;
-        let revisions = CacheRevisions { changed: vec![(Repository::Effectcraft, cache, old.effectcraft.clone(), old.effectcraft.clone())] };
+        let revisions = CacheRevisions {
+            changed: vec![(Repository::Effectcraft, None, cache, old.effectcraft.clone(), old.effectcraft.clone())],
+            folders: BTreeMap::new(),
+        };
         let absent = crate::adaptations::missing(&list, &revisions)?;
         if let Some((id, file)) = absent.first() {
             return Err(format!(
@@ -384,23 +495,29 @@ impl Steps for Live {
     }
 
     fn adaptations(&self, old: &Revs, new: &Revs) -> Result<Comparison, String> {
-        let mut changed = vec![(Repository::Effectcraft, crate::upstream::Cache::create()?, old.effectcraft.clone(), new.effectcraft.clone())];
+        let mut changed = vec![(Repository::Effectcraft, None, crate::upstream::Cache::create()?, old.effectcraft.clone(), new.effectcraft.clone())];
         if !old.same_filmcraft(new) {
             let film = crate::upstream::Cache::create_film()?;
             let (old_film, new_film) = (film.official_commit_fetching(&old.filmcraft)?, film.official_commit_fetching(&new.filmcraft)?);
-            changed.push((Repository::Filmcraft, film, old_film, new_film));
+            changed.push((Repository::Filmcraft, None, film, old_film, new_film));
         }
         let list = crate::adaptations::read(&self.root)?;
         let now = library_revisions(&self.root, &list)?;
+        let folders =
+            if now.is_empty() { BTreeMap::new() } else { library_folders(&crate::meta::read(&self.root.join("rust"), crate::meta::Graph::Resolved)?) };
         for (side, before) in self.libraries.borrow().iter() {
             let Some((_, after)) = now.iter().find(|(known, _)| known == side) else { continue };
-            if !same_revision(before, after) {
+            for (package, old_revision) in before {
+                let Some(new_revision) = after.get(package) else { continue };
+                if same_revision(old_revision, new_revision) {
+                    continue;
+                }
                 let libraries = crate::upstream::Cache::create_libraries()?;
-                let (old_libraries, new_libraries) = (libraries.official_commit_fetching(before)?, libraries.official_commit_fetching(after)?);
-                changed.push((*side, libraries, old_libraries, new_libraries));
+                let (old_libraries, new_libraries) = (libraries.official_commit_fetching(old_revision)?, libraries.official_commit_fetching(new_revision)?);
+                changed.push((*side, Some(package.clone()), libraries, old_libraries, new_libraries));
             }
         }
-        let revisions = CacheRevisions { changed };
+        let revisions = CacheRevisions { changed, folders };
         if let Some((id, file)) = crate::adaptations::missing(&list, &revisions)?.first() {
             return Err(format!("{}: {id} lists {file}, which the revision the tree held does not have", crate::adaptations::LIST));
         }
@@ -417,6 +534,7 @@ impl Steps for Live {
 
     fn gate(&self) -> Result<bool, String> {
         std::process::Command::new(self.root.join("tools/ci.sh"))
+            .args(GATE_STAGES)
             .current_dir(&self.root)
             .status()
             .map(|status| status.success())
@@ -477,6 +595,30 @@ mod tests {
 
     fn revs(effectcraft: &str) -> Revs {
         Revs { effectcraft: format!("{effectcraft:0<40}"), filmcraft: "d5ead4ba".to_string() }
+    }
+
+    /// The stages `tools/ci.sh --list` names for `stages`: the gate's own answer to which stages a
+    /// selection runs, which refuses a stage it does not know.
+    fn listed(stages: &[&str]) -> Vec<String> {
+        let output =
+            std::process::Command::new("bash").arg(crate::repo_root().join("tools/ci.sh")).arg("--list").args(stages).env_remove("RUNNER_OS").output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let mut stages: Vec<String> = String::from_utf8_lossy(&output.stdout).split_whitespace().map(str::to_string).collect();
+        stages.sort();
+        stages
+    }
+
+    /// The update's gate is the gate's own stages its step names, each one the gate knows, and fewer
+    /// than the whole gate, which no local run makes.
+    #[test]
+    fn the_updates_gate_runs_the_stages_its_step_names_and_never_the_whole_gate() {
+        let mut named: Vec<String> = GATE_STAGES.iter().map(|stage| stage.to_string()).collect();
+        named.sort();
+        assert_eq!(listed(&GATE_STAGES), named, "every stage the update names is one the gate runs");
+        assert!(listed(&GATE_STAGES).len() < listed(&[]).len(), "the update runs part of the gate, never the whole of it");
+        for stage in ["rules", "conformance", "rust_mobile"] {
+            assert!(GATE_STAGES.contains(&stage), "plan §24's step names {stage}");
+        }
     }
 
     /// Steps that record what they were asked and answer from fixtures.
@@ -803,7 +945,7 @@ depends = [{ item = "queue", at = [{ file = "crates/engine/src/render_queue.rs" 
         ];
         let (cache, old, new) = cache_with_two_revisions(&first, second);
         let cache = crate::upstream::Cache::at(cache.0.clone()).unwrap();
-        let revisions = CacheRevisions { changed: vec![(Repository::Effectcraft, cache, old, new)] };
+        let revisions = CacheRevisions { changed: vec![(Repository::Effectcraft, None, cache, old, new)], folders: BTreeMap::new() };
         let list = crate::adaptations::parse(list_text).unwrap();
         assert!(crate::adaptations::missing(&list, &revisions).unwrap().is_empty());
         crate::adaptations::compare(&list, &revisions).unwrap()
@@ -821,25 +963,122 @@ depends = [{ item = "queue", at = [{ file = "crates/engine/src/render_queue.rs" 
         compared_with(&[("crates/engine/src/lib.rs", session), ("crates/automation/src/backend.rs", &backend), ("crates/engine/src/render_queue.rs", &backend)])
     }
 
-    /// A place in the Craft libraries is read at the revision its entry's app builds them at, which the
-    /// resolved graph says: in the workspace, FilmCraft's crates build them at a revision of their own.
+    /// A resolved graph to put fixture crates into: one app crate of EffectCraft depending on two copies
+    /// of one library package, which the app builds at two revisions at once.
+    fn split_graph() -> Vec<crate::meta::Crate> {
+        let krate = |name: &str, id: &str, source: Option<&str>, manifest_path: &str, depends_on: &[&str]| crate::meta::Crate {
+            name: name.to_string(),
+            id: id.to_string(),
+            source: source.map(str::to_string),
+            edition: "2024".to_string(),
+            target_editions: Vec::new(),
+            manifest_path: manifest_path.to_string(),
+            dependencies: Vec::new(),
+            library_targets: Vec::new(),
+            build_script: None,
+            depends_on: depends_on.iter().map(|id| id.to_string()).collect(),
+            member: false,
+            default_member: false,
+            binary_targets: Vec::new(),
+        };
+        vec![
+            krate(
+                "effectcraft-media",
+                "ec#1",
+                Some("git+https://github.com/storytold/effectcraft?rev=ee#ee"),
+                "/c/checkouts/effectcraft-hash/ee/crates/media/Cargo.toml",
+                &["audio-one", "audio-two", "video-one"],
+            ),
+            krate(
+                "craft-audio",
+                "audio-one",
+                Some("git+https://github.com/storytold/craft-libs?rev=aaaa#aaaa"),
+                "/c/checkouts/craft-libs-hash/aaaa/crates/audio/Cargo.toml",
+                &[],
+            ),
+            krate(
+                "craft-audio",
+                "audio-two",
+                Some("git+https://github.com/storytold/craft-libs?rev=bbbb#bbbb"),
+                "/c/checkouts/craft-libs-hash/bbbb/crates/audio/Cargo.toml",
+                &[],
+            ),
+            krate(
+                "craft-video",
+                "video-one",
+                Some("git+https://github.com/storytold/craft-libs?rev=cccc#cccc"),
+                "/c/checkouts/craft-libs-hash/cccc/crates/video/Cargo.toml",
+                &[],
+            ),
+        ]
+    }
+
+    /// A list reading one place of EffectCraft's build of the libraries at the named file.
+    fn effectcraft_place(file: &str) -> Vec<Adaptation> {
+        crate::adaptations::parse(&format!(
+            "[[adaptation]]\nid = \"AD1\"\ncrate = \"c\"\nrepository = \"storytold/effectcraft\"\ndepends = [\n  {{ item = \"a\", at = [{{ repository = \"storytold/craft-libs\", file = \"{file}\" }}] }},\n]\n"
+        ))
+        .unwrap()
+    }
+
+    /// A place in the Craft libraries is read at the revision the entry's app builds the package holding
+    /// it at, which the resolved graph says: in the workspace, each app builds craft-media at a revision
+    /// of its own, and each list names which app's build its places sit in.
     #[test]
-    fn the_libraries_are_read_at_the_revision_each_app_builds_them_at() {
+    fn the_libraries_are_read_at_the_revision_each_app_builds_the_package_holding_the_place_at() {
         let crates = crate::meta::read(&crate::repo_root().join("rust"), crate::meta::Graph::Resolved).unwrap();
+        let list = crate::adaptations::read(&crate::repo_root()).unwrap();
         let lock = std::fs::read_to_string(crate::repo_root().join("rust/Cargo.lock")).unwrap();
-        for side in [Repository::EffectcraftLibraries, Repository::FilmcraftLibraries] {
-            let commits = library_commits(&crates, side).unwrap();
-            assert_eq!(commits.len(), 1, "{side:?}: {commits:?}");
-            let commit = commits.iter().next().unwrap();
-            assert!(lock.contains(&format!("craft-libs?rev={commit}#{commit}")), "{side:?} reads a revision the lock holds: {commit}");
+        let revisions = listed_revisions(&crates, &list).unwrap();
+        for (side, read_at) in &revisions {
+            assert!(!read_at.is_empty(), "{side:?} reads at least one library package");
+            for (package, commit) in read_at {
+                assert!(lock.contains(&format!("craft-libs?rev={commit}#{commit}")), "{side:?} reads {package} at a revision the lock does not hold: {commit}");
+            }
         }
-        let film = library_commits(&crates, Repository::FilmcraftLibraries).unwrap();
-        assert_ne!(film, library_commits(&crates, Repository::EffectcraftLibraries).unwrap(), "each app builds them at its own revision");
-        assert_eq!(the_one_commit(film.clone(), Repository::FilmcraftLibraries), Ok(film.into_iter().next().unwrap()));
-        let two: BTreeSet<String> = ["aaaa".to_string(), "bbbb".to_string()].into();
-        let refused = the_one_commit(two, Repository::FilmcraftLibraries).unwrap_err();
-        assert!(refused.contains("aaaa") && refused.contains("bbbb") && refused.contains("filmcraft"), "{refused}");
-        assert!(the_one_commit(BTreeSet::new(), Repository::EffectcraftLibraries).is_err(), "an app that builds no library has no revision to read one at");
+        let at = |side: Repository, package: &str| revisions.iter().find(|(known, _)| *known == side).and_then(|(_, read_at)| read_at.get(package).cloned());
+        let (film, effects) = (Repository::FilmcraftLibraries, Repository::EffectcraftLibraries);
+        assert!(at(film, "craft-media").is_some() && at(effects, "craft-media").is_some(), "both apps' lists read a place in craft-media");
+        assert_ne!(at(film, "craft-media"), at(effects, "craft-media"), "each app builds craft-media at its own revision");
+    }
+
+    /// A package the app builds at two revisions leaves a place in it unable to say which it is read at,
+    /// and is refused by name and revision: a split of one package says nothing about the packages its
+    /// other places sit in, which are read at their own one revision each.
+    #[test]
+    fn a_package_built_at_two_revisions_refuses_a_place_in_it_and_says_nothing_about_the_others() {
+        let crates = split_graph();
+        let refused = listed_revisions(&crates, &effectcraft_place("crates/audio/src/lib.rs")).unwrap_err();
+        assert!(refused.contains("craft-audio") && refused.contains("aaaa") && refused.contains("bbbb") && refused.contains("effectcraft"), "{refused}");
+        assert_eq!(
+            listed_revisions(&crates, &effectcraft_place("crates/video/src/lib.rs"))
+                .unwrap()
+                .into_iter()
+                .flat_map(|(_, read_at)| read_at.into_values())
+                .collect::<Vec<_>>(),
+            ["cccc".to_string()],
+            "a split in one package leaves a place in another readable at its one revision"
+        );
+    }
+
+    /// A place no library package holds has no revision it could be read at, and is refused too.
+    #[test]
+    fn a_place_no_library_package_holds_is_refused() {
+        let refused = listed_revisions(&split_graph(), &effectcraft_place("crates/nonesuch/src/lib.rs")).unwrap_err();
+        assert!(refused.contains("crates/nonesuch/src/lib.rs") && refused.contains("no Craft library package holds"), "{refused}");
+    }
+
+    /// A place of the libraries is compared between the revisions of the package whose folder holds it,
+    /// which the longest matching folder says.
+    #[test]
+    fn a_place_of_the_libraries_routes_to_the_package_whose_folder_holds_it() {
+        let revisions = CacheRevisions {
+            changed: Vec::new(),
+            folders: [("craft-audio".to_string(), "crates/audio".to_string()), ("craft-media".to_string(), "crates/media".to_string())].into_iter().collect(),
+        };
+        assert_eq!(revisions.package_of("crates/media/src/isobmff/codec.rs").as_deref(), Some("craft-media"));
+        assert_eq!(revisions.package_of("crates/audio/src/lib.rs").as_deref(), Some("craft-audio"));
+        assert_eq!(revisions.package_of("crates/mediafoo/x.rs"), None, "a folder prefix that is not a path prefix names no package");
     }
 
     #[test]
@@ -849,7 +1088,7 @@ depends = [{ item = "queue", at = [{ file = "crates/engine/src/render_queue.rs" 
         )
         .unwrap();
         assert_eq!(library_sides(&list), [Repository::FilmcraftLibraries]);
-        let nothing = CacheRevisions { changed: Vec::new() };
+        let nothing = CacheRevisions { changed: Vec::new(), folders: BTreeMap::new() };
         assert_eq!(nothing.holds(Repository::FilmcraftLibraries, "crates/media/src/a.rs"), Ok(true));
         assert_eq!(nothing.diff(Repository::FilmcraftLibraries, "crates/media/src/a.rs"), Ok(String::new()));
     }
@@ -972,7 +1211,10 @@ depends = [{ item = "queue", at = [{ file = "crates/engine/src/render_queue.rs" 
             let changed = numbered(length as usize, Some(line as usize));
             let after: Vec<(&str, &str)> = files.iter().map(|name| (*name, if *name == file { changed.as_str() } else { unchanged.as_str() })).collect();
             let new = crate::git::commit_files(&cache.0, Some(&old), "new", &after);
-            let revisions = CacheRevisions { changed: vec![(Repository::Effectcraft, crate::upstream::Cache::at(cache.0.clone()).unwrap(), old.clone(), new)] };
+            let revisions = CacheRevisions {
+                changed: vec![(Repository::Effectcraft, None, crate::upstream::Cache::at(cache.0.clone()).unwrap(), old.clone(), new)],
+                folders: BTreeMap::new(),
+            };
             let found = crate::adaptations::compare(&list, &revisions).unwrap();
             let holds = |place: &crate::adaptations::Location| {
                 place.file == file

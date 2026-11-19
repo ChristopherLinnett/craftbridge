@@ -79,7 +79,7 @@ extension EffectsEngine.AnimCommands {
 
     /// Apply Animation Preset.
     ///
-    /// The engine describes its parameters as: {path | preset, layers?}
+    /// The engine describes its parameters as: {path | preset, layers?} — saved effects and text animators are added to each layer, with their keys at the CTI
     ///
     /// - Parameters:
     ///   - path: The key `path`: path | preset
@@ -213,7 +213,7 @@ extension EffectsEngine.AnimCommands {
 
     /// Save Animation Preset.
     ///
-    /// The engine describes its parameters as: {path (.ecpreset), name?} — saves the selected properties/effects
+    /// The engine describes its parameters as: {path (.ecpreset), name?} — saves the selected properties/effects; a text animator with a selected property is saved whole
     ///
     /// - Parameters:
     ///   - path: The key `path`: path (.ecpreset)

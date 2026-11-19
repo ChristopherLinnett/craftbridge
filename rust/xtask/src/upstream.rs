@@ -67,7 +67,7 @@ fn app_url(app: &layers::CraftApp) -> String {
 }
 
 /// The shared Craft libraries' official repository URL.
-fn library_url() -> String {
+pub(crate) fn library_url() -> String {
     format!("https://{}", layers::CRAFT_LIBRARY_REPOSITORY)
 }
 
@@ -190,6 +190,37 @@ pub(crate) fn upstream_filmcraft_rev(manifest_text: &str) -> Result<String, Stri
         0 => Err("the pinned EffectCraft names no FilmCraft revision".to_string()),
         many => Err(format!("the pinned EffectCraft names {many} FilmCraft revisions: one revision is the pin")),
     }
+}
+
+/// The revision the pinned EffectCraft's manifest pins each package from `url` at, by package name:
+/// how a Craft library package the workspace pins beside the apps is given its own revision when the
+/// pin moves, the same way one copy per package (plan §24) is kept.
+fn library_revs(upstream: &toml_edit::DocumentMut, url: &str) -> BTreeMap<String, String> {
+    let mut revs = BTreeMap::new();
+    let Some(dependencies) =
+        upstream.get("workspace").and_then(toml_edit::Item::as_table).and_then(|workspace| workspace.get("dependencies")).and_then(toml_edit::Item::as_table)
+    else {
+        return revs;
+    };
+    for (name, entry) in dependencies {
+        if entry.get("git").and_then(toml_edit::Item::as_str) == Some(url)
+            && let Some(rev) = entry.get("rev").and_then(toml_edit::Item::as_str)
+        {
+            revs.insert(name.to_string(), rev.to_string());
+        }
+    }
+    revs
+}
+
+/// Whether the pinned EffectCraft's manifest names `name` among its workspace dependencies at all,
+/// however it pins it: a name it never names is one the update writes no revision for.
+fn upstream_has_dep_named(upstream: &toml_edit::DocumentMut, name: &str) -> bool {
+    upstream
+        .get("workspace")
+        .and_then(toml_edit::Item::as_table)
+        .and_then(|workspace| workspace.get("dependencies"))
+        .and_then(toml_edit::Item::as_table)
+        .is_some_and(|dependencies| dependencies.contains_key(name))
 }
 
 /// The line naming who wrote a generated table. Identical between runs, so a second run of the
@@ -380,6 +411,30 @@ pub(crate) fn regenerate(ours: &str, upstream_manifest: &str, effectcraft_rev: &
     }
     for (at, name) in core_named_upstream().iter().enumerate() {
         set_pin(dependencies, name, &film_url, filmcraft_rev, at == 0);
+    }
+    // A Craft library package the workspace pins beside the two apps moves to the revision the pinned
+    // EffectCraft pins that package at, per package: one name at one revision (§7's one copy), and a
+    // leftover revision is what the rules check refuses. A pin upstream names nothing for is a finding;
+    // a pin upstream does not name at all is left as it is, since the update writes no revision for it.
+    let library = library_url();
+    let wanted = library_revs(&upstream, &library);
+    let unmovable: Vec<String> = dependencies
+        .iter()
+        .filter(|(_, item)| item.get("git").and_then(toml_edit::Item::as_str) == Some(library.as_str()))
+        .filter(|(name, _)| !wanted.contains_key(&**name) && upstream_has_dep_named(&upstream, name))
+        .map(|(name, _)| name.to_string())
+        .collect();
+    if !unmovable.is_empty() {
+        return Err(format!(
+            "rust/Cargo.toml: a Craft library pin the update cannot move: {}; the pinned EffectCraft names {} in its own dependencies with no Craft library revision to move it to",
+            unmovable.join(", "),
+            unmovable.first().map(String::as_str).unwrap_or("one")
+        ));
+    }
+    for (name, rev) in wanted.iter() {
+        if dependencies.contains_key(name) {
+            set_pin(dependencies, name, &library, rev, false);
+        }
     }
     written.note(Part::Pins, &document);
     transplant(&mut document, &upstream, "patch");
@@ -1184,7 +1239,26 @@ fn pin_from(root: &Path, cache: &Cache, rev: &str, full: &str) -> Result<(String
 /// on the day. A pin or a patch that moved changes what resolves, so the lock starts again from upstream's.
 fn keeps_lock(ours: &str, written: &str, effectcraft_rev: &str, filmcraft_rev: &str) -> bool {
     let patch = |text: &str| toml::from_str::<toml::Value>(text).ok().and_then(|document| document.get("patch").cloned());
-    pins_from_manifest(ours).is_ok_and(|held| held.effectcraft_rev == effectcraft_rev && held.filmcraft_rev == filmcraft_rev) && patch(ours) == patch(written)
+    let library = library_url();
+    let library_pins = |text: &str| -> BTreeMap<String, String> {
+        toml::from_str::<toml::Value>(text)
+            .ok()
+            .map(|document| {
+                document
+                    .get("workspace")
+                    .and_then(|workspace| workspace.get("dependencies"))
+                    .and_then(toml::Value::as_table)
+                    .into_iter()
+                    .flat_map(|table| table.iter())
+                    .filter(|(_, entry)| entry.get("git").and_then(toml::Value::as_str) == Some(library.as_str()))
+                    .filter_map(|(name, entry)| entry.get("rev").and_then(toml::Value::as_str).map(|rev| (name.clone(), rev.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    pins_from_manifest(ours).is_ok_and(|held| held.effectcraft_rev == effectcraft_rev && held.filmcraft_rev == filmcraft_rev)
+        && patch(ours) == patch(written)
+        && library_pins(ours) == library_pins(written)
 }
 
 /// A bare scratch repository fetching from official EffectCraft, holding nothing yet: the cache a test
@@ -1654,6 +1728,63 @@ mod tests {
         assert_ne!(patched_by_hand, written);
         assert!(!keeps_lock(&patched_by_hand, &written, "10376058", "d5ead4ba"), "a [patch] entry the script puts back changes what resolves");
         assert!(!keeps_lock(&written, &written, "abcdef12", "d5ead4ba"), "a pin that moves changes what resolves");
+        let library = "https://github.com/storytold/craft-libs";
+        let with_library = |rev: &str| {
+            written.replace("[workspace.dependencies]\n", &format!("[workspace.dependencies]\ncraft-docpath = {{ git = \"{library}\", rev = \"{rev}\" }}\n"))
+        };
+        assert!(keeps_lock(&with_library("e7c3dda"), &with_library("e7c3dda"), "10376058", "d5ead4ba"), "a library pin that stays changes nothing");
+        assert!(!keeps_lock(&with_library("0ld"), &with_library("e7c3dda"), "10376058", "d5ead4ba"), "a library pin that moves changes what resolves");
+    }
+
+    /// The workspace's own pins of the Craft libraries move with the pin, each package to the revision the
+    /// pinned EffectCraft pins that very package at, keeping how the workspace takes it (its features);
+    /// a package upstream does not name keeps the pin it had, which the rules then judge against upstream's
+    /// lock; and the `[patch]` table, which is upstream's own, keeps upstream's revisions of its entries
+    /// even where they are another revision of the same repository.
+    #[test]
+    fn the_workspaces_craft_library_pins_move_to_the_revisions_upstream_pins_each_package_at() {
+        let library = "https://github.com/storytold/craft-libs";
+        let ours = format!(
+            "{}craft-docpath = {{ git = \"{library}\", rev = \"0ld\", default-features = false, features = [\"bitstream\"] }}\ncraft-elsewhere = {{ git = \"{library}\", rev = \"0ld\" }}\n",
+            workspace_manifest("10376058", "d5ead4ba")
+        );
+        let upstream = upstream_manifest("d5ead4ba", "e7c3dda")
+            .replace("[patch.crates-io]\n", &format!("[patch.crates-io]\nhayro-syntax = {{ git = \"{library}\", rev = \"808730f\", version = \"=0.7.2\" }}\n"));
+        let written = regenerate(&ours, &upstream, "10376058", "d5ead4ba").expect("the fixture parses").text;
+        let document: toml::Value = toml::from_str(&written).unwrap();
+        let pin = |table: &str, name: &str, key: &str| {
+            document[table]["dependencies"]
+                .get(name)
+                .or(document[table].get("crates-io").and_then(|patch| patch.get(name)))
+                .and_then(|entry| entry.get(key))
+                .cloned()
+        };
+        assert_eq!(pin("workspace", "craft-docpath", "rev"), Some(toml::Value::from("e7c3dda")), "{written}");
+        assert_eq!(pin("workspace", "craft-docpath", "features"), Some(toml::Value::Array(vec![toml::Value::from("bitstream")])), "{written}");
+        assert_eq!(pin("workspace", "craft-elsewhere", "rev"), Some(toml::Value::from("0ld")), "a package upstream does not name: {written}");
+        assert_eq!(document["patch"]["crates-io"]["hayro-syntax"]["rev"].as_str(), Some("808730f"), "upstream's own patch of the same repository: {written}");
+    }
+
+    /// A Craft library package upstream names among its own dependencies, but by no revision of the
+    /// libraries (a path, a registry version, another repository), gives the update nothing to move the
+    /// workspace's pin of it to, and stops it by name rather than leave a revision upstream never locked.
+    #[test]
+    fn a_craft_library_pin_upstream_names_by_no_revision_stops_the_update_by_name() {
+        let library = "https://github.com/storytold/craft-libs";
+        let ours = format!("{}craft-media = {{ git = \"{library}\", rev = \"0ld\" }}\n", workspace_manifest("10376058", "d5ead4ba"));
+        for named in [
+            "craft-media = { path = \"crates/media\" }",
+            "craft-media = \"0.1\"",
+            "craft-media = { git = \"https://github.com/someone/craft-libs\", rev = \"e7c3dda\" }",
+        ] {
+            let upstream = upstream_manifest("d5ead4ba", "e7c3dda").replace("[profile.dev.package.\"*\"]", &format!("{named}\n\n[profile.dev.package.\"*\"]"));
+            let refused = regenerate(&ours, &upstream, "10376058", "d5ead4ba").err().unwrap_or_default();
+            assert_eq!(
+                refused,
+                "rust/Cargo.toml: a Craft library pin the update cannot move: craft-media; the pinned EffectCraft names craft-media in its own dependencies with no Craft library revision to move it to",
+                "{named}"
+            );
+        }
     }
 
     #[test]

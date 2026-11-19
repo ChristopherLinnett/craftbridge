@@ -441,7 +441,7 @@ extension EffectsEngine.PropCommands {
 
     /// Set Property Value.
     ///
-    /// The engine describes its parameters as: {layer?, path|prop, value, time? (layer s by default), timeBase?: layer|comp, merge?, selected? (also the other selected layers), offset? (them by the same change), proportional? (with offset: Proportional Scrubbing, each layer by its share in selection order, the first none, the last all), dims? (with selected, a typed value: the components edited, e.g. [2] for Z; the other layers keep the rest of their own value), follow? (with dims: components that move on each other layer by the change its first typed component takes)}
+    /// The engine describes its parameters as: {layer?, path|prop, value, time? (layer s by default), timeBase?: layer|comp, merge?, selected? (also the other selected layers), offset? (them by the same change), proportional? (with offset: Proportional Scrubbing, each layer by its share in selection order, the first none, the last all), dims? (with selected, a typed value: the components edited, e.g. [2] for Z; the other layers keep the rest of their own value), follow? (with dims: components that move on each other layer by the change its first typed component takes), factor? (with selected, a typed `*` or `/`: the other layers take their own value times it, in the dims components of a vector), addend? (the same for a typed `+`: their own value plus it)}
     ///
     /// - Parameters:
     ///   - layer: The key `layer`: layer?
@@ -456,6 +456,8 @@ extension EffectsEngine.PropCommands {
     ///   - proportional: The key `proportional`: proportional? (with offset: Proportional Scrubbing, each layer by its share in selection order, the first none, the last all)
     ///   - dims: The key `dims`: dims? (with selected, a typed value: the components edited, e.g. [2] for Z; the other layers keep the rest of their own value)
     ///   - follow: The key `follow`: follow? (with dims: components that move on each other layer by the change its first typed component takes)
+    ///   - factor: The key `factor`: factor? (with selected, a typed `*` or `/`: the other layers take their own value times it, in the dims components of a vector)
+    ///   - addend: The key `addend`: addend? (the same for a typed `+`: their own value plus it)
     ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
     /// - Returns: The engine's reply.
     /// - Throws: Whatever the engine refuses the call with.
@@ -472,6 +474,8 @@ extension EffectsEngine.PropCommands {
         proportional: JSONValue? = nil,
         dims: JSONValue? = nil,
         follow: JSONValue? = nil,
+        factor: JSONValue? = nil,
+        addend: JSONValue? = nil,
         extra: [String: JSONValue] = [:]
     ) async throws -> JSONValue {
         try await self.engine.command(
@@ -489,6 +493,8 @@ extension EffectsEngine.PropCommands {
                 "proportional": proportional?.jsonValue,
                 "dims": dims?.jsonValue,
                 "follow": follow?.jsonValue,
+                "factor": factor?.jsonValue,
+                "addend": addend?.jsonValue,
             ],
             extra: extra
         )

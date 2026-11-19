@@ -56,7 +56,7 @@
         }
       ],
       "label": "Apply Animation Preset...",
-      "params": "{path | preset, layers?}",
+      "params": "{path | preset, layers?} — saved effects and text animators are added to each layer, with their keys at the CTI",
       "refusedUnderConfinement": false,
       "withheldByPlugin": false
     },
@@ -161,7 +161,7 @@
         }
       ],
       "label": "Save Animation Preset...",
-      "params": "{path (.ecpreset), name?} — saves the selected properties/effects",
+      "params": "{path (.ecpreset), name?} — saves the selected properties/effects; a text animator with a selected property is saved whole",
       "refusedUnderConfinement": false,
       "withheldByPlugin": false
     },
@@ -2161,7 +2161,7 @@
       "keys": [],
       "label": "Edit Original...",
       "params": "{}",
-      "refusedUnderConfinement": false,
+      "refusedUnderConfinement": true,
       "withheldByPlugin": false
     },
     {
@@ -5660,7 +5660,7 @@
       ],
       "label": "Watch Folder...",
       "params": "{folder, stop?: bool} → watches the folder for .ecproj files with queued renders, renders them and writes `<project>.status.json`",
-      "refusedUnderConfinement": false,
+      "refusedUnderConfinement": true,
       "withheldByPlugin": true
     },
     {
@@ -5676,7 +5676,7 @@
       ],
       "label": "Poll Watch Folder",
       "params": "{folder? (default: the watched one)} → renders new projects now: {watching, rendered: [{project, state: done|failed, items: [{comp, status, output}]}]}",
-      "refusedUnderConfinement": false,
+      "refusedUnderConfinement": true,
       "withheldByPlugin": true
     },
     {
@@ -11688,7 +11688,7 @@
         }
       ],
       "label": "Install Plug-in",
-      "params": "{id, version?, wait?} — downloads the release, checks its SHA-256 against the catalog, loads it",
+      "params": "{id, version?, wait?} — downloads the release (a GitHub release asset, in the package's repo when it names one), checks its SHA-256 against the catalog, loads it",
       "refusedUnderConfinement": true,
       "withheldByPlugin": false
     },
@@ -11771,7 +11771,7 @@
       "journal": true,
       "keys": [
         {
-          "doc": "catalog?: https:// or file:// URL of an index.json (default: the community catalog)",
+          "doc": "catalog?: https:// or file:// URL of an index.json (default: the community catalog; file:// takes a local path, not a network path such as //server/share)",
           "name": "catalog",
           "required": false,
           "type": "json"
@@ -11784,7 +11784,7 @@
         }
       ],
       "label": "Refresh Plug-in Catalog",
-      "params": "{catalog?: https:// or file:// URL of an index.json (default: the community catalog), wait?}",
+      "params": "{catalog?: https:// or file:// URL of an index.json (default: the community catalog; file:// takes a local path, not a network path such as //server/share), wait?}",
       "refusedUnderConfinement": true,
       "withheldByPlugin": false
     },
@@ -14076,6 +14076,15 @@
       "withheldByPlugin": false
     },
     {
+      "id": "path.toggleClosed",
+      "journal": true,
+      "keys": [],
+      "label": "Closed",
+      "params": "{}",
+      "refusedUnderConfinement": false,
+      "withheldByPlugin": false
+    },
+    {
       "id": "path.ungroupShapes",
       "journal": true,
       "keys": [
@@ -14610,10 +14619,16 @@
           "name": "parent",
           "required": false,
           "type": "json"
+        },
+        {
+          "doc": "items?: [id|name] (moved into it)",
+          "name": "items",
+          "required": false,
+          "type": "json"
         }
       ],
       "label": "New Folder",
-      "params": "{name?, parent?}",
+      "params": "{name?, parent?, items?: [id|name] (moved into it)}",
       "refusedUnderConfinement": false,
       "withheldByPlugin": false
     },
@@ -15263,10 +15278,22 @@
           "name": "follow",
           "required": false,
           "type": "json"
+        },
+        {
+          "doc": "factor? (with selected, a typed `*` or `/`: the other layers take their own value times it, in the dims components of a vector)",
+          "name": "factor",
+          "required": false,
+          "type": "json"
+        },
+        {
+          "doc": "addend? (the same for a typed `+`: their own value plus it)",
+          "name": "addend",
+          "required": false,
+          "type": "json"
         }
       ],
       "label": "Set Property Value",
-      "params": "{layer?, path|prop, value, time? (layer s by default), timeBase?: layer|comp, merge?, selected? (also the other selected layers), offset? (them by the same change), proportional? (with offset: Proportional Scrubbing, each layer by its share in selection order, the first none, the last all), dims? (with selected, a typed value: the components edited, e.g. [2] for Z; the other layers keep the rest of their own value), follow? (with dims: components that move on each other layer by the change its first typed component takes)}",
+      "params": "{layer?, path|prop, value, time? (layer s by default), timeBase?: layer|comp, merge?, selected? (also the other selected layers), offset? (them by the same change), proportional? (with offset: Proportional Scrubbing, each layer by its share in selection order, the first none, the last all), dims? (with selected, a typed value: the components edited, e.g. [2] for Z; the other layers keep the rest of their own value), follow? (with dims: components that move on each other layer by the change its first typed component takes), factor? (with selected, a typed `*` or `/`: the other layers take their own value times it, in the dims components of a vector), addend? (the same for a typed `+`: their own value plus it)}",
       "refusedUnderConfinement": false,
       "withheldByPlugin": false
     },
@@ -21961,7 +21988,7 @@
     }
   ],
   "engineVersion": "0.24.1",
-  "pin": "103760584a60074c9aaeef686d2d05d89f08155e",
+  "pin": "665bfac0b33904b1dcda6de889f43f43a94ad3f8",
   "tools": [
     {
       "bridgeOnly": false,
@@ -22551,10 +22578,15 @@
     },
     {
       "bridgeOnly": false,
-      "description": "Render a composition frame (default: the active comp at the current time) and return it as a PNG image, longest side `max_side` (default 960, 0 = full size). `path` also writes the PNG to disk; `inline: false` returns only the metadata. Use it to check your work.",
+      "description": "Render a composition frame (default: the active comp at the current time) and return it as a PNG image, longest side `max_side` (default 960, 0 = full size). With `times` (up to 64 comp times) it renders each and returns ONE contact-sheet PNG tiling them in that order: `columns` (default near-square), `max_side` per cell (default 320), `labels` (default true) draws each cell's time; the metadata gives comp, times, columns, rows, cellWidth, cellHeight, width and height. `path` also writes the PNG (or sheet) to disk; `inline: false` returns only the metadata. Use it to check your work, and `times` to check motion in one call.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "columns": {
+            "description": "Contact-sheet columns (with `times`; default near-square, at most the number of times).",
+            "minimum": 1,
+            "type": "integer"
+          },
           "comp": {
             "description": "Composition item id or name; omit for the active comp.",
             "type": [
@@ -22566,17 +22598,30 @@
             "description": "Include the image in the reply (default true).",
             "type": "boolean"
           },
+          "labels": {
+            "description": "Draw each contact-sheet cell's comp time on it (with `times`; default true).",
+            "type": "boolean"
+          },
           "max_side": {
-            "description": "Longest side in pixels (default 960; 0 = full comp size).",
+            "description": "Longest side in pixels (default 960; 0 = full comp size); with `times`, of each cell (default 320).",
             "type": "integer"
           },
           "path": {
-            "description": "Also write the PNG here.",
+            "description": "Also write the PNG (with `times`, the contact sheet) here.",
             "type": "string"
           },
           "time": {
             "description": "Comp time in seconds (default: current time).",
             "type": "number"
+          },
+          "times": {
+            "description": "Comp times in seconds: render each and return ONE contact-sheet PNG that tiles them row by row in this order. Not with `time`.",
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "type": "array"
           },
           "transparent": {
             "description": "Keep the frame's alpha (RGBA PNG, as an RGB + Alpha render writes it) instead of compositing over the comp's background colour.",
@@ -22591,10 +22636,15 @@
     },
     {
       "bridgeOnly": false,
-      "description": "Render a composition frame (default: the active comp at the current time) and return it as a PNG image, longest side `max_side` (default 960, 0 = full size). Use it to check your work.",
+      "description": "Render a composition frame (default: the active comp at the current time) and return it as a PNG image, longest side `max_side` (default 960, 0 = full size). With `times` (up to 64 comp times) it renders each and returns ONE contact-sheet PNG tiling them in that order: `columns` (default near-square), `max_side` per cell (default 320), `labels` (default true) draws each cell's time; the metadata gives comp, times, columns, rows, cellWidth, cellHeight, width and height. Use it to check your work, and `times` to check motion in one call.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "columns": {
+            "description": "Contact-sheet columns (with `times`; default near-square, at most the number of times).",
+            "minimum": 1,
+            "type": "integer"
+          },
           "comp": {
             "description": "Composition item id or name; omit for the active comp.",
             "type": [
@@ -22602,13 +22652,26 @@
               "string"
             ]
           },
+          "labels": {
+            "description": "Draw each contact-sheet cell's comp time on it (with `times`; default true).",
+            "type": "boolean"
+          },
           "max_side": {
-            "description": "Longest side in pixels (default 960; 0 = full comp size).",
+            "description": "Longest side in pixels (default 960; 0 = full comp size); with `times`, of each cell (default 320).",
             "type": "integer"
           },
           "time": {
             "description": "Comp time in seconds (default: current time).",
             "type": "number"
+          },
+          "times": {
+            "description": "Comp times in seconds: render each and return ONE contact-sheet PNG that tiles them row by row in this order. Not with `time`.",
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "type": "array"
           },
           "transparent": {
             "description": "Keep the frame's alpha (RGBA PNG, as an RGB + Alpha render writes it) instead of compositing over the comp's background colour.",

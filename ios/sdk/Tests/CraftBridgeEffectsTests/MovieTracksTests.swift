@@ -117,11 +117,12 @@ private func read(_ asset: AVURLAsset) async throws -> Reading {
         let (pictures, heard) = (
             try await #require(video.first).load(.timeRange), try await #require(audio.first).load(.timeRange)
         )
-        // A movie's sound is padded to whole AAC frames of 1024 samples, with 2112 of priming before it.
+        // The sound's own 4.000 s, past the encoder's priming, which the track's edit names and its roll
+        // sample group lets AVFoundation take from that edit instead of dropping twice.
         #expect(abs(pictures.duration.seconds - 4) < 0.05, "the pictures last \(pictures.duration.seconds) s")
-        #expect(abs(heard.duration.seconds - 4) < 0.1, "the sound lasts \(heard.duration.seconds) s")
-        #expect(abs(pictures.start.seconds - heard.start.seconds) < 0.1, "both tracks start together")
-        #expect(abs(pictures.end.seconds - heard.end.seconds) < 0.1, "both tracks end together")
+        #expect(abs(heard.duration.seconds - 4) < 0.01, "the sound lasts \(heard.duration.seconds) s")
+        #expect(abs(pictures.start.seconds - heard.start.seconds) < 0.01, "both tracks start together")
+        #expect(abs(pictures.end.seconds - heard.end.seconds) < 0.01, "both tracks end together")
 
         let seen = try await read(asset)
         #expect(seen.status == .completed, "both tracks were read to their end: \(seen.status.rawValue)")
@@ -134,20 +135,13 @@ private func read(_ asset: AVURLAsset) async throws -> Reading {
         print(
             "the movie: \(seen.pictures) pictures to \(seen.lastPicture.seconds) s, \(seen.sound) samples to \(seen.soundEnds.seconds) s, the tone from sample \(seen.soundOnset ?? -1), status \(seen.status.rawValue)"
         )
-        // Apple's readers take an AAC track's priming from its edit only when the track has the roll sample
-        // group of ISO/IEC 14496-12, -1 for AAC, which the MP4 writer of the pinned FilmCraft does not write:
-        // they drop the encoder's 2112 samples of priming on top of the edit, so the sound's first 44 ms are
-        // lost and the rest is read 44 ms ahead of the pictures, ending that much before them. What a movie
-        // must give stands here, and the known issue holds it until the writer adds the group; then these
-        // hold, and Swift Testing fails the test until the known issue goes.
-        withKnownIssue("the sound track has no roll sample group, so AVFoundation drops the AAC priming twice") {
-            let shift = (seen.soundOnset ?? 0) - onset
-            #expect(abs(shift) <= 4, "the tone starts \(shift) samples from where it starts beside the pictures")
-            // The edit runs to the end of the last AAC frame, so up to a frame of the encoder's padding follows.
-            #expect(
-                (4 * rate)...(4 * rate + 1_024) ~= seen.sound,
-                "the sound reads \(seen.sound) samples of \(4 * rate)")
-            #expect(seen.soundEnds.seconds >= 4, "the sound ends at \(seen.soundEnds.seconds) s, with the pictures")
-        }
+        // The read sound sits exactly where the pictures are: the priming taken from the edit as the roll
+        // group says, and the sound ending with them rather than running to the encoder's last whole frame.
+        let shift = (seen.soundOnset ?? 0) - onset
+        #expect(abs(shift) <= 4, "the tone starts \(shift) samples from where it starts beside the pictures")
+        #expect(seen.sound == 4 * rate, "the sound reads \(seen.sound) samples of \(4 * rate)")
+        #expect(
+            abs(seen.soundEnds.seconds - 4) < 0.01,
+            "the sound ends at \(seen.soundEnds.seconds) s, with the pictures")
     }
 }

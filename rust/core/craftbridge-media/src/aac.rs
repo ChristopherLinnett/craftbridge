@@ -81,7 +81,7 @@ impl AacSpec {
         if frames > 0 {
             units.truncate(usize::try_from(needed.div_ceil(u128::from(AAC_FRAME))).unwrap_or(usize::MAX));
         }
-        Ok(AudioTrack { config, channels: self.channels, sample_rate: self.sample_rate, priming, units })
+        Ok(AudioTrack { config, channels: self.channels, sample_rate: self.sample_rate, priming, units, frames })
     }
 }
 
