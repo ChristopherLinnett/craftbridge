@@ -827,6 +827,151 @@ mod tests {
             );
         }
     }
+
+    /// The build and test stages refuse, before anything is built or any simulator is taken, a scheme or a
+    /// test plan a developer's Xcode left where `xcodebuild` reads schemes: given `-scheme <name>` it runs
+    /// the file `<name>.xcscheme` on disk — its test environment and any test plan it names included —
+    /// instead of the scheme it generates from the tree, so under such a file the gate would answer for the
+    /// machine rather than the tree. Only a file git does not track is refused, an ignored one as much as any:
+    /// a scheme the tree commits is the tree's own, and passes. The refusal is status 2, and what follows
+    /// the call never runs, whether the call stands alone under `set -e` or stands on the left of a list,
+    /// where bash holds `set -e` off: the stages run it as `... || return 1`, and a case below runs it on
+    /// the left of an `&&`. It names every file from the root on a line of its own, with what it is and a
+    /// removal command that, pasted as printed, removes that file whatever its name holds; and it leaves
+    /// every file as it found it, since removing a developer's own file is the developer's choice.
+    /// Whatever else the folders of Xcode's state hold — the management files and folders Xcode writes
+    /// beside its schemes — passes, and so does a folder that is not there; a git that cannot answer,
+    /// outside a checkout, refuses, since the check could not tell a left file from the tree's. No
+    /// simulator is asked for: what is judged is the disk.
+    #[test]
+    fn the_stages_refuse_the_schemes_and_test_plans_xcode_left_on_disk() {
+        let env = crate::repo_root().join("tools/env.sh");
+        let scheme = "pkg/.swiftpm/xcode/xcshareddata/xcschemes/CraftBridge-Package.xcscheme";
+        let plan = "pkg/.swiftpm/xcode/xcshareddata/xcschemes/OneTest.xctestplan";
+        let user_scheme = "app/PostcardStudio.xcodeproj/project.xcworkspace/xcuserdata/dev.xcuserdatad/xcschemes/PostcardStudio.xcscheme";
+        let shared_scheme = "app/PostcardStudio.xcodeproj/xcshareddata/xcschemes/PostcardStudio.xcscheme";
+        let odd_plan = "app/PostcardStudio.xcodeproj/xcshareddata/xcschemes/it's a \"plan\".xctestplan";
+        let reason = "xcodebuild reads the schemes kept there in place of the ones it generates from the tree, and runs the test plans they name, so a run would answer for what this machine's Xcode left there, not for the tree";
+        // The tree a run judges: a checkout that ignores the package's state folder, as the repository does,
+        // and commits `tracked`; `left` is on disk beside it, never added. `checkout` false leaves git out.
+        let started = |bash: &std::path::Path, shape: &str, checkout: bool, tracked: &[&str], left: &[&str], folders: &[&str]| {
+            let script = match shape {
+                // The stages call the helper as `... || return 1`; this shape calls it on the left of an
+                // `&&`. Either stands on the left of a list, where bash holds its `set -e` off: a refusal
+                // must skip what runs after it, and the call's own status must stand.
+                "and" => "set -euo pipefail\nsource \"$1\"\nshift\ncraftbridge_refuse_leftover_schemes_and_test_plans \"$@\" && echo ran after\nexit $?",
+                _ => "set -euo pipefail\nsource \"$1\"\nshift\ncraftbridge_refuse_leftover_schemes_and_test_plans \"$@\"\necho ran after",
+            };
+            let scratch = crate::scratch::Scratch::new("leftover-schemes");
+            if checkout {
+                crate::git::output(&scratch.0, &["init", "-q"]).unwrap();
+                scratch.write(".gitignore", "/pkg/.swiftpm/\n");
+            }
+            for path in tracked.iter().chain(left) {
+                scratch.write(path, "planted by the test, untouched by the refusal\n");
+            }
+            if !tracked.is_empty() {
+                let mut add = vec!["add", "--"];
+                add.extend(tracked);
+                crate::git::output(&scratch.0, &add).unwrap();
+            }
+            let mut command = std::process::Command::new(bash);
+            command.arg("-c").arg(script).arg("bash").arg(&env).args(folders).current_dir(&scratch.0);
+            // As the gate runs it: tools/ci.sh starts with git's repository variables removed, so a run from
+            // a hook asks the checkout it is in, not the repository the hook was started for.
+            for variable in crate::git::local_env_vars() {
+                command.env_remove(variable);
+            }
+            let output = command.output().unwrap();
+            let kept: Vec<bool> = tracked.iter().chain(left).map(|path| scratch.0.join(path).exists()).collect();
+            (
+                output.status.code(),
+                String::from_utf8_lossy(&output.stdout).trim_end().to_string(),
+                String::from_utf8_lossy(&output.stderr).trim_end().to_string(),
+                kept,
+                scratch,
+            )
+        };
+        for bash in the_bashes_the_gate_runs_under() {
+            let run = |shape: &str, tracked: &[&str], left: &[&str], folders: &[&str]| {
+                let (code, out, err, kept, _) = started(&bash, shape, true, tracked, left, folders);
+                (code, out, err, kept)
+            };
+            let (code, out, err, kept) = run("direct", &[], &[scheme], &["pkg/.swiftpm"]);
+            assert_eq!((code, out.as_str()), (Some(2), ""), "a scheme left in the package's ignored state folder is refused, and nothing runs after it");
+            assert_eq!(
+                err,
+                format!(
+                    "bash: craftbridge_refuse_leftover_schemes_and_test_plans refuses the scheme {scheme}, which git does not track: {reason}\nbash:   remove it and run again: rm -f -- {scheme}"
+                ),
+                "the refusal names the file from the root, what it is, and the command that removes it"
+            );
+            assert_eq!(kept, vec![true], "the developer's own file is left exactly as it was found");
+            let (code, _out, err, kept) = run("direct", &[], &[plan], &["pkg/.swiftpm"]);
+            assert_eq!(code, Some(2), "a test plan left beside the schemes is refused too: {err}");
+            assert!(
+                err.starts_with(&format!("bash: craftbridge_refuse_leftover_schemes_and_test_plans refuses the test plan {plan}, which git does not track:")),
+                "the refusal says which it is: {err}"
+            );
+            assert_eq!(kept, vec![true], "the developer's own file is left exactly as it was found");
+            let (code, out, err, kept) = run("direct", &[], &[scheme, plan, user_scheme], &["pkg/.swiftpm", "app/PostcardStudio.xcodeproj"]);
+            assert_eq!((code, out.as_str()), (Some(2), ""), "the stages name the sample projects beside the package, and one refusal lists them all");
+            for named in [scheme, plan, user_scheme] {
+                assert!(
+                    err.contains(&format!(
+                        "refuses the {} {named}, which git does not track:",
+                        if named.ends_with(".xcscheme") { "scheme" } else { "test plan" }
+                    )),
+                    "{named} is not named: {err}"
+                );
+            }
+            assert_eq!(err.lines().count(), 6, "each file is named on its own line beside its removal line: {err}");
+            assert_eq!(kept, vec![true, true, true], "no file of any folder is touched");
+            let (code, out, _err, _) = run("and", &[], &[scheme], &["pkg/.swiftpm"]);
+            assert_eq!(
+                (code, out.as_str()),
+                (Some(2), ""),
+                "a call on the left of an `&&`, where bash holds `set -e` off as it does in the stages' `... || return 1`, stops on the refusal with its own status and nothing after it running"
+            );
+            let (code, out, err, kept) = run("direct", &[shared_scheme], &[], &["pkg/.swiftpm", "app/PostcardStudio.xcodeproj"]);
+            assert_eq!(
+                (code, out.as_str(), err.as_str(), kept),
+                (Some(0), "ran after", "", vec![true]),
+                "a shared scheme the tree commits is the tree's own, and passes"
+            );
+            let (code, _out, err, kept) = run("direct", &[shared_scheme], &[user_scheme], &["app/PostcardStudio.xcodeproj"]);
+            assert_eq!(code, Some(2), "a user's scheme left beside a committed one is still refused: {err}");
+            assert!(err.contains(user_scheme) && !err.contains(shared_scheme), "only the file git does not track is named: {err}");
+            assert_eq!(kept, vec![true, true], "neither file is touched");
+            let (code, _out, err, kept, scratch) = started(&bash, "direct", true, &[], &[odd_plan], &["app/PostcardStudio.xcodeproj"]);
+            assert_eq!((code, kept), (Some(2), vec![true]), "a name holding a space and quotes is refused like any other: {err}");
+            let removal = err.lines().last().and_then(|line| line.strip_prefix("bash:   remove it and run again: ")).unwrap_or_default().to_string();
+            let pasted = std::process::Command::new(&bash).arg("-c").arg(&removal).current_dir(&scratch.0).output().unwrap();
+            assert!(
+                pasted.status.success() && !scratch.0.join(odd_plan).exists() && scratch.0.join("app/PostcardStudio.xcodeproj/xcshareddata/xcschemes").is_dir(),
+                "the removal line, pasted as printed, removes exactly that file: {removal}"
+            );
+            let (code, out, err, _) =
+                run("direct", &[], &["pkg/.swiftpm/xcode/xcschememanagement.plist", "pkg/.swiftpm/configuration/stub"], &["pkg/.swiftpm"]);
+            assert_eq!(
+                (code, out.as_str(), err.as_str()),
+                (Some(0), "ran after", ""),
+                "the rest of what Xcode leaves beside its schemes is nobody's business: only a scheme or a test plan refuses"
+            );
+            let (code, out, err, _) = run("direct", &[], &[], &["pkg/.swiftpm"]);
+            assert_eq!((code, out.as_str(), err.as_str()), (Some(0), "ran after", ""), "the tree with none of them left passes, state folder or not");
+            let (code, out, err, _, _) = started(&bash, "direct", false, &[], &[], &["pkg/.swiftpm"]);
+            assert_eq!(
+                (code, out.as_str(), err.lines().last().unwrap_or("")),
+                (
+                    Some(2),
+                    "",
+                    "bash: craftbridge_refuse_leftover_schemes_and_test_plans cannot ask git which files it tracks under pkg/.swiftpm, so it cannot tell a scheme Xcode left there from one the tree commits"
+                ),
+                "outside a checkout git cannot answer, and the check refuses rather than pass what it could not read"
+            );
+        }
+    }
 }
 
 /// The one reading of the root, proved: the folder found from the run, its checks, and the refusal of

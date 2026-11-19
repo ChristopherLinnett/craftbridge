@@ -291,15 +291,21 @@ stage_swift_build() {
   # writes no graph, so its last graph, written from the sources it still has, is the one read, and a
   # clean build folder loses both together.
   local builds configuration destination architectures status=0 build=0 folder graphs=() library libraries=() project projects=()
-  xcframework || return 1
   # The sample apps, each an Xcode project of its own that takes the package by local path, as an app
   # does, listed by `cargo xtask swift-samples` (rust/xtask/src/samples.rs), the one list of them, whose
-  # pins the licence check reads. Each bundles the running example's template from the `Template` folder
-  # beside its project, which git ignores and the sample's build refuses to start without: it is made here
-  # from its recipe by the EffectCraft command line at the pin (tools/birthday-card.sh), so no sample holds
-  # a template made another way.
+  # pins the licence check reads.
   items_of "sample projects to build" swift-samples || return 1
   projects=("${items[@]}")
+  # First, before anything is built: every xcodebuild below asks through a `-scheme <name>`, so a scheme or
+  # test plan git does not track — one Xcode left in the package's ignored state folder, or a user's or
+  # shared scheme edited into a sample's project bundle — would be what they build, rather than what the
+  # tree gives (tools/env.sh).
+  craftbridge_refuse_leftover_schemes_and_test_plans ios/sdk/.swiftpm "${projects[@]}" || return 1
+  xcframework || return 1
+  # Each sample bundles the running example's template from the `Template` folder beside its project,
+  # which git ignores and the sample's build refuses to start without: it is made here from its recipe by
+  # the EffectCraft command line at the pin (tools/birthday-card.sh), so no sample holds a template made
+  # another way.
   for project in "${projects[@]}"; do
     tools/birthday-card.sh "$(dirname "$project")/Template" >&2 || return 1
   done
@@ -383,11 +389,16 @@ stage_swift_build() {
 # test runner takes a sandbox of its own, so a run of the suite started by hand on the same simulator
 # never meets this one's files. The run starts with no `TEST_RUNNER_` or `SIMCTL_CHILD_` variable of the
 # environment the stage was called in and only those the stage names for it, so what a developer's shell
-# happens to export cannot decide which tests the suite runs. The suite runs in the one configuration
-# that command names, the one a developer and `swift test` run it in. The Simulator is macOS's own, so
-# the hosted macOS job runs this stage on the runner's simulator.
+# happens to export cannot decide which tests the suite runs; the stage refuses to start at all while the
+# package's ignored state folder holds a scheme or test plan an Xcode session left there (tools/env.sh).
+# The suite runs in the one configuration that command names, the one a developer and `swift test` run it
+# in. The Simulator is macOS's own, so the hosted macOS job runs this stage on the runner's simulator.
 stage_swift_test() {
   local suites configuration destination architectures status=0
+  # First, before anything is built and before any simulator is taken: the runs below are asked through
+  # `-scheme CraftBridge-Package`, so a scheme or test plan Xcode left in the package's ignored state
+  # folder would be what they run, rather than what the manifest gives (tools/env.sh).
+  craftbridge_refuse_leftover_schemes_and_test_plans ios/sdk/.swiftpm || return 1
   xcframework || return 1
   suites="$(mktemp)"
   if ! xtask swift-suite >"$suites"; then

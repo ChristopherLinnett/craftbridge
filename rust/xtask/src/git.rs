@@ -28,7 +28,7 @@ use std::sync::OnceLock;
 
 /// The repository variables git itself lists, asked once. Git answers from its own build, whatever the
 /// environment holds, so the answer is right for whichever git the gate runs.
-fn local_env_vars() -> &'static [String] {
+pub(crate) fn local_env_vars() -> &'static [String] {
     static VARIABLES: OnceLock<Vec<String>> = OnceLock::new();
     VARIABLES.get_or_init(|| {
         Command::new("git")
