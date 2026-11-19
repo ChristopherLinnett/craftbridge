@@ -35,5 +35,10 @@ objc2-core-audio-types = { workspace = true, features = ["std", "CoreAudioBaseTy
 [target.'cfg(target_os = "android")'.dependencies]
 ndk = { workspace = true, features = ["media", "api-level-29"] }
 
+# The media tests start their own test binary again, one test to a process, to see how that process ends; the
+# support crate is host code, which a core crate may take from its tests only (AGENTS.md section 2).
+[dev-dependencies]
+craftbridge-process.workspace = true
+
 [lints]
 workspace = true

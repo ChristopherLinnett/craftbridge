@@ -1101,6 +1101,89 @@ pub(crate) mod tests {
         assert_eq!(fill(&mut input, &[0, 0, 0, 1]), Err("the codec gave no input buffer memory".to_string()));
     }
 
+    /// How many processes [`a_process_that_ends_right_after_closing_a_decoder_is_not_aborted_by_the_platforms_threads`]
+    /// starts: the abort the platform's buffer pool thread causes met about one process in twelve on the API 29
+    /// emulator right after a decoder was closed, so a hundred all escape it there by chance about once in
+    /// several thousand runs of a test binary that does not guard against it. The acceptance phone meets it far more
+    /// rarely, in whole runs of the suite rather than in one decoder's close.
+    const PROCESSES: usize = 100;
+
+    /// The status the test harness ends its process with when a test failed.
+    const HARNESS_FAILURE: i32 = 101;
+
+    /// The child tests' own path, which a rerun names each of them by.
+    const HERE: &str = "platform::mediacodec::tests";
+
+    /// A decoder made, given a sample that stays inside its codec, and closed: an engine closed while its decoder
+    /// is working, which is what starts the platform's buffer pool thread and leaves it at work.
+    fn close_a_decoder_with_a_sample_in_its_codec() {
+        give_device_codecs();
+        let entry = tiny_entry();
+        let mut raw = raw_codec(&entry, &stream(&entry), any_codec).unwrap();
+        if let Some((pts, sample)) = tiny_samples().first() {
+            raw.feed(sample, *pts).unwrap();
+        }
+    }
+
+    /// The test each of those processes runs, on its own, so the process's end follows the decoder's close at
+    /// once.
+    #[test]
+    #[ignore = "run by a_process_that_ends_right_after_closing_a_decoder_is_not_aborted_by_the_platforms_threads, one process each"]
+    fn a_decoder_is_closed_with_a_sample_in_the_codec_and_the_process_ends() {
+        close_a_decoder_with_a_sample_in_its_codec();
+    }
+
+    #[test]
+    fn a_process_that_ends_right_after_closing_a_decoder_is_not_aborted_by_the_platforms_threads() {
+        for process in 0..PROCESSES {
+            // The platform's abort comes after the process's own exit has set its status to 0, so only what the
+            // process said shows it.
+            craftbridge_process::rerun_refusing(
+                &format!("{HERE}::a_decoder_is_closed_with_a_sample_in_the_codec_and_the_process_ends"),
+                &[],
+                &format!("process {process} of {PROCESSES} did not end cleanly after closing a decoder"),
+                "FORTIFY",
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    #[ignore = "run by a_failed_test_ends_its_process_with_the_harnesss_failure_status_however_it_failed, which needs it to fail"]
+    fn a_test_that_panics_after_closing_a_decoder() {
+        close_a_decoder_with_a_sample_in_its_codec();
+        panic!("this test fails by a panic");
+    }
+
+    #[test]
+    #[ignore = "run by a_failed_test_ends_its_process_with_the_harnesss_failure_status_however_it_failed, which needs it to fail"]
+    fn a_test_that_returns_an_error_after_closing_a_decoder() -> std::result::Result<(), String> {
+        close_a_decoder_with_a_sample_in_its_codec();
+        Err("this test fails by its result, with no panic".to_string())
+    }
+
+    #[test]
+    #[ignore = "run by a_failed_test_ends_its_process_with_the_harnesss_failure_status_however_it_failed, which needs it to fail"]
+    #[should_panic = "a panic this test never makes"]
+    fn a_should_panic_test_that_returns_after_closing_a_decoder() {
+        close_a_decoder_with_a_sample_in_its_codec();
+    }
+
+    /// The test binary leaves without the platform's destructors, and still with the harness's own status: a test
+    /// that failed after the codecs were used, by a panic or by the two ways that make none, fails its run.
+    #[test]
+    fn a_failed_test_ends_its_process_with_the_harnesss_failure_status_however_it_failed() {
+        for child in [
+            "a_test_that_panics_after_closing_a_decoder",
+            "a_test_that_returns_an_error_after_closing_a_decoder",
+            "a_should_panic_test_that_returns_after_closing_a_decoder",
+        ] {
+            let problem = craftbridge_process::rerun(&format!("{HERE}::{child}"), &[], "the test failed")
+                .expect_err(&format!("{child} failed, and its process still ended with status 0"));
+            assert_eq!(problem.status().and_then(|status| status.code()), Some(HARNESS_FAILURE), "{child}: {problem}");
+        }
+    }
+
     /// Stops `raw`'s codec, if it has one, as a codec that fails on its own thread is stopped: every call a drain
     /// then makes fails, every time rather than in a race.
     fn stop_codec(raw: &RawCodec) {
