@@ -72,6 +72,12 @@ rayon = "1"
 # The native boundary (plan §20). The one version builds the scaffolding in each -ffi crate and, through
 # rust/uniffi-bindgen, the generator that reads it back, so the two can never differ.
 uniffi = "0.32"
+# UniFFI's own reading of the metadata its scaffolding embeds, which xtask reads the boundary's surface
+# from (rust/xtask/src/boundary_surface.rs). Cargo gives it the one copy the `uniffi` pin already pulls,
+# so the reader is never older than the scaffolding it reads.
+uniffi_bindgen = "0.32"
+# Paths that are known to be text, as UniFFI's own API takes them.
+camino = "1"
 # The channel the engine thread answers each call on (plan §16): a caller blocks on it or awaits it, so the
 # FFI's async calls wait for the engine's own answer without blocking a thread. It is the channel the
 # JavaScript engine in EffectCraft's graph already uses.

@@ -22,7 +22,7 @@ import io.github.christopherlinnett.craftbridge.ffi.core.Engine as BoundaryEngin
  * The frames of the comp an export renders: small enough to render quickly on a phone's CPU, long
  * enough for the engine to report its progress more than once on the way through.
  */
-private const val EXPORT_FRAMES = 300
+internal const val EXPORT_FRAMES = 300
 
 /**
  * The frames of the comp a cancel is caught inside: small frames render at a good pace on a phone, so
@@ -160,26 +160,26 @@ private fun endedByTheEnginesStop(answered: Throwable?): Boolean {
 }
 
 /** An output of the engine's own, in the folder the system may empty, which is where a check's files go. */
-private fun exportInto(
+internal fun exportInto(
     context: Context,
     name: String,
 ): File = File(Folders.appDefault(context).cache, name)
 
 /** A comp of the given frames at the engine's frame rate, small enough for a phone's CPU. */
-private fun compRequest(frames: Int): String =
+internal fun compRequest(frames: Int): String =
     """{"steps":[{"command":"comp.new","params":{"width":640,"height":360,"duration":${frames / 30.0},"frameRate":30}}]}"""
 
 /** An export of the comp to `output` as a sequence of images. */
-private fun exportRequest(output: File): String = """{"output":"${output.path}","format":"png"}"""
+internal fun exportRequest(output: File): String = """{"output":"${output.path}","format":"png"}"""
 
 /** The name the exporter gives frame `frame` of the sequence asked for at `output`. */
-private fun frameName(
+internal fun frameName(
     output: File,
     frame: Int,
 ): String = output.nameWithoutExtension + "_" + frame.toString().padStart(5, '0') + ".png"
 
 /** The files already written for the sequence asked for at `output`. */
-private fun exportsNamed(
+internal fun exportsNamed(
     output: File,
     prefix: String,
 ): List<File> =
@@ -188,7 +188,7 @@ private fun exportsNamed(
         ?.filter { it.name.startsWith(prefix) }
         .orEmpty()
 
-private fun removeExports(
+internal fun removeExports(
     output: File,
     prefix: String,
 ) {

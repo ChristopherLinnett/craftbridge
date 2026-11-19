@@ -24,6 +24,7 @@
 mod adaptations;
 mod attributes;
 mod bindings;
+mod boundary_surface;
 mod buildfiles;
 mod compiled;
 mod device_lock;

@@ -44,6 +44,7 @@ pub(crate) fn generators() -> Vec<Generator> {
             output_dir: crate::kotlin_bindings::EFFECTS_OUTPUT_DIR,
             generate: crate::kotlin_bindings::generate_effects,
         },
+        Generator { name: "boundary-surface", output_dir: crate::boundary_surface::OUTPUT_DIR, generate: crate::boundary_surface::generate },
     ]
 }
 
@@ -527,6 +528,9 @@ mod tests {
         assert!(
             registry.iter().any(|generator| generator.name == "kotlin-bindings-effects" && generator.output_dir == crate::kotlin_bindings::EFFECTS_OUTPUT_DIR)
         );
+        // The surface the device smoke checks call is written from the library's metadata, into the
+        // corpus's folder, which is where the instrumented checks already find their assets.
+        assert!(registry.iter().any(|generator| generator.name == "boundary-surface" && generator.output_dir == crate::boundary_surface::OUTPUT_DIR));
         // The bindings' folders sit beside the facade's, never in it: each generator replaces its own folder whole.
         assert!(!crate::kotlin_bindings::EFFECTS_OUTPUT_DIR.starts_with(crate::effects_api::KOTLIN_OUTPUT_DIR));
     }

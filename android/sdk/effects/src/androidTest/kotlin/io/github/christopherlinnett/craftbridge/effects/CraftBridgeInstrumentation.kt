@@ -43,8 +43,8 @@ internal class Case(
 private fun cases(context: Context): List<Case> {
     val checks =
         folderChecks + engineChecks + wordsChecks + hardwareDecodingChecks + fp16FloorChecks + exportPoolChecks + frameChecks +
-            previewChecks + apiChecks + typedCallChecks + selectionChecks + corpusModelChecks + scenarioRunnerChecks +
-            conformanceChecks(context) + plugInPolicyChecks + memoryGuardChecks + baselineChecks
+            previewChecks + apiChecks + typedCallChecks + boundarySmokeChecks + selectionChecks + corpusModelChecks +
+            scenarioRunnerChecks + conformanceChecks(context) + plugInPolicyChecks + memoryGuardChecks + baselineChecks
     return checks + scenarioCountCheck(checks)
 }
 

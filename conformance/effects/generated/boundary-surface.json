@@ -1,0 +1,130 @@
+{
+  "surface": [
+    {
+      "kind": "function",
+      "name": "attach_metal_layer",
+      "namespace": "craftbridge_core_ffi",
+      "owner": null
+    },
+    {
+      "kind": "function",
+      "name": "craft_error_message",
+      "namespace": "craftbridge_core_ffi",
+      "owner": null
+    },
+    {
+      "kind": "function",
+      "name": "set_device_codecs",
+      "namespace": "craftbridge_core_ffi",
+      "owner": null
+    },
+    {
+      "kind": "function",
+      "name": "window_address",
+      "namespace": "craftbridge_core_ffi",
+      "owner": null
+    },
+    {
+      "kind": "constructor",
+      "name": "new",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "CancelToken"
+    },
+    {
+      "kind": "method",
+      "name": "cancel",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "CancelToken"
+    },
+    {
+      "kind": "method",
+      "name": "is_cancelled",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "CancelToken"
+    },
+    {
+      "kind": "method",
+      "name": "attach_window",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "Engine"
+    },
+    {
+      "kind": "method",
+      "name": "detach_preview",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "Engine"
+    },
+    {
+      "kind": "method",
+      "name": "frame",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "Engine"
+    },
+    {
+      "kind": "method",
+      "name": "has_preview_surface",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "Engine"
+    },
+    {
+      "kind": "method",
+      "name": "mcp",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "Engine"
+    },
+    {
+      "kind": "method",
+      "name": "present",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "Engine"
+    },
+    {
+      "kind": "method",
+      "name": "recovery",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "Engine"
+    },
+    {
+      "kind": "method",
+      "name": "request",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "Engine"
+    },
+    {
+      "kind": "method",
+      "name": "request_with_progress",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "Engine"
+    },
+    {
+      "kind": "method",
+      "name": "resume_gpu",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "Engine"
+    },
+    {
+      "kind": "method",
+      "name": "shut_down",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "Engine"
+    },
+    {
+      "kind": "method",
+      "name": "suspend_gpu",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "Engine"
+    },
+    {
+      "kind": "method",
+      "name": "progress",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "ProgressListener"
+    },
+    {
+      "kind": "function",
+      "name": "start_effects_engine",
+      "namespace": "craftbridge_effects_ffi",
+      "owner": null
+    }
+  ]
+}
