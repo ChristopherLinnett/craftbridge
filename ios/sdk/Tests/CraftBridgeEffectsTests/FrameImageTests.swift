@@ -8,6 +8,9 @@ import CraftBridgeFFI
 import Foundation
 import Testing
 
+/// The containers of this suite's engines, removed when the suite ends.
+private let frameFolders = "frameimage"
+
 /// A frame of a translucent card in `format`: a ramp from black to white down a solid at 30% opacity, in a
 /// 32 bpc project, whose pixels are not rounded to 8 bits before they are written, so they hold colours
 /// between the 8-bit steps at an alpha that is no whole number of 255ths. There premultiplying the rounded
@@ -15,7 +18,7 @@ import Testing
 /// fifth of the pixels, where an 8 bpc project's would agree. A width of 37 pixels is 148 bytes a row, which
 /// a pixel buffer pads, so a copy that forgets the padding is read wrong.
 private func translucentFrame(format: PixelFormat = .bgra8Premultiplied) async throws -> FrameBytes {
-    let engine = try startEffectsEngine(folders: .isolated(), gpu: .cpuOnly)
+    let engine = try startEffectsEngine(folders: .isolated(frameFolders), gpu: .cpuOnly)
     try await engine.exec([("file.projectSettings", ["bitDepth": "32"])])
     try await engine.veil("Veil", width: 37, height: 256, color: "#c84d21", opacity: 30)
     try await engine.exec([("effect.apply", ["comp": "Veil", "layer": "Veil", "effect": "Gradient Ramp"])])
@@ -31,7 +34,7 @@ private func applesConversion() async throws -> [UInt8] {
     return applePremultipliedBGRA(of: [UInt8](straight.data), width: Int(straight.width), height: Int(straight.height))
 }
 
-@Suite struct FrameImageTests {
+@Suite(Removing(name: frameFolders)) struct FrameImageTests {
     @Test func aPixelBufferHoldsTheCoresPremultipliedBytesAsTheyAre() async throws {
         let frame = try await translucentFrame()
         let alphas = Set(stride(from: 3, to: frame.data.count, by: 4).map { frame.data[$0] })

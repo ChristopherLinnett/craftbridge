@@ -4,7 +4,9 @@
 import CraftBridge
 import CraftBridgeEffects
 import CraftBridgeFFI
+import Darwin
 import Foundation
+import Testing
 import UIKit
 import os
 
@@ -117,14 +119,14 @@ func engine(recording requests: Requests) -> EffectsEngine {
     return EffectsEngine(engine: fake)
 }
 
-/// An engine started in `folders`, the app's own unless a test names others, with a comp of `seconds` at
-/// 30 frames a second to export, and a folder of its own for each test's output inside `folder`, the cache
-/// unless a test names another.
+/// An engine started in `folders` — a suite's own isolated ones unless the test is about the app's own
+/// folders — with a comp of `seconds` at 30 frames a second to export, and a folder of its own for each
+/// test's output inside `folder`, the cache unless a test names another.
 struct Rig {
     let engine: Engine
     let output: URL
 
-    init(seconds: Int, in folder: URL? = nil, folders: Folders = .appDefault) async throws {
+    init(seconds: Int, in folder: URL? = nil, folders: Folders) async throws {
         engine = try startEffectsEngine(folders: folders, gpu: .cpuOnly)
         let cache = URL(filePath: folders.cache, directoryHint: .isDirectory)
         output = (folder ?? cache).appending(path: "ExportJobTests-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -262,12 +264,15 @@ extension Engine {
 }
 
 extension Folders {
-    /// Folders no other test shares, laid out as the corpus's are in a container of their own under the
-    /// simulator's temporary folder, with the test bundle to read: an engine started in the app's own folders
+    /// Folders no other test shares, laid out as the corpus's are in a container of their own, a run
+    /// folder (``runFolder(_:)``), with the test bundle to read: an engine started in the app's own folders
     /// holds their journal's lock and writes a probe file there, which another test's engine meets while the
-    /// two run side by side.
-    static func isolated() -> Folders {
-        engineFolders(container: temporaryFolder("tests"), bundle: Bundle.main.bundleURL)
+    /// two run side by side, and so does another run's on the same simulator. The container carries `name`,
+    /// and the suite whose tests start engines here carries ``Removing`` under that name, so the containers
+    /// go when its last test has run; a test that removes its own container when it ends — a device test —
+    /// may leave `name` at the default and do the removing itself.
+    static func isolated(_ name: String = "tests") -> Folders {
+        engineFolders(container: runFolder(name), bundle: Bundle.main.bundleURL)
     }
 }
 
@@ -312,4 +317,168 @@ func makeCardTemplate(_ engine: EffectsEngine, in folder: URL, width: Int, heigh
         ),
     ])
     return template
+}
+
+/// Where every run of the suite makes its run folders: the test runner's temporary folder. A plain run on
+/// the simulator has the simulator's own `tmp`, which every plain run there shares and the simulator empties
+/// when it shuts down; the `swift_test` stage gives its runs one of their own.
+let runFoldersHome = FileManager.default.temporaryDirectory
+
+/// What every run folder's name starts with, so the sweep looks at those folders of the home and no other.
+let runFolderPrefix = "craftbridge-"
+
+/// The folders this run has made and still holds, under the name of the suite that removes them, each with
+/// the open folder whose lock says that the run making it is alive. They are kept, not looked for again
+/// when the suite ends: another run on the same simulator makes folders of the very same names beside
+/// these.
+private let madeFolders = OSAllocatedUnfairLock<[String: [(folder: URL, lock: Int32)]]>(initialState: [:])
+
+/// A new folder for this run in the home, remembered so that the suite whose name it carries can remove
+/// it, and everything inside it, when that suite's last test has run. The run holds each folder it makes
+/// with an exclusive lock, which the system lets go however the run ends, so a folder of the home that no
+/// open holds is one no live run uses, as a run killed before its suites ended leaves them: each new folder
+/// is made after a sweep that removes those, and never one another run on the simulator still holds.
+func runFolder(_ name: String) -> URL {
+    let folder = newRunFolder(name)
+    do {
+        let lock = try holdingTheHome {
+            sweepTheHome()
+            return try madeAndHeld(folder)
+        }
+        madeFolders.withLock { made in made[name, default: []].append((folder, lock)) }
+    } catch {
+        Issue.record(error, "\(folder.path(percentEncoded: false)) is not held, so another run's sweep may remove it")
+    }
+    return folder
+}
+
+/// Where a new run folder carrying `name` goes in the home: no folder is there yet.
+func newRunFolder(_ name: String) -> URL {
+    runFoldersHome.appending(path: "\(runFolderPrefix)\(name)-\(UUID().uuidString)", directoryHint: .isDirectory)
+}
+
+/// Runs `body` while this run holds the home's own lock: a run makes and holds a folder, and sweeps, only
+/// under it, so no sweep ever finds a folder made and not yet held, which it would take for a killed run's.
+func holdingTheHome<T>(_ body: () throws -> T) throws -> T {
+    let home = try openedFolder(runFoldersHome)
+    defer { release(home) }
+    while flock(home, LOCK_EX) != 0 {
+        let code = errno
+        guard code == EINTR else { throw lockFailure("cannot lock", runFoldersHome, code) }
+    }
+    return try body()
+}
+
+/// Removes every run folder of the home that no live run holds. One that will not go now is left for the
+/// next sweep.
+private func sweepTheHome() {
+    let files = FileManager.default
+    let entries = (try? files.contentsOfDirectory(at: runFoldersHome, includingPropertiesForKeys: nil)) ?? []
+    for entry in entries where entry.lastPathComponent.hasPrefix(runFolderPrefix) {
+        // A file of that name, or a folder its run has just removed, has nothing to sweep.
+        let lock = open(entry.path(percentEncoded: false), O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        guard lock >= 0 else { continue }
+        defer { release(lock) }
+        if (try? lockedAtOnce(lock, entry)) == true {
+            try? files.removeItem(at: entry)
+        }
+    }
+}
+
+/// `folder`, made and held by this run.
+func madeAndHeld(_ folder: URL) throws -> Int32 {
+    let lock = try openedFolder(folder)
+    var held = false
+    defer { if !held { release(lock) } }
+    guard try lockedAtOnce(lock, folder) else {
+        throw CraftError.Io(detail: "\(folder.path(percentEncoded: false)) is held by another run as it is made")
+    }
+    held = true
+    return lock
+}
+
+/// Removes the folders this run made under `name`, and lets them go: each is removed while it is still
+/// held, so no other run's sweep is removing it at the same time, and a folder that would not go is left
+/// unheld, for the next run's sweep.
+private func removeRunFolders(named name: String) {
+    for made in madeFolders.withLock({ made in made.removeValue(forKey: name) ?? [] }) {
+        try? FileManager.default.removeItem(at: made.folder)
+        release(made.lock)
+    }
+}
+
+/// Removes every folder the run made under `name` once every test of the suite it is set on has run.
+struct Removing: SuiteTrait, TestScoping {
+    let name: String
+
+    func provideScope(
+        for test: Test,
+        testCase: Test.Case?,
+        performing function: @Sendable () async throws -> Void
+    ) async throws {
+        defer { removeRunFolders(named: name) }
+        try await function()
+    }
+}
+
+/// Keeps every other run of the suite out of the app's own folders while the suite it is set on is in
+/// them. A Swift package's tests on the simulator have no app container: the simulator's own data folder
+/// is their sandbox, so it is one set of app folders for every plain run on that simulator, and the core
+/// lets one process hold one container's export journal at a time. Only tests that take `.appDefault`
+/// themselves need this — there `.appDefault` is what is under test — and they wait here for a run that
+/// got there first. A run given a sandbox of its own, as the gate's stage gives its runs, has its own copy
+/// of the folder and waits for no one.
+struct AppsFoldersLock: SuiteTrait, TestScoping {
+    /// The folder held: the app's own, the container of `.appDefault`.
+    static var folder: URL { URL(filePath: Folders.appDefault.container, directoryHint: .isDirectory) }
+
+    func provideScope(
+        for test: Test,
+        testCase: Test.Case?,
+        performing function: @Sendable () async throws -> Void
+    ) async throws {
+        try await holding(Self.folder) { try await function() }
+    }
+}
+
+/// Runs `body` while this run holds an exclusive lock on `folder` itself, waiting a quarter of a second at
+/// a time while another run holds it. The lock is on the folder, so nothing is made for it and nothing is
+/// left behind, and the system lets it go however the run ends.
+func holding(_ folder: URL, while body: () async throws -> Void) async throws {
+    let lock = try openedFolder(folder)
+    defer { release(lock) }
+    while try !lockedAtOnce(lock, folder) {
+        try await Task.sleep(for: .milliseconds(250))
+    }
+    try await body()
+}
+
+/// An open of `folder` to lock it by, made first when it is not there yet. A program the run starts does
+/// not keep it once that program runs.
+func openedFolder(_ folder: URL) throws -> Int32 {
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let lock = open(folder.path(percentEncoded: false), O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+    guard lock >= 0 else { throw lockFailure("cannot open", folder, errno) }
+    return lock
+}
+
+/// Whether `lock`, an open of `folder`, took the folder's exclusive lock at once: false while another
+/// open, of this process or another, holds it.
+func lockedAtOnce(_ lock: Int32, _ folder: URL) throws -> Bool {
+    if flock(lock, LOCK_EX | LOCK_NB) == 0 { return true }
+    let code = errno
+    guard code == EWOULDBLOCK else { throw lockFailure("cannot lock", folder, code) }
+    return false
+}
+
+/// Lets `lock` go, and closes it. It is unlocked before it is closed: a program the run starts holds a
+/// copy of every open until that program runs, and the lock belongs to the open those copies share.
+func release(_ lock: Int32) {
+    flock(lock, LOCK_UN)
+    close(lock)
+}
+
+/// The failure to `what` `folder`, with the system's error number.
+private func lockFailure(_ what: String, _ folder: URL, _ code: Int32) -> CraftError {
+    CraftError.Io(detail: "\(what) \(folder.path(percentEncoded: false)): errno \(code)")
 }

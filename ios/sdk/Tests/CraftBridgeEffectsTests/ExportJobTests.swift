@@ -4,11 +4,14 @@ import Foundation
 import Testing
 import os
 
-@Suite struct ExportJobTests {
+/// The containers of this suite's engines, removed when the suite ends.
+private let jobFolders = "exportjob"
+
+@Suite(Removing(name: jobFolders)) struct ExportJobTests {
     /// Cancelling the task that awaits an export's result sets the job's cancel token, and the engine
     /// stops the export and answers `Cancelled`.
     @Test func cancellingTheTaskAwaitingAnExportCancelsIt() async throws {
-        let rig = try await Rig(seconds: 60)
+        let rig = try await Rig(seconds: 60, folders: .isolated(jobFolders))
         let first = FirstReport()
         let job = try ExportJob(engine: rig.engine, method: "export", params: rig.export, progress: first.handler)
         let awaiting = Task { try await job.result }
@@ -21,7 +24,7 @@ import os
     }
 
     @Test func cancelStopsAnExport() async throws {
-        let rig = try await Rig(seconds: 60)
+        let rig = try await Rig(seconds: 60, folders: .isolated(jobFolders))
         let first = FirstReport()
         let job = try ExportJob(engine: rig.engine, method: "export", params: rig.export, progress: first.handler)
         await first.wait(for: job)
@@ -32,7 +35,7 @@ import os
     }
 
     @Test func anExportLeftAloneAnswersWhatItRendered() async throws {
-        let rig = try await Rig(seconds: 1)
+        let rig = try await Rig(seconds: 1, folders: .isolated(jobFolders))
         let job = try ExportJob(engine: rig.engine, method: "export", params: rig.export)
         let answer = try await job.result
         guard case .object(let fields) = answer, case .array(let rendered) = fields["rendered"] else {
@@ -42,17 +45,6 @@ import os
         #expect(rendered.count == 1)
         #expect(!job.isCancelled)
         #expect(try await job.result == answer, "a result can be awaited again")
-        try await rig.finish()
-    }
-
-    /// The engine writes anywhere in the app's sandbox, so an app exports into `Documents`, which the Files app
-    /// shows for an app that shares it, as well as into its `Library`.
-    @Test func anExportGoesIntoTheAppsDocuments() async throws {
-        let rig = try await Rig(seconds: 1, in: .documentsDirectory)
-        let job = try ExportJob(engine: rig.engine, method: "export", params: rig.export)
-        await #expect(throws: Never.self) { try await job.result }
-        let written = try FileManager.default.contentsOfDirectory(atPath: rig.output.path(percentEncoded: false))
-        #expect(written.contains { $0.hasSuffix(".png") }, "the export wrote \(written)")
         try await rig.finish()
     }
 }

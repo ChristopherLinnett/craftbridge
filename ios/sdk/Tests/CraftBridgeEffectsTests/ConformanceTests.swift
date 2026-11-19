@@ -22,29 +22,14 @@ extension Scenario: CustomTestStringConvertible {
     var testDescription: String { "\(id): \(title)" }
 }
 
-/// Removes a folder once every test of the suite it is set on has run.
-struct Removing: SuiteTrait, TestScoping {
-    let folder: URL
-
-    func provideScope(
-        for test: Test,
-        testCase: Test.Case?,
-        performing function: @Sendable () async throws -> Void
-    ) async throws {
-        defer { try? FileManager.default.removeItem(at: folder) }
-        try await function()
-    }
-}
-
-/// A folder of the simulator's own temporary folder, new for each run.
-func temporaryFolder(_ name: String) -> URL {
-    FileManager.default.temporaryDirectory.appending(path: "craftbridge-\(name)-\(UUID().uuidString)")
-}
+/// The name this suite's folders are made under and removed under together, so the making and the
+/// removing cannot drift apart.
+private let scenarioFoldersName = "conformance"
 
 /// Where the corpus scenarios' folders are made, for the whole suite.
-private let scenarioFolders = temporaryFolder("conformance")
+private let scenarioFolders = runFolder(scenarioFoldersName)
 
-@Suite(.serialized, .timeLimit(.minutes(10)), Removing(folder: scenarioFolders)) struct ConformanceTests {
+@Suite(.serialized, .timeLimit(.minutes(10)), Removing(name: scenarioFoldersName)) struct ConformanceTests {
     @Test func theCorpusParsesAndTheSwiftRunTakesEveryScenarioThePlugInRuns() throws {
         _ = try Corpus(file: Corpus.file)
         // The scenarios the plug-in runs are counted from the document itself, not through the model or

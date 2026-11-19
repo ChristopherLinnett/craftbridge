@@ -10,10 +10,14 @@ import ImageIO
 import Testing
 import UniformTypeIdentifiers
 
-/// Where the folders of the scenarios made here are made, for the whole suite.
-private let scenarioFolders = temporaryFolder("runner")
+/// The name this suite's folders are made under and removed under together, so the making and the
+/// removing cannot drift apart.
+private let scenarioFoldersName = "runner"
 
-@Suite(.serialized, Removing(folder: scenarioFolders)) struct ScenarioRunnerTests {
+/// Where the folders of the scenarios made here are made, for the whole suite.
+private let scenarioFolders = runFolder(scenarioFoldersName)
+
+@Suite(.serialized, Removing(name: scenarioFoldersName)) struct ScenarioRunnerTests {
     /// The scenario `calls` and `rest` make, in the corpus's own text: one step, whose calls are `calls`.
     private func scenario(calls: String, _ rest: String = "") throws -> Scenario {
         let text = """
@@ -29,9 +33,10 @@ private let scenarioFolders = temporaryFolder("runner")
 
     private let info = "[[scenario.step.call]]\nkind = \"request\"\nmethod = \"info\"\n"
 
-    /// A folder with `files` in it, each by its path in the folder.
+    /// A folder with `files` in it, each by its path in the folder, made inside the suite's own folder so
+    /// that the suite's ``Removing`` takes each one with the rest.
     private func folder(holding files: [String: String]) throws -> URL {
-        let folder = temporaryFolder("files")
+        let folder = scenarioFolders.appending(path: "files-\(UUID().uuidString)")
         for (path, text) in files {
             let file = folder.appending(path: path)
             try FileManager.default.createDirectory(

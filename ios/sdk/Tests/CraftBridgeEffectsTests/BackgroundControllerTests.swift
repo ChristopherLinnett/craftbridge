@@ -176,9 +176,12 @@ private func controlled(
     }
 }
 
+/// The containers of this suite's rigs, removed when the suite ends.
+private let engineExportFolders = "engineexport"
+
 /// The two ends the system leaves an export that is running as the app goes to the background, on a real
 /// engine: it finishes under its background task, or it is cancelled before the app is suspended.
-@Suite @MainActor struct BackgroundExportOnTheEngineTests {
+@Suite(Removing(name: engineExportFolders)) @MainActor struct BackgroundExportOnTheEngineTests {
     /// The export of `rig`'s comp, started through an engine whose host is `host`, once it is rendering.
     private func rendering(_ rig: Rig, under host: FakeHost) async throws -> (engine: EffectsEngine, job: ExportJob) {
         let engine = EffectsEngine(engine: rig.engine, host: host)
@@ -190,7 +193,7 @@ private func controlled(
     }
 
     @Test func anExportRunningAsTheAppEntersTheBackgroundFinishesUnderItsTask() async throws {
-        let rig = try await Rig(seconds: 2, folders: .isolated())
+        let rig = try await Rig(seconds: 2, folders: .isolated(engineExportFolders))
         let host = FakeHost()
         let (engine, job) = try await rendering(rig, under: host)
 
@@ -210,7 +213,7 @@ private func controlled(
     }
 
     @Test func anExportTheSystemIsAboutToStopIsCancelledAndEndsItsTask() async throws {
-        let rig = try await Rig(seconds: 60, folders: .isolated())
+        let rig = try await Rig(seconds: 60, folders: .isolated(engineExportFolders))
         let host = FakeHost()
         let (engine, job) = try await rendering(rig, under: host)
 
