@@ -271,6 +271,55 @@ craftbridge_set_test_runner_env() {
   done
 }
 
+# Refuse a gate run that would build or test under a scheme or test plan a developer's Xcode left on disk.
+# Given `-scheme <name>`, xcodebuild runs the file `<name>.xcscheme` wherever Xcode keeps a project's or a
+# package's schemes in preference to the scheme it generates itself: it builds and tests exactly what that
+# file says, its test environment and any test plan it names among them. So a scheme left by opening the
+# package in Xcode — `ios/sdk/.swiftpm`, which git ignores — or edited into a sample's project bundle,
+# would make the gate answer for what the machine's Xcode left rather than for the tree: one holding
+# `CRAFTBRIDGE_BASELINE=1`, with nothing exported in the shell, was shown to make swift_test run the
+# baseline measurement beside every other suite. A stage that builds or tests calls this on the folders Xcode
+# keeps state in — the package's `.swiftpm`, and each sample's own project bundle, where both the user's and
+# the shared schemes sit — before it builds or takes a simulator, and the refusal is where the stage starts.
+# Only a file git does not track is refused, ignored or not: a scheme the tree commits, as a project may to
+# fix its build and test settings for everyone, is the tree's own, and the gate answers for it as for any
+# other tracked file. Nothing here deletes or edits anything: a developer's file stays exactly as it was
+# found, because removing it is the developer's choice, and the refusal repeats until it has been made. Each
+# refused file is one line naming it from the repository's root and what it is, and one with the command
+# that removes it, quoted so that it pastes whatever the name holds; the refusal is status 2.
+craftbridge_refuse_leftover_schemes_and_test_plans() {
+  local listing found kind quoted
+  local -a leftovers=()
+  # `git ls-files --others` names every file git does not track, the ignored ones too, since it applies
+  # no ignore rule unless asked to. Its answer goes through a file, where its status can be read: a git
+  # that cannot answer would otherwise read as a tree with nothing left in it.
+  listing="$(mktemp)" || return 2
+  if ! git --literal-pathspecs ls-files -z --others -- "$@" >"$listing"; then
+    rm -f "$listing"
+    echo "$(basename "$0" .sh): craftbridge_refuse_leftover_schemes_and_test_plans cannot ask git which files it tracks under $*, so it cannot tell a scheme Xcode left there from one the tree commits" >&2
+    return 2
+  fi
+  while IFS= read -r -d '' found; do
+    case "$found" in
+      *.xcscheme | *.xctestplan) leftovers+=("$found") ;;
+    esac
+  done <"$listing"
+  rm -f "$listing"
+  if [ ${#leftovers[@]} -eq 0 ]; then
+    return 0
+  fi
+  for found in "${leftovers[@]}"; do
+    case "$found" in
+      *.xcscheme) kind=scheme ;;
+      *) kind="test plan" ;;
+    esac
+    printf -v quoted '%q' "$found"
+    echo "$(basename "$0" .sh): craftbridge_refuse_leftover_schemes_and_test_plans refuses the $kind $found, which git does not track: xcodebuild reads the schemes kept there in place of the ones it generates from the tree, and runs the test plans they name, so a run would answer for what this machine's Xcode left there, not for the tree" >&2
+    echo "$(basename "$0" .sh):   remove it and run again: rm -f -- $quoted" >&2
+  done
+  return 2
+}
+
 # The gate's lint library (AGENTS.md §3), which `cargo dylint` builds with the nightly its own
 # rust-toolchain.toml pins and runs over the workspace, and the cargo-dylint release that runs it. The gate
 # pins the release: one can change how a library is built and driven, so an upgrade is an edit here and a
