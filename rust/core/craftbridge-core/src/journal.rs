@@ -42,9 +42,14 @@
 //!   each export makes the folder its own files need.
 //! * **Two paths are one file when the volume holding them says so, never by their spelling.** Every
 //!   comparison in the journal asks one question through [`PathId`]: a path that is there is the
-//!   volume's own identity for it — its device and file number — and one that is not yet is its
-//!   deepest folder that is, with the names below it folded under the volume's own rules for case and
-//!   Unicode form, read from the volume by asking it and never assumed from the platform. A volume
+//!   volume's own identity for it — its device and file number, with where its name lies beside them,
+//!   which is what one that is not there yet is told by: each folder above it that is there, with the
+//!   names below that folder folded under the volume's own rules for case and Unicode form, read from
+//!   the volume by asking it and never assumed from the platform. Two paths name one file when they
+//!   share the numbers or one of those dwellings, so a file a running export puts up between one
+//!   operation's looks at it, or under a folder it makes between them, is still the file it was
+//!   before its writer wrote it. That is no equivalence, so the journal gathers paths by each of
+//!   those keys apart and never sorts them by one order. A volume
 //!   whose rules cannot be read is treated as the one that loses no work, which compares as if it
 //!   ignored both. One file spelt two ways is then refused a second export exactly as one path listed
 //!   twice is, so a finished export's file survives another export's cancel, kill or failure however
@@ -138,6 +143,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
 use std::fs::{self, File, TryLockError};
 use std::io::{self, Read, Write};
+use std::iter;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Mutex;
@@ -392,22 +398,141 @@ fn names_apart(folder: &Path, name: &str, spelling: &str) -> Option<bool> {
 /// No folder to stand at the head of a folded path: the container itself could not be looked at.
 const NO_FOLDER: (u64, u64) = (0, 0);
 
+/// Where a name lies, as one folder above it that is there tells it: that folder's numbers, and the
+/// names from it down to the name, each folded as the volume holding it folds names. A folder is
+/// looked at through its links, as the writer's open and a start's removal reach what lies in it, so
+/// two paths that reach one folder by different ways lie in one dwelling of it. A path is told from
+/// every folder above it that is there, the container first, and a dwelling stays one across a file
+/// or a folder below it being put up, which numbers cannot: they exist only once a file is there.
+#[derive(Clone, Debug)]
+struct Dwelling {
+    /// The folder's numbers ([`NO_FOLDER`] for a container that cannot be looked at).
+    folder: (u64, u64),
+    /// The names from the container down to the folder the path's own name lies in, of which those
+    /// below `folder` begin at `below`: shared by every dwelling of every path in that folder.
+    folders: Rc<[String]>,
+    below: usize,
+    /// The path's own name.
+    name: Option<Rc<str>>,
+}
+
+impl Dwelling {
+    /// What a dwelling is: the folder, and the names below it with the path's own after them.
+    fn parts(&self) -> ((u64, u64), &[String], Option<&str>) {
+        (self.folder, self.folders.get(self.below..).unwrap_or_default(), self.name.as_deref())
+    }
+}
+
+impl PartialEq for Dwelling {
+    fn eq(&self, other: &Self) -> bool {
+        self.parts() == other.parts()
+    }
+}
+
+impl Eq for Dwelling {}
+
+impl Ord for Dwelling {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.parts().cmp(&other.parts())
+    }
+}
+
+impl PartialOrd for Dwelling {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 /// Where a path below the container lies, told the way the volume holding it tells one file from
 /// another: the journal's one answer to whether two paths name one file, which no comparison in it
-/// asks any other way. A path that is there is the volume's own numbers for it — one answer however
-/// the path is spelt and however many names the file carries. A path not there yet is the deepest
-/// folder of it that is, with the names below that folder folded as the volume holding them folds
-/// names: an export lists the file it is about to write before it writes it, and the listing holds
-/// or refuses it by what the volume would make of the spelling, never by the spelling.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum PathId {
-    /// The volume's and the file's numbers of a path that is there.
-    There(u64, u64),
-    /// A path that is not: the numbers of the deepest folder of it that is ([`NO_FOLDER`] when the
-    /// container itself could not be looked at), and the names below it folded as that folder's
-    /// volume folds names — under the reading that loses no work whenever the folder is not on the
-    /// volume whose rules were read, the container that could not be looked at included.
-    Below((u64, u64), Vec<String>),
+/// asks any other way. A path that is there carries the volume's own numbers for it, and every path
+/// carries its dwellings, one from each folder above it that is there: an export lists the file it is
+/// about to write before it writes it, and the listing holds or refuses it by what the volume would
+/// make of the spelling, never by the spelling. Two paths name one file when they share a key — the
+/// numbers, when both looks found the file, or a dwelling, whenever one of them came before a writer
+/// put the file, or a folder of it, up — so one file is one file however its paths were looked at,
+/// before or after it came to be. That relation is no equivalence (a file put at a path in place of
+/// another shares the path's dwellings with the file before it, a second name of the first file in
+/// another folder shares its numbers, and those two share nothing), so no order can stand for it and
+/// none is given: the journal gathers tellings in [`Tellings`], which looks one up by every key.
+#[derive(Clone, Debug)]
+struct PathId {
+    /// The volume's and the file's numbers, when a file is there.
+    numbers: Option<(u64, u64)>,
+    /// The names from the container down to the folder the path lies in, folded.
+    folders: Rc<[String]>,
+    /// Each folder of the path that is there, from the container down: how many of `folders` lie
+    /// above it, and its numbers, none for a container that cannot be looked at.
+    there: Rc<[(usize, Option<(u64, u64)>)]>,
+    /// The path's own name, folded as its folder's volume folds names.
+    name: Option<Rc<str>>,
+}
+
+impl PathId {
+    /// Where this path lies, as each folder above it that is there tells it.
+    fn dwellings(&self) -> impl Iterator<Item = Dwelling> + '_ {
+        self.there.iter().map(|&(below, folder)| Dwelling {
+            folder: folder.unwrap_or(NO_FOLDER),
+            folders: Rc::clone(&self.folders),
+            below,
+            name: self.name.clone(),
+        })
+    }
+}
+
+/// Tellings gathered so that another finds every one it names one file with ([`PathId`]): each is kept
+/// under its numbers, when its file is there, and under each of its dwellings, each key in an order
+/// of its own, and a telling is looked up under every key it has. One map ordered by whole tellings
+/// would lose them: a telling sorts by its first parts, and a lookup that sorts past the one it shares
+/// a key with never reaches it.
+struct Tellings<V> {
+    by_numbers: BTreeMap<(u64, u64), V>,
+    by_dwelling: BTreeMap<Dwelling, V>,
+}
+
+impl<V> Default for Tellings<V> {
+    fn default() -> Self {
+        Self { by_numbers: BTreeMap::new(), by_dwelling: BTreeMap::new() }
+    }
+}
+
+impl<V: Clone> Tellings<V> {
+    /// Gather `id` with `value`, which `join` adds to what each key of it holds already.
+    fn add(&mut self, id: &PathId, value: V, join: impl Fn(&mut V, &V)) {
+        if let Some(numbers) = id.numbers {
+            gather(self.by_numbers.entry(numbers), &value, &join);
+        }
+        for dwelling in id.dwellings() {
+            gather(self.by_dwelling.entry(dwelling), &value, &join);
+        }
+    }
+
+    /// What the tellings that name one file with `id` were gathered with, under each key it shares
+    /// with them.
+    fn of<'a>(&'a self, id: &'a PathId) -> impl Iterator<Item = &'a V> + 'a {
+        let numbers = id.numbers.and_then(|numbers| self.by_numbers.get(&numbers));
+        numbers.into_iter().chain(id.dwellings().filter_map(|dwelling| self.by_dwelling.get(&dwelling)))
+    }
+
+    /// Whether a telling gathered names one file with `id`.
+    fn holds(&self, id: &PathId) -> bool {
+        self.of(id).next().is_some()
+    }
+
+    /// Whether nothing is gathered.
+    fn is_empty(&self) -> bool {
+        self.by_dwelling.is_empty() && self.by_numbers.is_empty()
+    }
+}
+
+/// Put `value` under the key `slot` stands for, or `join` it to what is there.
+fn gather<K: Ord, V: Clone>(slot: Slot<'_, K, V>, value: &V, join: &impl Fn(&mut V, &V)) {
+    match slot {
+        Slot::Vacant(free) => {
+            free.insert(value.clone());
+        }
+        Slot::Occupied(mut held) => join(held.get_mut(), value),
+    }
 }
 
 /// The identities of the paths below one container, gathered for one operation — one listing, one
@@ -445,16 +570,35 @@ struct Paths {
 
 /// One folder of or below the container, told once for the operation.
 struct Folder {
-    /// The volume's and the deepest folder of it that is there; none when the container itself cannot
-    /// be looked at, whose names then fold by [`VolumeRules::default`], the reading that loses no work.
-    head: Option<(u64, u64)>,
-    /// This folder's own names below `head`, folded as that volume folds them; none below when the
-    /// folder itself is there.
-    below: Vec<String>,
+    /// The names from the container down to it, each folded as the volume of the folder above it
+    /// folds names, or, below a folder that is not there, as the deepest that is folds them.
+    names: Rc<[String]>,
+    /// Each folder from the container down to it that is there: how many of `names` lie above it,
+    /// and its numbers, none for a container that cannot be looked at, whose names then fold by
+    /// [`VolumeRules::default`], the reading that loses no work. The last is the deepest that is
+    /// there, this folder itself when it is.
+    there: Rc<[(usize, Option<(u64, u64)>)]>,
     /// The names it holds, folded as its volume folds them, when it is there and its listing tells
     /// every name from every other; none when it is not, or when the listing says nothing of them,
     /// which leaves each name below to be looked at on its own.
     held: Option<BTreeSet<String>>,
+}
+
+impl Folder {
+    /// The deepest folder of it that is there: its depth below the container, and its numbers.
+    fn deepest(&self) -> (usize, Option<(u64, u64)>) {
+        self.there.last().copied().unwrap_or((0, None))
+    }
+
+    /// The volume whose rules fold the names in it: the deepest folder's of it that is there.
+    fn device(&self) -> Option<u64> {
+        self.deepest().1.map(|(device, _)| device)
+    }
+
+    /// Whether the folder itself is there.
+    fn is_there(&self) -> bool {
+        self.deepest().0 == self.names.len()
+    }
 }
 
 /// What one path of the container was told: where it lies, and whether nothing can be at it.
@@ -526,7 +670,7 @@ impl Paths {
         let mut current = match known.get(&self.root) {
             Some(container) => Rc::clone(container),
             None => {
-                let container = Rc::new(Folder { head: self.anchor, below: Vec::new(), held: self.held_of(self.root.as_path(), self.anchor) });
+                let container = Rc::new(self.container(self.held_of(self.root.as_path(), self.anchor)));
                 known.insert(self.root.clone(), Rc::clone(&container));
                 container
             }
@@ -540,17 +684,25 @@ impl Paths {
             }
             // A folder is looked at through a link, as the writer's open and a start's removal reach
             // what lies in it; one the disk shows but will not list holds its names to themselves.
+            // Its name is kept whether it is there or not, so a path below it is told from every
+            // folder above it that is there, and from the same ones once it is made.
+            let names: Rc<[String]> = current.names.iter().cloned().chain(iter::once(self.fold(name, current.device()))).collect();
             current = Rc::new(match fs::metadata(&here).ok().as_ref().and_then(identity_of) {
-                Some(numbers) => Folder { head: Some(numbers), below: Vec::new(), held: self.held_of(&here, Some(numbers)) },
-                None => {
-                    let mut below = current.below.clone();
-                    below.push(self.fold(name, current.head.map(|(device, _)| device)));
-                    Folder { head: current.head, below, held: None }
-                }
+                Some(numbers) => Folder {
+                    there: current.there.iter().copied().chain(iter::once((names.len(), Some(numbers)))).collect(),
+                    names,
+                    held: self.held_of(&here, Some(numbers)),
+                },
+                None => Folder { names, there: Rc::clone(&current.there), held: None },
             });
             known.insert(here.clone(), Rc::clone(&current));
         }
         Some(current)
+    }
+
+    /// The container as a folder: no names above it, and its own numbers, holding `held`.
+    fn container(&self, held: Option<BTreeSet<String>>) -> Folder {
+        Folder { names: Rc::from([]), there: Rc::from([(0, self.anchor)]), held }
     }
 
     /// The names of the folder whose numbers are `numbers`, folded as that volume folds them, or none
@@ -581,15 +733,15 @@ impl Paths {
             return told.clone();
         }
         let (parent, name) = (Path::new(path).parent().unwrap_or(Path::new("")), Path::new(path).file_name());
-        let folder = self.folder(&self.root.join(parent)).unwrap_or_else(|| Rc::new(Folder { head: self.anchor, below: Vec::new(), held: None }));
+        let folder = self.folder(&self.root.join(parent)).unwrap_or_else(|| Rc::new(self.container(None)));
         // The name as its volume tells it, which is what both questions below read. A name a folder
         // the disk listed holds nothing of is not there, and nothing lies below a folder that is not
         // there at all, so the disk is not asked of the name. Every other name is asked of itself —
         // the folder was reached through its links, as the writer's open and a start's removal reach
         // what lies in it, while the path's own name is looked at as itself, as a start deals with a
         // link there.
-        let folded = name.map(|name| self.fold(name, folder.head.map(|(device, _)| device)));
-        let absent = !folder.below.is_empty()
+        let folded = name.map(|name| self.fold(name, folder.device()));
+        let absent = !folder.is_there()
             || match (&folder.held, &folded) {
                 (Some(held), Some(folded)) => !held.contains(folded),
                 _ => false,
@@ -598,16 +750,11 @@ impl Paths {
             true => None,
             false => fs::symlink_metadata(self.root.join(path)).ok().as_ref().and_then(identity_of),
         };
-        let id = match found {
-            Some((device, inode)) => PathId::There(device, inode),
-            None => {
-                let mut below = folder.below.clone();
-                if let Some(folded) = folded {
-                    below.push(folded);
-                }
-                PathId::Below(folder.head.unwrap_or(NO_FOLDER), below)
-            }
-        };
+        // The name's dwellings are told whichever way the disk answered, and a file there carries
+        // them beside its numbers: a path of a file looked at before its writer put it, or a folder
+        // of it, up, and one looked at after, are then told one dwelling, and one file, whoever
+        // compares them.
+        let id = PathId { numbers: found, folders: Rc::clone(&folder.names), there: Rc::clone(&folder.there), name: folded.map(Rc::from) };
         let told = Told { id, absent };
         self.asked.borrow_mut().insert(path.to_string(), told.clone());
         told
@@ -650,9 +797,9 @@ impl Paths {
 #[derive(Default)]
 struct Claims {
     /// What each entry names.
-    named: BTreeSet<PathId>,
+    named: Tellings<()>,
     /// Each folder an entry lies in, and what the entry names.
-    within: BTreeSet<PathId>,
+    within: Tellings<()>,
 }
 
 impl Claims {
@@ -667,9 +814,9 @@ impl Claims {
 
     /// Claim what `listed` names, and every folder it lies in, as well.
     fn add(&mut self, paths: &Paths, listed: &Entry) {
-        self.named.insert(paths.id(&listed.path));
+        self.named.add(&paths.id(&listed.path), (), |_, _| {});
         for folder in 1..=depth(&listed.path) {
-            self.within.insert(paths.id(&under(&listed.path, folder)));
+            self.within.add(&paths.id(&under(&listed.path, folder)), (), |_, _| {});
         }
     }
 
@@ -678,8 +825,8 @@ impl Claims {
     fn by(&self, paths: &Paths, entry: &Entry) -> bool {
         let id = paths.id(&entry.path);
         match entry.kind {
-            Kind::File(_) => self.named.contains(&id),
-            Kind::Folder => self.within.contains(&id),
+            Kind::File(_) => self.named.holds(&id),
+            Kind::Folder => self.within.holds(&id),
         }
     }
 }
@@ -740,8 +887,12 @@ impl Taken {
     /// record happens to carry. The record is told once, so each entry a start hands over asks one
     /// lookup however many files the record names.
     fn yields<'p>(&self, paths: &'p Paths) -> impl Fn(&str) -> bool + use<'p> {
-        let (every, files): (bool, BTreeSet<PathId>) = (self.every, self.files.iter().map(|file| paths.id(file)).collect());
-        move |path| every || files.contains(&paths.id(path))
+        let mut files = Tellings::default();
+        for file in &self.files {
+            files.add(&paths.id(file), (), |_, _| {});
+        }
+        let every = self.every;
+        move |path| every || files.holds(&paths.id(path))
     }
 
     fn is_empty(&self) -> bool {
@@ -1076,8 +1227,15 @@ impl Journal {
         // of their files needing it: the entries differ only in the export that made each, and one
         // of them stands for the folder. Spellings one volume folds can sort apart from each other,
         // so what stands is the first entry of each folder seen, not the one that sorted beside it.
-        let mut one_folder: BTreeSet<PathId> = BTreeSet::new();
-        folders.retain(|entry| one_folder.insert(paths.id(&entry.path)));
+        let mut one_folder = Tellings::default();
+        folders.retain(|entry| {
+            let id = paths.id(&entry.path);
+            let first = !one_folder.holds(&id);
+            if first {
+                one_folder.add(&id, (), |_, _| {});
+            }
+            first
+        });
         let running = Claims::of(paths, running);
         // What stays listed, and what it claims, which grows with it.
         let (mut held, mut kept) = (Vec::new(), Claims::default());
@@ -1482,7 +1640,7 @@ impl Pending {
         // sequence at once.
         let mut known = lock(&KNOWN);
         let state = self.journal.hold(&mut known)?;
-        let listed = self.list_held(state, outputs);
+        let listed = self.list_held(state, &self.journal.paths(), outputs);
         // A process with no export running holds no lock.
         if state.running.is_empty() {
             known.remove(&self.journal.file);
@@ -1490,9 +1648,8 @@ impl Pending {
         listed
     }
 
-    /// [`Pending::list`] with the journal held, as `state`.
-    fn list_held(&mut self, state: &mut Known, outputs: &[PathBuf]) -> Result<()> {
-        let paths = self.journal.paths();
+    /// [`Pending::list`] with the journal held, as `state`, its paths told by `paths`, the listing's own.
+    fn list_held(&mut self, state: &mut Known, paths: &Paths, outputs: &[PathBuf]) -> Result<()> {
         // A path a running export of this process has listed belongs to that export alone until it
         // ends. Two exports writing one path at once leave no defined file there, and once two exports
         // had listed one path and the one that finished cleared its entry, nothing in the journal could
@@ -1507,39 +1664,41 @@ impl Pending {
         // there, so a listing of a long sequence looks each of its paths up instead of walking every
         // running entry for each.
         //
-        // One window stays open by what a file's identity is, not by how this check is held: a
-        // running export that puts its file up between this call's look at its entries and its
-        // look at the paths being listed is told two ways — the running path by the file's
-        // numbers, the listed path by its folded name, since that look found no file — so a
-        // second export of that one file passes this check, and a start splits the same way
-        // between the claims it gathers and the deletions it weighs after them. The journal's own
-        // lock cannot wait the creation out: the writer creates a file, not a journal entry, and
-        // takes no journal lock, while this call already holds this journal's from its first look
-        // to its record. And the paths of one folder are told from one listing of it, kept for the
-        // call, so two spellings of a name in one folder are told alike; the window needs two
-        // paths of one file whose folders are spelt apart, one folder looked at before the putting
-        // up and the other after. Closing it needs an identity that stays one across a file being
-        // put up; the filesystem's numbers, which are identity here, exist only once a file is
-        // there.
-        let mut others: BTreeMap<PathId, bool> = BTreeMap::new();
+        // A running export's writer puts files up as it renders, taking no journal lock, and this
+        // call cannot wait the creation out: it holds this journal's lock from its first look to its
+        // record while the write lands between the looks. Each listing records its files at their
+        // landings, their folders resolved, so two exports' paths of one file in a folder that is
+        // there are one spelling, told once, wherever the volume's resolution answers one spelling
+        // for each folder. Where it does not — a volume that folds names its resolution keeps as
+        // given — the identity waits the creation out: a file carries where its name lies, as each
+        // folder above it that is there tells it, beside its numbers, and a path looked at before the
+        // file, or a folder of it, was put up shares a dwelling with one looked at after, so a second
+        // export of a file that appears between the looks is refused like any other ([`PathId`]).
+        // What stays open is a path through a link that is itself made between the looks: before, the
+        // link is nowhere and its name lies under the container as spelt; after, it is the folder it
+        // reaches, and no folder above both tells the two alike. What is put up after a folder was
+        // listed is none the less never deleted for a stale entry, whoever wrote it: the start and
+        // the cancel weigh deletions only against the answer their listing gave them, and a name
+        // absent from it is nowhere ([`settle`]).
+        let mut others = Tellings::default();
         for listed in state.running.iter().filter(|listed| listed.export != Some(self.export)) {
-            *others.entry(paths.id(&listed.path)).or_default() |= matches!(listed.kind, Kind::File(_));
+            others.add(&paths.id(&listed.path), matches!(listed.kind, Kind::File(_)), |file, also| *file |= *also);
         }
         let (mut entries, mut seen) = (Vec::with_capacity(outputs.len()), BTreeSet::new());
         for output in outputs {
-            let file = self.journal.entry_of(&paths, output, self.export)?;
+            let file = self.journal.entry_of(paths, output, self.export)?;
             let made = self.journal.made_folders(&file.path, &self.looked, &mut seen, self.export);
             entries.push(file);
             entries.extend(made);
         }
-        let clash = entries.iter().find(|entry| others.get(&paths.id(&entry.path)).is_some_and(|&file| file || matches!(entry.kind, Kind::File(_))));
+        let clash = entries.iter().find(|entry| others.of(&paths.id(&entry.path)).any(|&file| file || matches!(entry.kind, Kind::File(_))));
         if let Some(entry) = clash {
             return Err(CraftError::io(format!(
                 "the output file {} is listed by an export that has not ended, so two exports cannot write it at once",
                 self.journal.root.join(&entry.path).display()
             )));
         }
-        let held = taken_over(&state.held, &mut entries, &paths);
+        let held = taken_over(&state.held, &mut entries, paths);
         let mut listed: Vec<Entry> = held.iter().chain(&state.running).cloned().collect();
         listed.extend(entries.iter().cloned());
         self.journal.write(&listed, &state.taken).map_err(|error| {
@@ -1799,22 +1958,25 @@ fn taken_over(held: &[Entry], listing: &mut [Entry], paths: &Paths) -> Vec<Entry
     // Each file's held entries are told once, and each entry of the listing looks its file up, so a
     // long listing over a long held list costs no more than the two of them. The first held entry of
     // a file is the oldest, the nearest to what was there before any export wrote it.
-    let mut oldest: BTreeMap<PathId, Kind> = BTreeMap::new();
-    for entry in held.iter().filter(|entry| is_file(entry)) {
-        oldest.entry(paths.id(&entry.path)).or_insert(entry.kind);
+    let mut oldest = Tellings::default();
+    for (at, entry) in held.iter().enumerate().filter(|(_, entry)| is_file(entry)) {
+        oldest.add(&paths.id(&entry.path), (at, entry.kind), |_, _| {});
     }
     if oldest.is_empty() {
         return held.to_vec();
     }
-    let mut listed_again: BTreeSet<PathId> = BTreeSet::new();
+    let mut listed_again = Tellings::default();
     for listed in listing.iter_mut().filter(|listed| is_file(listed)) {
         let id = paths.id(&listed.path);
-        if let Some(older) = oldest.get(&id) {
-            listed.kind = *older;
-            listed_again.insert(id);
+        // A file may be one with held entries that are not one with each other — told by its numbers
+        // with one, by where its name lies with another — and the oldest of them is what was there
+        // before any export wrote it.
+        if let Some(&(_, older)) = oldest.of(&id).min_by_key(|(at, _)| *at) {
+            listed.kind = older;
+            listed_again.add(&id, (), |_, _| {});
         }
     }
-    held.iter().filter(|entry| !(is_file(entry) && listed_again.contains(&paths.id(&entry.path)))).cloned().collect()
+    held.iter().filter(|entry| !(is_file(entry) && listed_again.holds(&paths.id(&entry.path)))).cloned().collect()
 }
 
 /// What the journals set aside list (`set_aside`) that is still theirs to deal with. Each entry of a
@@ -1885,6 +2047,14 @@ mod tests {
     use tempfile::TempDir;
 
     type Test = std::result::Result<(), Box<dyn std::error::Error>>;
+
+    /// Whether two tellings name one file, asked as every comparison in the journal asks it: of the
+    /// tellings gathered, here the one ([`Tellings`]).
+    fn one_file(one: &PathId, other: &PathId) -> bool {
+        let mut gathered = Tellings::default();
+        gathered.add(one, (), |_, _| {});
+        gathered.holds(other)
+    }
 
     // The journal's lock is one for the whole process, and these listings are measured by the
     // clock: one export's listing of thousands of files must not lengthen another timed test's
@@ -1972,7 +2142,7 @@ mod tests {
             let (spelt, other) = (format!("out/{spelt}"), format!("out/{other}"));
             sand.put(&spelt, b"one file, two spellings");
             let paths = sand.journal().paths();
-            assert!(!paths.absent(&other) && paths.id(&other) == paths.id(&spelt), "{other} was not told as the file {spelt} its volume holds it as");
+            assert!(!paths.absent(&other) && one_file(&paths.id(&other), &paths.id(&spelt)), "{other} was not told as the file {spelt} its volume holds it as");
         }
         // Under the reading that folds case, these two are one name; only a volume that keeps them
         // apart holds both, and there no name is told by a listing that cannot tell them apart.
@@ -2179,6 +2349,13 @@ mod tests {
 
         fn file(&self) -> PathBuf {
             self.folders.config.join(JOURNAL_FILE)
+        }
+
+        /// A folder `folder` in the container, and a link `link` beside it that reaches it.
+        #[cfg(unix)]
+        fn linked(&self, folder: &str, link: &str) -> std::result::Result<(), io::Error> {
+            fs::create_dir_all(self.folders.container.join(folder))?;
+            std::os::unix::fs::symlink(self.folders.container.join(folder), self.folders.container.join(link))
         }
 
         /// A file in the container, with `bytes` in it.
@@ -5306,7 +5483,7 @@ mod tests {
         let root = sand.journal().root;
         let device = fs::metadata(&root)?.dev();
         let keeps_apart = Some(VolumeRules { case_sensitive: true, form_sensitive: true });
-        let one = |paths: Paths| paths.id("Card.MP4") == paths.id("CARD.MP4");
+        let one = |paths: Paths| one_file(&paths.id("Card.MP4"), &paths.id("CARD.MP4"));
         assert!(one(Paths::with(&root, keeps_apart.map(|rules| (device ^ 1, rules)))), "another volume's rules folded the container's names");
         assert!(
             one(Paths::with(&root.join("gone"), keeps_apart.map(|rules| (NO_FOLDER.0, rules)))),
@@ -5330,9 +5507,306 @@ mod tests {
         sand.put("real/finished.mp4", b"finished");
         std::os::unix::fs::symlink(container.join("real/finished.mp4"), container.join("pointer.mp4"))?;
         let paths = sand.journal().paths();
-        assert_eq!(paths.id("linked/new.mp4"), paths.id("real/new.mp4"), "a file not there yet was told by the link its folder was reached through");
-        assert_eq!(paths.id("linked/finished.mp4"), paths.id("real/finished.mp4"), "a file there was told by the link its folder was reached through");
-        assert_ne!(paths.id("pointer.mp4"), paths.id("real/finished.mp4"), "a link at a path's own name was told as what it points at");
+        assert!(one_file(&paths.id("linked/new.mp4"), &paths.id("real/new.mp4")), "a file not there yet was told by the link its folder was reached through");
+        assert!(one_file(&paths.id("linked/finished.mp4"), &paths.id("real/finished.mp4")), "a file there was told by the link its folder was reached through");
+        assert!(!one_file(&paths.id("pointer.mp4"), &paths.id("real/finished.mp4")), "a link at a path's own name was told as what it points at");
+        Ok(())
+    }
+
+    /// A writer puts a file up between one operation's look at a path in one folder and its look at
+    /// the same path through another spelling of that folder: one file still, because the identity
+    /// told to the second look — the file's numbers with the folder and folded name beside them —
+    /// names one file with the dwelling the first look was told, whichever look came before the
+    /// putting up. The Paths of one operation is that operation: its two tells are the two looks,
+    /// and the write is what the writer does between them.
+    #[test]
+    fn a_file_put_up_between_one_operations_two_looks_is_one_file_through_a_folder_spelt_another_way() -> Test {
+        let sand = Sandbox::new()?;
+        if volume_rules(&sand).case_sensitive {
+            skipped("this volume keeps folder names apart by case")?;
+            return Ok(());
+        }
+        let container = &sand.folders.container;
+        fs::create_dir(container.join("Movie"))?;
+        let paths = sand.journal().paths();
+        let before = paths.id("Movie/late.png");
+        sand.put("MOVIE/late.png", b"half of the movie");
+        assert!(one_file(&paths.id("MOVIE/late.png"), &before), "a file put up between one operation's two looks, its folder spelt apart, was told two files");
+        Ok(())
+    }
+
+    /// The same between the looks of one operation as they reach the file one way before it is there
+    /// and another after: the folder reached through a link and the folder itself are one folder, so
+    /// the dwelling is one dwelling and the two tells one file, on a volume that keeps every
+    /// spelling of a name apart as much as on one that folds them.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_put_up_between_one_operations_two_looks_is_one_file_reached_through_a_link() -> Test {
+        let sand = Sandbox::new()?;
+        sand.linked("real", "link")?;
+        let paths = sand.journal().paths();
+        let before = paths.id("link/movie.mp4");
+        sand.put("real/movie.mp4", b"half of the movie");
+        assert!(one_file(&paths.id("real/movie.mp4"), &before), "a file reached through a link, put up between one operation's two looks, was told two files");
+        Ok(())
+    }
+
+    /// One file reached under two names, each in another folder, is one file while both names are
+    /// there: the volume's numbers for it are one, and they name one file across dwellings that
+    /// differ. A rule that told one file by where its name lies alone would tell the two names two
+    /// files, run a second export beside the first, and leave one export's cancel to delete the
+    /// other's file.
+    #[test]
+    fn a_file_under_two_names_in_two_folders_is_one_file_by_its_numbers() -> Test {
+        let sand = Sandbox::new()?;
+        let container = &sand.folders.container;
+        sand.put("first/movie.mp4", b"the movie");
+        fs::create_dir(container.join("second"))?;
+        fs::hard_link(container.join("first/movie.mp4"), container.join("second/other.mp4"))?;
+        let paths = sand.journal().paths();
+        assert!(
+            one_file(&paths.id("first/movie.mp4"), &paths.id("second/other.mp4")),
+            "one file under two names was told two files, though its numbers were one"
+        );
+        Ok(())
+    }
+
+    /// Places one movie under two names in two folders — `first/movie.mp4`, and a hard link
+    /// naming it at `second/other.mp4` — and returns a running export listing it under the link's
+    /// name. Both tests beside it start from this one file named two ways.
+    #[cfg(unix)]
+    fn movie_under_two_names(sand: &Sandbox) -> std::result::Result<Pending, Box<dyn std::error::Error>> {
+        let container = &sand.folders.container;
+        sand.put("first/movie.mp4", b"the movie");
+        fs::create_dir(container.join("second"))?;
+        fs::hard_link(container.join("first/movie.mp4"), container.join("second/other.mp4"))?;
+        let mut holder = sand.journal().pending();
+        holder.list(std::slice::from_ref(&container.join("second/other.mp4")))?;
+        Ok(holder)
+    }
+
+    /// The refusal, with a running export's file reached by another name in another folder: its
+    /// numbers are told under both names, so the listing gathers the running entry whatever name
+    /// an export reached the file by, and no second export of it gets in under another name. The
+    /// refused listing enters nothing of its own.
+    #[cfg(unix)]
+    #[test]
+    fn a_second_export_of_a_running_exports_file_is_refused_under_another_name_of_it() -> Test {
+        let sand = Sandbox::new()?;
+        let holder = movie_under_two_names(&sand)?;
+        let mut second = sand.journal().pending();
+        assert_eq!(
+            second.list(std::slice::from_ref(&sand.folders.container.join("first/movie.mp4"))),
+            Err(sand.held_by_another("first/movie.mp4")),
+            "a second export listed, under its other name, the file a running export holds"
+        );
+        let written = fs::read_to_string(sand.file())?;
+        assert!(written.contains("second/other.mp4") && !written.contains("first/movie.mp4"), "the refused listing entered the journal: {written}");
+        holder.clear()?;
+        Ok(())
+    }
+
+    /// One file lies under two names in two folders; a running export lists it by one, and then
+    /// another file is put at the other name in its place. The two names now tell two files, and
+    /// a second export may list the replaced one: a comparison asks what the two tellings share
+    /// now, and binds nothing through an older telling that matches neither — so two files are two
+    /// exports, and neither listing reaches across to the other's file.
+    #[cfg(unix)]
+    #[test]
+    fn the_file_put_in_the_place_of_a_running_exports_other_name_is_another_file() -> Test {
+        let sand = Sandbox::new()?;
+        let container = &sand.folders.container;
+        let holder = movie_under_two_names(&sand)?;
+        fs::remove_file(container.join("first/movie.mp4"))?;
+        let replaced = sand.put("first/movie.mp4", b"a movie that took its place");
+        let mut second = sand.journal().pending();
+        second.list(std::slice::from_ref(&container.join("first/movie.mp4")))?;
+        assert_eq!(fs::read(&replaced)?, b"a movie that took its place", "the export of the replaced name lost the file there");
+        assert_eq!(fs::read(container.join("second/other.mp4"))?, b"the movie", "a listing of one file reached across to the file of another");
+        second.clear()?;
+        holder.clear()?;
+        assert!(!sand.file().exists(), "an export's end cleared more than it listed");
+        Ok(())
+    }
+
+    /// Two files of one name under two folders are two files: the name folds to one, but each lies
+    /// in another folder and carries its own numbers, so no comparison may take one for the other —
+    /// neither a refusal of a second export of the one a running export holds, nor a claim,
+    /// take-over or yielding across the two.
+    #[test]
+    fn two_files_of_one_name_under_two_folders_are_two_files() -> Test {
+        let sand = Sandbox::new()?;
+        sand.put("first/movie.mp4", b"the movie");
+        sand.put("second/movie.mp4", b"the other movie");
+        let paths = sand.journal().paths();
+        assert!(!one_file(&paths.id("first/movie.mp4"), &paths.id("second/movie.mp4")), "two files of one name under two folders were told one file");
+        Ok(())
+    }
+
+    /// A path is told once for an operation, however many of its rules ask: the file put at it in
+    /// place of the one first told is the one that path stands for until the operation ends, so a
+    /// path's two askings never tell two files.
+    #[test]
+    fn a_path_is_told_once_for_an_operation() -> Test {
+        let sand = Sandbox::new()?;
+        let path = sand.put("out/card.mp4", b"the first movie");
+        let paths = sand.journal().paths();
+        let first = paths.id("out/card.mp4");
+        fs::remove_file(&path)?;
+        let _kept = sand.put("out/kept.mp4", b"put first, so the movie put next is not given the first one's freed number");
+        sand.put("out/card.mp4", b"another movie in its place");
+        assert_eq!(paths.id("out/card.mp4").numbers, first.numbers, "one path was asked of the disk twice in one operation");
+        assert_ne!(sand.journal().paths().id("out/card.mp4").numbers, first.numbers, "the next operation did not ask for itself");
+        Ok(())
+    }
+
+    /// The files of a running export of a sequence, below `folder`: `frames` frames and `late.png`,
+    /// each listed by the export numbered 1 and none written yet.
+    fn running_sequence(folder: &str, frames: usize) -> Vec<Entry> {
+        (0..frames)
+            .map(|frame| format!("{folder}/f_{frame:05}.png"))
+            .chain(iter::once(format!("{folder}/late.png")))
+            .map(|path| Entry { path, kind: Kind::File(None), export: Some(1) })
+            .collect()
+    }
+
+    /// Three tellings of the kind the journal's comparisons meet, built on the disk: A, a file by its
+    /// path; B, another file put at that path in its place, told through another way to its folder;
+    /// C, the first file by a second name in another folder. A is one file with B, by where they lie,
+    /// and with C, by its numbers, while B and C are two, so no order can keep the three. Every way the
+    /// journal gathers tellings — what entries claim, the take-over of held entries, the files a record
+    /// yields to, and the gathering the refusal and the folders' one-of-each use — finds each telling it
+    /// is one file with, among many others and in whatever order they came, and none of the rest.
+    #[cfg(unix)]
+    #[test]
+    fn every_gathering_finds_each_telling_it_is_one_file_with_among_many_in_any_order() -> Test {
+        let sand = Sandbox::new()?;
+        let container = &sand.folders.container;
+        sand.put("a/x.png", b"the first file");
+        fs::create_dir(container.join("b"))?;
+        fs::hard_link(container.join("a/x.png"), container.join("b/q.png"))?;
+        sand.linked("a", "alias")?;
+        let paths = sand.journal().paths();
+        let (a, c) = (paths.id("a/x.png"), paths.id("b/q.png"));
+        fs::remove_file(container.join("a/x.png"))?;
+        sand.put("a/x.png", b"another file in its place");
+        let b = paths.id("alias/x.png");
+        assert!(a.numbers.is_some() && b.numbers.is_some() && a.numbers != b.numbers && a.numbers == c.numbers, "{a:?} {b:?} {c:?}");
+        assert!(one_file(&a, &b) && one_file(&b, &a) && one_file(&a, &c) && one_file(&c, &a), "{a:?} {b:?} {c:?}");
+        assert!(!one_file(&b, &c) && !one_file(&c, &b), "{b:?} {c:?}");
+        // Many others, in both folders, around them in every order a gathering may meet them.
+        let others: Vec<PathId> = running_sequence("a", 32).iter().chain(&running_sequence("b", 32)).map(|entry| paths.id(&entry.path)).collect();
+        let named = [("A", &a), ("B", &b), ("C", &c)];
+        for gathered in [vec![0], vec![1], vec![2], vec![1, 2], vec![2, 1], vec![0, 1, 2], vec![2, 1, 0]] {
+            for others_first in [true, false] {
+                let mut tellings = Tellings::default();
+                let mut add = |id: &PathId| tellings.add(id, (), |_, _| {});
+                if others_first {
+                    others.iter().for_each(&mut add);
+                }
+                gathered.iter().filter_map(|&at| named.get(at)).for_each(|(_, id)| add(id));
+                if !others_first {
+                    others.iter().for_each(&mut add);
+                }
+                for (probe, id) in named {
+                    let due = gathered.iter().filter_map(|&at| named.get(at)).any(|(_, held)| one_file(held, id));
+                    assert_eq!(tellings.holds(id), due, "{probe} among {gathered:?}, the others {}", if others_first { "first" } else { "last" });
+                }
+            }
+        }
+        // The journal's own gatherings, over the paths the tellings were told by.
+        let entry = |path: &str| Entry { path: path.to_string(), kind: Kind::File(None), export: None };
+        let mut running = running_sequence("b", 32);
+        running.push(entry("b/q.png"));
+        let claims = Claims::of(&paths, &running);
+        assert!(claims.by(&paths, &entry("a/x.png")) && !claims.by(&paths, &entry("alias/x.png")), "what entries claim");
+        let taken = Taken { files: ["b/q.png".to_string()].into(), every: false };
+        let yields = taken.yields(&paths);
+        assert!(yields("a/x.png") && !yields("alias/x.png"), "the files a record yields to");
+        let held =
+            vec![entry("b/f_00000.png"), Entry { kind: Kind::File(Some(Stamp { bytes: 3, modified: Some(1) })), ..entry("b/q.png") }, entry("alias/x.png")];
+        let mut listing = vec![entry("a/x.png")];
+        let still = taken_over(&held, &mut listing, &paths);
+        assert_eq!(listing.first().map(|listed| listed.kind), held.get(1).map(|older| older.kind), "the oldest held entry of the file listed again");
+        assert_eq!(still, vec![entry("b/f_00000.png")], "the held entries the listing took over");
+        Ok(())
+    }
+
+    /// A start, or a cancel, tells the paths a running export claims before it weighs the stale
+    /// entries, and a running export's writer puts a file up between the two: the stale entry of
+    /// that file, spelt through another way to its folder, is still the running export's, however
+    /// many files that export lists, and the file it is writing is left. Told by one order of whole
+    /// tellings, a gathering of more than one claim sorted the late telling past the one it is one
+    /// file with, and the start deleted the file being written.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_put_up_while_a_start_tells_its_paths_is_left_to_the_export_writing_it() -> Test {
+        for frames in [0, 1, 64] {
+            let sand = Sandbox::new()?;
+            sand.linked("real", "link")?;
+            let running = running_sequence("real", frames);
+            let paths = sand.journal().paths();
+            // The start's first look: what the running export claims, before its writer has put a frame up.
+            assert!(Claims::of(&paths, &running).by(&paths, &running[running.len() - 1]));
+            let late = sand.put("real/late.png", b"half of the frame");
+            let stale = vec![Entry { path: "link/late.png".to_string(), kind: Kind::File(None), export: None }];
+            let mut recovery = Recovery::default();
+            let left = sand.journal().deal_with_all(&paths, stale, &running, &mut recovery);
+            assert!(left.is_empty() && recovery.removed.is_empty(), "{frames} frames: {recovery:?}");
+            assert_eq!(fs::read(&late)?, b"half of the frame", "{frames} frames: the start deleted the file a running export is writing");
+        }
+        Ok(())
+    }
+
+    /// The listing's refusal, with a running export's file put up between its look at the running
+    /// export's entries and its look at its own: the second export of that file is refused, spelt
+    /// through another way to its folder. Each listing records its files at their landings, their
+    /// folders resolved, so the two paths are one spelling and one telling, which the putting up
+    /// between the looks cannot split.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_put_up_between_the_listings_two_looks_is_refused_to_a_second_export() -> Test {
+        let sand = Sandbox::new()?;
+        let container = &sand.folders.container;
+        sand.linked("real", "link")?;
+        let journal = sand.journal();
+        let mut holder = journal.pending();
+        let frames: Vec<PathBuf> = running_sequence("real", 64).iter().map(|entry| container.join(&entry.path)).collect();
+        holder.list(&frames)?;
+        let paths = journal.paths();
+        // The listing's look at the running export's entries, which its writer has not reached yet.
+        for listed in &holder.listed {
+            paths.id(&listed.path);
+        }
+        sand.put("real/late.png", b"half of the frame");
+        let mut second = journal.pending();
+        let refused = {
+            let mut known = lock(&KNOWN);
+            let state = journal.hold(&mut known)?;
+            second.list_held(state, &paths, &[container.join("link/late.png")])
+        };
+        assert_eq!(refused, Err(sand.held_by_another("real/late.png")));
+        holder.clear()?;
+        Ok(())
+    }
+
+    /// A file under a folder that one look found nowhere, and the writer made before the next look,
+    /// is one file for both looks, its folder spelt another way: the first look tells where the name
+    /// lies from the container, the folder above it that is there, and the second from the container
+    /// and from the folder made since, so the container's telling is the one they share.
+    #[test]
+    fn a_file_under_a_folder_made_between_one_operations_two_looks_is_one_file() -> Test {
+        let sand = Sandbox::new()?;
+        if volume_rules(&sand).case_sensitive {
+            skipped("this volume keeps folder names apart by case")?;
+            return Ok(());
+        }
+        let paths = sand.journal().paths();
+        let before = paths.id("New/late.png");
+        sand.put("NEW/late.png", b"half of the movie");
+        let after = paths.id("NEW/late.png");
+        assert!(before.numbers.is_none() && after.numbers.is_some(), "{before:?} {after:?}");
+        assert!(one_file(&before, &after), "a file under a folder made between one operation's two looks was told two files: {before:?} {after:?}");
         Ok(())
     }
 }
