@@ -299,11 +299,15 @@ let cardSeconds = 6
 /// The running example's card's frame rate.
 let cardFrameRate = 30
 
-/// The running example's card template, made the way Leo makes one: a composition of `width` by `height`,
-/// ``cardSeconds`` at ``cardFrameRate`` frames a second, with a text layer and a red picture as imported footage, a
-/// Name control on the text and a Photo control on the picture, saved as `card.ectemplate` in `folder`. The steps
-/// name the layers and items, not their ids, so nothing depends on which numbers the session hands out.
-func makeCardTemplate(_ engine: EffectsEngine, in folder: URL, width: Int, height: Int) async throws -> URL {
+/// The running example's card template, made the way Leo makes one: a composition of `width` by `height`, `seconds`
+/// long (``cardSeconds``) at `frameRate` frames a second (``cardFrameRate``), with a text layer and a red picture as
+/// imported footage, a Name control on the text and a Photo control on the picture, saved as `card.ectemplate` in
+/// `folder`. The steps name the layers and items, not their ids, so nothing depends on which numbers the session
+/// hands out.
+func makeCardTemplate(
+    _ engine: EffectsEngine, in folder: URL, width: Int, height: Int, seconds: Int = cardSeconds,
+    frameRate: Int = cardFrameRate
+) async throws -> URL {
     let photo = folder.appending(path: "photo.png")
     let template = folder.appending(path: "card.ectemplate")
     try picture(.red, to: photo)
@@ -312,7 +316,7 @@ func makeCardTemplate(_ engine: EffectsEngine, in folder: URL, width: Int, heigh
             command: "comp.new",
             params: [
                 "name": "Card", "width": .number(Double(width)), "height": .number(Double(height)),
-                "duration": .number(Double(cardSeconds)), "frameRate": .number(Double(cardFrameRate)),
+                "duration": .number(Double(seconds)), "frameRate": .number(Double(frameRate)),
             ]
         ),
         (command: "layer.newSolid", params: ["comp": "Card", "name": "Bg", "color": "#223344"]),

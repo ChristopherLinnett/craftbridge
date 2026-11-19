@@ -20,8 +20,14 @@ private const val SCENARIO_FOLDER = "craftbridge-conformance"
 /** The folder the scenarios' folders are made in, which lies in the app's own data folder. */
 internal fun scenarioRoot(context: Context): File = File(context.dataDir, SCENARIO_FOLDER)
 
+/** The text of the file [name] in the test APK's assets, which are the conformance folder's own files. */
+internal fun assetText(
+    context: Context,
+    name: String,
+): String = context.assets.open(name).use { it.readBytes().decodeToString() }
+
 /** The corpus file's text. */
-internal fun corpusText(context: Context): String = context.assets.open(CORPUS_ASSET).use { it.readBytes().decodeToString() }
+internal fun corpusText(context: Context): String = assetText(context, CORPUS_ASSET)
 
 /** The scenarios the plug-in runs, which is every one the oracle does not run alone. */
 internal fun pluginScenarios(text: String): List<Scenario> = corpusOf(text).scenarios.filter { it.sides.runsPlugin }

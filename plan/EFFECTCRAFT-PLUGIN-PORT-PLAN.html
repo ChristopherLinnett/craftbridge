@@ -583,8 +583,8 @@ try await card.set(&quot;Photo&quot;, media: photoURL)        // sam.jpg
 </tr>
 <tr>
 <td>Device performance</td>
-<td>first-preview time and export time of the running example on each acceptance device, recorded as the baseline</td>
-<td>V5</td>
+<td>first-preview time, export time and peak memory of the running example on each acceptance device, recorded as the baseline in <code>conformance/<wbr>effects/<wbr>baseline.toml</code>; a release is flagged when the median of ten fresh runs is more than 10 % slower than it and its fastest run is slower than the record&#39;s slowest</td>
+<td>V5, release workflow</td>
 </tr>
 </tbody></table>
 </div><p><strong>Analytics.</strong> CraftBridge collects nothing: no telemetry, no network calls (§29). Every measure above comes from the conformance suite, the acceptance runs and the release workflow.</p>
@@ -1298,7 +1298,7 @@ pub fn set_device_codecs(codecs: Vec&lt;CodecInfo&gt;);   // the device&#39;s co
 <tr>
 <td><code>conformance/<wbr>effects/<wbr></code></td>
 <td>NEW</td>
-<td>§28: the corpus every platform&#39;s runner reads</td>
+<td>§28: the corpus every platform&#39;s runner reads; V5: <code>baseline.toml</code>, the running example&#39;s per-device baseline, whose definition the Swift and Kotlin measurements read from the copy their test bundles pack and whose record the release script reads (§9, §29)</td>
 </tr>
 <tr>
 <td><code>plan/<wbr></code></td>
@@ -2662,7 +2662,7 @@ which calls <code>request(&quot;exec&quot;, {&quot;command&quot;: &quot;layer.ne
 <li><strong>Security.</strong> Hand-written <code>unsafe</code> only in the platform modules, each block justified (§20); WebAssembly plug-ins run in EffectCraft&#39;s interpreter sandbox and load only where the app allows (PD13); no helper processes (AD1), and the engine&#39;s two model downloads — the commands that fetch weights by starting the system&#39;s <code>curl</code> — are answered <code>Unsupported</code> on every path, so no process starts at all (AD11).</li>
 <li><strong>Reliability.</strong> EffectCraft&#39;s &quot;never crash&quot; rules hold in every CraftBridge crate; a panic becomes <code>Internal</code> and the document stays (§16). A cancel takes effect within one 100 ms poll plus the frame being rendered.</li>
 <li><strong>Responsiveness.</strong> No engine call blocks the caller&#39;s thread; all are <code>async</code> (§20).</li>
-<li><strong>Performance.</strong> First-preview and export times of the running example on each acceptance device are recorded as the baseline (V5) and reported per release; a release slower than the baseline by more than 10 % is flagged.</li>
+<li><strong>Performance.</strong> First-preview and export times and peak memory of the running example on each acceptance device are recorded as the baseline (V5), in <code>conformance/<wbr>effects/<wbr>baseline.toml</code>, the one place that holds the figures, how they are measured and the line the measurements print, and are reported per release; a release slower than the baseline by more than 10 % is flagged.</li>
 <li><strong>Size.</strong> The release library&#39;s size per architecture is measured and reported per release (PD15); Android libraries are 16 KB-aligned (§23).</li>
 <li><strong>Licences.</strong> Every dependency is MIT, Apache-2.0, BSD, ISC, Zlib, Unicode or CC0, or MPL-2.0 used unmodified (UniFFI), as EffectCraft&#39;s own rule allows (<code>AGENTS.md</code>, &quot;Clean-room code&quot;); <code>tools/<wbr>ci.sh</code> checks the list.</li>
 <li><strong>Observability.</strong> The Rust <code>log</code> output goes to <code>os_log</code> on iOS and logcat on Android, at a level the app sets.</li>
@@ -2776,7 +2776,7 @@ which calls <code>request(&quot;exec&quot;, {&quot;command&quot;: &quot;layer.ne
 <li><input disabled="" type="checkbox"> OPS-7 · 0.5 d · W0 — The Kotlin never-crash and JNI rules as detekt rules, configured once in <code>build-logic</code> (D-28). Acceptance: each banned call, planted in a main source set, fails the Android stage.</li>
 <li><input disabled="" type="checkbox"> OPS-8 · 0.5 d · W0 — The Rust <code>unsafe</code> and lint-attribute checks on the <code>syn</code> parser, and the hand-written source stripper removed from <code>rust/<wbr>xtask</code> (D-28). Acceptance: every planted violation still fails; no stripper remains.</li>
 <li><input disabled="" type="checkbox"> OPS-4 · 1.5 d · W5 — Steps 3 to 7 of <code>tools/<wbr>update-upstream.sh</code> (§24): the adaptations diff over <code>tools/<wbr>adaptations.toml</code>, regeneration and the API diff, the gate, the record, the library versions with a newer release. Acceptance: a dry run on the current pin changes nothing; a fixture revision that changes a file an adaptation lists names it; a fixture catalog holding an outdated library version names that version and its newer release; E12.</li>
-<li><input disabled="" type="checkbox"> OPS-5 · 1.5 d · W5 — <code>tools/<wbr>release.sh</code>: version, XCFramework zip and checksum, AARs, release notes with size and baseline (§9), the one version from <code>rust/<wbr>Cargo.toml</code> (D-27), and <code>craftbridge-swift</code> written from <code>ios/<wbr>sdk/<wbr></code> (D-24); stages a draft release without publishing. Acceptance: G2 is the only step left.</li>
+<li><input disabled="" type="checkbox"> OPS-5 · 1.5 d · W5 — <code>tools/<wbr>release.sh</code>: version, XCFramework zip and checksum, AARs, release notes with size and baseline (§9, read from <code>conformance/<wbr>effects/<wbr>baseline.toml</code>), the one version from <code>rust/<wbr>Cargo.toml</code> (D-27), and <code>craftbridge-swift</code> written from <code>ios/<wbr>sdk/<wbr></code> (D-24); stages a draft release without publishing. Acceptance: G2 is the only step left.</li>
 </ul>
 <p><strong>UP: upstream pin</strong> (W1; EffectCraft itself is never changed, PD5)</p>
 <ul>
@@ -2900,7 +2900,7 @@ which calls <code>request(&quot;exec&quot;, {&quot;command&quot;: &quot;layer.ne
 </tr>
 <tr>
 <td>V5</td>
-<td>Baseline per device: first preview and full export of the running example, and peak memory</td>
+<td>Baseline per device: first preview and full export of the running example, and peak memory. Answered on 2026-11-19 on the iPhone 12 Pro, with the Xiaomi 17 Pro Max&#39;s series owed to V5a (#383), which measures it settled, as <code>baseline.toml</code> says, by a Swift real-app test (<code>RealAppBaselineTests</code>, through <code>tools/<wbr>ios-device-test.sh --swift</code>) and an instrumented check (<code>BaselineOnDevice</code>) that each print one line of the figures (the first preview, split into the GPU&#39;s start and the rest, the preview path on a warm engine, the export, the peak memory, and the conditions the run was made under); the figures, with each device&#39;s hardware, OS, build, conditions, runs, median and range, are in <code>conformance/<wbr>effects/<wbr>baseline.toml</code> alone, which also says how each is measured, what the first preview is made of on each phone, and why its peak memory is the figure to read on each platform</td>
 <td class="rid">QA-3</td>
 </tr>
 <tr>

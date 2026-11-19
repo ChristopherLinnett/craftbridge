@@ -22,13 +22,19 @@ private const val POOL_THREAD_NAME = "craftbridge-exp"
 /** How long a check waits for the threads of an earlier engine's pool to end. */
 private const val WAIT_FOR_THREADS_MS = 10_000L
 
-/** One figure of `/proc/meminfo`, such as `MemAvailable`, as an app reads it, in bytes. */
-internal fun meminfo(name: String): Long {
-    val line = File("/proc/meminfo").readLines().firstOrNull { it.startsWith("$name:") } ?: error("/proc/meminfo has no $name line")
+/** One figure of a `/proc` file that gives it in kB, such as `/proc/meminfo`'s `MemAvailable` or `/proc/self/status`'s `VmHWM`, in bytes. */
+internal fun procBytes(
+    path: String,
+    name: String,
+): Long {
+    val line = File(path).readLines().firstOrNull { it.startsWith("$name:") } ?: error("$path has no $name line")
     val words = line.substringAfter(':').trim().split(Regex("\\s+"))
     require(words.size == 2 && words[1] == "kB") { "$name reads `$line`, not a figure in kB" }
     return words[0].toLong() * 1024
 }
+
+/** One figure of `/proc/meminfo`, such as `MemAvailable`, as an app reads it, in bytes. */
+internal fun meminfo(name: String): Long = procBytes("/proc/meminfo", name)
 
 /** `MemAvailable`, the kernel's estimate of the memory an app can still allocate, which the exporter sizes its pool by. */
 internal fun memAvailable(): Long = meminfo("MemAvailable")
@@ -67,6 +73,13 @@ private fun poolThreads(): Int =
         runCatching { File(task, "comm").readText().trim() == POOL_THREAD_NAME }.getOrDefault(false)
     }
 
+/**
+ * The threads the last export ran on, read while its engine lives: the pool the exporter sized below the cores,
+ * which it keeps until the engine ends, or, where the memory held the job nothing back, the caller's own threads,
+ * as many as the cores, which carry no name of the pool's.
+ */
+internal fun exportThreads(): Int = poolThreads().takeIf { it > 0 } ?: allowedProcessors()
+
 /** Waits until no thread of an earlier pool is left, since the pool a job keeps ends with its engine. */
 private fun awaitNoPoolThreads() {
     val deadline = System.currentTimeMillis() + WAIT_FOR_THREADS_MS
@@ -86,7 +99,7 @@ private suspend fun poolOfOneExport(
     context: Context,
     width: Int,
     height: Int,
-): Triple<Int?, Long, Long> {
+): Triple<Int, Long, Long> {
     val cache = File(Folders.appDefault(context).cache)
     val output = File(cache, "qa3b-pool.png")
     val written = { cache.listFiles().orEmpty().filter { it.name.startsWith("qa3b-pool") } }
@@ -115,8 +128,7 @@ private suspend fun poolOfOneExport(
         val after = memAvailable()
         require(written().isNotEmpty()) { "the ${width}x$height export wrote no frame" }
         // The pool is kept after the job for the next of its size, so it is still there to be counted.
-        val named = poolThreads()
-        return Triple(named.takeIf { it > 0 }, before, after)
+        return Triple(exportThreads(), before, after)
     } finally {
         engine.shutDown()
         written().forEach { it.delete() }
@@ -168,9 +180,7 @@ private suspend fun poolHeldToTheRule(
         Log.i(LOG_TAG, "pool at $name: left out, ${memAvailable()} bytes are available for a frame in flight needing $need")
         return null
     }
-    val (named, before, after) = poolOfOneExport(context, width, height)
-    // A pool of as many threads as the cores is the caller's own, which carries no name of the pool's.
-    val observed = named ?: cores
+    val (observed, before, after) = poolOfOneExport(context, width, height)
     val least = expectedPool(minOf(before, after), width, height, cores, perPixel)
     val most = expectedPool(maxOf(before, after), width, height, cores, perPixel)
     val said = "MemAvailable $before before and $after after, $cores cores: the rule gives $least to $most"

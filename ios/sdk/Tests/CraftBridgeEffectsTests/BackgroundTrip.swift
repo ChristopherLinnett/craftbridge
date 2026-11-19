@@ -43,6 +43,16 @@ extension Trait where Self == ConditionTrait {
     static func needsTheDeviceRunner(askedFor name: String) -> Self {
         enabled(if: deviceRunAsks(for: name), "only a device run that asks for \(name) by name runs it")
     }
+
+    /// A test whose figures are a measurement: it runs where it has a phone and an app of its own, the device
+    /// runner's, or where the person measuring asks for it (`CRAFTBRIDGE_BASELINE` in the test's environment, which
+    /// `xcodebuild test` passes on only as `TEST_RUNNER_CRAFTBRIDGE_BASELINE`), and never beside the suite's other
+    /// tests in the gate, whose load would move its times and which it would load.
+    static var measuresTheBaseline: Self {
+        enabled(
+            if: underTheDeviceRunner || ProcessInfo.processInfo.environment["CRAFTBRIDGE_BASELINE"] != nil,
+            "only a device run or a run asked for measures the baseline")
+    }
 }
 
 /// One stay of the app in the background that the device runner arranges when asked, counted by the system's
