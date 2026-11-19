@@ -40,6 +40,15 @@
 //!   delete a file it never wrote, at the time or after a restart. An export may list its own path
 //!   again, and two exports whose files need one new folder each keep that folder's entry apart, as
 //!   each export makes the folder its own files need.
+//! * **Two paths are one file when the volume holding them says so, never by their spelling.** Every
+//!   comparison in the journal asks one question through [`PathId`]: a path that is there is the
+//!   volume's own identity for it — its device and file number — and one that is not yet is its
+//!   deepest folder that is, with the names below it folded under the volume's own rules for case and
+//!   Unicode form, read from the volume by asking it and never assumed from the platform. A volume
+//!   whose rules cannot be read is treated as the one that loses no work, which compares as if it
+//!   ignored both. One file spelt two ways is then refused a second export exactly as one path listed
+//!   twice is, so a finished export's file survives another export's cancel, kill or failure however
+//!   the second export spelt the path; and two files a volume keeps apart stay two exports.
 //! * **Only regular files, and empty folders an export made, inside the container are touched.**
 //!   Entries are stored relative to the container, because the absolute path of an iOS app's
 //!   container can change between one launch and the next (an update moves it). A start joins each
@@ -123,8 +132,10 @@ use crate::engine::lock;
 use crate::error::CraftError;
 use crate::folders::{Confinement, Folders, entry_in, resolved, written_file};
 use serde_json::{Map, Value};
+use std::cell::RefCell;
 use std::collections::btree_map::Entry as Slot;
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsStr;
 use std::fs::{self, File, TryLockError};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -132,6 +143,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::NamedTempFile;
+use unicase::UniCase;
+use unicode_normalization::UnicodeNormalization;
 
 /// The journal's file name, in the app's config folder.
 pub const JOURNAL_FILE: &str = "pending-exports.json";
@@ -168,8 +181,9 @@ const MODIFIED: &str = "modified";
 /// identities.
 const EXPORT: &str = "export";
 
-/// What a temporary file of the journal's atomic write starts with, so a start can sweep the ones a
-/// killed write left behind and nothing else.
+/// What a temporary file of the journal's atomic write starts with, and the name a probe of the
+/// volume's rules puts up beside it ([`probe_name`]), so a start can sweep what a killed write or
+/// probe left behind and nothing else.
 const TEMP_PREFIX: &str = ".pending-exports-";
 
 /// The file, beside the journal, whose exclusive lock a process holds while it deals with the journal
@@ -237,6 +251,313 @@ impl Known {
     }
 }
 
+// ——— Whether two paths name one file: the one definition every comparison in the journal uses ———
+
+/// What the volume holding `found` says that file is, where the system numbers files at all: the
+/// volume's and the file's own numbers, which one file carries under every name and spelling of it.
+#[cfg(unix)]
+fn identity_of(found: &fs::Metadata) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    Some((found.dev(), found.ino()))
+}
+
+/// This system gives no file numbers to tell a path by, so no path can be told by one: every
+/// spelling of a path is then folded before it is compared, which is the reading that loses no work
+/// ([`VolumeRules::default`]).
+#[cfg(not(unix))]
+fn identity_of(_found: &fs::Metadata) -> Option<(u64, u64)> {
+    None
+}
+
+/// Which volume `found` sits on, where the system names volumes at all: [`VOLUMES`] keys each read
+/// volume's rules by that number.
+#[cfg(unix)]
+fn volume_of(found: &fs::Metadata) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    Some(found.dev())
+}
+
+/// No volume to name, so none to read rules from or key them under: every volume is then one whose
+/// rules could not be read, and keeps [`VolumeRules::default`].
+#[cfg(not(unix))]
+fn volume_of(_found: &fs::Metadata) -> Option<u64> {
+    None
+}
+
+/// How the volume holding the journal compares the names under it, read from the volume itself by
+/// [`VolumeRules::read`] and never assumed from the platform: a Mac's internal disk folds case and
+/// Unicode form, an external volume formatted another way on the same Mac may fold neither, and a
+/// Linux volume may keep even case apart, so only the volume can say what the volume does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct VolumeRules {
+    /// Whether two names differing only in case are kept and compared apart.
+    case_sensitive: bool,
+    /// Whether two names differing only in Unicode form are kept and compared apart.
+    form_sensitive: bool,
+}
+
+impl Default for VolumeRules {
+    /// The reading of a volume whose rules cannot be read: the one that loses no work. Reading a
+    /// volume as folding more than it does can only refuse a listing two files could have run, since
+    /// two files that are there are told apart by their own numbers whatever the fold; reading it as
+    /// stricter than it folds lets two spellings of one file pass as two exports, which is how a
+    /// cancel deletes a file another export finished. Lost work outranks a needless refusal, so an
+    /// unread volume folds both.
+    fn default() -> Self {
+        Self { case_sensitive: false, form_sensitive: false }
+    }
+}
+
+/// The rules read from each volume this process has asked, keyed by the volume's number: the asking
+/// writes a probe file, so no volume is asked twice in one process.
+static VOLUMES: Mutex<BTreeMap<u64, VolumeRules>> = Mutex::new(BTreeMap::new());
+
+/// Names each probe of [`VolumeRules::ask`] apart from every other's, in this process and after it.
+static PROBED: AtomicU64 = AtomicU64::new(1);
+
+impl VolumeRules {
+    /// The rules of the volume holding `folder` — the journal's own folder — with that volume's
+    /// number, asked once per volume in a process and remembered; none when `folder` names no
+    /// volume, whose names then fold by [`VolumeRules::default`]. The rules hold for that volume
+    /// alone: the number goes with them, so they fold no name on another.
+    ///
+    /// The volume is asked by what it does with names, because no call could be read instead: POSIX
+    /// `pathconf` names no rule for case, Apple's volumes carry a flag for that but none for form,
+    /// and nothing anywhere answers Unicode form at all — which is exactly what a Mac's disks fold.
+    /// So the volume is shown a name and asked what answers a spelling of it, and it answers both
+    /// rules at once in its own behaviour rather than a platform's reputation.
+    fn read(folder: &Path) -> Option<(u64, Self)> {
+        let volume = fs::metadata(folder).ok().as_ref().and_then(volume_of)?;
+        let rules = *lock(&VOLUMES).entry(volume).or_insert_with(|| Self::ask(folder));
+        Some((volume, rules))
+    }
+
+    /// Ask the volume holding `folder` its rules, by a probe put up in `folder` and taken back
+    /// ([`names_apart`]): a rule the volume could not be asked about folds, the reading that loses no
+    /// work.
+    fn ask(folder: &Path) -> Self {
+        let probe = probe_name();
+        Self {
+            case_sensitive: names_apart(folder, &probe, &probe.to_uppercase()).unwrap_or(false),
+            form_sensitive: names_apart(folder, &format!("{probe}\u{fc}"), &format!("{probe}u\u{308}")).unwrap_or(false),
+        }
+    }
+}
+
+/// The name a probe of [`VolumeRules::ask`] puts up, which no other probe of this process or of any
+/// other running process puts up. It starts with [`TEMP_PREFIX`], so a start's sweep removes what a
+/// process killed mid-probe left in the journal's folder.
+fn probe_name() -> String {
+    format!("{TEMP_PREFIX}volume-rules-{:x}-{:x}", std::process::id(), PROBED.fetch_add(1, Ordering::Relaxed))
+}
+
+/// Ask the volume holding `folder` whether it keeps the name `name` and the name `spelling` — the
+/// same name spelt another way, differing in the one rule being asked about — apart: `Some(true)`
+/// for two files, `Some(false)` for one file answering both names, `None` when the volume could not
+/// be asked, whose reader folds instead ([`VolumeRules::default`]), the answer that loses no work.
+/// The spelling is looked at before the name, and that order is what makes two names a proof: a
+/// sweep of a process that runs without the journal's lock may take the probe away at any moment,
+/// and nothing but this ask puts its name up, so a name still there after the spelling found nothing
+/// was there when the spelling was looked at, while the other order would read a probe swept between
+/// the two looks as two names on a volume that folds them.
+fn names_apart(folder: &Path, name: &str, spelling: &str) -> Option<bool> {
+    let put_up = folder.join(name);
+    let spelled = folder.join(spelling);
+    match fs::OpenOptions::new().write(true).create_new(true).open(&put_up) {
+        // The probe is opened and dropped at once: its presence under a name is the whole answer,
+        // and nothing of the ask may hold a file in the journal's folder afterwards.
+        Ok(probe) => drop(probe),
+        // A file already answers the name: the same question asked twice at once has one answer
+        // either way, so asking against what is already there is enough.
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+        // The folder takes no probe: the volume cannot be asked.
+        Err(_) => return None,
+    }
+    let answer = match (fs::symlink_metadata(&spelled), fs::symlink_metadata(&put_up)) {
+        // The other name answers too: one file, if the numbers say it is the same file.
+        (Ok(other), Ok(one)) => (identity_of(&one) == identity_of(&other)).then_some(false),
+        // Nothing answers the other name while the name itself is there to say the volume kept the
+        // two apart: two names.
+        (Err(error), Ok(_)) if error.kind() == io::ErrorKind::NotFound => Some(true),
+        _ => None,
+    };
+    // Take the probe back however it is spelt: on a folding volume both names are the one file,
+    // and the name that finds nothing has taken it back already.
+    let _gone = fs::remove_file(&spelled);
+    let _gone = fs::remove_file(&put_up);
+    answer
+}
+
+/// No folder to stand at the head of a folded path: the container itself could not be looked at.
+const NO_FOLDER: (u64, u64) = (0, 0);
+
+/// Where a path below the container lies, told the way the volume holding it tells one file from
+/// another: the journal's one answer to whether two paths name one file, which no comparison in it
+/// asks any other way. A path that is there is the volume's own numbers for it — one answer however
+/// the path is spelt and however many names the file carries. A path not there yet is the deepest
+/// folder of it that is, with the names below that folder folded as the volume holding them folds
+/// names: an export lists the file it is about to write before it writes it, and the listing holds
+/// or refuses it by what the volume would make of the spelling, never by the spelling.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum PathId {
+    /// The volume's and the file's numbers of a path that is there.
+    There(u64, u64),
+    /// A path that is not: the numbers of the deepest folder of it that is ([`NO_FOLDER`] when the
+    /// container itself could not be looked at), and the names below it folded as that folder's
+    /// volume folds names — under the reading that loses no work whenever the folder is not on the
+    /// volume whose rules were read, the container that could not be looked at included.
+    Below((u64, u64), Vec<String>),
+}
+
+/// The identities of the paths below one container, gathered for one operation — one listing, one
+/// start, one export's end — and kept for it: telling a missing path asks what the disk says of each
+/// name of it from the container down, and a listing of a long sequence would ask it of every path
+/// once per rule that asks, so each path gets one answer per operation instead.
+struct Paths {
+    root: PathBuf,
+    /// The container's own numbers, which head every folded path below it; none for a container
+    /// that cannot be looked at.
+    anchor: Option<(u64, u64)>,
+    /// The volume whose rules were read, with those rules ([`VolumeRules::read`]); the names on any
+    /// other volume fold by [`VolumeRules::default`].
+    read: Option<(u64, VolumeRules)>,
+    asked: RefCell<BTreeMap<String, PathId>>,
+}
+
+impl Paths {
+    /// The identities below `root`, with the rules read from `folder`, the journal's own folder.
+    fn new(root: &Path, folder: &Path) -> Self {
+        Self::with(root, VolumeRules::read(folder))
+    }
+
+    /// The identities below `root`, folding the names on the volume `read` names by the rules it
+    /// carries. Those rules are never taken for another volume's, however near: the container may sit
+    /// on another volume than the journal's folder, and a volume may be mounted under the container,
+    /// so a folder of a path on any other volume, or below a container that cannot be looked at at
+    /// all, folds by [`VolumeRules::default`], the reading that loses no work.
+    fn with(root: &Path, read: Option<(u64, VolumeRules)>) -> Self {
+        let anchor = fs::symlink_metadata(root).ok().as_ref().and_then(identity_of);
+        Self { root: root.to_path_buf(), anchor, read, asked: RefCell::new(BTreeMap::new()) }
+    }
+
+    /// Where the path `path` — an entry's, below the container — lies, told by the volume: [`PathId`].
+    fn id(&self, path: &str) -> PathId {
+        if let Some(asked) = self.asked.borrow().get(path) {
+            return asked.clone();
+        }
+        let names: Vec<&OsStr> = Path::new(path).iter().collect();
+        let last = names.len().saturating_sub(1);
+        let mut here = self.root.clone();
+        let mut anchor = self.anchor;
+        let mut below: Vec<String> = Vec::new();
+        for (at, name) in names.into_iter().enumerate() {
+            here.push(name);
+            // The disk is asked only down to the first name that is not there: no name below a name
+            // that is not there can be, and the deepest folder that is there is the volume whose
+            // rules will fold the names below it. A folder of the path is looked at through a link,
+            // as the writer's open and a start's removal reach what lies in it; the path's own name
+            // is looked at as itself, as a start deals with a link there.
+            if below.is_empty() {
+                let found = if at == last { fs::symlink_metadata(&here) } else { fs::metadata(&here) };
+                if let Some(found) = found.ok().as_ref().and_then(identity_of) {
+                    anchor = Some(found);
+                    continue;
+                }
+            }
+            below.push(self.fold(name, anchor.map(|(device, _)| device)));
+        }
+        let head = anchor.unwrap_or(NO_FOLDER);
+        let id = if below.is_empty() { PathId::There(head.0, head.1) } else { PathId::Below(head, below) };
+        self.asked.borrow_mut().insert(path.to_string(), id.clone());
+        id
+    }
+
+    /// A name as the volume of the number `device` sees it when it asks whether two names are one:
+    /// folded as that volume's own answer said it folds names ([`VolumeRules::read`]) — for case by
+    /// Unicode's full case folding, which holds `straße` and `STRASSE`, `ſ` and `s`, as one name as a
+    /// Mac's disk does, and for form to the decomposed form — and folded for both where the folder
+    /// is on no volume whose rules were read. Full folding is the fold a Mac's disk makes, and a
+    /// volume that folds case by a simpler table folds no more than it does, so the most that table
+    /// can cost is a refusal, never a file. Case and form feed each other — a folded case can expose
+    /// a form to fold, a folding can expose a case to fold — so folding runs on until it stops
+    /// changing, bounded so no name costs more than a fixed few rounds however it is spelt.
+    fn fold(&self, name: &OsStr, device: Option<u64>) -> String {
+        let VolumeRules { case_sensitive, form_sensitive } = match (self.read, device) {
+            (Some((volume, rules)), Some(device)) if volume == device => rules,
+            _ => VolumeRules::default(),
+        };
+        let mut folded = name.to_string_lossy().into_owned();
+        for _ in 0..4 {
+            let mut next = if case_sensitive { folded.clone() } else { UniCase::new(folded.as_str()).to_folded_case() };
+            if !form_sensitive {
+                next = next.nfd().collect();
+            }
+            if next == folded {
+                break;
+            }
+            folded = next;
+        }
+        folded
+    }
+}
+
+/// What some entries claim, told as the volumes holding them tell files ([`PathId`]): the file or
+/// folder each names, and every folder each lies in. A start and a cancel ask of every stale entry
+/// whether a running export claims it, and of every folder whether an entry left listed lies in it,
+/// so what those entries claim is gathered once, and each stale entry asks a lookup rather than
+/// walking them all.
+#[derive(Default)]
+struct Claims {
+    /// What each entry names.
+    named: BTreeSet<PathId>,
+    /// Each folder an entry lies in, and what the entry names.
+    within: BTreeSet<PathId>,
+}
+
+impl Claims {
+    /// What `entries` claim.
+    fn of(paths: &Paths, entries: &[Entry]) -> Self {
+        let mut claims = Self::default();
+        for listed in entries {
+            claims.add(paths, listed);
+        }
+        claims
+    }
+
+    /// Claim what `listed` names, and every folder it lies in, as well.
+    fn add(&mut self, paths: &Paths, listed: &Entry) {
+        self.named.insert(paths.id(&listed.path));
+        for folder in 1..=depth(&listed.path) {
+            self.within.insert(paths.id(&under(&listed.path, folder)));
+        }
+    }
+
+    /// Whether `entry` claims one of the entries gathered: a file entry claims the one that names
+    /// its file, and a folder entry each one that names the folder or lies in it.
+    fn by(&self, paths: &Paths, entry: &Entry) -> bool {
+        let id = paths.id(&entry.path);
+        match entry.kind {
+            Kind::File(_) => self.named.contains(&id),
+            Kind::Folder => self.within.contains(&id),
+        }
+    }
+}
+
+/// `path` (below the container) cut back to its first `depth` names: the folder as deep as `depth`
+/// that the path lies in — the path to tell when a folder entry is asked whether `listed` lies in
+/// it. Cut the way a folder entry's own path reads, so the two tellings of one folder come out one.
+fn under(path: &str, depth: usize) -> String {
+    Path::new(path)
+        .components()
+        .take(depth)
+        .map(|part| {
+            let name: &OsStr = part.as_ref();
+            name.to_string_lossy().into_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// The files whose set-aside entries yield to an export that ended at them ([`TAKEN`]).
 #[derive(Debug, Default)]
 struct Taken {
@@ -273,9 +594,13 @@ impl Taken {
         self.extend(other.files);
     }
 
-    /// Whether a set-aside entry of the file at `path` yields.
-    fn yields(&self, path: &str) -> bool {
-        self.every || self.files.contains(path)
+    /// Whether a set-aside entry of the file at a path yields: whether that path names one file with
+    /// a recorded one, as the volumes holding them decide ([`PathId`]) — never by the spelling the
+    /// record happens to carry. The record is told once, so each entry a start hands over asks one
+    /// lookup however many files the record names.
+    fn yields<'p>(&self, paths: &'p Paths) -> impl Fn(&str) -> bool + use<'p> {
+        let (every, files): (bool, BTreeSet<PathId>) = (self.every, self.files.iter().map(|file| paths.id(file)).collect());
+        move |path| every || files.contains(&paths.id(path))
     }
 
     fn is_empty(&self) -> bool {
@@ -550,14 +875,15 @@ impl Journal {
         // The set-aside journals removed once what they list has been dealt with and the journal is
         // written, each with why it is no journal when it is not: every one read, unless one waits,
         // and then those that are no journal.
+        let paths = self.paths();
         let read_now = if waits {
             set_aside.wait(&mut recovery)
         } else {
-            stale.extend(still_set_aside(set_aside.contents, &mut taken, &self.root, &mut recovery));
+            stale.extend(still_set_aside(set_aside.contents, &mut taken, &self.root, &paths, &mut recovery));
             set_aside.read
         };
         stale.extend(found.entries);
-        let held = self.deal_with_all(stale, &running, &mut recovery);
+        let held = self.deal_with_all(&paths, stale, &running, &mut recovery);
         let mut state = Known { held, running, taken, lock };
         let uncleared = |error: io::Error| format!("cannot clear the pending-export journal {}: {error}", self.file.display());
         match self.write(&state.entries(), &state.taken) {
@@ -601,21 +927,27 @@ impl Journal {
     /// they were listed, then the folders their writers made, the deepest first, so each folder is
     /// looked at once what the export put in it has gone. An entry that a running export of this
     /// process (`running`) lists belongs to that export, whatever an older entry says, so it is left.
-    fn deal_with_all(&self, stale: Vec<Entry>, running: &[Entry], recovery: &mut Recovery) -> Vec<Entry> {
+    /// Paths are told by `paths`, the operation's own ([`Paths`]).
+    fn deal_with_all(&self, paths: &Paths, stale: Vec<Entry>, running: &[Entry], recovery: &mut Recovery) -> Vec<Entry> {
         let (files, mut folders): (Vec<Entry>, Vec<Entry>) = stale.into_iter().partition(|entry| matches!(entry.kind, Kind::File(_)));
         folders.sort_by(|a, b| depth(&b.path).cmp(&depth(&a.path)).then_with(|| b.path.cmp(&a.path)));
-        // A folder one path names is one folder however many exports made an entry for it, each of
-        // their files needing it: the entries differ only in the export that made each, and one of
-        // them stands for the folder.
-        folders.dedup_by(|a, b| a.path == b.path);
-        let mut held = Vec::new();
+        // A folder one file is, however many exports made an entry for a spelling of its path, each
+        // of their files needing it: the entries differ only in the export that made each, and one
+        // of them stands for the folder. Spellings one volume folds can sort apart from each other,
+        // so what stands is the first entry of each folder seen, not the one that sorted beside it.
+        let mut one_folder: BTreeSet<PathId> = BTreeSet::new();
+        folders.retain(|entry| one_folder.insert(paths.id(&entry.path)));
+        let running = Claims::of(paths, running);
+        // What stays listed, and what it claims, which grows with it.
+        let (mut held, mut kept) = (Vec::new(), Claims::default());
         for entry in files.into_iter().chain(folders) {
-            if running.iter().any(|listed| entry.claims(listed)) {
+            if running.by(paths, &entry) {
                 continue;
             }
             // A folder that holds a file this start could not delete stays listed with it, for the
             // start that deletes the file.
-            if entry.kind == Kind::Folder && held.iter().any(|listed| entry.claims(listed)) {
+            if entry.kind == Kind::Folder && kept.by(paths, &entry) {
+                kept.add(paths, &entry);
                 held.push(entry);
                 continue;
             }
@@ -638,6 +970,7 @@ impl Journal {
                 Err(Refusal::NotAFolder(what)) => recovery.refused.push((target, format!("it is {what}, not a folder a writer makes"))),
                 Err(Refusal::Disk(reason)) => {
                     recovery.failed.push((target, reason));
+                    kept.add(paths, &entry);
                     held.push(entry);
                 }
             }
@@ -802,6 +1135,12 @@ impl Journal {
         self.file.parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "the journal has no folder"))
     }
 
+    /// The journal's answer to whether two paths below the container name one file, asked of the
+    /// volume its own folder lies on — the volume an app's entries live on too ([`PathId`]).
+    fn paths(&self) -> Paths {
+        Paths::new(&self.root, self.folder().unwrap_or(self.root.as_path()))
+    }
+
     /// The journals earlier takes set aside, in name order, or why the disk will not list them.
     fn shelves(&self) -> std::result::Result<Vec<PathBuf>, String> {
         let folder = self.folder().map_err(|error| error.to_string())?;
@@ -962,6 +1301,7 @@ impl Pending {
         }
         let mut known = lock(&KNOWN);
         let state = self.journal.hold(&mut known)?;
+        let paths = self.journal.paths();
         // A path a running export of this process has listed belongs to that export alone until it
         // ends. Two exports writing one path at once leave no defined file there, and once two exports
         // had listed one path and the one that finished cleared its entry, nothing in the journal could
@@ -970,21 +1310,37 @@ impl Pending {
         // refused here, before any of it is written. An export may list its own path again, and a
         // folder two exports' files each need is listed by both; refused is only a path this listing
         // would put a file, or a folder of its own making, where a running export of another listing
-        // has one of its own. What the others hold is gathered once, each path with whether one of
-        // them puts a file there, so a listing of a long sequence looks each of its paths up instead
-        // of walking every running entry for each.
-        let mut others: BTreeMap<&str, bool> = BTreeMap::new();
+        // has one of its own — one file told as the volume holding them decides ([`PathId`]), so a
+        // second export of one file spelt another way is refused exactly as one spelt the same way
+        // is. What the others hold is gathered once, each file with whether one of them puts a file
+        // there, so a listing of a long sequence looks each of its paths up instead of walking every
+        // running entry for each.
+        //
+        // One window stays open by what a file's identity is, not by how this check is held: a
+        // running export that puts its file up between this call's look at its entries and its
+        // look at the paths being listed is told two ways — the running path by the file's
+        // numbers, the listed path by its folded name, since that look found no file — so a
+        // second export of that one file passes this check, and a start splits the same way
+        // between the claims it gathers and the deletions it weighs after them. The journal's own
+        // lock cannot wait the creation out: the writer creates a file, not a journal entry, and
+        // takes no journal lock, while this call already holds this journal's from this check to
+        // its record. And one path within one call is told one way, each path being looked up
+        // once, so the window needs two paths of one file spelt apart, one looked at before the
+        // putting up and the other after. Closing it needs an identity that stays one across a
+        // file being put up; the filesystem's numbers, which are identity here, exist only once a
+        // file is there.
+        let mut others: BTreeMap<PathId, bool> = BTreeMap::new();
         for listed in state.running.iter().filter(|listed| listed.export != Some(self.export)) {
-            *others.entry(listed.path.as_str()).or_default() |= matches!(listed.kind, Kind::File(_));
+            *others.entry(paths.id(&listed.path)).or_default() |= matches!(listed.kind, Kind::File(_));
         }
-        let clash = entries.iter().find(|entry| others.get(entry.path.as_str()).is_some_and(|&file| file || matches!(entry.kind, Kind::File(_))));
+        let clash = entries.iter().find(|entry| others.get(&paths.id(&entry.path)).is_some_and(|&file| file || matches!(entry.kind, Kind::File(_))));
         if let Some(entry) = clash {
             return Err(CraftError::io(format!(
                 "the output file {} is listed by an export that has not ended, so two exports cannot write it at once",
                 self.journal.root.join(&entry.path).display()
             )));
         }
-        let held = taken_over(&state.held, &mut entries);
+        let held = taken_over(&state.held, &mut entries, &paths);
         let mut listed: Vec<Entry> = held.iter().chain(&state.running).cloned().collect();
         listed.extend(entries.iter().cloned());
         let written = self.journal.write(&listed, &state.taken);
@@ -1049,7 +1405,7 @@ impl Pending {
         // Whether the disk would not let go of a file the cancelled export wrote.
         let mut file_kept = false;
         if remove {
-            let held = journal.deal_with_all(listed.clone(), &state.running, &mut removal);
+            let held = journal.deal_with_all(&journal.paths(), listed.clone(), &state.running, &mut removal);
             file_kept = held.iter().any(|entry| matches!(entry.kind, Kind::File(_)));
             state.held.extend(held);
         } else if !journal.none_waits() {
@@ -1089,15 +1445,6 @@ impl Pending {
 }
 
 impl Entry {
-    /// Whether `listed` is this entry's, or lies under it: a file is claimed by the entry of its own
-    /// path, and a folder by every entry below it.
-    fn claims(&self, listed: &Entry) -> bool {
-        match self.kind {
-            Kind::File(_) => listed.path == self.path,
-            Kind::Folder => Path::new(&listed.path).starts_with(&self.path),
-        }
-    }
-
     /// The file entry a journal's JSON holds, or none for one that is not an entry.
     fn file_from(value: &Value) -> Option<Self> {
         let path = path_from(value)?;
@@ -1245,17 +1592,31 @@ fn bounded(reader: impl Read) -> io::Result<Vec<u8>> {
 /// still the file that was there before that export; an export that lists the path again would
 /// otherwise have the finished file it writes there deleted. So the new entry takes the held one's
 /// place, with the file that was there before the export that left it: what is at the path is
-/// deleted only if this export is killed or cancelled, and the file it finishes is kept.
-fn taken_over(held: &[Entry], listing: &mut [Entry]) -> Vec<Entry> {
-    let same_file = |a: &Entry, b: &Entry| matches!((a.kind, b.kind), (Kind::File(_), Kind::File(_))) && a.path == b.path;
-    for listed in listing.iter_mut() {
-        // The first held entry of the path is the oldest, the nearest to what was there before any
-        // export wrote it.
-        if let Some(older) = held.iter().find(|entry| same_file(entry, listed)) {
-            listed.kind = older.kind;
+/// deleted only if this export is killed or cancelled, and the file it finishes is kept. The file a
+/// listing lists again is told as the volume holding it says, not by the spelling either entry
+/// carries ([`PathId`]), so one file left by an earlier export is taken over however the new export
+/// spells its path.
+fn taken_over(held: &[Entry], listing: &mut [Entry], paths: &Paths) -> Vec<Entry> {
+    let is_file = |entry: &Entry| matches!(entry.kind, Kind::File(_));
+    // Each file's held entries are told once, and each entry of the listing looks its file up, so a
+    // long listing over a long held list costs no more than the two of them. The first held entry of
+    // a file is the oldest, the nearest to what was there before any export wrote it.
+    let mut oldest: BTreeMap<PathId, Kind> = BTreeMap::new();
+    for entry in held.iter().filter(|entry| is_file(entry)) {
+        oldest.entry(paths.id(&entry.path)).or_insert(entry.kind);
+    }
+    if oldest.is_empty() {
+        return held.to_vec();
+    }
+    let mut listed_again: BTreeSet<PathId> = BTreeSet::new();
+    for listed in listing.iter_mut().filter(|listed| is_file(listed)) {
+        let id = paths.id(&listed.path);
+        if let Some(older) = oldest.get(&id) {
+            listed.kind = *older;
+            listed_again.insert(id);
         }
     }
-    held.iter().filter(|entry| !listing.iter().any(|listed| same_file(listed, entry))).cloned().collect()
+    held.iter().filter(|entry| !(is_file(entry) && listed_again.contains(&paths.id(&entry.path)))).cloned().collect()
 }
 
 /// What the journals set aside list (`set_aside`) that is still theirs to deal with. Each entry of a
@@ -1270,11 +1631,12 @@ fn taken_over(held: &[Entry], listing: &mut [Entry]) -> Vec<Entry> {
 /// says which files yielded and why, naming them below `root`. `taken` gains what the set-aside
 /// journals recorded too, kept for a start that reads one of them again because the disk would not
 /// remove it.
-fn still_set_aside(set_aside: Contents, taken: &mut Taken, root: &Path, recovery: &mut Recovery) -> Vec<Entry> {
+fn still_set_aside(set_aside: Contents, taken: &mut Taken, root: &Path, paths: &Paths, recovery: &mut Recovery) -> Vec<Entry> {
     let Contents { entries, taken: recorded } = set_aside;
     taken.merge(recorded);
+    let yields = taken.yields(paths);
     let yielding: BTreeSet<String> =
-        entries.iter().filter(|entry| matches!(entry.kind, Kind::File(_)) && taken.yields(&entry.path)).map(|entry| entry.path.clone()).collect();
+        entries.iter().filter(|entry| matches!(entry.kind, Kind::File(_)) && yields(&entry.path)).map(|entry| entry.path.clone()).collect();
     if let Some(first) = yielding.first() {
         let files = format!(
             "{}{}",
@@ -1294,7 +1656,7 @@ fn still_set_aside(set_aside: Contents, taken: &mut Taken, root: &Path, recovery
     }
     // The exports that ended at those files, as the later listing.
     let mut ended: Vec<Entry> = yielding.into_iter().map(|path| Entry { path, kind: Kind::File(None), export: None }).collect();
-    taken_over(&entries, &mut ended)
+    taken_over(&entries, &mut ended, paths)
 }
 
 /// Remove one entry equal to `entry` from `entries`: an export's end takes apart its own listing
@@ -3835,41 +4197,45 @@ mod tests {
         Ok(())
     }
 
-    /// A second listing of a running export's path is refused before any of it is written, so the
-    /// refused export has nothing of its own to delete however it ends. The order is the one in which
-    /// entries told apart by their value lost the file: the second export lists while nothing is at
-    /// the path yet, the holder writes there and finishes, and the second ends after it, cancelled,
-    /// killed or failed. The file the holder finished stays through each ending and the restart
-    /// after it, and the refused listing wrote nothing.
+    /// A second listing of the path a running export has listed is refused before any of it is
+    /// written, so the refused export has nothing of its own to delete however it ends — and, on a
+    /// volume that folds them, so is a second listing of the same file spelt another way, which is
+    /// the same one file. The order is the one in which entries told apart by their value lost the
+    /// file: the second export lists while nothing is at the path yet, the holder writes there and
+    /// finishes, and the second ends after it, cancelled, killed or failed. The file the holder
+    /// finished stays through each ending and the restart after it, the refused listing wrote
+    /// nothing, and the refusal names the path as the second export spelt it.
     #[test]
     fn a_refused_export_deletes_nothing_of_the_export_that_holds_the_path() -> Test {
-        let endings: [(&str, fn(Pending) -> Result<()>); 3] = [
-            ("cancelled", Pending::remove),
-            // The holder has ended, so the refused export is all the killed process was running.
-            ("killed", |refused| {
-                refused.killed();
-                Ok(())
-            }),
-            ("failed", Pending::clear),
-        ];
-        for (ending, end) in endings {
-            let sand = Sandbox::new()?;
-            let output = sand.folders.container.join("card.mp4");
-            let (mut holder, mut refused) = (sand.journal().pending(), sand.journal().pending());
-            let held_by = holder.export;
-            holder.list(std::slice::from_ref(&output))?;
-            let listing = refused.list(std::slice::from_ref(&output));
-            let after_refusal: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
-            sand.put("card.mp4", b"the finished movie");
-            holder.clear()?;
-            end(refused)?;
-            let engine = sand.start()?;
-            let kept = fs::read(&output).ok();
-            assert_eq!(kept.as_deref(), Some(&b"the finished movie"[..]), "{ending}: the holder's finished file was lost");
-            assert_eq!(engine.recovery(), &Recovery::default(), "{ending}");
-            assert!(!sand.file().exists(), "{ending}: the journal outlived both exports");
-            assert_eq!(listing, Err(sand.held_by_another("card.mp4")), "{ending}");
-            assert_eq!(after_refusal[OUTPUTS], json!([{ PATH: "card.mp4", EXPORT: held_by }]), "{ending}: the refused listing was written: {after_refusal}");
+        // One path as one export lists it, and — where this volume folds them — that file spelt
+        // another way: other case, another Unicode form, and both at once.
+        let mut spellings = vec![("card.mp4".to_string(), "card.mp4".to_string())];
+        spellings.extend(spellings_folding_to_one(&Sandbox::new()?));
+        for (spelling, another) in &spellings {
+            for (ending, end) in endings() {
+                let sand = Sandbox::new()?;
+                let output = sand.folders.container.join(spelling);
+                let alt = sand.folders.container.join(another);
+                let (mut holder, mut refused) = (sand.journal().pending(), sand.journal().pending());
+                let held_by = holder.export;
+                holder.list(std::slice::from_ref(&output))?;
+                let listing = refused.list(std::slice::from_ref(&alt));
+                let after_refusal: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
+                sand.put(spelling, b"the finished movie");
+                holder.clear()?;
+                end(refused)?;
+                let engine = sand.start()?;
+                let kept = fs::read(&output).ok();
+                assert_eq!(kept.as_deref(), Some(&b"the finished movie"[..]), "{spelling} and {another}, {ending}: the holder's finished file was lost");
+                assert_eq!(engine.recovery(), &Recovery::default(), "{spelling} and {another}, {ending}");
+                assert!(!sand.file().exists(), "{spelling} and {another}, {ending}: the journal outlived both exports");
+                assert_eq!(listing, Err(sand.held_by_another(another)), "{spelling} and {another}, {ending}");
+                assert_eq!(
+                    after_refusal[OUTPUTS],
+                    json!([{ PATH: spelling, EXPORT: held_by }]),
+                    "{spelling} and {another}, {ending}: the refused listing was written: {after_refusal}"
+                );
+            }
         }
         Ok(())
     }
@@ -4089,11 +4455,7 @@ mod tests {
         assert_eq!(now[OUTPUTS], json!([held]), "the rewrite lost the export that listed the entry it could not delete: {now}");
         // A later export listing the path takes the entry over: the record of what was there comes
         // along, and the identity becomes the listing export's.
-        let mut later = sand.journal().pending();
-        later.list(std::slice::from_ref(&file))?;
-        let now: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
-        assert_eq!(now[OUTPUTS], json!([{ PATH: "locked/card.mp4", EXPORT: later.export, BYTES: 18, MODIFIED: 1234 }]), "{now}");
-        later.clear()?;
+        listed_as_one_entry(&sand, &file, "locked/card.mp4", 18, 1234)?;
         Ok(())
     }
 
@@ -4125,11 +4487,12 @@ mod tests {
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o500))?;
 
         let engine = sand.start()?;
-        fs::set_permissions(&locked, fs::Permissions::from_mode(0o700))?;
         if !partial.exists() {
-            // A user the permissions do not hold back (root) deletes it anyway.
+            // A user the permissions do not hold back (root) deletes it anyway, and the emptied
+            // folder goes with it, so there is nothing left to open again.
             return Ok(());
         }
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o700))?;
         assert_eq!(engine.recovery().failed.len(), 1, "{:?}", engine.recovery());
         assert!(engine.recovery().untouched.is_empty() && engine.recovery().removed.is_empty(), "{:?}", engine.recovery());
         let journal: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
@@ -4166,6 +4529,376 @@ mod tests {
             return Ok(());
         }
         assert!(matches!(&answered, Err(CraftError::Io { message }) if message.contains("card.mp4")), "{answered:?}");
+        Ok(())
+    }
+
+    // ——— One file spelt two ways: every comparison asks the volume that holds the paths ———
+
+    /// The endings an export can have in these tests, and how to end one so: cancelled deletes what
+    /// it wrote, killed leaves the journal and forgets the export, as a kill does, and failed keeps
+    /// what the export wrote. Where a start meets the killed export after the other export of the
+    /// path has ended, the killed one is all that process was ever running.
+    fn endings() -> [(&'static str, fn(Pending) -> Result<()>); 3] {
+        [
+            ("cancelled", Pending::remove),
+            ("killed", |ended| {
+                ended.killed();
+                Ok(())
+            }),
+            ("failed", Pending::clear),
+        ]
+    }
+
+    /// The rules this process read from the volume the sandbox's journal lies on.
+    fn volume_rules(sand: &Sandbox) -> VolumeRules {
+        VolumeRules::read(&sand.folders.config).map_or_else(VolumeRules::default, |(_, rules)| rules)
+    }
+
+    /// The spellings of one name this volume folds to one file: other case, if it folds case, both
+    /// as lower-casing folds it and as only Unicode's full case folding does (`ß` against `SS`, which
+    /// a Mac's disk holds as one name); another Unicode form, if it folds that; and one differing in
+    /// both at once, if it folds both. A volume that keeps every spelling apart has none here, since
+    /// a test that needs one file named two ways then has two files — the volume of two files has
+    /// its own test next to these.
+    fn spellings_folding_to_one(sand: &Sandbox) -> Vec<(String, String)> {
+        let VolumeRules { case_sensitive, form_sensitive } = volume_rules(sand);
+        let mut pairs = Vec::new();
+        if !case_sensitive {
+            pairs.push(("Card.MP4".to_string(), "CARD.MP4".to_string()));
+            pairs.push(("Stra\u{df}e.mp4".to_string(), "STRASSE.MP4".to_string()));
+        }
+        if !form_sensitive {
+            pairs.push(("\u{e1}lbum.mov".to_string(), "a\u{301}lbum.mov".to_string()));
+        }
+        if !case_sensitive && !form_sensitive {
+            pairs.push(("\u{c1}lb\u{fa}m.MOV".to_string(), "a\u{301}lbu\u{301}m.mov".to_string()));
+        }
+        pairs
+    }
+
+    /// One name and another spelling of it that this volume folds to one file, if it folds any.
+    /// Two spellings this volume folds to one name, or none after saying why, when the volume keeps
+    /// every spelling apart and there is nothing for the journal to fold.
+    fn folded_or_skip(sand: &Sandbox) -> std::result::Result<Option<(String, String)>, io::Error> {
+        if let Some(pair) = one_spelling_folded(sand) {
+            return Ok(Some(pair));
+        }
+        skipped("this volume keeps every spelling of a name apart")?;
+        Ok(None)
+    }
+
+    /// A newer export lists `file` and the journal is read back showing one entry for it: the newer
+    /// export's own, holding the stamp `bytes` and `modified` the other entry was holding — the take-
+    /// over one path is, whatever spelling its listing came in under. That export is then cleared.
+    fn listed_as_one_entry(sand: &Sandbox, file: &PathBuf, path: &str, bytes: u64, modified: u64) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut later = sand.journal().pending();
+        later.list(std::slice::from_ref(file))?;
+        let now: Value = serde_json::from_slice(&fs::read(sand.file())?)?;
+        assert_eq!(
+            now[OUTPUTS],
+            json!([{ PATH: path, EXPORT: later.export, BYTES: bytes, MODIFIED: modified }]),
+            "a newer listing did not become one entry carrying the older record: {now}"
+        );
+        later.clear()?;
+        Ok(())
+    }
+
+    fn one_spelling_folded(sand: &Sandbox) -> Option<(String, String)> {
+        spellings_folding_to_one(sand).into_iter().next()
+    }
+
+    /// A pair of spellings of one name this volume keeps apart — the case pair where it reads case,
+    /// the form pair where it reads form — and none where it folds both, since then no two spellings
+    /// of one name anywhere under it are two files.
+    fn one_spelling_kept_apart(sand: &Sandbox) -> Option<(String, String)> {
+        let VolumeRules { case_sensitive, form_sensitive } = volume_rules(sand);
+        if case_sensitive {
+            Some(("Card.MP4".to_string(), "CARD.MP4".to_string()))
+        } else if form_sensitive {
+            Some(("\u{e1}lbum.mov".to_string(), "a\u{301}lbum.mov".to_string()))
+        } else {
+            None
+        }
+    }
+
+    /// Whether a name and another spelling of it name one file on this volume: a file is put up
+    /// under the first in the test's cache folder and the second is looked at for the same file.
+    /// That is the volume's answer told another way than the probe asks it, and this test is where
+    /// the two tellings must agree.
+    fn answer_about(sand: &Sandbox, name: &str, spelling: &str) -> std::result::Result<bool, io::Error> {
+        let put_up = sand.folders.cache.join(name);
+        fs::write(&put_up, b"x")?;
+        let folded = fs::symlink_metadata(sand.folders.cache.join(spelling)).is_ok();
+        fs::remove_file(&put_up)?;
+        Ok(folded)
+    }
+
+    /// The rules are read from the volume and not from the platform: what the volume does with a
+    /// name and a spelling of it matches the rule read from it, on whatever machine runs the test —
+    /// a Mac, whose internal disks fold case and form, or a Linux container that keeps both apart.
+    #[test]
+    fn the_volume_is_read_by_what_it_answers_and_not_by_its_platform() -> Test {
+        let sand = Sandbox::new()?;
+        let VolumeRules { case_sensitive, form_sensitive } = volume_rules(&sand);
+        let folds_case = answer_about(&sand, "Probe.Case", "PROBE.CASE")?;
+        assert_eq!(folds_case, !case_sensitive, "the case rule read is not what this volume does with names");
+        let folds_form = answer_about(&sand, "\u{e1}lbum-probe", "a\u{301}lbum-probe")?;
+        assert_eq!(folds_form, !form_sensitive, "the form rule read is not what this volume does with names");
+        Ok(())
+    }
+
+    /// The take-over reaches across spellings: the journal holds an entry an earlier export left of
+    /// a file, and a later export lists that same file spelt another way, with nothing there when it
+    /// lists. The volume says one file, so the listing takes the left entry over — the record of
+    /// what was there comes along, and the older entry is gone — and when the newer export writes
+    /// and finishes, nothing of the older entry deletes its file, at the end or at a restart. A
+    /// journal written before spellings were told apart may hold a later entry of the file too,
+    /// spelt as the listing spells it: the listing takes every entry of the file over, and the
+    /// record it keeps is the oldest's, the nearest to what was there before any export wrote it.
+    #[test]
+    fn a_later_export_of_one_file_spelt_another_way_takes_the_left_entry_over() -> Test {
+        let sand = Sandbox::new()?;
+        let Some((left, listing)) = folded_or_skip(&sand)? else {
+            return Ok(());
+        };
+        sand.write_journal(&[json!({ PATH: left, BYTES: 18, MODIFIED: 1234, EXPORT: 9 }), json!({ PATH: listing, BYTES: 4, MODIFIED: 99, EXPORT: 10 })]);
+        let file = sand.folders.container.join(&listing);
+        listed_as_one_entry(&sand, &file, &listing, 18, 1234)?;
+        sand.put(&listing, b"the finished movie");
+        let engine = sand.start()?;
+        assert_eq!(
+            engine.recovery(),
+            &Recovery::default(),
+            "a restart deleted a finished export's file for an older entry of its other spelling: {:?}",
+            engine.recovery()
+        );
+        assert_eq!(fs::read(&file)?, b"the finished movie", "the finished file did not survive the older entry");
+        assert!(!sand.file().exists(), "the older entry outlived the export that took it over");
+        Ok(())
+    }
+
+    /// Two killed exports whose files needed one folder, each spelt another way, leave that folder
+    /// listed twice: a start deals with it once and reports it once, because the volume says one
+    /// folder however the entries spelt it, whichever way the two spellings sorted.
+    #[test]
+    fn two_spellings_of_one_folder_a_killed_export_made_are_dealt_with_and_reported_once() -> Test {
+        let sand = Sandbox::new()?;
+        let Some((name, other)) = folded_or_skip(&sand)? else {
+            return Ok(());
+        };
+        let container = &sand.folders.container;
+        let (mut one, mut two) = (sand.journal().pending(), sand.journal().pending());
+        one.list(&[container.join(format!("{name}/one.png"))])?;
+        two.list(&[container.join(format!("{other}/two.png"))])?;
+        sand.put(&format!("{name}/one.png"), b"half");
+        sand.put(&format!("{name}/notes.txt"), b"not the export's");
+        one.killed();
+        two.killed();
+
+        let engine = sand.start()?;
+        let recovery = engine.recovery();
+        assert_eq!(recovery.removed, [sand.real(&format!("{name}/one.png"))], "{recovery:?}");
+        assert_eq!(recovery.untouched.len(), 1, "one folder spelt two ways was dealt with twice: {recovery:?}");
+        if let Some(kept) = recovery.untouched.first() {
+            assert_eq!(fs::canonicalize(kept)?, fs::canonicalize(sand.real(&name))?, "the entry left standing does not name the folder: {recovery:?}");
+        }
+        assert!(!sand.file().exists());
+        Ok(())
+    }
+
+    /// A folder a running export writes into is left by a start however a killed export's entry
+    /// spelt its path: the claim that a running export's file lies in a folder entry's folder is
+    /// asked through the volume, not the spelling the older entry carries. The killed export listed
+    /// its file and the folder it was to make, and the kill came before it wrote, so the running
+    /// export lists with nothing there and keeps its own spelling, which a folder already there would
+    /// have had the listing resolve to the folder's own.
+    #[test]
+    fn a_start_leaves_a_folder_a_running_export_needs_however_a_killed_export_spelt_it() -> Test {
+        let sand = Sandbox::new()?;
+        let Some((name, other)) = folded_or_skip(&sand)? else {
+            return Ok(());
+        };
+        let container = &sand.folders.container;
+        sand.write_journal_with(&[entry(&format!("{name}/one.png"))], &[entry(&name)]);
+        let running_file = format!("{other}/two.png");
+        let mut running = sand.journal().pending();
+        running.list(&[container.join(&running_file)])?;
+        sand.put(&running_file, b"half of a newer movie");
+
+        let engine = sand.start()?;
+        assert_eq!(
+            engine.recovery(),
+            &Recovery::default(),
+            "a start dealt with the folder a running export writes into, spelt another way by the killed entry: {:?}",
+            engine.recovery()
+        );
+        assert_eq!(fs::read(container.join(&running_file))?, b"half of a newer movie");
+        running.remove()?;
+        assert!(!container.join(&other).exists(), "the running export's own cancel did not remove its file and the folder it made");
+        assert!(!sand.file().exists(), "the journal outlived the running export");
+        Ok(())
+    }
+
+    /// A file a running export writes is left by a start however a journal set aside spelt it: the
+    /// set-aside entry is the running export's file, which it claims as the volume tells files, so
+    /// the start neither deletes the file nor keeps the entry.
+    #[test]
+    fn a_start_leaves_a_running_exports_file_however_a_set_aside_journal_spelt_it() -> Test {
+        let sand = Sandbox::new()?;
+        let Some((name, other)) = folded_or_skip(&sand)? else {
+            return Ok(());
+        };
+        fs::write(sand.folders.config.join(format!("{SHELF_PREFIX}1.json")), json!({ OUTPUTS: [entry(&name)] }).to_string())?;
+        let file = sand.folders.container.join(&other);
+        let mut running = sand.journal().pending();
+        running.list(std::slice::from_ref(&file))?;
+        sand.put(&other, b"half of a newer movie");
+
+        let engine = sand.start()?;
+        let recovery = engine.recovery();
+        assert!(recovery.removed.is_empty() && recovery.untouched.is_empty(), "a start dealt with a running export's file: {recovery:?}");
+        assert_eq!(fs::read(&file)?, b"half of a newer movie", "a start deleted a running export's file for a set-aside entry of its other spelling");
+        assert!(shelved(&sand)?.is_empty(), "the set-aside journal outlived the start that dealt with it");
+        running.clear()?;
+        assert_eq!(fs::read(&file)?, b"half of a newer movie");
+        assert!(!sand.file().exists(), "the journal outlived the running export");
+        Ok(())
+    }
+
+    /// A journal set aside lists a file that an export ended at while it waited — and the record
+    /// that the export ended there spells the file another way. The volume says one file, so the
+    /// set-aside entry yields to the record exactly as it would to a record spelt its own way, and
+    /// the finished file the export left stands.
+    #[test]
+    fn a_set_aside_entry_of_a_file_taken_under_another_spelling_yields_too() -> Test {
+        let sand = Sandbox::new()?;
+        let Some((name, taken_as)) = folded_or_skip(&sand)? else {
+            return Ok(());
+        };
+        sand.put(&name, b"the finished movie");
+        fs::write(sand.folders.config.join(format!("{SHELF_PREFIX}1.json")), json!({ OUTPUTS: [entry(&name)], TAKEN: [{ PATH: taken_as }] }).to_string())?;
+
+        let engine = sand.start()?;
+        let recovery = engine.recovery();
+        assert!(
+            recovery.removed.is_empty() && recovery.untouched.is_empty(),
+            "a set-aside entry of a file taken under another spelling was dealt with anyway: {recovery:?}"
+        );
+        assert!(recovery.journal.iter().any(|line| line.contains("yield")), "the start did not say the entry yielded: {recovery:?}");
+        assert_eq!(
+            fs::read(sand.folders.container.join(&name))?,
+            b"the finished movie",
+            "the file an export ended at was deleted by a set-aside entry of its other spelling"
+        );
+        assert!(!sand.file().exists(), "the journal outlived the entries that yielded: {:?}", engine.recovery());
+        Ok(())
+    }
+
+    /// Where the volume keeps two spellings apart they are two files, and two exports have them:
+    /// both listings run — no refusal — and every end removes its own file alone, a restart included.
+    /// A volume that folds every spelling has nothing to tell apart here and says itself skipped;
+    /// its proof is the tests above.
+    #[test]
+    fn two_spellings_a_volume_keeps_apart_are_two_files_in_the_journal_too() -> Test {
+        let sand = Sandbox::new()?;
+        let (one_name, other_name) = match one_spelling_kept_apart(&sand) {
+            Some(pair) => pair,
+            None => {
+                skipped("this volume folds every spelling of a name together")?;
+                return Ok(());
+            }
+        };
+        let (mine, theirs) = (sand.folders.container.join(&one_name), sand.folders.container.join(&other_name));
+        sand.put(&one_name, b"the one movie");
+        sand.put(&other_name, b"the other movie");
+        assert_ne!(fs::canonicalize(&mine)?, fs::canonicalize(&theirs)?, "the volume folded the spellings the read says it keeps apart");
+        let (mut one, mut two) = (sand.journal().pending(), sand.journal().pending());
+        one.list(std::slice::from_ref(&mine))?;
+        two.list(std::slice::from_ref(&theirs))?;
+        sand.put(&one_name, b"the newer movie");
+        sand.put(&other_name, b"the newer other");
+        one.remove()?;
+        assert!(!mine.exists(), "a cancel did not remove its own file");
+        assert_eq!(fs::read(&theirs)?, b"the newer other", "a cancel removed the other export's file");
+        let engine = sand.start()?;
+        assert_eq!(engine.recovery(), &Recovery::default(), "a start dealt with a running export's file: {:?}", engine.recovery());
+        assert_eq!(fs::read(&theirs)?, b"the newer other", "a start removed the running export's file");
+        two.remove()?;
+        assert!(!theirs.exists(), "a cancel did not remove its own file after a start");
+        assert!(!sand.file().exists(), "the journal outlived both exports");
+        Ok(())
+    }
+
+    /// The volume is asked in the journal's folder and the asking leaves nothing there, and what an
+    /// ask a kill stopped midway put up there goes at the next start, as a killed write's file does.
+    #[test]
+    fn asking_the_volume_leaves_nothing_in_the_journals_folder() -> Test {
+        let sand = Sandbox::new()?;
+        assert_eq!(VolumeRules::ask(&sand.folders.config), volume_rules(&sand), "asking again answered other than this volume's rules");
+        let names: Vec<std::ffi::OsString> = fs::read_dir(&sand.folders.config)?.map(|entry| entry.map(|e| e.file_name())).collect::<io::Result<_>>()?;
+        assert!(names.is_empty(), "the asking left {names:?} in the journal's folder");
+        let left = sand.folders.config.join(probe_name());
+        fs::write(&left, b"")?;
+        sand.start()?;
+        assert!(!left.exists(), "a start left what an ask stopped midway put up");
+        Ok(())
+    }
+
+    /// A folder the volume cannot be asked in, one this user may only read, is read as a volume that
+    /// folds both, the reading that loses no work.
+    #[cfg(unix)]
+    #[test]
+    fn a_volume_that_cannot_be_asked_is_read_as_one_that_folds_both() -> Test {
+        let sand = Sandbox::new()?;
+        if !permissions_hold(&sand)? {
+            return Ok(());
+        }
+        set_mode(&sand.folders.cache, 0o500)?;
+        let unasked = VolumeRules::ask(&sand.folders.cache);
+        set_mode(&sand.folders.cache, 0o700)?;
+        assert_eq!(unasked, VolumeRules::default(), "a folder that takes no probe was read as a volume that keeps names apart");
+        Ok(())
+    }
+
+    /// The rules read from a volume fold the names on that volume alone, which its number tells:
+    /// the names below a container on another volume, or one that cannot be looked at, fold by the
+    /// reading that loses no work however the volume read keeps names apart, and the names on the
+    /// volume read fold by what it answered.
+    #[cfg(unix)]
+    #[test]
+    fn the_rules_read_from_a_volume_fold_the_names_on_that_volume_alone() -> Test {
+        use std::os::unix::fs::MetadataExt;
+        let sand = Sandbox::new()?;
+        let root = sand.journal().root;
+        let device = fs::metadata(&root)?.dev();
+        let keeps_apart = Some(VolumeRules { case_sensitive: true, form_sensitive: true });
+        let one = |paths: Paths| paths.id("Card.MP4") == paths.id("CARD.MP4");
+        assert!(one(Paths::with(&root, keeps_apart.map(|rules| (device ^ 1, rules)))), "another volume's rules folded the container's names");
+        assert!(
+            one(Paths::with(&root.join("gone"), keeps_apart.map(|rules| (NO_FOLDER.0, rules)))),
+            "the rules read folded the names below a container that could not be looked at"
+        );
+        assert!(!one(Paths::with(&root, keeps_apart.map(|rules| (device, rules)))), "the rules read did not fold the names of the volume they were read from");
+        Ok(())
+    }
+
+    /// A path is told as the volume reaches it: a link that stands for a folder of the path is the
+    /// folder it reaches, so a file in that folder is one file however the path reaches it, there or
+    /// not yet; while a link at the path's own name is the link, never what it points at, as a start
+    /// deals with a link there.
+    #[cfg(unix)]
+    #[test]
+    fn a_path_through_a_linked_folder_is_told_as_the_folder_the_link_reaches() -> Test {
+        let sand = Sandbox::new()?;
+        let container = &sand.folders.container;
+        fs::create_dir(container.join("real"))?;
+        std::os::unix::fs::symlink(container.join("real"), container.join("linked"))?;
+        sand.put("real/finished.mp4", b"finished");
+        std::os::unix::fs::symlink(container.join("real/finished.mp4"), container.join("pointer.mp4"))?;
+        let paths = sand.journal().paths();
+        assert_eq!(paths.id("linked/new.mp4"), paths.id("real/new.mp4"), "a file not there yet was told by the link its folder was reached through");
+        assert_eq!(paths.id("linked/finished.mp4"), paths.id("real/finished.mp4"), "a file there was told by the link its folder was reached through");
+        assert_ne!(paths.id("pointer.mp4"), paths.id("real/finished.mp4"), "a link at a path's own name was told as what it points at");
         Ok(())
     }
 }
