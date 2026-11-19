@@ -13,12 +13,6 @@ import UIKit
 import os
 
 @Suite(.serialized) @MainActor struct RealAppSpineTests {
-    /// The length of a movie's picture track, in seconds.
-    private func seconds(of movie: URL) async throws -> Double {
-        let track = try #require(try await AVURLAsset(url: movie).loadTracks(withMediaType: .video).first)
-        return try await track.load(.timeRange).duration.seconds
-    }
-
     @Test(.needsTheDeviceRunner)
     func theCardIsExportedCancelledAndExportedAgainInTheBackgroundAtTheRunningExamplesSize() async throws {
         let (engine, folder, shutDown) = try await startedEngine(gpu: .preferred)

@@ -1,6 +1,7 @@
 // One fake engine the tests share: a UniFFI handle with no Rust behind it, recording every call the
 // facade makes on it and answering what the test sets.
 
+import AVFoundation
 import CraftBridge
 import CraftBridgeEffects
 import CraftBridgeFFI
@@ -286,10 +287,22 @@ func picture(_ color: UIColor, to url: URL) throws {
     try data.write(to: url)
 }
 
-/// The running example's card template, made the way Leo makes one: a composition of `width` by `height`, 6
-/// seconds at 30 frames a second, with a text layer and a red picture as imported footage, a Name control on
-/// the text and a Photo control on the picture, saved as `card.ectemplate` in `folder`. The steps name the
-/// layers and items, not their ids, so nothing depends on which numbers the session hands out.
+/// The length of a movie's picture track, in seconds.
+func seconds(of movie: URL) async throws -> Double {
+    let track = try #require(try await AVURLAsset(url: movie).loadTracks(withMediaType: .video).first)
+    return try await track.load(.timeRange).duration.seconds
+}
+
+/// The running example's card's length, in seconds.
+let cardSeconds = 6
+
+/// The running example's card's frame rate.
+let cardFrameRate = 30
+
+/// The running example's card template, made the way Leo makes one: a composition of `width` by `height`,
+/// ``cardSeconds`` at ``cardFrameRate`` frames a second, with a text layer and a red picture as imported footage, a
+/// Name control on the text and a Photo control on the picture, saved as `card.ectemplate` in `folder`. The steps
+/// name the layers and items, not their ids, so nothing depends on which numbers the session hands out.
 func makeCardTemplate(_ engine: EffectsEngine, in folder: URL, width: Int, height: Int) async throws -> URL {
     let photo = folder.appending(path: "photo.png")
     let template = folder.appending(path: "card.ectemplate")
@@ -298,8 +311,8 @@ func makeCardTemplate(_ engine: EffectsEngine, in folder: URL, width: Int, heigh
         (
             command: "comp.new",
             params: [
-                "name": "Card", "width": .number(Double(width)), "height": .number(Double(height)), "duration": 6,
-                "frameRate": 30,
+                "name": "Card", "width": .number(Double(width)), "height": .number(Double(height)),
+                "duration": .number(Double(cardSeconds)), "frameRate": .number(Double(cardFrameRate)),
             ]
         ),
         (command: "layer.newSolid", params: ["comp": "Card", "name": "Bg", "color": "#223344"]),
