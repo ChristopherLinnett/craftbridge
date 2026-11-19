@@ -9,9 +9,11 @@
 //! behind it (plan §19, EffectCraft's own `Backend::confine`), which is what refuses each file access
 //! outside them; refusing accesses here as well would be a second confinement to keep in step. The
 //! one file access the core makes on its own account is the pending-export journal's (`crate::journal`),
-//! which deletes files by name at start, so the core checks those paths itself ([`written_file`],
-//! [`entry_in`]).
+//! which deletes files by name at start, so the core checks those paths itself ([`Confined::written`],
+//! [`Confined::entry`]).
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::iter;
@@ -187,39 +189,92 @@ impl Confinement {
     }
 }
 
-/// Where `path`, a file about to be written, really lands, as a path below `root` (a resolved write
-/// root): resolved as the writer's open will resolve it (links followed, `..` taken; see `resolved`),
-/// so a spelling that climbs out of the root or runs through a link out of it is refused as the file
-/// it reaches. The root itself is no file.
-pub(crate) fn written_file(root: &Path, path: &Path) -> Result<PathBuf, CraftError> {
-    names_a_path("output file", path)?;
-    let target = resolved("output file", path)?;
-    match target.strip_prefix(root) {
-        Ok(below) if !below.as_os_str().is_empty() => Ok(below.to_path_buf()),
-        _ => Err(outside_the_container(path, root)),
-    }
+/// The files an engine writes or deletes, with each folder of theirs looked at once.
+///
+/// [`resolved`] costs the disk a resolution of every name above the one it is asked of, and an export
+/// lists every file it may write before it writes any, so a sequence of ten thousand frames in one
+/// folder would ask of the ten thousandth exactly what it asked of the first. Where a name lands is
+/// its folder's resolution with the name below it unless a link stands at the name, so each folder is
+/// resolved once and its answer kept here, and only a link at a name, which only the name can say
+/// where it points, is resolved on its own ([`Confined::written`]).
+#[derive(Default)]
+pub(crate) struct Confined {
+    /// Each folder already resolved, by the path it was asked under.
+    folders: RefCell<BTreeMap<PathBuf, Real>>,
 }
 
-/// Where the entry `relative` names under `root` (a resolved write root), to be deleted: its folder
-/// resolved, so a folder that is a link out of the root is refused as the folder it reaches, and its
-/// own name kept as it is, never followed, so a file someone replaced with a link is looked at as the
-/// link and nothing it points at is reached. `relative` is a plain name below the root, every part
-/// a name: an absolute path, `..`, or nothing at all names no file the root holds and is refused
-/// unread.
-pub(crate) fn entry_in(root: &Path, relative: &Path) -> Result<PathBuf, CraftError> {
-    let plain = !relative.as_os_str().is_empty() && relative.components().all(|part| matches!(part, Component::Normal(_)));
-    let (true, Some(name), Some(parent)) = (plain, relative.file_name(), root.join(relative).parent().map(Path::to_path_buf)) else {
-        return Err(CraftError::io(format!(
-            "the entry {} is not a path inside the container {}: it must be a plain name below it",
-            relative.display(),
-            root.display()
-        )));
-    };
-    let folder = resolved("output file's folder", &parent)?;
-    if !folder.starts_with(root) {
-        return Err(outside_the_container(relative, root));
+/// One folder already resolved: where it is with its links followed, and whether something stands
+/// there that is no folder, which is where nothing below it can be put.
+#[derive(Clone)]
+struct Real {
+    at: PathBuf,
+    blocked: bool,
+}
+
+impl Confined {
+    /// Where `path`, a file about to be written, lands below `root` (a resolved write root): resolved
+    /// as the writer's open will resolve it (links followed, `..` taken; see [`resolved`]), so a
+    /// spelling that climbs out of the root or runs through a link out of it is refused as the file it
+    /// reaches, and the root itself refused as no file. This is the whole resolution, name and all, for
+    /// a name a link may stand at; [`Confined::landing`] is the folder's half, kept for every name
+    /// beside it.
+    pub(crate) fn written(&self, root: &Path, path: &Path) -> Result<PathBuf, CraftError> {
+        names_a_path("output file", path)?;
+        let target = resolved("output file", path)?;
+        match target.strip_prefix(root) {
+            Ok(below) if !below.as_os_str().is_empty() => Ok(below.to_path_buf()),
+            _ => Err(outside_the_container(path, root)),
+        }
     }
-    Ok(folder.join(name))
+
+    /// Where the file `path` lands below `root` when no link stands at its own name: its folder
+    /// resolved, once however many files lie in it, with the name below it as it is spelt, the file
+    /// [`Confined::written`] reaches for such a name. `None` when the name must be resolved on its own
+    /// instead — something that is no folder stands where its folder should be, the folder lands
+    /// outside `root`, or there is no name to ask — which is for [`Confined::written`] to answer, as it
+    /// refuses what lands outside the root.
+    pub(crate) fn landing(&self, root: &Path, path: &Path) -> Result<Option<PathBuf>, CraftError> {
+        names_a_path("output file", path)?;
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else { return Ok(None) };
+        let folder = self.folder("output file's folder", parent)?;
+        if folder.blocked {
+            return Ok(None);
+        }
+        Ok(folder.at.strip_prefix(root).ok().map(|below| below.join(name)))
+    }
+
+    /// Where the entry `relative` names under `root` (a resolved write root), to be deleted: its
+    /// folder resolved, so a folder that is a link out of the root is refused as the folder it
+    /// reaches, and its own name kept as it is, never followed, so a file someone replaced with a
+    /// link is looked at as the link and nothing it points at is reached. `relative` is a plain name
+    /// below the root, every part a name: an absolute path, `..`, or nothing at all names no file the
+    /// root holds and is refused unread. Each folder is resolved once for the entries beside it.
+    pub(crate) fn entry(&self, root: &Path, relative: &Path) -> Result<PathBuf, CraftError> {
+        let plain = !relative.as_os_str().is_empty() && relative.components().all(|part| matches!(part, Component::Normal(_)));
+        let (true, Some(name), Some(parent)) = (plain, relative.file_name(), root.join(relative).parent().map(Path::to_path_buf)) else {
+            return Err(CraftError::io(format!(
+                "the entry {} is not a path inside the container {}: it must be a plain name below it",
+                relative.display(),
+                root.display()
+            )));
+        };
+        let folder = self.folder("output file's folder", &parent)?;
+        if !folder.at.starts_with(root) {
+            return Err(outside_the_container(relative, root));
+        }
+        Ok(folder.at.join(name))
+    }
+
+    /// Where `folder` really is, its links followed, looked at once however many paths ask for it.
+    fn folder(&self, subject: &str, folder: &Path) -> Result<Real, CraftError> {
+        if let Some(known) = self.folders.borrow().get(folder) {
+            return Ok(known.clone());
+        }
+        let real = resolved(subject, folder)?;
+        let known = Real { blocked: fs::metadata(&real).is_ok_and(|found| !found.is_dir()), at: real };
+        self.folders.borrow_mut().insert(folder.to_path_buf(), known.clone());
+        Ok(known)
+    }
 }
 
 /// The refusal of a file the engine would write or delete outside its write root.
