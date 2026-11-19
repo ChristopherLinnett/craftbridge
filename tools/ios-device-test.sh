@@ -20,6 +20,12 @@
 #   CRAFTBRIDGE_DEVICE_TEST_LIMIT      the seconds a Swift test may run before it counts as hung (default 300)
 # The tests are built as the gate builds, so a switch the gate refuses (tools/env.sh) is refused here too.
 #
+# Two runs on one phone take turns: a run takes the machine's lock for its device — the lock `cargo xtask
+# simulator` takes per simulator, held through `cargo xtask device-lock` — before it builds anything or
+# touches the phone, and a run that waits for another says so, naming the device. However a run ends —
+# Ctrl-C, a kill of its id or of its terminal among them — it takes its apps off the phone before its lock
+# is let go, and nothing it started is left to keep the phone busy.
+#
 # A binary the system ends before its harness does when it runs whole (past the app's memory limit, say) is
 # finished one test per launch: the tests with no result in the whole run's output each get an app launch
 # of their own, and one the system kills alone is a failure. The tests tools/device-tests.tsv names are not
@@ -50,6 +56,11 @@ unset $(git rev-parse --local-env-vars 2>/dev/null)
 # shellcheck source=tools/env.sh
 source "$(dirname "$0")/env.sh"
 cd "$CRAFTBRIDGE_ROOT"
+# This file and the whole argument list it came in with, kept because the run starts again under the
+# device's lock below: after the cd only an absolute path names this file from wherever the restart
+# stands, and after the parse below only a copy holds the arguments whole.
+script="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+run_args=("$@")
 # Before anything is built: a RUSTFLAGS, for one, would replace the device's CPU target set below.
 craftbridge_refuse_switches || exit 1
 
@@ -106,6 +117,38 @@ for tool in jq xcrun codesign security; do
 done
 device="$CRAFTBRIDGE_DEVICE_ID"
 plist_buddy=/usr/libexec/PlistBuddy
+
+# The device this run names is one phone, and every run installs its app on it under the same bundle ids:
+# two runs started at once replace each other's app mid-run, and the one that ends first uninstalls what
+# the other is still testing on, so what fails is the runs and not the code. Therefore the run takes the
+# machine's lock for this device here, from this one place it names it — the lock `cargo xtask simulator`
+# takes per simulator, through `cargo xtask device-lock`, and nowhere a second time — and runs the rest of
+# itself again under it: nothing is built and no phone is touched before the lock is held, and a run that
+# waits for another says so naming the device. The lock is taken per name, so the phone is named one way
+# only, as CoreDevice names it: its serial, its UDID or its name would each take another lock.
+[[ "$device" =~ ^[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}$ ]] ||
+  die "CRAFTBRIDGE_DEVICE_ID is $device, which is no CoreDevice identifier: name the phone as \`xcrun devicectl list devices\` does, since another name for it would take another lock"
+# The run under the lock is the one `cargo xtask device-lock` started for this device: the variable it sets
+# names the device and its own process id, which only its own child has for a parent, so neither a shell
+# that exported the variable nor a run started inside a run passes for the run that holds the lock. This
+# run stays the process its caller started, and its lock command a child of it in the background, which
+# leaves that command deaf to a terminal's Ctrl-C and hang-up: a run that is interrupted, or killed by its
+# id, ends here, and the lock command, seeing its caller gone, asks the run under the lock to end — which
+# takes its apps off the phone — and lets the lock go once it has. The lock command is built for this run
+# alone, in a folder this run removes however it ends but a kill outright.
+if [ "${CRAFTBRIDGE_DEVICE_LOCK:-}" != "$device:$PPID" ]; then
+  lock_run="$(mktemp -d "${TMPDIR:-/tmp}/craftbridge-device-lock.XXXXXX")"
+  trap 'rm -rf "$lock_run"' EXIT
+  trap 'exit 1' INT TERM HUP
+  craftbridge_xtask_build "$lock_run" || die "the build of the device-lock tool failed"
+  (
+    trap '' HUP
+    exec "$lock_run/debug/xtask" device-lock "$device" -- bash "$script" "${run_args[@]+"${run_args[@]}"}"
+  ) &
+  lock_status=0
+  wait "$!" || lock_status=$?
+  exit "$lock_status"
+fi
 
 # What a line of the table may hold, each problem on a line `<file>:<line>: <problem>`: seven fields, none
 # empty since a shell read collapses an empty one, a kind the runner knows, a reason, and a child test only
