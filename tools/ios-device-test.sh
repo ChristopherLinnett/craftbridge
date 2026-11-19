@@ -69,6 +69,9 @@ test_limit="${CRAFTBRIDGE_DEVICE_TEST_LIMIT:-300}"
 background_request="craftbridge-runner: send the app to the background"
 # How long a request that names no stay keeps the app in the background.
 cover_seconds=6
+# Why an app asks to add to Photos, which the system shows with its prompt: the test that exports the running
+# example's movie saves it there, and the owner watches it.
+photos_reason="A device test saves the movie it exports to Photos, so the owner can watch it and judge its sound."
 cover=""
 phone_hint="If the phone is locked, unlock it; if it asks to trust this computer, trust it; then run again"
 
@@ -345,7 +348,8 @@ install_app() {
     -c "Add :CFBundleName string $name" -c "Add :CFBundleVersion string 1" -c "Add :CFBundleShortVersionString string 1" \
     -c "Add :CFBundlePackageType string APPL" -c "Add :MinimumOSVersion string $minimum" \
     -c "Add :UIDeviceFamily array" -c "Add :UIDeviceFamily:0 integer 1" \
-    -c "Add :CFBundleSupportedPlatforms array" -c "Add :CFBundleSupportedPlatforms:0 string iPhoneOS" "$app/Info.plist" >/dev/null
+    -c "Add :CFBundleSupportedPlatforms array" -c "Add :CFBundleSupportedPlatforms:0 string iPhoneOS" \
+    -c "Add :NSPhotoLibraryAddUsageDescription string $photos_reason" "$app/Info.plist" >/dev/null
   "$plist_buddy" -c "Add :application-identifier string $team.$bundle" -c "Add :com.apple.developer.team-identifier string $team" \
     -c "Add :get-task-allow bool true" "$work/entitlements.plist" >/dev/null
   codesign --force --sign "$CRAFTBRIDGE_SIGNING_IDENTITY" --entitlements "$work/entitlements.plist" "$app" >&2 || die "cannot sign $name"

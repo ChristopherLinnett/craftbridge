@@ -1,5 +1,6 @@
-// The tests' reads of memory a system call owns, a pixel buffer's rows and a bitmap context's, as plain bytes,
-// and Apple's own conversion of straight pixels, which writes into the bytes it is handed.
+// The tests' reads of memory a system call owns, a pixel buffer's rows or one of its pixels and a bitmap
+// context's, as plain bytes, and Apple's own conversion of straight pixels, which writes into the bytes it is
+// handed.
 
 import Accelerate
 import CoreGraphics
@@ -35,6 +36,17 @@ func bytes(of buffer: CVPixelBuffer) -> [UInt8] {
         bytes += UnsafeRawBufferPointer(start: base + line * stride, count: row)
     }
     return bytes
+}
+
+/// The four bytes of the pixel at (`x`, `y`) of `buffer`, a buffer of four bytes a pixel, in its own order: one
+/// pixel, where ``bytes(of:)`` copies every row. None when the buffer has no such pixel or no memory to read.
+func pixel(of buffer: CVPixelBuffer, x: Int, y: Int) -> [UInt8] {
+    CVPixelBufferLockBaseAddress(buffer, .readOnly)
+    defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+    guard (0..<CVPixelBufferGetWidth(buffer)) ~= x, (0..<CVPixelBufferGetHeight(buffer)) ~= y,
+        let base = CVPixelBufferGetBaseAddress(buffer)
+    else { return [] }
+    return [UInt8](UnsafeRawBufferPointer(start: base + y * CVPixelBufferGetBytesPerRow(buffer) + x * 4, count: 4))
 }
 
 /// The bytes of `image` as a bitmap of the same layout holds them after Core Graphics drew it there: the

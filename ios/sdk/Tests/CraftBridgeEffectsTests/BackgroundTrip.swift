@@ -13,11 +13,35 @@ import os
 /// the background. A run with no runner has none, which leaves out every test that needs the trip.
 let backgroundRequest = ProcessInfo.processInfo.environment["CRAFTBRIDGE_RUNNER_BACKGROUND_REQUEST"]
 
+/// Whether the device runner started this run: it is the only one that puts the request line in the environment.
+let underTheDeviceRunner = backgroundRequest != nil
+
+/// Whether the run's arguments, as the runner hands them on to Swift Testing, ask for the tests of `name` by a
+/// `--filter` that is exactly `name`. Other rounds run the device runner with filters that reach a suite without
+/// naming it, a prefix (`RealApp`), a pattern that takes others too (`RealAppPhotosTests|RealAppSpineTests`), one
+/// of its tests or the whole target, and none of those asks.
+func askedByName(_ name: String, in arguments: [String]) -> Bool {
+    zip(arguments, arguments.dropFirst()).contains { flag, value in flag == "--filter" && value == name }
+}
+
+/// Whether this run is a device run that asks for the tests of `name` by name: what a test that leaves something
+/// on the phone, or waits for a person, needs before it does either.
+func deviceRunAsks(for name: String) -> Bool {
+    underTheDeviceRunner && askedByName(name, in: CommandLine.arguments)
+}
+
 extension Trait where Self == ConditionTrait {
     /// A test that needs the app really sent to the background and brought back, which a package's tests have
     /// no UI to do: the device runner does it, so the test runs nowhere else.
     static var needsTheDeviceRunner: Self {
-        enabled(if: backgroundRequest != nil, "only the device runner can send the app to the background")
+        enabled(if: underTheDeviceRunner, "only the device runner can send the app to the background")
+    }
+
+    /// A test that leaves something behind on the phone, or waits for a person to act on it, so it runs only when
+    /// asked for by name (`tools/ios-device-test.sh --swift -- --filter <name>`) through the device runner, and in
+    /// no default run of the suite, on the phone or anywhere else.
+    static func needsTheDeviceRunner(askedFor name: String) -> Self {
+        enabled(if: deviceRunAsks(for: name), "only a device run that asks for \(name) by name runs it")
     }
 }
 
