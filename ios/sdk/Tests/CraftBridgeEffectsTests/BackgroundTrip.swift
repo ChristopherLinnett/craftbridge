@@ -221,6 +221,36 @@ func startedEngine(
     return (EffectsEngine(engine: raw, host: host), container, { try await raw.shutDown() })
 }
 
+/// The counters `info` reports under `section`, in the order of `names`, each -1 when `info` does not report it.
+func infoCounters(of engine: EffectsEngine, in section: String, _ names: [String]) async throws -> [Int] {
+    let info = try await engine.request("info", [:])
+    return names.map { name in
+        guard case .number(let value)? = info.value(at: "/\(section)/\(name)") else { return -1 }
+        return Int(value)
+    }
+}
+
+/// What the hardware encoders and the software encoder behind them have done, as `info.encoding` counts it.
+struct Encoding: CustomStringConvertible {
+    let hardwarePictures: Int
+    let softwarePictures: Int
+    let fallbacks: Int
+    /// The first frame the software encoder made in the latest switch, or nil before any.
+    let lastFallbackFrame: Int?
+
+    init(of engine: EffectsEngine) async throws {
+        let counts = try await infoCounters(
+            of: engine, in: "encoding", ["hardwarePictures", "softwarePictures", "fallbacks", "lastFallbackFrame"])
+        (hardwarePictures, softwarePictures, fallbacks) = (counts[0], counts[1], counts[2])
+        lastFallbackFrame = counts[3] < 0 ? nil : counts[3]
+    }
+
+    var description: String {
+        "\(hardwarePictures) hardware pictures, \(softwarePictures) software pictures, \(fallbacks) fallbacks, "
+            + "the latest switch at frame \(lastFallbackFrame.map(String.init) ?? "none")"
+    }
+}
+
 /// How an export ended, and when: what it answered, or the `CraftError` it threw, which is the only way a job
 /// fails.
 struct Ending: CustomStringConvertible {

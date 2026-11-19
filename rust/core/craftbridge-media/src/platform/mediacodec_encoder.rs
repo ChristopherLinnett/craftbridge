@@ -337,6 +337,13 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn an_h264_movie_whose_codec_is_lost_goes_on_in_software_within_d12() {
+        for start in STARTS {
+            encodetests::check_session_lost_midway(start);
+        }
+    }
+
+    #[test]
     fn an_hevc_encode_is_a_movie_within_d12() {
         for start in STARTS {
             encodetests::check_movie(encodetests::spec(VideoCodec::Hevc), start);

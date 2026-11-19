@@ -92,7 +92,31 @@ impl VideoSpec {
     }
 }
 
+/// The lowest bit rate EffectCraft's encoders take for each codec, in kbit/s.
+const MIN_H264_KBPS: u32 = 100;
+const MIN_HEVC_KBPS: u32 = 50;
+
+/// A bit rate an encoder aims at and the ceiling it keeps under, in bits a second.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BitRate {
+    pub(crate) target: i64,
+    pub(crate) peak: i64,
+}
+
 impl VideoSpec {
+    /// The bit rate every encoder of the movie is asked for, hardware and software alike, as EffectCraft's own
+    /// encoders take a request: raised to the lowest they take for the codec, with a ceiling a half above it.
+    /// None for a constant quality.
+    pub(crate) fn bit_rate(&self) -> Option<BitRate> {
+        let RateControl::Bitrate { kbps } = self.rate_control else { return None };
+        let floor = match self.codec {
+            VideoCodec::H264 => MIN_H264_KBPS,
+            VideoCodec::Hevc => MIN_HEVC_KBPS,
+        };
+        let target = i64::from(kbps.max(floor)) * 1000;
+        Some(BitRate { target, peak: target * 3 / 2 })
+    }
+
     /// The presentation time of frame `index` in the movie's timescale (`rate_num` ticks a second): every
     /// frame lasts `rate_den` ticks.
     pub fn presentation_time(&self, index: u64) -> i64 {
@@ -116,14 +140,22 @@ impl Yuv420 {
         self.y.len() == w * h && self.u.len() == chroma && self.v.len() == chroma
     }
 
+    /// Refuses planes that are not exactly a `width` by `height` picture's: one the encoder took would write a
+    /// frame the movie never asked for.
+    pub fn check_picture(&self, width: u32, height: u32) -> Result<(), EncodeError> {
+        if self.is_picture(width, height) {
+            Ok(())
+        } else {
+            Err(EncodeError::Invalid(format!("the frame's planes are not those of a {width}x{height} picture")))
+        }
+    }
+
     /// The picture into a biplanar surface: luma rows `luma_stride` bytes apart, and one plane of
     /// interleaved Cb, Cr pairs `chroma_stride` bytes apart, which is the layout hardware encoders take.
     /// The surface's padding is left as it is. Fails, writing nothing, unless the planes are the picture's
     /// and the surface's are large enough for it.
     pub fn write_biplanar(&self, width: u32, height: u32, luma: (&mut [u8], usize), chroma: (&mut [u8], usize)) -> Result<(), EncodeError> {
-        if !self.is_picture(width, height) {
-            return Err(EncodeError::Invalid(format!("the frame's planes are not those of a {width}x{height} picture")));
-        }
+        self.check_picture(width, height)?;
         let (w, h) = (width as usize, height as usize);
         if w == 0 || h == 0 {
             return Err(EncodeError::Invalid("the picture has no pixels".into()));

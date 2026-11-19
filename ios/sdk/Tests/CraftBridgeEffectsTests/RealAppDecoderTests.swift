@@ -88,14 +88,9 @@ struct Decoding: CustomStringConvertible {
     let fallbacks: Int
 
     init(of engine: EffectsEngine) async throws {
-        let info = try await engine.request("info", [:])
-        func count(_ name: String) -> Int {
-            guard case .number(let value)? = info.value(at: "/decoding/\(name)") else { return -1 }
-            return Int(value)
-        }
-        (sessions, pictures, declined, fallbacks) = (
-            count("sessions"), count("pictures"), count("declined"), count("fallbacks")
-        )
+        let counts = try await infoCounters(
+            of: engine, in: "decoding", ["sessions", "pictures", "declined", "fallbacks"])
+        (sessions, pictures, declined, fallbacks) = (counts[0], counts[1], counts[2], counts[3])
     }
 
     var description: String {

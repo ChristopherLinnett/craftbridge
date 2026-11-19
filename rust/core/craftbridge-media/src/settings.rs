@@ -2,7 +2,7 @@
 //! one by one: the bit rate with its ceiling or the constant quality, the key frame interval, the profile and
 //! the colour tags. Safe code, so a host tests every rule; only a platform with a hardware encoder reads it.
 
-use crate::encode::{ColourCodes, RateControl, VideoCodec, VideoSpec};
+use crate::encode::{BitRate, ColourCodes, RateControl, VideoCodec, VideoSpec};
 
 /// A primaries, transfer or matrix the encoder can be told by name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,21 +81,12 @@ pub(crate) struct Settings {
     pub(crate) tags: Tags,
 }
 
-/// The lowest bit rate EffectCraft's encoders take for each codec, in kbit/s.
-const MIN_H264_KBPS: u32 = 100;
-const MIN_HEVC_KBPS: u32 = 50;
-
 impl VideoSpec {
     pub(crate) fn settings(&self) -> Settings {
-        let (average_bit_rate, peak_bytes_per_second, quality) = match self.rate_control {
-            RateControl::Bitrate { kbps } => {
-                let kbps = i64::from(kbps.max(match self.codec {
-                    VideoCodec::H264 => MIN_H264_KBPS,
-                    VideoCodec::Hevc => MIN_HEVC_KBPS,
-                }));
-                (Some(kbps * 1000), Some(kbps * 1000 * 3 / 2 / 8), None)
-            }
-            RateControl::Quality { percent } => (None, None, Some(f32::from(percent.clamp(1, 100)) / 100.0)),
+        let (average_bit_rate, peak_bytes_per_second) = self.bit_rate().map_or((None, None), |BitRate { target, peak }| (Some(target), Some(peak / 8)));
+        let quality = match self.rate_control {
+            RateControl::Quality { percent } => Some(f32::from(percent.clamp(1, 100)) / 100.0),
+            RateControl::Bitrate { .. } => None,
         };
         Settings {
             average_bit_rate,

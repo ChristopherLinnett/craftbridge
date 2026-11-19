@@ -51,6 +51,14 @@ fn info_names_the_engine_its_version_and_the_builds_state() {
     for counter in ["sessions", "pictures", "declined", "fallbacks"] {
         assert!(info["decoding"][counter].is_u64(), "`info.decoding.{counter}` counts the hardware decoders' work: {}", info["decoding"]);
     }
+    for counter in ["hardwarePictures", "softwarePictures", "fallbacks"] {
+        assert!(info["encoding"][counter].is_u64(), "`info.encoding.{counter}` counts which encoder made the pictures: {}", info["encoding"]);
+    }
+    assert!(
+        info["encoding"]["lastFallbackFrame"].is_null() || info["encoding"]["lastFallbackFrame"].is_u64(),
+        "`info.encoding.lastFallbackFrame` is a frame number, or null before any switch: {}",
+        info["encoding"]
+    );
     assert_eq!(
         info["project"]["renderer"]["why"].as_str(),
         Some("headless: renders on the CPU"),

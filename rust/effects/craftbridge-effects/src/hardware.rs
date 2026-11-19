@@ -7,6 +7,10 @@
 //! receives the frames from the render threads in any order; they are turned into the planes EffectCraft's
 //! own encoders are fed, put back in order and encoded by the device's hardware encoder, the sound is encoded
 //! as AAC by the platform's encoder, and `craftbridge-media` writes the MP4, tagged as EffectCraft tags its own.
+//! A hardware encoder whose session is lost part way (the system takes it from an app that went to the
+//! background) hands the rest of an H.264 movie to the software encoder, from the first frame it made no packet
+//! for; a movie that cannot go on that way ends in an error naming the lost session, and `info.encoding`
+//! counts which encoder made which pictures.
 //!
 //! A job the hardware path cannot reproduce faithfully, or a device without the encoder, is declined before
 //! anything renders, and goes to EffectCraft's exporter unchanged.
@@ -18,7 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
-use craftbridge_media::{AacSpec, ColourCodes, EncodeError, HardwareEncoder, Movie, RateControl, VideoCodec, VideoSpec, Yuv420};
+use craftbridge_media::{AacSpec, ColourCodes, EncodeError, Movie, RateControl, Resilient, VideoCodec, VideoSpec, Yuv420};
 use effectcraft_engine::project::render_queue::{
     AudioOutput, Channels, CodecProfile, OutputFormat, RateControlMode, RenderLog, RenderQueueItem, RenderSettings, sequence_path,
 };
@@ -287,7 +291,7 @@ fn describe(error: EncodeError) -> String {
 }
 
 /// The movie being written: shared by the sink's render threads, and taken back when the sub-job ends.
-type SharedMovie = Arc<Mutex<Option<Movie<HardwareEncoder, BufWriter<File>>>>>;
+type SharedMovie = Arc<Mutex<Option<Movie<Resilient, BufWriter<File>>>>>;
 
 /// The file the movie is written to, its folder made as EffectCraft makes it.
 fn create(path: &str) -> Result<BufWriter<File>, String> {
@@ -317,7 +321,7 @@ impl HardwareExporter {
     fn hardware(&self, job: &ExportJob, progress: &mut dyn FnMut(u64, u64) -> bool) -> Option<Result<ExportResult, String>> {
         let plan = Plan::of(job).ok()?;
         let started = Instant::now();
-        let encoder = HardwareEncoder::start(plan.spec).ok()?;
+        let encoder = Resilient::start(plan.spec).ok()?;
         // The sound first, which is cheap beside the frames: a sound the platform cannot encode declines the
         // job before any frame has rendered.
         let track = match &plan.audio {
@@ -361,7 +365,7 @@ impl HardwareExporter {
     fn movie(
         &self,
         plan: &Plan,
-        encoder: HardwareEncoder,
+        encoder: Resilient,
         track: Option<craftbridge_media::AudioTrack>,
         job: &ExportJob,
         progress: &mut dyn FnMut(u64, u64) -> bool,

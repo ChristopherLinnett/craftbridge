@@ -101,6 +101,11 @@ filmcraft-codecs = { git = "https://github.com/storytold/filmcraft", rev = "d5ea
 filmcraft-color = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
 filmcraft-frame = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
 filmcraft-isobmff = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
+# The software H.264 encoder a movie goes on in when its hardware encoder is lost (plan §18): the one EffectCraft's
+# own export encodes with, at the library revision EffectCraft builds it at, with the same library's H.264 parameter
+# set and slice header readers and its bit reader and writer, which rename the encoder's parameter sets.
+craft-video = { git = "https://github.com/storytold/craft-libs", rev = "e7c3dda7f3e339dd2c8d40fc4eb405472be1a1e4", default-features = false, features = ["h264-encode", "h264-decode"] }
+craft-media = { git = "https://github.com/storytold/craft-libs", rev = "e7c3dda7f3e339dd2c8d40fc4eb405472be1a1e4", default-features = false, features = ["bitstream"] }
 
 # Apple's frameworks, through the bindings generated from their headers: the media ones for the iOS hardware
 # decoder in craftbridge-media (plan §18), CoreText for the faces craftbridge-core's iOS platform module reads
