@@ -10,12 +10,6 @@ import io.github.christopherlinnett.craftbridge.core.jsonValue
 import java.io.File
 import kotlin.math.sqrt
 
-/** The bytes a pixel of a frame in flight takes in the exporter's sizing: four `f32` channels. */
-private const val BYTES_PER_PIXEL = 16L
-
-/** How many frames' worth of memory a render needs free: the frame and the buffer it is read back into. */
-private const val RENDER_HEADROOM = 2
-
 /** The sizes the pool is sized for, by the names a person gives them. */
 private val frameSizes = listOf("1080p" to (1920 to 1080), "4K" to (3840 to 2160), "5K" to (5120 to 2880), "8K" to (7680 to 4320))
 
@@ -53,16 +47,19 @@ private fun allowedProcessors(): Int =
         }
 
 /**
- * The size of the export pool for [available] bytes: as many threads as half of them hold frames of `width` by
- * `height` pixels at 16 bytes a pixel, at least one and at most [cores]. Written here from the plan's rule in
- * the plan's words, not from the exporter's code, so a device compares the exporter with the rule.
+ * The size of the export pool for [available] bytes: as many threads as they hold frames in flight of
+ * `width` by `height` pixels at [perPixel] bytes a pixel — the need the exporter divides the memory by — at
+ * least one and at most [cores]. Written here from the plan's rule in the plan's words, not from the
+ * exporter's code, so a device compares the exporter with the rule; only the bytes a pixel come from the
+ * engine, read from its own refusal ([bytesAPixelInFlight]).
  */
 internal fun expectedPool(
     available: Long,
     width: Int,
     height: Int,
     cores: Int,
-): Int = minOf(cores.toLong(), maxOf(1L, available / 2 / (width * height * BYTES_PER_PIXEL))).toInt()
+    perPixel: Long,
+): Int = minOf(cores.toLong(), maxOf(1L, available / (width.toLong() * height * perPixel))).toInt()
 
 /** How many threads of this process carry the pool's name. */
 private fun poolThreads(): Int =
@@ -127,27 +124,28 @@ private suspend fun poolOfOneExport(
 }
 
 /**
- * Whether the device has the memory to render one frame of [width] by [height]: the system ends an app that asks a
- * small phone for more than it has (an 8K frame is 531 MB at the exporter's 16 bytes a pixel, and the render holds
- * more than one such buffer), which no check can tell from a failure of the pool, so a size the device cannot hold is
- * left out of the run and said in its log.
+ * Whether the device has the memory to hold one frame of [width] by [height] in flight at [perPixel] bytes a
+ * pixel: the exporter refuses a frame it cannot hold, which leaves no pool to count, so a size the device
+ * cannot hold is left out of the run and said in its log.
  */
 private fun deviceHolds(
     width: Int,
     height: Int,
-): Boolean = width * height * BYTES_PER_PIXEL * RENDER_HEADROOM <= memAvailable()
+    perPixel: Long,
+): Boolean = width.toLong() * height * perPixel <= memAvailable()
 
 /**
- * A square size whose frame puts the rule at half the [cores] for [available] bytes, which the device holds twice
- * over: what a device with the memory to run every named size on its cores is also held to, since only a pool below
- * the cores shows the exporter sizing it by the memory.
+ * A square size whose frame puts the rule at half the [cores] for [available] bytes at [perPixel] bytes a
+ * pixel, and which the device always holds: what a device with the memory to run every named size on its
+ * cores is also held to, since only a pool below the cores shows the exporter sizing it by the memory.
  */
 private fun sizeBelowTheCores(
     available: Long,
     cores: Int,
+    perPixel: Long,
 ): Pair<Int, Int> {
-    val frame = available / 2 / maxOf(1, cores / 2)
-    val side = sqrt((frame / BYTES_PER_PIXEL).toDouble()).toInt()
+    val need = available / maxOf(1, cores / 2)
+    val side = sqrt((need / perPixel).toDouble()).toInt()
     return side to side
 }
 
@@ -163,17 +161,18 @@ private suspend fun poolHeldToTheRule(
     width: Int,
     height: Int,
     cores: Int,
+    perPixel: Long,
 ): Boolean? {
-    if (!deviceHolds(width, height)) {
-        val frame = width.toLong() * height * BYTES_PER_PIXEL
-        Log.i(LOG_TAG, "pool at $name: left out, ${memAvailable()} bytes are available for a frame of $frame")
+    if (!deviceHolds(width, height, perPixel)) {
+        val need = width.toLong() * height * perPixel
+        Log.i(LOG_TAG, "pool at $name: left out, ${memAvailable()} bytes are available for a frame in flight needing $need")
         return null
     }
     val (named, before, after) = poolOfOneExport(context, width, height)
     // A pool of as many threads as the cores is the caller's own, which carries no name of the pool's.
     val observed = named ?: cores
-    val least = expectedPool(minOf(before, after), width, height, cores)
-    val most = expectedPool(maxOf(before, after), width, height, cores)
+    val least = expectedPool(minOf(before, after), width, height, cores, perPixel)
+    val most = expectedPool(maxOf(before, after), width, height, cores, perPixel)
     val said = "MemAvailable $before before and $after after, $cores cores: the rule gives $least to $most"
     Log.i(LOG_TAG, "pool at $name: $observed threads, $said")
     require(observed in least..most) { "the export at $name ran on a pool of $observed threads; $said" }
@@ -192,17 +191,28 @@ internal val exportPoolChecks: List<Case> =
             Log.i(LOG_TAG, "MemAvailable $available bytes of $total")
             require(available in 1 until total) { "MemAvailable $available is not a figure below MemTotal $total" }
         },
-        Case("at 1080p, 4K, 5K and 8K the export's pool is min(cores, max(1, MemAvailable / 2 / (width x height x 16)))") { context ->
+        Case(
+            "at 1080p, 4K, 5K and 8K the export's pool is min(cores, max(1, MemAvailable / (width x height x the bytes a pixel " +
+                "in flight the exporter's refusal counts)))",
+        ) { context ->
             val cores = allowedProcessors()
+            val probe = startOn(context)
+            val perPixel =
+                try {
+                    probe.bytesAPixelInFlight(context)
+                } finally {
+                    probe.shutDown()
+                }
+            Log.i(LOG_TAG, "pool: the exporter counts $perPixel bytes a pixel in flight")
             val held =
                 frameSizes.mapNotNull { (name, size) ->
-                    poolHeldToTheRule(context, name, size.first, size.second, cores)?.let { below -> name to below }
+                    poolHeldToTheRule(context, name, size.first, size.second, cores, perPixel)?.let { below -> name to below }
                 }
             var sized = held.filter { it.second }.map { it.first }
             if (sized.isEmpty()) {
-                val (width, height) = sizeBelowTheCores(memAvailable(), cores)
+                val (width, height) = sizeBelowTheCores(memAvailable(), cores, perPixel)
                 val name = "${width}x$height"
-                sized = listOfNotNull(name.takeIf { poolHeldToTheRule(context, name, width, height, cores) == true })
+                sized = listOfNotNull(name.takeIf { poolHeldToTheRule(context, name, width, height, cores, perPixel) == true })
             }
             require(sized.isNotEmpty()) {
                 val sizes = frameSizes.map { it.first }

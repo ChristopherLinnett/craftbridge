@@ -1,45 +1,75 @@
-//! How much memory the app may still allocate, as the phone says it.
+//! How much memory the app may still allocate, as the platform says it.
 //!
-//! An exporter that renders frames in parallel needs this number to size its thread pool: EffectCraft's
-//! own free-memory reading has no branch for iOS or Android, so left to itself it bounds the frames in
-//! flight by the thread count alone. The core reads the figure itself, because it knows nothing of
-//! EffectCraft (AGENTS.md §2).
+//! An exporter that renders frames needs this number to size its thread pool, and to refuse a frame the
+//! memory cannot hold at all before it renders: EffectCraft's own free-memory reading has no branch for
+//! iOS or Android, so left to itself it bounds the frames in flight by the thread count alone. The core
+//! reads the figure itself, because it knows nothing of EffectCraft (AGENTS.md §2).
 //!
-//! Every decision is plain safe code that the host tests run: what a `/proc/meminfo` line says, in what
-//! unit, and what a figure that is missing or cannot be read means. Only the one call into iOS is
-//! `unsafe`, and it answers a number.
+//! Every platform answers its own figure or the reason it has none, never a figure made up in its place:
+//! a caller holding work to the memory cannot tell a guess from a reading, and a guess too high lets the
+//! system end the app mid-export. Every decision is plain safe code that the host tests run: what a
+//! `/proc/meminfo` line says and in what unit, how the kernel's answers read, and the words of each
+//! failure. Only the calls into the system, which answer numbers, are `unsafe`.
 
-/// The memory the platform says the app may still allocate, in bytes; `None` when the platform gives no
-/// figure, which is every desktop (a desktop export reads its own free memory, so nothing here changes
-/// it), the iOS Simulator and a phone whose figure cannot be read. A missing figure is an answer, never
-/// a failure: a caller that gets it applies no memory bound.
-pub fn available_memory() -> Option<u64> {
+/// The memory the platform says the app may still allocate, in bytes:
+///
+/// - on an iPhone, `os_proc_available_memory()`: what the app may allocate before the system's per-app
+///   limit ends it, 0 for an app already past it;
+/// - on Android and on Linux, the kernel's `MemAvailable`: its estimate of what can be allocated without
+///   swapping;
+/// - on a Mac, and in the iOS Simulator, which holds no app to a limit of its own and runs on the Mac's
+///   memory, the host's own figure: the share of its memory the kernel counts as available
+///   (`kern.memorystatus_level`, in whole percents of `hw.memsize`).
+///
+/// # Errors
+///
+/// Why the platform gives no figure, in words: its report cannot be read or holds no figure, or the
+/// platform is none of the above.
+pub fn available_memory() -> Result<u64, String> {
     platform_figure()
 }
 
-/// iOS's own figure for the app: what it may allocate before the system's per-app limit ends it.
-#[cfg(target_os = "ios")]
-fn platform_figure() -> Option<u64> {
-    ios_figure(app_memory_left(), cfg!(target_env = "sim"))
+/// An iPhone's own figure for the app.
+#[cfg(all(target_os = "ios", not(target_env = "sim")))]
+fn platform_figure() -> Result<u64, String> {
+    let answer = app_memory_left();
+    u64::try_from(answer).map_err(|_| format!("os_proc_available_memory answered {answer}, more bytes than a figure counts"))
 }
 
-/// Android's `MemAvailable`, the kernel's estimate of what can be allocated without swapping. A file
-/// that cannot be read is no figure.
-#[cfg(target_os = "android")]
-fn platform_figure() -> Option<u64> {
-    std::fs::read_to_string("/proc/meminfo").ok().and_then(|text| parse_meminfo(&text))
+/// The kernel's `MemAvailable`, from the report every Android and Linux kernel since 3.14 writes.
+#[cfg(any(target_os = "android", target_os = "linux"))]
+fn platform_figure() -> Result<u64, String> {
+    meminfo_figure(std::fs::read_to_string(MEMINFO))
 }
 
-/// The desktop reports nothing, so the caller leaves its own memory reading in charge.
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-fn platform_figure() -> Option<u64> {
-    None
+/// The host's own figure, on a Mac and in the iOS Simulator.
+#[cfg(any(target_os = "macos", all(target_os = "ios", target_env = "sim")))]
+fn platform_figure() -> Result<u64, String> {
+    host_figure(sysctl_number(c"kern.memorystatus_level")?, sysctl_number(c"hw.memsize")?)
+}
+
+/// A platform none of the above: it has no figure this module knows how to ask for.
+#[cfg(not(any(target_os = "ios", target_os = "android", target_os = "linux", target_os = "macos")))]
+fn platform_figure() -> Result<u64, String> {
+    Err("this platform gives no figure for the memory an app may still allocate".to_string())
+}
+
+/// Where Android's and Linux's kernels report their memory.
+#[cfg(any(target_os = "android", target_os = "linux", test))]
+const MEMINFO: &str = "/proc/meminfo";
+
+/// The figure a read of [`MEMINFO`] gives, or why it gives none: a report the system would not let the
+/// app read, or one with no `MemAvailable` figure in kibibytes.
+#[cfg(any(target_os = "android", target_os = "linux", test))]
+fn meminfo_figure(read: std::io::Result<String>) -> Result<u64, String> {
+    let text = read.map_err(|error| format!("{MEMINFO} could not be read: {error}"))?;
+    parse_meminfo(&text).ok_or_else(|| format!("{MEMINFO} holds no MemAvailable figure in kB"))
 }
 
 /// `MemAvailable` from the text of `/proc/meminfo`, in bytes. The kernel writes it in kibibytes under
 /// the unit `kB`; a line in any other unit, with no number or with a number too large for bytes is no
 /// figure rather than a guess, and so is a report that has no such line (a kernel older than 3.14).
-#[cfg(any(target_os = "android", test))]
+#[cfg(any(target_os = "android", target_os = "linux", test))]
 fn parse_meminfo(text: &str) -> Option<u64> {
     let (_, value) = text.lines().filter_map(|line| line.split_once(':')).find(|(name, _)| name.trim() == "MemAvailable")?;
     let mut words = value.split_whitespace();
@@ -50,16 +80,44 @@ fn parse_meminfo(text: &str) -> Option<u64> {
     number.checked_mul(1024)
 }
 
-/// The figure for what iOS's call answered, in the Simulator or not. Apple's header answers 0 for a
-/// process that is not an app and for one past its memory limit. On a device this runs only inside an
-/// app, so 0 there is an app past its limit, and a figure of 0 bytes gives it the fewest frames in
-/// flight. The Simulator puts no app under a limit and answers 0 to every one, so there 0 is no figure.
-#[cfg(any(target_os = "ios", test))]
-fn ios_figure(answer: usize, simulator: bool) -> Option<u64> {
-    u64::try_from(answer).ok().filter(|&bytes| bytes > 0 || !simulator)
+/// The host's available memory from the kernel's two answers: `level` percent of its `total` bytes. A
+/// share above the whole is no figure the kernel could mean.
+#[cfg(any(target_os = "macos", all(target_os = "ios", target_env = "sim"), test))]
+fn host_figure(level: u64, total: u64) -> Result<u64, String> {
+    if level > 100 {
+        return Err(format!("kern.memorystatus_level reads {level} percent, more than the whole memory"));
+    }
+    // A share of at most the whole of a 64-bit number is itself one.
+    u64::try_from(u128::from(total) * u128::from(level) / 100).map_err(|_| format!("{level} percent of {total} bytes is more bytes than a figure counts"))
 }
 
-#[cfg(target_os = "ios")]
+/// The number the kernel answers for the sysctl `name`, which it writes as an `int` or a 64-bit quad.
+#[cfg(any(target_os = "macos", all(target_os = "ios", target_env = "sim")))]
+fn sysctl_number(name: &std::ffi::CStr) -> Result<u64, String> {
+    let mut answer = [0_u8; 8];
+    let mut size = answer.len();
+    // SAFETY: `name` is a NUL-terminated string the call only reads; the call writes at most `size`
+    // bytes into `answer`, which holds that many, and sets `size` to the bytes it wrote; a null new
+    // value of length 0 sets nothing.
+    let status = unsafe { libc::sysctlbyname(name.as_ptr(), answer.as_mut_ptr().cast(), &raw mut size, std::ptr::null_mut(), 0) };
+    if status != 0 {
+        return Err(format!("the kernel did not answer {}: {}", name.to_string_lossy(), std::io::Error::last_os_error()));
+    }
+    sysctl_value(answer, size).ok_or_else(|| format!("the kernel answered {} in {size} bytes, which is no number", name.to_string_lossy()))
+}
+
+/// The number in a sysctl's answer, in the machine's own byte order: its first four bytes for an `int`,
+/// all eight for a quad, and no number for an answer of any other size.
+#[cfg(any(target_os = "macos", all(target_os = "ios", target_env = "sim"), test))]
+fn sysctl_value(answer: [u8; 8], size: usize) -> Option<u64> {
+    match size {
+        4 => answer.first_chunk::<4>().map(|int| u64::from(u32::from_ne_bytes(*int))),
+        8 => Some(u64::from_ne_bytes(answer)),
+        _ => None,
+    }
+}
+
+#[cfg(all(target_os = "ios", not(target_env = "sim")))]
 unsafe extern "C" {
     /// `os_proc_available_memory` from `<os/proc.h>`, in the system library every iOS process links.
     #[link_name = "os_proc_available_memory"]
@@ -67,7 +125,7 @@ unsafe extern "C" {
 }
 
 /// What iOS says the app may still allocate, in bytes.
-#[cfg(target_os = "ios")]
+#[cfg(all(target_os = "ios", not(target_env = "sim")))]
 fn app_memory_left() -> usize {
     // SAFETY: the function takes no arguments, reads no memory of ours and has no precondition; it only
     // returns a number.
@@ -122,20 +180,65 @@ mod tests {
     }
 
     #[test]
-    fn ios_answers_zero_means_past_the_limit_on_a_device_and_no_figure_in_the_simulator() {
-        assert_eq!(ios_figure(0, false), Some(0), "a device's app past its limit has no memory to spare");
-        assert_eq!(ios_figure(0, true), None, "the Simulator gives no app a limit");
-        for simulator in [false, true] {
-            assert_eq!(ios_figure(1, simulator), Some(1));
-            assert_eq!(ios_figure(3 << 30, simulator), Some(3 << 30));
-            assert_eq!(ios_figure(usize::MAX, simulator), u64::try_from(usize::MAX).ok());
+    fn a_report_that_cannot_be_read_or_holds_no_figure_answers_why() {
+        assert_eq!(meminfo_figure(Ok(REPORT.to_string())), Ok(1_887_920 * 1024));
+        let refused = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let words = format!("/proc/meminfo could not be read: {refused}");
+        assert_eq!(meminfo_figure(Err(refused)), Err(words));
+        assert_eq!(meminfo_figure(Ok("MemTotal: 10 kB\n".to_string())), Err("/proc/meminfo holds no MemAvailable figure in kB".to_string()));
+    }
+
+    #[test]
+    fn the_hosts_figure_is_its_share_of_the_whole_memory() {
+        assert_eq!(host_figure(79, 64 << 30), Ok(79 * (64 << 30) / 100));
+        assert_eq!(host_figure(0, 64 << 30), Ok(0), "a host with nothing to spare has no memory to give");
+        assert_eq!(host_figure(100, u64::MAX), Ok(u64::MAX), "the whole of the largest memory");
+        assert_eq!(host_figure(101, 64 << 30), Err("kern.memorystatus_level reads 101 percent, more than the whole memory".to_string()));
+    }
+
+    #[test]
+    fn a_sysctl_answers_an_int_or_a_quad_and_nothing_else() {
+        let int = [79, 0, 0, 0, 0xff, 0xff, 0xff, 0xff];
+        assert_eq!(sysctl_value(int, 4), Some(u64::from(u32::from_ne_bytes([79, 0, 0, 0]))), "only the int's own bytes count");
+        let quad = (64_u64 << 30).to_ne_bytes();
+        assert_eq!(sysctl_value(quad, 8), Some(64 << 30));
+        for size in [0, 1, 2, 3, 5, 7, 9] {
+            assert_eq!(sysctl_value(quad, size), None, "{size} bytes");
         }
     }
 
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    /// A Mac's figure is the kernel's own, as its `sysctl` command reads the same two values, not a
+    /// number of the core's: the level moves while the test runs, so the figure is held to the levels
+    /// read just before and just after it.
+    #[cfg(target_os = "macos")]
     #[test]
-    fn the_desktop_reports_no_figure() {
-        assert_eq!(available_memory(), None);
+    fn a_mac_reports_the_kernels_share_of_its_memory() {
+        let read = || {
+            let output = std::process::Command::new("/usr/sbin/sysctl").args(["-n", "kern.memorystatus_level", "hw.memsize"]).output().expect("sysctl runs");
+            let text = String::from_utf8(output.stdout).expect("sysctl writes text");
+            let numbers: Vec<u64> = text.split_whitespace().map(|word| word.parse().expect("a number")).collect();
+            assert_eq!(numbers.len(), 2, "{text:?}");
+            (numbers[0], numbers[1])
+        };
+        let (before, total) = read();
+        let figure = available_memory().expect("a Mac reports its figure");
+        let (after, _) = read();
+        eprintln!("available_memory() = {figure} of {total} bytes, at levels {before} and {after}");
+        let shares = [before.min(after), before.max(after)].map(|level| u128::from(total) * u128::from(level) / 100);
+        assert!((shares[0]..=shares[1]).contains(&u128::from(figure)), "{figure} bytes, against {shares:?}");
+    }
+
+    /// A Linux machine's figure is its kernel's `MemAvailable`, as the report reads it just before and
+    /// just after.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_reports_its_kernels_mem_available() {
+        let read = || parse_meminfo(&std::fs::read_to_string(MEMINFO).expect("the report reads")).expect("a MemAvailable figure");
+        let before = read();
+        let figure = available_memory().expect("Linux reports its figure");
+        let after = read();
+        eprintln!("available_memory() = {figure}, MemAvailable {before} then {after}");
+        assert!((before.min(after)..=before.max(after)).contains(&figure), "{figure} bytes, against {before} and {after}");
     }
 
     /// On a phone, the figure the platform gives is a real, plausible one: more than a page and below
@@ -144,13 +247,10 @@ mod tests {
     #[test]
     fn the_phone_reports_a_figure() {
         let figure = available_memory();
-        #[cfg(target_os = "ios")]
+        #[cfg(all(target_os = "ios", not(target_env = "sim")))]
         eprintln!("os_proc_available_memory() = {}", app_memory_left());
         eprintln!("available_memory() = {figure:?}");
-        if let Some(bytes) = figure {
-            assert!(bytes > 4096 && bytes < (1 << 40), "{bytes}");
-        }
-        #[cfg(target_os = "android")]
-        assert!(figure.is_some(), "an Android kernel reports MemAvailable");
+        let bytes = figure.expect("a phone reports its figure");
+        assert!(bytes > 4096 && bytes < (1 << 40), "{bytes}");
     }
 }

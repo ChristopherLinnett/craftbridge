@@ -431,6 +431,10 @@ impl Exporter for HardwareExporter {
     }
 
     fn export(&self, job: &ExportJob, progress: &mut dyn FnMut(u64, u64) -> bool) -> Result<ExportResult, String> {
+        // The memory is asked before either path starts anything: the hardware path starts the device's
+        // encoder, encodes the sound and makes the movie's file and folder before its frames reach the
+        // pool, so a frame the memory refuses is refused here, while nothing of the export exists.
+        self.pooled.admit(job)?;
         if self.choice.chosen()
             && let Some(done) = self.hardware(job, progress)
         {
@@ -446,7 +450,7 @@ mod tests {
     use image::ImageEncoder;
 
     use super::*;
-    use crate::exporter::tests::{project_with_comp, with_job};
+    use crate::exporter::tests::{project_with_comp, with_job, with_job_at};
 
     /// The plan the job for `item` over a `width` by `height` composition gets.
     fn plan_of(width: u32, height: u32, change: impl FnOnce(&mut RenderQueueItem)) -> Result<Plan, Decline> {
@@ -769,6 +773,22 @@ mod tests {
     fn a_wav_that_is_not_one_is_refused_in_words() {
         let error = samples_of(b"RIFF nonsense".to_vec(), &AacSpec { sample_rate: 48_000, channels: 2 }).unwrap_err();
         assert!(error.starts_with("the rendered sound could not be read: "), "{error}");
+    }
+
+    #[test]
+    fn a_frame_the_memory_cannot_hold_is_refused_before_the_hardware_path_makes_anything() {
+        // A 1080p frame in flight on the CPU needs 132710400 bytes; the device here has one megabyte.
+        let (project, item) = project_with_comp(1920, 1080);
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let folder = scratch.path().join("made by the export");
+        let path = folder.join("movie.mp4");
+        let choice = HardwareChoice::default();
+        let exporter = HardwareExporter::over(PooledExporter::over(Arc::new(FileExporter::default()), || Ok(1 << 20)), choice.clone());
+        let _chosen = choice.scope(true);
+        let refused = with_job_at(&project, &item, None, path.to_str().expect("a scratch path is text"), |job| exporter.export(job, &mut |_, _| true))
+            .expect_err("the frame cannot fit");
+        assert_eq!(refused, "a frame of 1920x1080 needs 132710400 bytes to render on the CPU and write, and the device reports 1048576 bytes available");
+        assert!(!folder.exists(), "the refused export made its movie's folder, so something of it was written first");
     }
 
     #[test]
