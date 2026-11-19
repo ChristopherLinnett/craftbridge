@@ -6,6 +6,7 @@
 /ios/sdk/.build/
 /ios/sdk/.swiftpm/
 /ios/sdk/Frameworks/
+/ios/samples/**/Template/
 /android/sdk/**/.gradle/
 /android/sdk/**/.kotlin/
 /android/sdk/local.properties

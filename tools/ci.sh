@@ -290,8 +290,19 @@ stage_swift_build() {
   # derived data and keep their place from run to run: a module that is up to date compiles nothing and
   # writes no graph, so its last graph, written from the sources it still has, is the one read, and a
   # clean build folder loses both together.
-  local builds configuration destination architectures status=0 build=0 folder graphs=() library libraries=()
+  local builds configuration destination architectures status=0 build=0 folder graphs=() library libraries=() project projects=()
   xcframework || return 1
+  # The sample apps, each an Xcode project of its own that takes the package by local path, as an app
+  # does, listed by `cargo xtask swift-samples` (rust/xtask/src/licences.rs), the one list of them, whose
+  # pins the licence check reads. Each bundles the running example's template from the `Template` folder
+  # beside its project, which git ignores and the sample's build refuses to start without: it is made here
+  # from its recipe by the EffectCraft command line at the pin (tools/birthday-card.sh), so no sample holds
+  # a template made another way.
+  items_of "sample projects to build" swift-samples || return 1
+  projects=("${items[@]}")
+  for project in "${projects[@]}"; do
+    tools/birthday-card.sh "$(dirname "$project")/Template" >&2 || return 1
+  done
   # The library products, listed from the manifest through `cargo xtask swift-products` (rust/xtask/src/
   # pins.rs), so a product added to the package joins the extension builds below with no second list here
   # to keep in step.
@@ -335,6 +346,18 @@ stage_swift_build() {
       (cd ios/sdk && xcodebuild -scheme "$library" -destination "$destination" -configuration "$configuration" -derivedDataPath ".build/xcode-extension/$build" -quiet build \
         DIAGNOSE_MISSING_TARGET_DEPENDENCIES=YES_ERROR ARCHS="$architectures" \
         APPLICATION_EXTENSION_API_ONLY=YES SWIFT_TREAT_WARNINGS_AS_ERRORS=YES) || status=1
+    done
+    # And every sample app, in the same configuration for the same destination, built as an app is: signing
+    # is off, since the gate has no profile and a build that needs none still compiles every file, links
+    # the package and bundles the template. Its packages resolve only from the `Package.resolved` the project
+    # commits (-disableAutomaticPackageResolution): resolved here, a published package the sample takes would
+    # be written into a new one after the licence check had read the tree, and ship with its licence, and
+    # those of the packages it takes, unread. Their derived data sits under the package's `.build`, which
+    # every rule and walk skips as build output, so no sample's intermediate Swift is read as source.
+    for project in "${projects[@]}"; do
+      xcodebuild -project "$project" -scheme "$(basename "$project" .xcodeproj)" -destination "$destination" -configuration "$configuration" \
+        -derivedDataPath "ios/sdk/.build/xcode-samples/$build" -disableAutomaticPackageResolution -quiet build \
+        DIAGNOSE_MISSING_TARGET_DEPENDENCIES=YES_ERROR ARCHS="$architectures" CODE_SIGNING_ALLOWED=NO || status=1
     done
   done <"$builds"
   rm -f "$builds"

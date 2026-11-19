@@ -212,6 +212,36 @@ pub(crate) fn package_manifests(ios: &Path) -> Result<Vec<PathBuf>, String> {
         .collect())
 }
 
+/// Every Xcode project of the iOS samples, at any depth under `ios/samples`: a `<name>.xcodeproj` folder that
+/// holds the `project.pbxproj` Xcode reads, the walk skipping build output as every rule does. This is the one
+/// answer to which apps the samples are: `swift_build` builds each (`cargo xtask swift-samples`) and the licence
+/// check reads each one's pins, so no sample is built and left unread, or read and left unbuilt.
+pub(crate) fn sample_projects(ios: &Path) -> Result<Vec<PathBuf>, String> {
+    Ok(scan::walk(&ios.join("samples"), "project.pbxproj")?
+        .into_iter()
+        .filter(|file| file.path.file_name().is_some_and(|name| name == "project.pbxproj"))
+        .filter_map(|file| file.path.parent().filter(|project| project.extension().is_some_and(|extension| extension == "xcodeproj")).map(Path::to_path_buf))
+        .collect())
+}
+
+/// Every `Package.resolved` the Swift under `ios/` ships with: the SDK package's, beside its manifest, and each
+/// sample project's, which Xcode writes at `<name>.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/`.
+/// A file elsewhere under `ios/samples` is not one Xcode reads for a project, so it is no pin of an app.
+pub(crate) fn resolved_files(ios: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut files = vec![ios.join("sdk").join("Package.resolved")];
+    for project in sample_projects(ios)? {
+        files.push(project.join("project.xcworkspace").join("xcshareddata").join("swiftpm").join("Package.resolved"));
+    }
+    Ok(files)
+}
+
+/// `cargo xtask swift-samples`: the Xcode projects of the iOS samples, one path from the repository root per
+/// line.
+pub(crate) fn samples(root: &Path) -> std::process::ExitCode {
+    let projects = sample_projects(&root.join("ios")).map(|projects| projects.iter().map(|project| crate::report::shown(root, project)).collect());
+    crate::report::print_lines(projects, "swift-samples")
+}
+
 /// Compare what the builds use against what is declared: every use needs a declaration with an allowed
 /// expression, and every declaration needs a use.
 pub(crate) fn compare(used: &[Used], declared: &[Declaration<'_>], allow: &[String]) -> Vec<String> {
@@ -285,10 +315,11 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
             used.push(Used { key, source: shown.clone(), kind: "package" });
         }
     }
-    // SwiftPM writes the resolved graph next to the manifest once it has resolved the package; every pin
-    // ships with the app, transitive ones included, whether or not any manifest names it.
-    let resolved = root.join("ios").join("sdk").join("Package.resolved");
-    if let Some(source) = read_optional(&resolved)? {
+    // SwiftPM writes the resolved graph next to the manifest once it has resolved the package, and Xcode
+    // writes a sample project's into the project's own workspace; every pin ships with the app, transitive
+    // ones included, whether or not any manifest names it.
+    for resolved in resolved_files(&root.join("ios"))? {
+        let Some(source) = read_optional(&resolved)? else { continue };
         let shown = crate::report::shown(root, &resolved);
         for (identity, location) in resolved_pins(&source, &shown)? {
             // A declaration may key the package by its URL or by its registry identity; a pin matches
@@ -500,6 +531,60 @@ mod tests {
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].contains("swift-log") && errors[0].contains("has no licence"), "{errors:?}");
         assert!(errors[0].contains("Package.resolved"), "{errors:?}");
+    }
+
+    const SWIFT_LOG_PIN: &str =
+        r#"{ "version": 3, "pins": [{ "identity": "swift-log", "location": "https://github.com/apple/swift-log.git", "state": { "revision": "y" } }] }"#;
+
+    /// Where Xcode keeps the pins of the project at `project`, under `ios/samples`.
+    fn project_pins(project: &str) -> String {
+        format!("ios/samples/{project}/project.xcworkspace/xcshareddata/swiftpm/Package.resolved")
+    }
+
+    #[test]
+    fn a_sample_projects_pin_needs_a_declaration_like_the_sdks() {
+        for project in ["App/App.xcodeproj", "Group/App/App.xcodeproj"] {
+            let repo = ScratchRepo::new("sample-pin", "[swiftpm]\n", "", "");
+            repo.0.write(&format!("ios/samples/{project}/project.pbxproj"), "");
+            repo.0.write(&project_pins(project), SWIFT_LOG_PIN);
+            let errors = repo.errors();
+            assert_eq!(errors.len(), 1, "{project}: {errors:?}");
+            assert!(errors[0].contains("swift-log") && errors[0].contains("has no licence"), "{errors:?}");
+            assert!(errors[0].contains(&project_pins(project)), "{errors:?}");
+        }
+    }
+
+    #[test]
+    fn a_resolved_file_no_project_reads_is_no_pin_of_an_app() {
+        let repo = ScratchRepo::new("sample-stray", "[swiftpm]\n", "", "");
+        repo.0.write("ios/samples/App/App.xcodeproj/project.pbxproj", "");
+        repo.0.write("ios/samples/App/Package.resolved", SWIFT_LOG_PIN);
+        repo.0.write("ios/samples/App/App.xcodeproj/Package.resolved", SWIFT_LOG_PIN);
+        repo.0.write("ios/samples/App/App.xcodeproj/project.xcworkspace/Package.resolved", SWIFT_LOG_PIN);
+        // A project folder Xcode cannot open, holding no `project.pbxproj`, is no app either.
+        repo.0.write(&project_pins("Other/Other.xcodeproj"), SWIFT_LOG_PIN);
+        assert!(repo.errors().is_empty(), "{:?}", repo.errors());
+    }
+
+    /// The samples' projects are the `.xcodeproj` folders Xcode can open, however deep, and nothing in build
+    /// output or somebody else's packages: what `swift_build` builds and what the licence check reads are this one
+    /// list.
+    #[test]
+    fn the_samples_projects_are_every_project_xcode_opens_under_the_samples() {
+        let scratch = Scratch::new("sample-projects");
+        for file in [
+            "ios/samples/App/App.xcodeproj/project.pbxproj",
+            "ios/samples/Group/Other/Other.xcodeproj/project.pbxproj",
+            "ios/samples/Empty/Empty.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+            "ios/samples/Loose/project.pbxproj",
+            "ios/samples/Backup/Backup.xcodeproj/old-project.pbxproj",
+            "ios/samples/App/node_modules/Copy.xcodeproj/project.pbxproj",
+        ] {
+            scratch.write(file, "");
+        }
+        let ios = scratch.0.join("ios");
+        let projects: Vec<String> = sample_projects(&ios).unwrap().iter().map(|project| crate::report::shown(&scratch.0, project)).collect();
+        assert_eq!(projects, ["ios/samples/App/App.xcodeproj", "ios/samples/Group/Other/Other.xcodeproj"]);
     }
 
     #[test]
