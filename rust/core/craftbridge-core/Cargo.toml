@@ -41,6 +41,11 @@ objc2-core-text = { workspace = true, features = ["std", "CTFontCollection", "CT
 [target.'cfg(all(target_os = "android", target_arch = "aarch64"))'.dependencies]
 libc.workspace = true
 
+# The kernel's own memory figures on a Mac and in the iOS Simulator, which runs on one, read by sysctl
+# (src/platform/memory.rs).
+[target.'cfg(any(target_os = "macos", all(target_os = "ios", target_env = "sim")))'.dependencies]
+libc.workspace = true
+
 # The core's tests rerun an ignored child test in a fresh process whose environment differs, which is
 # the only way to prove the environment switches nothing the core chooses. The support crate is host
 # code, and a core crate may take it from its tests only (AGENTS.md §2).

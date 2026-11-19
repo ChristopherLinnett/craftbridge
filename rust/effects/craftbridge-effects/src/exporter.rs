@@ -9,6 +9,14 @@
 //! ([`available_memory`]) can hold, and EffectCraft's own rule does the rest, since it follows the
 //! pool's size.
 //!
+//! A frame the memory cannot hold at all is different from a frame it merely holds fewer of at once:
+//! the floor of one thread renders a frame larger than the phone's whole memory, and the system ends
+//! the app mid-render. So before a job renders, the export compares what its frame needs — the copies
+//! its compositor and its output hold of it, [`frame_need`], the same need the pool's size is built
+//! from — with what the platform reports, and refuses a frame that cannot fit in words naming the
+//! frame and the memory, before a pixel is written. A platform whose figure cannot be read fails the
+//! export with its reason: a guess in its place could let the system end the app.
+//!
 //! A job the memory does not hold back runs on the threads its caller already has, exactly as
 //! EffectCraft's exporter alone runs it. A smaller pool is kept from job to job rather than started
 //! for each: EffectCraft keeps state on every thread it renders on (each builds an expression runtime
@@ -22,33 +30,127 @@ use craftbridge_core::available_memory;
 use effectcraft_engine::project::render_queue::{OutputFormat, RenderSettings};
 use effectcraft_engine::render_queue::{ExportJob, ExportResult, Exporter};
 
-/// The bytes a pixel of a frame in flight takes: the compositors keep four `f32` channels, the number
-/// EffectCraft's own rule for its frames in flight counts by.
+/// The bytes a pixel of a frame takes in the compositors: four `f32` channels, the number EffectCraft's
+/// own rule for its frames in flight counts by.
 const BYTES_PER_PIXEL: u64 = 16;
 
-/// The number of threads an export may run on: as many as half of `available` bytes hold frames of
-/// `frame` bytes (the other half is for the layer caches, the decoded footage, the encoder and the
-/// figure being low), at least one and at most `cores`.
-///
-/// Without a figure for the memory, or for the frame, there is nothing to size by and the export keeps
-/// every core: the exports of a desktop, whose figures EffectCraft reads itself, run as they did.
-pub(crate) fn pool_size(available: Option<u64>, frame: Option<u64>, cores: usize) -> usize {
-    let cores = cores.max(1);
-    let (Some(available), Some(frame)) = (available, frame.filter(|&bytes| bytes > 0)) else { return cores };
-    usize::try_from(available / 2 / frame).unwrap_or(usize::MAX).clamp(1, cores)
+/// The compositor a job's frames render on, which decides how many copies of a frame are held at once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Compositor {
+    Cpu,
+    Gpu,
 }
 
-/// The bytes of the largest frame the job holds at once: the frame the compositor renders, or the frame
-/// the job's output module writes after its crop and resize, whichever is larger. A queue item's other
-/// output modules are not counted: EffectCraft hands each module to the exporter as a job of its own,
-/// which writes only its own. `None` when the job names no composition, which the export itself refuses
-/// in its own words.
-fn frame_bytes(job: &ExportJob) -> Option<u64> {
+/// The copies of a frame in flight that are alive at once on the CPU (`Compositor::copies` says why
+/// four). The device checks read it, times the frame's bytes a pixel, from the refusal's own words, so no
+/// other language spells it.
+const CPU_COPIES: u64 = 4;
+
+/// The copies of a frame in flight that are alive at once on the GPU.
+const GPU_COPIES: u64 = 10;
+
+impl Compositor {
+    /// The compositor EffectCraft's exporter renders a job on: the GPU's when the project asks for GPU
+    /// acceleration and the job has an accelerator, the CPU's otherwise. A job on the GPU may still
+    /// render some frames on the CPU, as its compositor is measured; it is counted at the GPU's need,
+    /// the larger.
+    fn of(gpu_acceleration: bool, accelerated: bool) -> Self {
+        if gpu_acceleration && accelerated { Self::Gpu } else { Self::Cpu }
+    }
+
+    /// How many times a frame's bytes one frame in flight holds, at the pin, measured as the most memory
+    /// a one-frame export of a full-frame layer held above what the process held before it, for every
+    /// format EffectCraft writes that was measured. On the CPU: the canvas the comp is drawn on, the
+    /// frame of the layer drawn onto it, and what the output makes of the finished frame — its 8-bit
+    /// pixels and the writer's or encoder's own buffers — from 2.2 frames (OpenEXR) through 2.4 (PNG,
+    /// JPEG), 2.5 (TIFF) and 2.8 (Targa, H.264) to 3.3 (ProRes). On the GPU, its working textures and the
+    /// frame read back from them besides: 6.5 frames (PNG at 5K and 8K) to 9.3 (ProRes at 1080p and 4K),
+    /// on a Mac's Metal device, which shares the app's memory as a phone's GPU does. Each count is the
+    /// whole number above the most measured; a comp with more effects can need more, so the count is a
+    /// floor the refusal holds a frame to, never a promise that a frame above it fits.
+    fn copies(self) -> u64 {
+        match self {
+            Self::Cpu => CPU_COPIES,
+            Self::Gpu => GPU_COPIES,
+        }
+    }
+
+    /// The compositor, as the refusal names it.
+    fn words(self) -> &'static str {
+        match self {
+            Self::Cpu => "the CPU",
+            Self::Gpu => "the GPU",
+        }
+    }
+}
+
+/// One frame the export holds: the size it is at, its bytes at the compositor's bytes a pixel, and the
+/// compositor that renders it.
+struct Frame {
+    width: u32,
+    height: u32,
+    bytes: u64,
+    on: Compositor,
+}
+
+/// What one frame in flight needs: its bytes as many times as its compositor and output hold them. The
+/// pool's size divides the memory by this, and [`refusal`] compares it with the memory as it is: the one
+/// definition of a frame's need, so a job the pool can hold a frame of is never refused, and a frame no
+/// pool can hold is.
+fn frame_need(frame: &Frame) -> u64 {
+    frame.bytes.saturating_mul(frame.on.copies())
+}
+
+/// The number of threads an export may run on: as many as `available` bytes hold frames in flight of
+/// `need` bytes each ([`frame_need`]), at least one and at most `cores`. Every thread may hold a frame in
+/// flight; on the GPU fewer render at once, so the count errs towards fewer threads, the side that keeps
+/// the app alive.
+pub(crate) fn pool_size(available: u64, need: u64, cores: usize) -> usize {
+    let cores = cores.max(1);
+    // A need of no bytes, which no frame has, holds nothing back.
+    available.checked_div(need).map_or(cores, |frames| usize::try_from(frames).unwrap_or(usize::MAX).clamp(1, cores))
+}
+
+/// The refusal of a job whose frames do not fit: `None` when `threads` frames in flight of `frame`, one
+/// per thread of its pool, fit in `available` bytes at [`frame_need`] each, and the words that say why
+/// it does not when they do not, naming the frame's size, its compositor and the memory the platform
+/// reports. The number a platform reports is never more than `u64::MAX`, so a frame whose need passes
+/// that number, from a size too large to count, fits nowhere and is refused everywhere.
+fn refusal(available: u64, frame: &Frame, threads: usize) -> Option<String> {
+    let need = frame_need(frame);
+    (need.saturating_mul(u64::try_from(threads).unwrap_or(u64::MAX)) > available).then(|| {
+        format!(
+            "a frame of {}x{} needs {need} bytes to render on {} and write, and the device reports {available} bytes available",
+            frame.width,
+            frame.height,
+            frame.on.words()
+        )
+    })
+}
+
+/// The failure of a job whose frame cannot be held to the memory, because the platform's figure could
+/// not be read: `why` is the platform's reason.
+fn unread(frame: &Frame, why: &str) -> String {
+    format!("a frame of {}x{} cannot be checked against the device's memory: {why}", frame.width, frame.height)
+}
+
+/// The largest frame the job holds at once: the frame the compositor renders, or the frame the job's
+/// output module writes after its crop and resize, whichever is larger. A queue item's other output
+/// modules are not counted: EffectCraft hands each module to the exporter as a job of its own, which
+/// writes only its own. `None` when the job renders no frame: one that names no composition, which the
+/// export itself refuses in its own words, and one whose output is sound alone, which EffectCraft mixes
+/// without rendering a picture.
+fn frame_of(job: &ExportJob) -> Option<Frame> {
+    if job.item.output.format.is_audio_only() {
+        return None;
+    }
     let comp = job.project.comp(job.item.comp)?;
     let pixels = |(width, height): (u32, u32)| u64::from(width).saturating_mul(u64::from(height));
-    let rendered = pixels(job.item.settings.output_size(comp));
-    let written = pixels(job.item.output.output_size(comp, &job.item.settings));
-    Some(rendered.max(written).saturating_mul(BYTES_PER_PIXEL))
+    let rendered = job.item.settings.output_size(comp);
+    let written = job.item.output.output_size(comp, &job.item.settings);
+    let (width, height) = if pixels(written) > pixels(rendered) { written } else { rendered };
+    let on = Compositor::of(job.project.settings.gpu_acceleration, job.accel.is_some());
+    Some(Frame { width, height, bytes: pixels((width, height)).saturating_mul(BYTES_PER_PIXEL), on })
 }
 
 /// The pool an export runs on: `threads` threads, named so a debugger or a crash report shows whose they are.
@@ -63,10 +165,10 @@ fn started(pool: Result<rayon::ThreadPool, rayon::ThreadPoolBuildError>) -> Resu
 }
 
 /// The exporter a session holds: every job goes to `inner` inside a pool of the size [`pool_size`]
-/// gives for the memory `memory` reports as the job starts.
+/// gives for the memory `memory` reports as the job starts, or is refused before it starts.
 pub(crate) struct PooledExporter {
     inner: Arc<dyn Exporter>,
-    memory: fn() -> Option<u64>,
+    memory: fn() -> Result<u64, String>,
     /// The pool the last job the memory held back ran on, for the next job that needs one of its size.
     /// Only the last is kept, so at most one pool's threads wait beside the caller's own.
     kept: Mutex<Option<Arc<rayon::ThreadPool>>>,
@@ -80,7 +182,7 @@ impl PooledExporter {
     }
 
     /// `inner` on the memory `memory` reports.
-    fn over(inner: Arc<dyn Exporter>, memory: fn() -> Option<u64>) -> Self {
+    pub(crate) fn over(inner: Arc<dyn Exporter>, memory: fn() -> Result<u64, String>) -> Self {
         Self { inner, memory, kept: Mutex::new(None) }
     }
 
@@ -97,18 +199,31 @@ impl PooledExporter {
 }
 
 impl PooledExporter {
-    /// `job` through `inner`, on the pool the memory allows: the one place a job's pool is chosen, so the
-    /// exports CraftBridge makes of its own (plan §18) are held to the memory as EffectCraft's are.
-    pub(crate) fn run(&self, inner: &dyn Exporter, job: &ExportJob, progress: &mut dyn FnMut(u64, u64) -> bool) -> Result<ExportResult, String> {
+    /// The threads `job` may run on, or why it may not run at all, decided before anything of it renders
+    /// or is written: the frame must fit the memory the platform reports before a pixel of it is painted,
+    /// since a floor of one thread would otherwise render a frame larger than the phone's whole memory,
+    /// and the system would end the app mid-render — losing the user's work in the app, not just the
+    /// export. A job that renders no frame has nothing to hold to the memory and keeps every core; for one
+    /// that does, a figure the platform cannot give fails the job with the platform's reason.
+    pub(crate) fn admit(&self, job: &ExportJob) -> Result<usize, String> {
         // The pool's ceiling is the size of the pool a thread outside any pool would run on, which is
         // what EffectCraft's own rule counts threads in: the machine's cores, or the count rayon's
         // environment variables set.
         let cores = rayon::current_num_threads();
-        let threads = pool_size((self.memory)(), frame_bytes(job), cores);
-        if threads == cores {
+        let Some(frame) = frame_of(job) else { return Ok(cores) };
+        let available = (self.memory)().map_err(|why| unread(&frame, &why))?;
+        let threads = pool_size(available, frame_need(&frame), cores);
+        refusal(available, &frame, threads).map_or(Ok(threads), Err)
+    }
+
+    /// `job` through `inner`, on the pool the memory allows: the one place a job's pool is chosen, so the
+    /// exports CraftBridge makes of its own (plan §18) are held to the memory as EffectCraft's are.
+    pub(crate) fn run(&self, inner: &dyn Exporter, job: &ExportJob, progress: &mut dyn FnMut(u64, u64) -> bool) -> Result<ExportResult, String> {
+        let threads = self.admit(job)?;
+        if threads == rayon::current_num_threads() {
             // The caller's own pool already has that many threads, so the job runs there, as
-            // EffectCraft's exporter alone runs it: a desktop's exports, which report no figure, keep
-            // their threads and what EffectCraft keeps on them.
+            // EffectCraft's exporter alone runs it: a job the memory does not hold back keeps its
+            // threads and what EffectCraft keeps on them.
             return inner.export(job, progress);
         }
         let pool = self.pool(threads)?;
@@ -167,50 +282,49 @@ pub(crate) mod tests {
     /// A 1920 by 1080 frame at 16 bytes a pixel.
     const FULL_HD: u64 = 1920 * 1080 * BYTES_PER_PIXEL;
 
-    /// Memory whose half holds 256 1080p frames: more than any machine the tests run on has cores, and
-    /// few enough that an export test with a broken ceiling starts a pool the machine can bear, where
+    /// What a 1080p frame in flight needs on the CPU: four copies of its bytes.
+    const FULL_HD_NEED: u64 = 4 * FULL_HD;
+
+    /// What a 16 by 16 frame in flight needs on the CPU: four copies of its 4096 bytes.
+    const SMALLEST_NEED: u64 = 4 * 16 * 16 * BYTES_PER_PIXEL;
+
+    /// Memory that holds 256 1080p frames in flight: more than any machine the tests run on has cores,
+    /// and few enough that an export test with a broken ceiling starts a pool the machine can bear, where
     /// the largest figure would ask for billions of threads.
-    const PLENTY: u64 = 2 * 256 * FULL_HD;
+    const PLENTY: u64 = 256 * FULL_HD_NEED;
 
     #[test]
-    fn the_pool_holds_as_many_frames_as_half_the_memory() {
-        // Half of 4 GiB is 2 GiB, which holds 64 frames of 32 MiB, and 4 of 512 MiB.
-        assert_eq!(pool_size(Some(4 * GIB), Some(32 * MIB), 128), 64);
-        assert_eq!(pool_size(Some(4 * GIB), Some(512 * MIB), 128), 4);
-        // A 1080p frame is 31.6 MiB: 6 GiB free holds 97 of them in its half.
-        assert_eq!(pool_size(Some(6 * GIB), Some(FULL_HD), 128), 97);
+    fn the_pool_holds_as_many_frames_in_flight_as_the_memory_holds_needs() {
+        assert_eq!(pool_size(4 * GIB, 32 * MIB, 256), 128);
+        assert_eq!(pool_size(4 * GIB, 512 * MIB, 128), 8);
+        // A 1080p frame in flight needs 126.6 MiB on the CPU: 6 GiB holds 48 of them.
+        assert_eq!(pool_size(6 * GIB, FULL_HD_NEED, 128), 48);
     }
 
     #[test]
     fn the_pool_rounds_down_at_the_edge_of_a_frame() {
-        assert_eq!(pool_size(Some(2 * 3 * MIB), Some(MIB), 16), 3);
-        assert_eq!(pool_size(Some(2 * 3 * MIB - 1), Some(MIB), 16), 2);
-        assert_eq!(pool_size(Some(2 * 3 * MIB + 2 * MIB - 1), Some(MIB), 16), 3);
+        assert_eq!(pool_size(3 * MIB, MIB, 16), 3);
+        assert_eq!(pool_size(3 * MIB - 1, MIB, 16), 2);
+        assert_eq!(pool_size(4 * MIB - 1, MIB, 16), 3);
     }
 
     #[test]
     fn the_pool_never_has_fewer_than_one_thread() {
-        assert_eq!(pool_size(Some(0), Some(MIB), 8), 1);
-        assert_eq!(pool_size(Some(MIB), Some(GIB), 8), 1);
-        assert_eq!(pool_size(Some(2 * GIB - 1), Some(GIB), 8), 1);
-        assert_eq!(pool_size(Some(GIB), Some(1), 0), 1, "a count of no cores is one");
-        assert_eq!(pool_size(None, None, 0), 1);
+        assert_eq!(pool_size(0, MIB, 8), 1);
+        assert_eq!(pool_size(MIB, GIB, 8), 1);
+        assert_eq!(pool_size(GIB - 1, GIB, 8), 1);
+        assert_eq!(pool_size(GIB, 1, 0), 1, "a count of no cores is one");
+        assert_eq!(pool_size(GIB, u64::MAX, 8), 1, "a frame whose need passes every number is the floor of one");
+        assert_eq!(pool_size(0, 0, 0), 1);
     }
 
     #[test]
     fn the_pool_never_has_more_threads_than_cores() {
-        assert_eq!(pool_size(Some(64 * GIB), Some(MIB), 6), 6);
-        assert_eq!(pool_size(Some(u64::MAX), Some(1), 6), 6);
-        assert_eq!(pool_size(Some(2 * 6 * MIB), Some(MIB), 6), 6, "exactly as many frames as cores");
-        assert_eq!(pool_size(Some(2 * 7 * MIB), Some(MIB), 6), 6);
-    }
-
-    #[test]
-    fn without_a_figure_the_pool_has_every_core() {
-        assert_eq!(pool_size(None, Some(FULL_HD), 8), 8, "a memory figure that is missing");
-        assert_eq!(pool_size(Some(GIB), None, 8), 8, "a frame that is not known");
-        assert_eq!(pool_size(Some(GIB), Some(0), 8), 8, "a frame of no bytes");
-        assert_eq!(pool_size(None, None, 8), 8);
+        assert_eq!(pool_size(64 * GIB, MIB, 6), 6);
+        assert_eq!(pool_size(u64::MAX, 1, 6), 6);
+        assert_eq!(pool_size(6 * MIB, MIB, 6), 6, "exactly as many frames as cores");
+        assert_eq!(pool_size(7 * MIB, MIB, 6), 6);
+        assert_eq!(pool_size(GIB, 0, 8), 8, "a need of no bytes holds nothing back");
     }
 
     /// The pieces of an export job: a project holding one composition `width` by `height`, and a queue
@@ -224,16 +338,27 @@ pub(crate) mod tests {
         (project, RenderQueueItem::new(1, comp))
     }
 
-    /// `body` with a job for `item` over `project`, which writes to `path`.
+    /// `body` with a job for `item` over `project`, which writes to `out.mp4` and has no accelerator.
     pub(crate) fn with_job<R>(project: &Project, item: &RenderQueueItem, body: impl FnOnce(&ExportJob) -> R) -> R {
+        with_job_at(project, item, None, "out.mp4", body)
+    }
+
+    /// `body` with a job for `item` over `project`, which writes to `path` and renders with `accel`.
+    pub(crate) fn with_job_at<R>(
+        project: &Project,
+        item: &RenderQueueItem,
+        accel: Option<&dyn effectcraft_render::Accelerator>,
+        path: &str,
+        body: impl FnOnce(&ExportJob) -> R,
+    ) -> R {
         let footage = MediaPool::new();
         let job = ExportJob {
             project,
             footage: &footage,
             expr: None,
             item,
-            accel: None,
-            path: "out.mp4",
+            accel,
+            path,
             storage: None,
             label: "#1 A".into(),
             nested_switches: false,
@@ -244,14 +369,18 @@ pub(crate) mod tests {
         body(&job)
     }
 
+    fn frame_in(project: &Project, item: &RenderQueueItem) -> Option<(u32, u32, u64, Compositor)> {
+        with_job(project, item, |job| frame_of(job).map(|frame| (frame.width, frame.height, frame.bytes, frame.on)))
+    }
+
     fn bytes_of(project: &Project, item: &RenderQueueItem) -> Option<u64> {
-        with_job(project, item, frame_bytes)
+        frame_in(project, item).map(|(_, _, bytes, _)| bytes)
     }
 
     #[test]
     fn a_frame_is_the_size_the_comp_renders_at_sixteen_bytes_a_pixel() {
         let (project, item) = project_with_comp(1920, 1080);
-        assert_eq!(bytes_of(&project, &item), Some(FULL_HD));
+        assert_eq!(frame_in(&project, &item), Some((1920, 1080, FULL_HD, Compositor::Cpu)), "the frame is the size of the comp");
         let (project, mut item) = project_with_comp(1920, 1080);
         item.settings.resolution = 0.5;
         assert_eq!(bytes_of(&project, &item), Some(960 * 540 * 16), "half the render scale is a quarter of the pixels");
@@ -264,13 +393,13 @@ pub(crate) mod tests {
         item.output.resize.lock_aspect = false;
         item.output.resize.width = 3840;
         item.output.resize.height = 2160;
-        assert_eq!(bytes_of(&project, &item), Some(3840 * 2160 * 16), "an enlarging resize holds the larger frame");
+        assert_eq!(frame_in(&project, &item), Some((3840, 2160, 3840 * 2160 * 16, Compositor::Cpu)), "an enlarging resize holds the larger frame");
         let (project, mut item) = project_with_comp(3840, 2160);
         item.output.resize.enabled = true;
         item.output.resize.lock_aspect = false;
         item.output.resize.width = 640;
         item.output.resize.height = 360;
-        assert_eq!(bytes_of(&project, &item), Some(3840 * 2160 * 16), "a shrinking resize still renders the full frame");
+        assert_eq!(frame_in(&project, &item), Some((3840, 2160, 3840 * 2160 * 16, Compositor::Cpu)), "a shrinking resize still renders the full frame");
     }
 
     #[test]
@@ -289,10 +418,127 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_job_without_its_comp_has_no_frame_size() {
+    fn a_job_without_its_comp_has_no_frame() {
         let (project, _) = project_with_comp(16, 16);
         let missing = RenderQueueItem::new(1, ItemId(9999));
         assert_eq!(bytes_of(&project, &missing), None);
+    }
+
+    #[test]
+    fn a_job_that_writes_sound_alone_renders_no_frame() {
+        for format in OutputFormat::ALL {
+            let (project, mut item) = project_with_comp(7680, 4320);
+            item.output.format = format;
+            let sound_alone = matches!(format, OutputFormat::Wav | OutputFormat::Aiff);
+            assert_eq!(bytes_of(&project, &item).is_none(), sound_alone, "{format:?}");
+        }
+    }
+
+    #[test]
+    fn a_frame_renders_on_the_gpu_only_where_the_project_asks_for_it_and_the_job_has_an_accelerator() {
+        assert_eq!(Compositor::of(true, true), Compositor::Gpu);
+        assert_eq!(Compositor::of(true, false), Compositor::Cpu, "no accelerator, nothing to render on but the CPU");
+        assert_eq!(Compositor::of(false, true), Compositor::Cpu, "a Software Only project");
+        assert_eq!(Compositor::of(false, false), Compositor::Cpu);
+        // The job's own accelerator, where the machine has an adapter to make one on.
+        let Ok(gpu) = effectcraft_gpu::Gpu::try_headless() else {
+            eprintln!("no GPU adapter here: the job with an accelerator is not built");
+            return;
+        };
+        let (project, item) = project_with_comp(1920, 1080);
+        assert!(project.settings.gpu_acceleration, "a new project asks for GPU acceleration");
+        assert_eq!(with_job_at(&project, &item, Some(&gpu), "out.mp4", |job| frame_of(job).map(|frame| frame.on)), Some(Compositor::Gpu));
+    }
+
+    #[test]
+    fn a_frame_in_flight_needs_its_bytes_as_often_as_its_compositor_holds_them() {
+        let frame = |on| Frame { width: 1920, height: 1080, bytes: FULL_HD, on };
+        assert_eq!(frame_need(&frame(Compositor::Cpu)), 4 * FULL_HD);
+        assert_eq!(frame_need(&frame(Compositor::Gpu)), 10 * FULL_HD);
+        assert_eq!(frame_need(&Frame { width: u32::MAX, height: u32::MAX, bytes: u64::MAX, on: Compositor::Cpu }), u64::MAX, "a need too large to count");
+    }
+
+    #[test]
+    fn an_8k_export_on_a_phone_that_cannot_hold_the_frame_is_refused_in_words_before_anything_is_written() {
+        // A two-gigabyte emulator with 450 MiB free, as the low-memory run leaves it: one 8K frame in
+        // flight on the CPU needs four times its 531 MB, which the phone does not have to give.
+        let inner = recording(1);
+        let exporter = PooledExporter::over(inner.clone(), || Ok(450 * MIB));
+        let (project, item) = project_with_comp(7680, 4320);
+        let refused = with_job(&project, &item, |job| exporter.export(job, &mut |_, _| true)).expect_err("the frame cannot fit");
+        assert_eq!(
+            refused, "a frame of 7680x4320 needs 2123366400 bytes to render on the CPU and write, and the device reports 471859200 bytes available",
+            "the refusal names the frame's size, its compositor and the memory the platform gave"
+        );
+        assert!(inner.runs.lock().unwrap().is_empty(), "a refused export reached nothing that could write");
+    }
+
+    #[test]
+    fn the_refusal_is_pinned_to_its_exact_words_at_the_smallest_size_on_either_compositor() {
+        // A 16x16 frame is 4096 bytes; on the CPU it needs 16384, one more than this memory has.
+        let (project, item) = project_with_comp(16, 16);
+        let exporter = PooledExporter::over(recording(1), || Ok(SMALLEST_NEED - 1));
+        let refused = with_job(&project, &item, |job| exporter.export(job, &mut |_, _| true)).expect_err("one byte short of the frame's need");
+        assert_eq!(refused, "a frame of 16x16 needs 16384 bytes to render on the CPU and write, and the device reports 16383 bytes available");
+        let on_the_gpu = Frame { width: 16, height: 16, bytes: 4096, on: Compositor::Gpu };
+        assert_eq!(
+            refusal(40_959, &on_the_gpu, 1).as_deref(),
+            Some("a frame of 16x16 needs 40960 bytes to render on the GPU and write, and the device reports 40959 bytes available")
+        );
+        assert_eq!(refusal(40_960, &on_the_gpu, 1), None);
+    }
+
+    #[test]
+    fn a_figure_the_platform_cannot_give_fails_the_export_with_its_reason_before_anything_is_written() {
+        let inner = recording(1);
+        let exporter = PooledExporter::over(inner.clone(), || Err("/proc/meminfo could not be read: permission denied".to_string()));
+        let (project, item) = project_with_comp(1920, 1080);
+        let failed = with_job(&project, &item, |job| exporter.export(job, &mut |_, _| true)).expect_err("no figure, no export");
+        assert_eq!(failed, "a frame of 1920x1080 cannot be checked against the device's memory: /proc/meminfo could not be read: permission denied");
+        assert!(inner.runs.lock().unwrap().is_empty(), "an export with no figure reached nothing that could write");
+    }
+
+    #[test]
+    fn what_fits_is_not_refused_and_a_job_with_no_frame_asks_for_no_figure() {
+        // Memory exactly one 8K frame's need holds the export, on a pool of one thread.
+        let inner = recording(1);
+        let exporter = PooledExporter::over(inner.clone(), || Ok(4 * 7680 * 4320 * BYTES_PER_PIXEL));
+        assert_eq!(run_on(&exporter, &inner, 7680, 4320).0, 1, "memory exactly a frame's need runs it");
+        // A job whose comp is gone is the export's to answer in its own words, and a job of sound alone
+        // renders no picture: neither has a frame to hold to the memory, so neither asks for a figure,
+        // and both run on the caller's own threads.
+        let caller = std::thread::current().id();
+        let inner = recording(1);
+        let unreadable = PooledExporter::over(inner.clone(), || Err("no figure".to_string()));
+        let (project, mut sound) = project_with_comp(7680, 4320);
+        sound.output.format = OutputFormat::Wav;
+        with_job(&project, &sound, |job| unreadable.export(job, &mut |_, _| true)).expect("a job of sound alone is not held to the memory");
+        assert_eq!(inner.last(), (rayon::current_num_threads(), caller));
+        let missing = RenderQueueItem::new(1, ItemId(9999));
+        with_job(&project, &missing, |job| unreadable.export(job, &mut |_, _| true)).expect("a job with no frame is not refused by the check");
+    }
+
+    #[test]
+    fn a_frame_too_large_to_count_fits_no_figure_and_each_thread_holds_a_frame() {
+        let uncountable = Frame { width: u32::MAX, height: u32::MAX, bytes: u64::MAX, on: Compositor::Cpu };
+        for available in [0, 1024, u64::MAX - 1] {
+            assert_eq!(
+                refusal(available, &uncountable, 1).as_deref(),
+                Some(
+                    format!(
+                        "a frame of {}x{} needs {} bytes to render on the CPU and write, and the device reports {available} bytes available",
+                        u32::MAX,
+                        u32::MAX,
+                        u64::MAX
+                    )
+                    .as_str()
+                ),
+                "a need past the largest figure fits no memory, even the largest"
+            );
+        }
+        let small = Frame { width: 4, height: 4, bytes: 256, on: Compositor::Cpu };
+        assert_eq!(refusal(1024, &small, 1), None, "memory exactly one need holds one frame in flight");
+        assert!(refusal(1024, &small, 2).is_some(), "two frames in flight need two needs");
     }
 
     /// An exporter that records, for each export, the size of the pool it ran on and the thread it ran
@@ -341,7 +587,7 @@ pub(crate) mod tests {
 
     /// The pool a 1080p export ran on, given the memory the phone reports (a function, as the exporter
     /// reads it, so each figure is its own).
-    fn threads_for(memory: fn() -> Option<u64>) -> usize {
+    fn threads_for(memory: fn() -> Result<u64, String>) -> usize {
         let inner = recording(1);
         run_on(&PooledExporter::over(inner.clone(), memory), &inner, 1920, 1080).0
     }
@@ -349,37 +595,35 @@ pub(crate) mod tests {
     #[test]
     fn the_export_runs_on_a_pool_that_follows_the_reported_memory() {
         let cores = rayon::current_num_threads();
-        // A 1080p frame is 31.6 MiB, so 2 GiB holds 32 frames in its half, and 100 MiB holds 1.
-        assert_eq!(threads_for(|| Some(100 * MIB)), 1);
-        assert_eq!(threads_for(|| Some(0)), 1);
-        assert_eq!(threads_for(|| Some(2 * 3 * FULL_HD)), 3.min(cores));
-        assert_eq!(threads_for(|| Some(2 * 3 * FULL_HD - 1)), 2.min(cores));
+        assert_eq!(threads_for(|| Ok(FULL_HD_NEED)), 1, "memory exactly one frame's need holds one frame in flight");
+        assert_eq!(threads_for(|| Ok(3 * FULL_HD_NEED)), 3.min(cores));
+        assert_eq!(threads_for(|| Ok(3 * FULL_HD_NEED - 1)), 2.min(cores));
         // A pool between one thread and the cores is its own size: a ceiling below the cores would show.
-        assert_eq!(threads_for(|| Some(2 * 10 * FULL_HD)), 10.min(cores));
-        assert_eq!(threads_for(|| Some(PLENTY)), cores);
-        assert_eq!(threads_for(|| None), cores, "a phone that reports nothing, and a desktop, keep every core");
+        assert_eq!(threads_for(|| Ok(10 * FULL_HD_NEED)), 10.min(cores));
+        assert_eq!(threads_for(|| Ok(PLENTY)), cores);
     }
 
     #[test]
     fn a_job_the_memory_does_not_hold_back_runs_on_its_callers_own_threads() {
         let caller = std::thread::current().id();
-        for memory in [(|| None) as fn() -> Option<u64>, || Some(PLENTY)] {
-            let inner = recording(1);
-            assert_eq!(run_on(&PooledExporter::over(inner.clone(), memory), &inner, 1920, 1080), (rayon::current_num_threads(), caller));
-        }
         let inner = recording(1);
-        assert_ne!(run_on(&PooledExporter::over(inner.clone(), || Some(0)), &inner, 1920, 1080).1, caller, "a job held back runs on its pool");
+        assert_eq!(run_on(&PooledExporter::over(inner.clone(), || Ok(PLENTY)), &inner, 1920, 1080), (rayon::current_num_threads(), caller));
+        let inner = recording(1);
+        let held_back = run_on(&PooledExporter::over(inner.clone(), || Ok(FULL_HD_NEED)), &inner, 1920, 1080);
+        assert_ne!(held_back.1, caller, "a job held back runs on its pool");
+        assert_eq!(held_back.0, 1);
     }
 
     #[test]
     fn jobs_of_one_size_share_one_pool_and_another_size_replaces_it() {
-        // Half of this holds two 1080p frames and no 4K frame, so a 4K job gets the floor of one thread;
-        // the machines the tests run on have more than two cores, so both jobs are held back.
+        // This figure holds one 4K frame in flight, and two of the half-width comp, so the 4K job gets
+        // the floor of one thread and the other a pool of two; the machines the tests run on have more
+        // than two cores, so both jobs are held back.
         let inner = recording(1);
-        let exporter = PooledExporter::over(inner.clone(), || Some(2 * 2 * FULL_HD));
+        let exporter = PooledExporter::over(inner.clone(), || Ok(4 * FULL_HD_NEED));
         let (one, first) = run_on(&exporter, &inner, 3840, 2160);
         assert_eq!((one, run_on(&exporter, &inner, 3840, 2160)), (1, (1, first)), "the second 4K job runs on the first one's thread");
-        assert_eq!(run_on(&exporter, &inner, 1920, 1080).0, 2, "a 1080p job needs a pool of two");
+        assert_eq!(run_on(&exporter, &inner, 1920, 2160).0, 2, "the half-width job needs a pool of two");
         let (one, again) = run_on(&exporter, &inner, 3840, 2160);
         assert_eq!(one, 1);
         assert_ne!(again, first, "the pool of one gave way to the pool of two");
@@ -388,19 +632,43 @@ pub(crate) mod tests {
     /// The pool follows the figure this platform really gives, for frames from 1080p to 8K. On a phone's
     /// simulator or emulator this is the run that shows it; each figure and size goes to the run's output
     /// for the person reading it. A phone's figure moves while the test runs, so the pool is held to the
-    /// sizes the figures just before and just after its export give.
+    /// sizes the figures just before and just after its export give. Where the figure cannot hold a frame
+    /// in flight at all the export is refused instead, in words: that is what the phone shows when it is
+    /// short, and the run shows the words and the figure they name.
     #[test]
     fn the_pool_follows_the_figure_the_platform_gives() {
         let cores = rayon::current_num_threads();
         let inner = recording(1);
         let exporter = PooledExporter::over(inner.clone(), available_memory);
         for (width, height) in [(1920, 1080), (3840, 2160), (5120, 2880), (7680, 4320)] {
-            let frame = Some(u64::from(width) * u64::from(height) * BYTES_PER_PIXEL);
+            let frame = Frame { width, height, bytes: u64::from(width) * u64::from(height) * BYTES_PER_PIXEL, on: Compositor::Cpu };
+            let need = frame_need(&frame);
+            let (project, item) = project_with_comp(width, height);
             let before = available_memory();
-            let (threads, _) = run_on(&exporter, &inner, width, height);
+            let outcome = with_job(&project, &item, |job| exporter.export(job, &mut |_, _| true));
             let after = available_memory();
-            eprintln!("available_memory() = {before:?} then {after:?}, cores = {cores}, a {width}x{height} export's pool = {threads}");
-            let (one, other) = (pool_size(before, frame, cores), pool_size(after, frame, cores));
+            let (before, after) = match (outcome, before, after) {
+                (Ok(_), Ok(before), Ok(after)) => (before, after),
+                (Err(failed), Err(why), _) => {
+                    eprintln!("available_memory() = {why:?}: a {width}x{height} export fails: {failed}");
+                    assert_eq!(failed, unread(&frame, &why), "a platform with no figure fails the export with its reason");
+                    continue;
+                }
+                (Err(refused), before, after) => {
+                    eprintln!("available_memory() = {before:?} then {after:?}: a {width}x{height} export is refused: {refused}");
+                    let said = refused
+                        .strip_prefix(&format!("a frame of {width}x{height} needs {need} bytes to render on the CPU and write, and the device reports "))
+                        .and_then(|said| said.strip_suffix(" bytes available"))
+                        .and_then(|said| said.parse::<u64>().ok())
+                        .expect("a refusal is in the promised words and names the figure it read");
+                    assert!(said < need, "the refused figure {said} is not under one frame's need of {need}");
+                    continue;
+                }
+                other => panic!("a {width}x{height} export with figures read but none used: {other:?}"),
+            };
+            let (threads, _) = inner.last();
+            eprintln!("available_memory() = {before} then {after}, cores = {cores}, a {width}x{height} export's pool = {threads}");
+            let (one, other) = (pool_size(before, need, cores), pool_size(after, need, cores));
             assert!((one.min(other)..=one.max(other)).contains(&threads), "{threads} threads, against {one} and {other}");
         }
     }
@@ -410,8 +678,8 @@ pub(crate) mod tests {
         let (project, item) = project_with_comp(16, 16);
         let caller = std::thread::current().id();
         // A job held back runs on the pool and a job that is not runs on the caller's own threads; the
-        // hook is the caller's either way.
-        for (memory, on_the_pool) in [(|| Some(0)) as fn() -> Option<u64>, || None].into_iter().zip([true, false]) {
+        // hook is the caller's either way. The held-back figure is exactly what the 16x16 frame needs.
+        for (memory, on_the_pool) in [(|| Ok(SMALLEST_NEED)) as fn() -> Result<u64, String>, || Ok(PLENTY)].into_iter().zip([true, false]) {
             let inner = recording(5);
             let exporter = PooledExporter::over(inner.clone(), memory);
             let mut heard = Vec::new();
@@ -452,7 +720,7 @@ pub(crate) mod tests {
     fn a_hook_that_fails_stops_the_export_on_the_pool_instead_of_letting_it_run_on() {
         let (project, item) = project_with_comp(16, 16);
         let inner = Arc::new(Counting::default());
-        let exporter = PooledExporter::over(inner.clone(), || Some(0));
+        let exporter = PooledExporter::over(inner.clone(), || Ok(SMALLEST_NEED));
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             with_job(&project, &item, |job| exporter.export(job, &mut |_, _| panic!("the hook fails")))
         }));
@@ -482,7 +750,7 @@ pub(crate) mod tests {
     #[test]
     fn a_panic_in_the_export_reaches_the_caller_on_its_own_thread_and_the_next_export_runs() {
         let (project, item) = project_with_comp(16, 16);
-        let exporter = PooledExporter::over(Arc::new(PanicsOnce::default()), || Some(0));
+        let exporter = PooledExporter::over(Arc::new(PanicsOnce::default()), || Ok(SMALLEST_NEED));
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| with_job(&project, &item, |job| exporter.export(job, &mut |_, _| true))));
         let payload = caught.expect_err("the panic comes back to the caller, the process is not ended");
         assert_eq!(payload.downcast_ref::<String>().map(String::as_str), Some("craftbridge-export-0"), "it was raised on the pool's thread");
@@ -499,7 +767,8 @@ pub(crate) mod tests {
     #[test]
     fn the_result_and_the_inner_exporters_answers_come_back_whole() {
         let (project, item) = project_with_comp(16, 16);
-        for memory in [(|| None) as fn() -> Option<u64>, || Some(0)] {
+        // Once on the caller's threads, and once held back to a pool of one.
+        for memory in [(|| Ok(PLENTY)) as fn() -> Result<u64, String>, || Ok(SMALLEST_NEED)] {
             let exporter = PooledExporter::over(recording(3), memory);
             let result = with_job(&project, &item, |job| exporter.export(job, &mut |_, _| true)).expect("it exports");
             assert_eq!((result.path.as_str(), result.frames), ("out.mp4", 3));

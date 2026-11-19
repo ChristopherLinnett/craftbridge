@@ -71,7 +71,8 @@ const SAMPLE_EVERY: Duration = Duration::from_millis(2);
 /// The platform's figure for what the app may still allocate (`available_memory()`, which on an iPhone is
 /// `os_proc_available_memory()`), read every [`SAMPLE_EVERY`] on a thread of its own from the watch's
 /// start until it finishes or is dropped. The figure falls by what the app holds, so its lowest point against its
-/// value at the start is the most the app held at once on top of what it held then.
+/// value at the start is the most the app held at once on top of what it held then. On a Mac and in the iOS
+/// Simulator the figure is the host's, which moves in whole percents of its memory, so the peak there is coarse.
 struct Watch {
     start: Option<u64>,
     lowest: Arc<AtomicU64>,
@@ -81,12 +82,12 @@ struct Watch {
 
 impl Watch {
     fn start() -> Self {
-        let start = available_memory();
+        let start = available_memory().ok();
         let (lowest, stop) = (Arc::new(AtomicU64::new(start.unwrap_or(u64::MAX))), Arc::new(AtomicBool::new(false)));
         let (reads, stops) = (Arc::clone(&lowest), Arc::clone(&stop));
         let thread = std::thread::spawn(move || {
             while !stops.load(Ordering::SeqCst) {
-                if let Some(now) = available_memory() {
+                if let Ok(now) = available_memory() {
                     reads.fetch_min(now, Ordering::SeqCst);
                 }
                 std::thread::sleep(SAMPLE_EVERY);
@@ -96,10 +97,10 @@ impl Watch {
     }
 
     /// The figure at the start and its lowest point since, once the watch has stopped; `None` where the
-    /// platform gives no figure (a Mac, the iOS Simulator).
+    /// platform's figure could not be read at the start.
     fn finish(mut self) -> Option<(u64, u64)> {
         self.stop_reading();
-        if let Some(now) = available_memory() {
+        if let Ok(now) = available_memory() {
             self.lowest.fetch_min(now, Ordering::SeqCst);
         }
         Some((self.start?, self.lowest.load(Ordering::SeqCst)))
@@ -127,7 +128,7 @@ fn measured<R>(what: &str, body: impl FnOnce() -> R) -> R {
     let watch = Watch::start();
     let answer = body();
     match watch.finish() {
-        None => eprintln!("{what}: the platform gives no memory figure"),
+        None => eprintln!("{what}: the platform's memory figure could not be read"),
         Some((start, lowest)) => {
             let mib = |bytes: u64| bytes >> 20;
             eprintln!(

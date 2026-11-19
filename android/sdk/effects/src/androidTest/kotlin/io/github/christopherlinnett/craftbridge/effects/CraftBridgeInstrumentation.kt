@@ -32,7 +32,7 @@ private fun cases(context: Context): List<Case> {
     val checks =
         folderChecks + engineChecks + wordsChecks + hardwareDecodingChecks + fp16FloorChecks + exportPoolChecks + frameChecks +
             previewChecks + apiChecks + typedCallChecks + selectionChecks + corpusModelChecks + scenarioRunnerChecks +
-            conformanceChecks(context) + plugInPolicyChecks
+            conformanceChecks(context) + plugInPolicyChecks + memoryGuardChecks
     return checks + scenarioCountCheck(checks)
 }
 
