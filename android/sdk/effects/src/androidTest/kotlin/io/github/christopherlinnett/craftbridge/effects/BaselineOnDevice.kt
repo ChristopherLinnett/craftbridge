@@ -34,16 +34,23 @@ private const val BASELINE_ASSET = "baseline.toml"
 /** The platform this run measures. */
 private const val PLATFORM = "android"
 
+/** The platforms the baseline is measured on. */
+private val PLATFORMS = listOf("ios", "android")
+
+/** The keys of a figure's table. */
+private val FIGURE_WORDS = setOf("name", "decimals", "flagged", "platforms", "unheld_on", "what")
+
 /**
  * One figure of the line: its name, the decimals its value is said with, whether a release whose figure is more
- * than the baseline's allowance above it is flagged, which a run's condition is not, and the platforms that
- * measure it.
+ * than the baseline's allowance above it is flagged, which a run's condition is not, the platforms that
+ * measure it, and those among them whose runs are reported but never flagged for their own noise.
  */
 internal class BaselineFigure(
     val name: String,
     val decimals: Int,
     val flagged: Boolean,
     val platforms: List<String>,
+    val unheldOn: List<String>,
 )
 
 /** The running example of plan §5, which every run builds, previews and exports. */
@@ -112,13 +119,50 @@ internal class Baseline(
                 text("/line"),
                 example,
                 listed.indices.map {
-                    val named = (document.valueAt("/figure/$it/platforms") as? JSONValue.Array)?.values
-                    BaselineFigure(
-                        text("/figure/$it/name"),
-                        number("/figure/$it/decimals").toInt(),
-                        flag("/figure/$it/flagged"),
-                        named?.indices?.map { place -> text("/figure/$it/platforms/$place") } ?: listOf("ios", "android"),
-                    )
+                    val name = text("/figure/$it/name")
+                    // A key spelt otherwise, `unheld_on` above all, would be read as absent: a figure meant to be
+                    // reported only would be flagged on every release.
+                    val keys = (document.valueAt("/figure/$it") as? JSONValue.Object)?.entries?.keys.orEmpty()
+                    keys.filter { key -> key !in FIGURE_WORDS }.minOrNull()?.let { key ->
+                        throw RunnerFailure("the figure `$name` holds the key `$key`, which no figure has")
+                    }
+
+                    // A platform spelt otherwise would leave the figure out of every run's line and every record
+                    // unseen, or flag it where it is to be reported only.
+                    fun platforms(key: String): List<String>? =
+                        when (val value = document.valueAt("/figure/$it/$key")) {
+                            null -> {
+                                null
+                            }
+
+                            is JSONValue.Array -> {
+                                value.values.indices.map { place -> text("/figure/$it/$key/$place") }.onEach { platform ->
+                                    if (platform !in PLATFORMS) {
+                                        throw RunnerFailure(
+                                            "the figure `$name` names the platform `$platform`, which is neither ios nor android",
+                                        )
+                                    }
+                                }
+                            }
+
+                            else -> {
+                                throw RunnerFailure("the figure `$name`'s `$key` is not a list of platforms")
+                            }
+                        }
+                    val measuring = platforms("platforms") ?: PLATFORMS
+                    val unheld = platforms("unheld_on").orEmpty()
+                    val flagged = flag("/figure/$it/flagged")
+                    unheld.firstOrNull { platform -> platform !in measuring }?.let { platform ->
+                        throw RunnerFailure("the figure `$name` is unheld on `$platform`, which does not measure it")
+                    }
+                    if (unheld.isNotEmpty() && !flagged) {
+                        throw RunnerFailure("the figure `$name` is unheld on a platform and never flagged")
+                    }
+                    // A figure no platform holds is one the rule never acts on, which `flagged = false` says once.
+                    if (unheld.isNotEmpty() && unheld.containsAll(measuring)) {
+                        throw RunnerFailure("the figure `$name` is unheld everywhere it is measured, which `flagged = false` says")
+                    }
+                    BaselineFigure(name, number("/figure/$it/decimals").toInt(), flagged, measuring, unheld)
                 },
             )
         }
@@ -319,18 +363,18 @@ internal val baselineChecks: List<Case> =
             val baseline = Baseline.of(context)
             agreed(baseline.line, "craftbridge-baseline", "the word the line starts with")
             agreed(
-                baseline.figures.map { listOf(it.name, it.decimals, it.flagged, it.platforms) },
+                baseline.figures.map { listOf(it.name, it.decimals, it.flagged, it.platforms, it.unheldOn) },
                 listOf(
-                    listOf("first_preview_ms", 1, true, listOf("ios", "android")),
-                    listOf("gpu_start_ms", 1, false, listOf("ios", "android")),
-                    listOf("first_path_ms", 1, true, listOf("ios", "android")),
-                    listOf("preview_path_ms", 1, true, listOf("ios", "android")),
-                    listOf("full_export_ms", 1, true, listOf("ios", "android")),
-                    listOf("peak_memory_bytes", 0, true, listOf("ios", "android")),
-                    listOf("export_threads", 0, false, listOf("ios", "android")),
-                    listOf("thermal_state", 0, false, listOf("ios")),
-                    listOf("cpu_cap_mhz", 0, false, listOf("android")),
-                    listOf("battery_c", 1, false, listOf("android")),
+                    listOf("first_preview_ms", 1, true, listOf("ios", "android"), listOf("android")),
+                    listOf("gpu_start_ms", 1, false, listOf("ios", "android"), emptyList<String>()),
+                    listOf("first_path_ms", 1, true, listOf("ios", "android"), listOf("android")),
+                    listOf("preview_path_ms", 1, true, listOf("ios", "android"), listOf("android")),
+                    listOf("full_export_ms", 1, true, listOf("ios", "android"), emptyList<String>()),
+                    listOf("peak_memory_bytes", 0, true, listOf("ios", "android"), emptyList<String>()),
+                    listOf("export_threads", 0, false, listOf("ios", "android"), emptyList<String>()),
+                    listOf("thermal_state", 0, false, listOf("ios"), emptyList<String>()),
+                    listOf("cpu_cap_mhz", 0, false, listOf("android"), emptyList<String>()),
+                    listOf("battery_c", 1, false, listOf("android"), emptyList<String>()),
                 ),
                 "the figures",
             )
@@ -377,6 +421,26 @@ internal val baselineChecks: List<Case> =
             val broken = runCatching { Baseline.of("[running_example\n") }.exceptionOrNull()
             require(broken?.message?.startsWith("the baseline is not TOML") == true) {
                 "a baseline that is not TOML was answered ${broken?.message ?: "with no refusal"}"
+            }
+            val file = assetText(context, BASELINE_ASSET)
+            val unheld = "unheld_on = [\"android\"]"
+            val iosOnly = "platforms = [\"ios\"]"
+            listOf(
+                file.replaceFirst(unheld, "unheld_on = [\"ios\", \"android\"]") to
+                    "the figure `first_preview_ms` is unheld everywhere it is measured, which `flagged = false` says",
+                file.replaceFirst(unheld, "unheld_on = [\"andriod\"]") to
+                    "the figure `first_preview_ms` names the platform `andriod`, which is neither ios nor android",
+                file.replaceFirst(unheld, "unheld_on = \"android\"") to
+                    "the figure `first_preview_ms`'s `unheld_on` is not a list of platforms",
+                file.replaceFirst(unheld, "unheld_in = [\"android\"]") to
+                    "the figure `first_preview_ms` holds the key `unheld_in`, which no figure has",
+                file.replaceFirst(iosOnly, "$iosOnly\nunheld_on = [\"android\"]") to
+                    "the figure `thermal_state` is unheld on `android`, which does not measure it",
+                file.replaceFirst(iosOnly, "$iosOnly\nunheld_on = [\"ios\"]") to
+                    "the figure `thermal_state` is unheld on a platform and never flagged",
+                file.replaceFirst(iosOnly, "platforms = \"ios\"") to "the figure `thermal_state`'s `platforms` is not a list of platforms",
+            ).forEach { (spelt, refusal) ->
+                agreed(runCatching { Baseline.of(spelt) }.exceptionOrNull()?.message, refusal, "a figure spelt otherwise")
             }
             val lacking = runCatching { baseline.line(mapOf("first_preview_ms" to 1.0)) }.exceptionOrNull()
             agreed(

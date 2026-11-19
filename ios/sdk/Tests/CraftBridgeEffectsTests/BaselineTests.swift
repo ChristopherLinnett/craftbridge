@@ -25,6 +25,7 @@ private func baseline(_ devices: String = "") -> String {
     name = "first_preview_ms"
     decimals = 1
     flagged = true
+    unheld_on = ["android"]
     [[figure]]
     name = "full_export_ms"
     decimals = 1
@@ -81,10 +82,10 @@ private func device(
         #expect(
             baseline.figures
                 == [
-                    .init(name: "first_preview_ms", decimals: 1, flagged: true),
+                    .init(name: "first_preview_ms", decimals: 1, flagged: true, unheldOn: ["android"]),
                     .init(name: "gpu_start_ms", decimals: 1, flagged: false),
-                    .init(name: "first_path_ms", decimals: 1, flagged: true),
-                    .init(name: "preview_path_ms", decimals: 1, flagged: true),
+                    .init(name: "first_path_ms", decimals: 1, flagged: true, unheldOn: ["android"]),
+                    .init(name: "preview_path_ms", decimals: 1, flagged: true, unheldOn: ["android"]),
                     .init(name: "full_export_ms", decimals: 1, flagged: true),
                     .init(name: "peak_memory_bytes", decimals: 0, flagged: true),
                     .init(name: "export_threads", decimals: 0, flagged: false),
@@ -105,6 +106,56 @@ private func device(
         #expect(
             baseline.example.seconds == cardSeconds && baseline.example.frameRate == cardFrameRate,
             "the card the baseline measures is the running example the other device tests build")
+    }
+
+    @Test func aFigureIsHeldOnEveryPlatformThatMeasuresItUnlessTheBaselineNamesOneWhereItIsNot() throws {
+        let figures = try Baseline(toml: baseline()).figures
+        let first = try #require(figures.first { $0.name == "first_preview_ms" })
+        #expect(first.isHeld(on: "ios") && !first.isHeld(on: "android"), "reported where its own noise is too wide")
+        let export = try #require(figures.first { $0.name == "full_export_ms" })
+        #expect(export.isHeld(on: "ios") && export.isHeld(on: "android"))
+        let thermal = try #require(figures.first { $0.name == "thermal_state" })
+        #expect(!thermal.isHeld(on: "ios"), "a condition is never flagged")
+        let ios = Baseline.Figure(name: "first_frame_ms", decimals: 1, flagged: true, platforms: ["ios"])
+        #expect(ios.isHeld(on: "ios") && !ios.isHeld(on: "android"), "a platform that does not measure it")
+    }
+
+    @Test func aFigureUnheldWhereItIsNotMeasuredOrNeverFlaggedIsRefused() {
+        let ios = "platforms = [\"ios\"]"
+        func unheld(on platform: String) -> String {
+            baseline().replacingOccurrences(of: ios, with: "\(ios)\nunheld_on = [\"\(platform)\"]")
+        }
+        let elsewhere = "the figure `thermal_state` is unheld on `android`, which does not measure it"
+        #expect(throws: CraftError.InvalidParams(detail: elsewhere)) { try Baseline(toml: unheld(on: "android")) }
+        let never = "the figure `thermal_state` is unheld on a platform and never flagged"
+        #expect(throws: CraftError.InvalidParams(detail: never)) { try Baseline(toml: unheld(on: "ios")) }
+    }
+
+    @Test func aFigureUnheldEverywhereOrWhosePlatformsAreSpeltOtherwiseIsRefused() {
+        func spelt(_ text: String, for listed: String = "unheld_on = [\"android\"]") -> String {
+            baseline().replacingOccurrences(of: listed, with: text)
+        }
+        let everywhere =
+            "the figure `first_preview_ms` is unheld everywhere it is measured, which `flagged = false` says"
+        #expect(throws: CraftError.InvalidParams(detail: everywhere)) {
+            try Baseline(toml: spelt("unheld_on = [\"ios\", \"android\"]"))
+        }
+        let unknown = "the figure `first_preview_ms` names the platform `andriod`, which is neither ios nor android"
+        #expect(throws: CraftError.InvalidParams(detail: unknown)) {
+            try Baseline(toml: spelt("unheld_on = [\"andriod\"]"))
+        }
+        let unlisted = "the figure `first_preview_ms`'s `unheld_on` is not a list of platforms"
+        #expect(throws: CraftError.InvalidParams(detail: unlisted)) {
+            try Baseline(toml: spelt("unheld_on = \"android\""))
+        }
+        let misspelt = "the figure `first_preview_ms` holds the key `unheld_in`, which no figure has"
+        #expect(throws: CraftError.InvalidParams(detail: misspelt)) {
+            try Baseline(toml: spelt("unheld_in = [\"android\"]"))
+        }
+        let measured = "the figure `thermal_state`'s `platforms` is not a list of platforms"
+        #expect(throws: CraftError.InvalidParams(detail: measured)) {
+            try Baseline(toml: spelt("platforms = \"ios\"", for: "platforms = [\"ios\"]"))
+        }
     }
 
     @Test func aRunPrintsOneLineOfTheFiguresItsPlatformMeasuresByNameInTheDefinedOrder() throws {
@@ -246,7 +297,9 @@ private func device(
             throws: CraftError.InvalidParams(
                 detail: "the figure `cpu_cap_mhz` names the platform `andriod`, which is neither ios nor android")
         ) {
-            try Baseline(toml: baseline().replacingOccurrences(of: "[\"android\"]", with: "[\"andriod\"]"))
+            try Baseline(
+                toml: baseline().replacingOccurrences(
+                    of: "platforms = [\"android\"]", with: "platforms = [\"andriod\"]"))
         }
     }
 
