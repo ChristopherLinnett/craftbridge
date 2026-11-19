@@ -16,6 +16,14 @@ struct Baseline {
         let decimals: Int
         let flagged: Bool
         var platforms: [String] = Baseline.platforms
+        /// The platforms whose runs are recorded and reported for this figure but never flagged, because their
+        /// own noise is wider than the allowance (`baseline.toml` says why).
+        var unheldOn: [String] = []
+
+        /// Whether a release's figure on `platform` is flagged when it is more than the allowance above the record's.
+        func isHeld(on platform: String) -> Bool {
+            flagged && platforms.contains(platform) && !unheldOn.contains(platform)
+        }
     }
 
     /// The running example of plan §5, which every run builds, previews and exports.
@@ -72,21 +80,34 @@ struct Baseline {
         }
         figures = try listed.map { entry in
             let table = try Baseline.table(entry, "figure")
-            var platforms = Baseline.platforms
             let name = try Baseline.string(table["name"], "name")
-            if case .array(let named)? = table["platforms"] {
-                platforms = try named.map { try Baseline.string($0, "platforms") }
-            }
-            // A platform spelt otherwise would leave the figure out of every run's line and every record unseen.
-            if let unknown = platforms.first(where: { !Baseline.platforms.contains($0) }) {
+            // A key spelt otherwise, `unheld_on` above all, would be read as absent: a figure meant to be reported
+            // only would be flagged on every release.
+            if let unknown = table.keys.filter({ !Baseline.figureWords.contains($0) }).min() {
                 throw CraftError.InvalidParams(
-                    detail: "the figure `\(name)` names the platform `\(unknown)`, which is neither ios nor android")
+                    detail: "the figure `\(name)` holds the key `\(unknown)`, which no figure has")
+            }
+            let platforms = try Baseline.platformList(table["platforms"], "platforms", of: name) ?? Baseline.platforms
+            let unheld = try Baseline.platformList(table["unheld_on"], "unheld_on", of: name) ?? []
+            let flagged = try Baseline.flag(table["flagged"], "flagged")
+            if let outside = unheld.first(where: { !platforms.contains($0) }) {
+                throw CraftError.InvalidParams(
+                    detail: "the figure `\(name)` is unheld on `\(outside)`, which does not measure it")
+            }
+            if !unheld.isEmpty && !flagged {
+                throw CraftError.InvalidParams(detail: "the figure `\(name)` is unheld on a platform and never flagged")
+            }
+            // A figure no platform holds is one the rule never acts on, which `flagged = false` says once.
+            if !unheld.isEmpty && Set(platforms).isSubset(of: unheld) {
+                throw CraftError.InvalidParams(
+                    detail: "the figure `\(name)` is unheld everywhere it is measured, which `flagged = false` says")
             }
             return Figure(
                 name: name,
                 decimals: Int(try Baseline.number(table["decimals"], "decimals")),
-                flagged: try Baseline.flag(table["flagged"], "flagged"),
-                platforms: platforms)
+                flagged: flagged,
+                platforms: platforms,
+                unheldOn: unheld)
         }
         if case .array(let held)? = document["device"] { devices = held } else { devices = [] }
     }
@@ -200,6 +221,23 @@ struct Baseline {
     static let platform = "ios"
     /// The words of a record besides its figures: what it was measured on, how, and what the phone was doing.
     static let recordWords = ["id", "platform", "device", "os", "build", "conditions", "recorded", "runs"]
+    /// The keys of a figure's table.
+    static let figureWords = ["name", "decimals", "flagged", "platforms", "unheld_on", "what"]
+
+    /// The platforms a figure's `key` lists, nil when the figure has no such key. A platform spelt otherwise would
+    /// leave the figure out of every run's line and every record unseen, or flag it where it is to be reported only.
+    private static func platformList(_ value: JSONValue?, _ key: String, of figure: String) throws -> [String]? {
+        guard let value else { return nil }
+        guard case .array(let listed) = value else {
+            throw CraftError.InvalidParams(detail: "the figure `\(figure)`'s `\(key)` is not a list of platforms")
+        }
+        let named = try listed.map { try Baseline.string($0, key) }
+        if let unknown = named.first(where: { !Baseline.platforms.contains($0) }) {
+            throw CraftError.InvalidParams(
+                detail: "the figure `\(figure)` names the platform `\(unknown)`, which is neither ios nor android")
+        }
+        return named
+    }
 
     private static func string(_ value: JSONValue?, _ key: String) throws -> String {
         guard case .string(let text)? = value else {

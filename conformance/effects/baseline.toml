@@ -1,7 +1,8 @@
 # The per-device baseline of the running example (plan §5): how long its first preview and its full export take
 # on each acceptance phone, and the most memory the process holds over the run. The release script reads the
 # `[[device]]` records below to report a release's figures beside them and to flag each `flagged` figure more than
-# `flag_slower_than_percent` above its baseline (plan §9, §29); the plan points here and keeps no second copy.
+# `flag_slower_than_percent` above its baseline, on every platform but those its `unheld_on` names (plan §9, §29); the
+# plan points here and keeps no second copy.
 #
 # This one file is read by the Swift real-app test (`ios/sdk/Tests`, RealAppBaselineTests) and the Kotlin
 # instrumented check (`android/sdk/effects/src/androidTest`, BaselineOnDevice), so what they measure, the name
@@ -15,8 +16,9 @@
 line = "craftbridge-baseline"
 flag_slower_than_percent = 10
 
-# How a release is held to the record, which a phone's own noise decides. Each `flagged` figure is measured as the
-# record was, in at least `runs` fresh installs of the release, each a process of its own on a quiet phone, under the
+# How a release is held to the record, which a phone's own noise decides. Each `flagged` figure, on each platform that
+# measures it and its `unheld_on` does not name, is measured as the record was, in at least `runs` fresh installs of
+# the release, each a process of its own on a quiet phone, under the
 # conditions the record names and its condition figures show run by run, and it is flagged when the median of those
 # runs is more than `flag_slower_than_percent` above the record's median and the fastest of them is slower than the
 # record's slowest run. One run is never compared, and a median alone is not either: the iPhone's export takes about
@@ -42,15 +44,19 @@ preview_at_seconds = 2
 # many more times on the engine that is warm by then, and `preview_path_ms` is the median of them.
 preview_repeats = 9
 
+# A figure's `unheld_on` names the platforms whose runs are recorded and reported but never flagged, because their own
+# noise is wider than the allowance; the reason is in the figure's own comment.
 [[figure]]
 name = "first_preview_ms"
 decimals = 1
 flagged = true
+unheld_on = ["android"]
 # From the call that starts the engine, with the folders and the GPU an app asks for, to the return of the
 # call that draws the card's frame at 2 s into the preview target, after the template is opened and its Name
 # and Photo are set. The template is made by an engine started and shut down before the clock starts, as an app
 # bundles its template. Most of it is the engine's GPU start (`gpu_start_ms`), which builds the compositor's
-# kernels as it takes the device, so a release is held to the rest by `preview_path_ms`.
+# kernels as it takes the device, so a release is held to the rest by `preview_path_ms`. On the Xiaomi it is reported
+# and never flagged: its GPU start spreads 20 % and its first path 2.6 times (see `first_path_ms`).
 what = "milliseconds from the engine's start to the first preview frame drawn"
 
 [[figure]]
@@ -67,17 +73,29 @@ what = "milliseconds from the engine's start until it answers its first call, th
 name = "first_path_ms"
 decimals = 1
 flagged = true
+unheld_on = ["android"]
 # What is left of `first_preview_ms` after the GPU start: the first open of the card, the two sets, the layer's
 # attach and the first draw, made cold, which the GPU start's own spread (a cold shader build) is too wide to show.
+# On the Xiaomi it is reported and never flagged: across 30 fresh runs of one build, which also sampled every core's
+# clock every 3 ms, it took 61.8 to 163.6 ms, 2.6 times between its fastest and its slowest, with the cap at 2880 MHz
+# and the pool at 8 threads in every run. Its time follows the processor's clock: over its open, sets and draw (52.7
+# to 149.1 ms), the calling thread's own CPU time ran 8.8 to 42.7 ms and followed their wall time at a correlation of
+# 0.95, and the wall time fell as the prime cores' mean clock over them rose, from 1022 to 2775 MHz (a correlation of
+# -0.79). The draw, the largest part (41.0 to 107.8 ms), rose and fell with the rest; the GPU's own clock cannot be
+# read without root, so a part of the GPU in it is neither found nor ruled out.
 what = "milliseconds of the first preview after the GPU start: open, set Name and Photo, attach and draw, cold"
 
 [[figure]]
 name = "preview_path_ms"
 decimals = 1
 flagged = true
+unheld_on = ["android"]
 # What the code CraftBridge ships decides of a preview, apart from the GPU start: the median of `preview_repeats`
 # runs of opening the card, setting Name and Photo and drawing the frame into the target that is already attached,
-# made after the export, which a slower open, set or draw moves by its own cost and the GPU start never hides.
+# made after the export, which a slower open, set or draw moves by its own cost and the GPU start never hides. On the
+# Xiaomi it is reported and never flagged: across the same 30 runs it took 22.2 to 52.1 ms, and within one run its
+# nine repeats took 19.7 to 37.4 ms while the prime cores' mean clock over them was 1157 MHz of their 2880 (see
+# `first_path_ms`).
 what = "milliseconds of a preview of the card on a warm engine: open, set Name and Photo, draw"
 
 [[figure]]
@@ -179,10 +197,14 @@ why = "Android holds an app's native memory to no limit of its own: the low-memo
 # A figure is flagged only once a release's fastest run is slower than the record's slowest, so what the rule can see
 # is each figure's spread on its phone. On the iPhone every flagged figure spreads under 7 % run to run, and a release
 # 12 % slower in any of them is flagged. On the Xiaomi the export and the peak memory spread under 3 %, and are held
-# as closely; its previews spread wider with the same cap, battery and threads and nothing else of CraftBridge's
-# running, the first preview 590 to 771 ms, the first path 59 to 131 ms (the series' last four runs in a band of their
-# own, 116 to 131 ms) and the preview path 20 to 34 ms, so a slower preview is flagged there only once its fastest run
-# passes the record's slowest.
+# as closely. Its three preview figures (`first_preview_ms`, `first_path_ms`, `preview_path_ms`) are recorded and
+# reported but never flagged (`unheld_on`): across 30 fresh runs of one build the first preview took 623.7 to
+# 796.1 ms, the first path 61.8 to 163.6 ms and the preview path 22.2 to 52.1 ms, their time following the prime cores'
+# clock over them (see `first_path_ms`), so a slower release cannot be told from a run whose clock stayed low. Nothing
+# read before a run tells the two apart: the cap (`cpu_cap_mhz`) read 2880 MHz in the fast and slow runs alike. So no
+# record holds the Android side's own part of a preview, its surface and its presenting above all: the iPhone's
+# previews hold the core's open, sets and drawing, which both platforms run, and the Xiaomi's export holds the core's
+# drawing over a whole movie.
 [[device]]
 id = "iphone-12-pro"
 platform = "ios"
