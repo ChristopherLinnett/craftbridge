@@ -6,16 +6,33 @@
 use crate::command::output_of;
 use std::ffi::OsStr;
 use std::fmt;
+use std::process::ExitStatus;
 
 /// Why a rerun did not pass: the caller's `failure`, or the refusal of a name that ran no test, then both
-/// of the child's streams. A test unwraps it, and `unwrap` shows an error by its `Debug`, which for a
-/// plain string escapes every line break and quote and folds the child's streams, a panic message or an
-/// `assert_eq!`'s two sides, into one line. So its `Debug`, like its `Display`, is the text as written.
-pub struct RerunError(String);
+/// of the child's streams, and the status the child ended with where one ran. A test unwraps it, and `unwrap`
+/// shows an error by its `Debug`, which for a plain string escapes every line break and quote and folds the
+/// child's streams, a panic message or an `assert_eq!`'s two sides, into one line. So its `Debug`, like its
+/// `Display`, is the text as written.
+pub struct RerunError {
+    text: String,
+    status: Option<ExitStatus>,
+}
+
+impl RerunError {
+    fn before_the_child(text: String) -> Self {
+        Self { text, status: None }
+    }
+
+    /// The status the child ended with, or `None` where none was started: a test that weighs how a process
+    /// of tests ends, not only that its test failed, reads it here.
+    pub fn status(&self) -> Option<ExitStatus> {
+        self.status
+    }
+}
 
 impl fmt::Display for RerunError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
+        formatter.write_str(&self.text)
     }
 }
 
@@ -36,25 +53,38 @@ impl std::error::Error for RerunError {}
 /// that only wants the test failed unwraps the answer, as test code may, and the failure names the
 /// caller's line.
 pub fn rerun(test: &str, env: &[(&str, &OsStr)], failure: &str) -> Result<(), RerunError> {
-    let exe = std::env::current_exe().map_err(|error| RerunError(format!("could not find the current test binary: {error}")))?;
+    rerun_unless_said(test, env, failure, None)
+}
+
+/// [`rerun`], and an answer of `failure` too when either of the child's streams holds `refused`: a process
+/// can say the platform aborted it, as bionic does for a mutex locked after its destruction, after its
+/// own exit has set a status of 0, so the status alone passes a child that was taken down.
+pub fn rerun_refusing(test: &str, env: &[(&str, &OsStr)], failure: &str, refused: &str) -> Result<(), RerunError> {
+    rerun_unless_said(test, env, failure, Some(refused))
+}
+
+fn rerun_unless_said(test: &str, env: &[(&str, &OsStr)], failure: &str, refused: Option<&str>) -> Result<(), RerunError> {
+    let exe = std::env::current_exe().map_err(|error| RerunError::before_the_child(format!("could not find the current test binary: {error}")))?;
     let mut child = std::process::Command::new(exe);
     child.args(["--exact", test, "--ignored", "--nocapture", "--test-threads=1"]);
     for (name, value) in env {
         child.env(name, value);
     }
-    let output = output_of(&mut child).map_err(RerunError)?;
+    let output = output_of(&mut child).map_err(RerunError::before_the_child)?;
     let ran = String::from_utf8_lossy(&output.stdout);
+    let said = String::from_utf8_lossy(&output.stderr);
     // The harness prints its progress to stdout, while a failed test writes its panic message to stderr,
     // and a child that cannot start its test says why on stderr alone: either stream alone can leave the
     // cause out.
-    let streams = format!("the child's stdout:\n{ran}\nthe child's stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+    let answer = |text: String| RerunError { text: format!("{text}\nthe child's stdout:\n{ran}\nthe child's stderr:\n{said}"), status: Some(output.status) };
     // A rename can leave this name matching no test, and a run of no tests exits zero: the child's status
     // would then pass having weighed nothing. The name must still name the one ignored child this helper
     // exists to rerun.
     if !ran.contains("running 1 test") {
-        return Err(RerunError(format!("rerun named no test: {test}\n{streams}")));
+        return Err(answer(format!("rerun named no test: {test}")));
     }
-    if output.status.success() { Ok(()) } else { Err(RerunError(format!("{failure}\n{streams}"))) }
+    let refused_said = refused.is_some_and(|text| ran.contains(text) || said.contains(text));
+    if output.status.success() && !refused_said { Ok(()) } else { Err(answer(failure.to_string())) }
 }
 
 #[cfg(test)]
@@ -98,6 +128,42 @@ mod tests {
         assert!(shown.starts_with("the failing child did not fail\nthe child's stdout:\n"), "{shown}");
         assert!(shown.contains("said to stdout \"quoted\"\n"), "{shown}");
         assert!(shown.contains("\nthe child's stderr:\nsaid to stderr\n"), "{shown}");
+    }
+
+    /// The answer carries the status the child ended with: a failed test's is the harness's own failure status,
+    /// one that passed but said refused words is 0, and a name that ran no test still ran a child.
+    #[test]
+    fn a_child_that_did_not_pass_answers_the_status_it_ended_with() {
+        let failed = rerun("rerun::tests::child_that_fails_on_purpose", &[], "never").unwrap_err();
+        assert_eq!(failed.status().and_then(|status| status.code()), Some(101), "{failed}");
+        let said = rerun_refusing("rerun::tests::child_that_says_it_on_stdout", &[], "never", "refused words").unwrap_err();
+        assert_eq!(said.status().and_then(|status| status.code()), Some(0), "{said}");
+        let none = rerun("rerun::tests::no_test_bears_this_name", &[], "never").unwrap_err();
+        assert_eq!(none.status().and_then(|status| status.code()), Some(0), "{none}");
+    }
+
+    /// A child that exits with status 0 but said what the caller refuses fails, as one that said it on either
+    /// stream, and one that said nothing of it passes.
+    #[test]
+    fn a_child_that_says_what_is_refused_fails_whatever_its_status() {
+        for stream in ["stdout", "stderr"] {
+            let problem = rerun_refusing(&format!("rerun::tests::child_that_says_it_on_{stream}"), &[], "the child said it", "refused words").unwrap_err();
+            assert!(problem.to_string().starts_with("the child said it\nthe child's stdout:\n"), "{stream}: {problem}");
+        }
+        rerun_refusing("rerun::tests::child_reads_the_planted_variable", &[("CRAFTBRIDGE_RERUN_PROBE", OsStr::new("planted"))], "never", "refused words")
+            .unwrap();
+    }
+
+    #[test]
+    #[ignore = "run by a_child_that_says_what_is_refused_fails_whatever_its_status, which refuses the words"]
+    fn child_that_says_it_on_stdout() {
+        println!("some refused words");
+    }
+
+    #[test]
+    #[ignore = "run by a_child_that_says_what_is_refused_fails_whatever_its_status, which refuses the words"]
+    fn child_that_says_it_on_stderr() {
+        eprintln!("some refused words");
     }
 
     #[test]

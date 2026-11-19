@@ -739,6 +739,7 @@ dependencies = [
 name = "craftbridge-media"
 version = "0.1.0"
 dependencies = [
+ "craftbridge-process",
  "filmcraft-codecs",
  "filmcraft-color",
  "filmcraft-frame",

@@ -8,7 +8,8 @@
 //! group, so a [`Group`] is led by a guard, and watched from outside by a sweeper, which end it when the
 //! program that started it ends first. A [`rerun`] runs one ignored test of the current test binary again
 //! in a child started with a changed environment, the only way a test can meet variables its own process
-//! must not carry while other tests run beside it. The code lives here once, so a fix reaches every tool
+//! must not carry while other tests run beside it, or see how a process of tests ends: the status it ends with,
+//! and what it says after its own exit has set that status. The code lives here once, so a fix reaches every tool
 //! that stops a group and every test that starts a child. The crate depends on no CraftBridge crate and
 //! holds no `unsafe`: the shell's own `kill` does the signalling, as a shell does, and the platform's own record
 //! of its processes, `/proc` on Linux and `pgrep` elsewhere, says which of a group's are alive.
@@ -24,4 +25,4 @@ mod rerun;
 pub use command::output_of;
 pub use group::{Group, group_has_live_process, signal_group, stop_group};
 pub use poll::poll_until;
-pub use rerun::{RerunError, rerun};
+pub use rerun::{RerunError, rerun, rerun_refusing};

@@ -10,6 +10,8 @@ pub(crate) mod mediacodec;
 pub(crate) mod mediacodec_aac;
 #[cfg(target_os = "android")]
 pub(crate) mod mediacodec_encoder;
+#[cfg(all(target_os = "android", test))]
+pub(crate) mod mediacodec_teardown;
 #[cfg(target_os = "ios")]
 pub(crate) mod videotoolbox;
 #[cfg(target_vendor = "apple")]
