@@ -22,6 +22,13 @@ wgpu.workspace = true
 pollster.workspace = true
 # Each call's answer, which the engine thread sends and a caller blocks on or awaits (plan §16).
 oneshot.workspace = true
+# The journal folds a name's Unicode form when the volume holding it folds forms, which std cannot:
+# no platform call answers the rule (pathconf carries a case flag on Apple volumes alone, and none
+# answers form), so the journal reads it by asking the volume, and folds names as its answer said.
+unicode-normalization.workspace = true
+# And it folds a name's case, when the volume folds case, by Unicode's full case folding, as a Mac's
+# disk does (`straße` and `STRASSE`, `ſ` and `s`, are one name there), which std's lower-casing is not.
+unicase.workspace = true
 
 # The faces CoreText offers an iOS app, which only an iPhone or its simulator has; the features are the
 # framework headers the platform module reads (src/platform/coretext.rs).

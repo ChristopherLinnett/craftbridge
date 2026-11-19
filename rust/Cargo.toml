@@ -37,6 +37,8 @@ toml_edit = "0.25"
 # The XML a Maven repository publishes its versions in.
 roxmltree = "0.21"
 unicode-normalization = "0.1"
+# Unicode's full case folding, by which a volume that folds case holds two spellings as one name.
+unicase = "2"
 # The Rust syntax tree the gate's unsafe and lint-attribute checks read: `syn` parses a source file as
 # the language does, `proc-macro2` gives its tokens line numbers, and `quote` prints an attribute back to
 # the tokens the checks read.
