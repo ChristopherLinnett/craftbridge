@@ -35,9 +35,19 @@ kotlinx-coroutines = "1.10.2"
 kotlinx-serialization = "1.11.0"
 # The TOML reader the conformance corpus's instrumented checks parse it with.
 tomlj = "2.2.0"
+# What the samples' Compose interface is built on: the UI toolkit's own line, Material 3 (its own line), the
+# activity's Compose host and photo picker, and the view model the screen's state lives in. Samples only: no
+# SDK module carries them.
+compose = "1.12.1"
+material3 = "1.4.0"
+activity = "1.12.4"
+lifecycle = "2.11.1"
 
 [plugins]
 android-library = { id = "com.android.library", version.ref = "agp" }
+android-application = { id = "com.android.application", version.ref = "agp" }
+# Compose's compiler is a Kotlin compiler plugin and is versioned with Kotlin.
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
 
@@ -72,3 +82,8 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 # Reads `conformance/effects/corpus.toml`, the one file every runner reads, in the instrumented checks alone: it
 # is an `androidTestImplementation`, so no library module ships it. It bundles the ANTLR runtime it parses with.
 tomlj = { module = "org.tomlj:tomlj", version.ref = "tomlj" }
+# The samples' Compose interface (android/samples): none of it ships in an SDK artifact.
+androidx-compose-ui = { module = "androidx.compose.ui:ui", version.ref = "compose" }
+androidx-compose-material3 = { module = "androidx.compose.material3:material3", version.ref = "material3" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }

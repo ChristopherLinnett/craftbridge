@@ -1,4 +1,4 @@
-//! Rule 10 — what a Gradle build file of the Android SDK may say.
+//! Rule 10 — what a Gradle build file of the Android SDK and of its samples may say.
 //!
 //! A module's build file is the one piece of Gradle every contributor writes, and Gradle lets it say
 //! anything: a `tasks` line rewires a check the gate relies on, a `sourceSets` line compiles another
@@ -26,8 +26,11 @@ use std::path::Path;
 enum Kind {
     /// `android/sdk/<module>/build.gradle.kts`.
     Module,
-    /// `android/sdk/build.gradle.kts`.
+    /// `android/sdk/build.gradle.kts`, and the root build file of each sample.
     Root,
+    /// The app module's build file of a sample, `android/samples/<sample>/<module>/build.gradle.kts`: a module that
+    /// applies the application convention and takes the SDK by its coordinates, as an app does.
+    App,
 }
 
 /// The block whose body a line sits in.
@@ -42,7 +45,21 @@ enum Inside {
 /// The plugin every module applies, and the one the root applies: the rules the gate relies on are
 /// what they bring.
 const MODULE_PLUGIN: &str = "id(\"craftbridge.android.library\")";
+const APP_PLUGIN: &str = "id(\"craftbridge.android.application\")";
 const ROOT_PLUGIN: &str = "id(\"craftbridge.quality\")";
+
+/// The one convention plugin line a kind of file applies.
+fn expected_plugin(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Module => MODULE_PLUGIN,
+        Kind::App => APP_PLUGIN,
+        Kind::Root => ROOT_PLUGIN,
+    }
+}
+
+/// The group of the SDK's artifacts, which an app names beside a module's own name to take one. An included build
+/// answers the coordinate with the SDK's own module, so the app writes no version.
+const SDK_GROUP: &str = "io.github.christopherlinnett.craftbridge:";
 
 /// The `android` block's one line: AGP reads the namespace, and AGENTS §9 says what it is.
 const NAMESPACE_PREFIX: &str = "namespace = \"io.github.christopherlinnett.craftbridge.";
@@ -79,7 +96,7 @@ fn open_block(line: &str, kind: Kind) -> Option<(Inside, Option<&str>)> {
 /// may also turn off the catalog's plugins for the projects that apply them.
 fn plugin_entry(line: &str, kind: Kind) -> bool {
     match kind {
-        Kind::Module => line == MODULE_PLUGIN,
+        Kind::Module | Kind::App => line == expected_plugin(kind),
         Kind::Root => line == ROOT_PLUGIN || catalog_plugin_alias(line),
     }
 }
@@ -109,12 +126,22 @@ fn namespace_segment(line: &str) -> Option<&str> {
 
 /// Is a line one dependency of the allowed shapes: an allowed configuration, and either a module of
 /// this build or an alias of the catalog? A written-out coordinate is refused: versions come from the
-/// catalog once, so no module pins one to itself.
-fn dependency_entry(line: &str) -> bool {
+/// catalog once, so no module pins one to itself. An app alone may name the SDK's own artifacts, by the
+/// coordinate an included build answers.
+fn dependency_entry(line: &str, kind: Kind) -> bool {
     DEPENDENCY_CONFIGURATIONS
         .iter()
         .filter_map(|configuration| line.strip_prefix(&format!("{configuration}(")).and_then(|rest| rest.strip_suffix(')')))
-        .any(|target| project_target(target) || libs_target(target))
+        .any(|target| project_target(target) || libs_target(target) || (kind == Kind::App && sdk_artifact(target)))
+}
+
+/// `"io.github.christopherlinnett.craftbridge:effects"`: an SDK artifact by its coordinate and no version.
+fn sdk_artifact(target: &str) -> bool {
+    target
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .and_then(|coordinate| coordinate.strip_prefix(SDK_GROUP))
+        .is_some_and(|module| !module.is_empty() && module.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'))
 }
 
 /// `project(":core")`, `:module` and `:group:module` spellings alike.
@@ -135,6 +162,9 @@ fn shape_message(at: &str, kind: Kind) -> String {
         Kind::Module => format!(
             "{at}: a module's build file holds only comments, plugins with id(\"craftbridge.android.library\"), android with its namespace, and dependencies of project(\":…\") or libs.<alias>; anything else a build needs is configured once in android/sdk/build-logic"
         ),
+        Kind::App => format!(
+            "{at}: a sample app's build file holds only comments, plugins with id(\"craftbridge.android.application\"), android with its namespace, and dependencies of libs.<alias> or an SDK artifact's coordinate; anything else a build needs is configured once in android/sdk/build-logic"
+        ),
         Kind::Root => format!(
             "{at}: the root build file holds only comments and a plugins block of alias(libs.plugins.<alias>) apply false lines and id(\"craftbridge.quality\"); anything else a build needs is configured once in android/sdk/build-logic"
         ),
@@ -149,11 +179,7 @@ fn entry_error(at: &str, line: &str, block: Inside, kind: Kind, module: Option<&
             if !plugin_entry(line, kind) {
                 return Some(shape_message(at, kind));
             }
-            let expected = match kind {
-                Kind::Module => MODULE_PLUGIN,
-                Kind::Root => ROOT_PLUGIN,
-            };
-            *applied |= line == expected;
+            *applied |= line == expected_plugin(kind);
             None
         }
         Inside::Android => match (namespace_segment(line), module) {
@@ -164,13 +190,13 @@ fn entry_error(at: &str, line: &str, block: Inside, kind: Kind, module: Option<&
                 }
                 None
             }
-            (Some(segment_is), Some(folder)) => {
-                Some(format!("{at}: the namespace's last segment must be `{folder}`, not `{segment_is}`: the module's folder names it (AGENTS §9)"))
-            }
+            (Some(segment_is), Some(folder)) => Some(format!(
+                "{at}: the namespace's last segment must be `{folder}`, not `{segment_is}`: the module's folder names it, a sample's own folder without its dashes (AGENTS §9)"
+            )),
             _ => Some(shape_message(at, kind)),
         },
         Inside::Dependencies => {
-            if dependency_entry(line) {
+            if dependency_entry(line, kind) {
                 None
             } else {
                 Some(shape_message(at, kind))
@@ -257,10 +283,11 @@ fn violations(name: &str, source: &str, kind: Kind, module: Option<&str>) -> Vec
     if !applied {
         errors.push(match kind {
             Kind::Module => format!("{name}:1: a module's build file must apply its convention plugin ({MODULE_PLUGIN}): the rules the gate relies on live in android/sdk/build-logic"),
+            Kind::App => format!("{name}:1: a sample app's build file must apply its convention plugin ({APP_PLUGIN}): the rules the gate relies on live in android/sdk/build-logic"),
             Kind::Root => format!("{name}:1: the root build file must apply {ROOT_PLUGIN}: it formats and checks the shared Gradle scripts (android/sdk/build-logic)"),
         });
     }
-    if kind == Kind::Module && namespaces != 1 {
+    if kind != Kind::Root && namespaces != 1 {
         errors.push(format!("{name}:1: a module's build file must name its namespace once: {NAMESPACE_PREFIX}{}\"", module.unwrap_or("<module>")));
     }
     errors
@@ -302,6 +329,48 @@ const BUILD_LOGIC: &str = "build-logic";
 /// every run, or a settings file but the build's and `build-logic`'s. Names are compared exactly:
 /// `rules: hygiene` refuses every other spelling of a name Gradle opens.
 pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
+    let mut errors = check_sdk(root)?;
+    errors.extend(check_samples(root)?);
+    Ok(errors)
+}
+
+/// A sample is a Gradle build of its own under `android/samples`, as the one list of them gives it
+/// (rust/xtask/src/samples.rs), which includes the SDK and takes its convention plugins from
+/// `android/sdk/build-logic`, so its build files say no more than a module's do: its root file only its plugins,
+/// each of its modules' only the application convention, a namespace and dependencies, and there is no Groovy
+/// build file, no `buildSrc` and no settings file but the sample's own (which names the builds it includes and is
+/// read by review, as the SDK's is).
+fn check_samples(root: &Path) -> Result<Vec<String>, String> {
+    let mut errors = Vec::new();
+    for folder in crate::samples::android_builds(&root.join("android"))? {
+        let sample = folder.file_name().and_then(|name| name.to_str()).unwrap_or_default().to_string();
+        let segment = sample.replace('-', "");
+        for found in scan::walk(&folder, "")? {
+            let Some(name) = found.path.file_name().and_then(|name| name.to_str()) else { continue };
+            let shown = crate::report::shown(root, &found.path);
+            if found.components.iter().any(|component| component == "buildSrc") {
+                errors.push(format!("{shown}: Gradle builds a buildSrc and runs its scripts on every run of the build, outside the convention plugins: shared setup lives in android/sdk/build-logic"));
+            } else if name == "settings.gradle.kts" && !found.components.is_empty() {
+                errors.push(format!("{shown}: a settings file of a build of its own, whose scripts run outside the convention plugins: a sample is one build, and shared setup lives in android/sdk/build-logic"));
+            } else if name.ends_with(".gradle") {
+                errors.push(format!("{shown}: Gradle reads this Groovy file in place of the `.kts` file of the same project, and this rule cannot read Groovy: the build is written in Kotlin DSL, and shared setup lives in android/sdk/build-logic"));
+            } else if name == BUILD_FILE {
+                let source = scan::read_text(&found.path)?;
+                let (kind, module) = if found.components.is_empty() { (Kind::Root, None) } else { (Kind::App, Some(segment.as_str())) };
+                errors.extend(violations(&shown, &source, kind, module));
+            }
+        }
+        if !folder.join(BUILD_FILE).is_file() {
+            let shown = crate::report::shown(root, &folder.join(BUILD_FILE));
+            errors.push(format!(
+                "{shown}: the root build file is missing: it applies id(\"craftbridge.quality\"), which formats and checks the shared Gradle scripts"
+            ));
+        }
+    }
+    Ok(errors)
+}
+
+fn check_sdk(root: &Path) -> Result<Vec<String>, String> {
     let sdk = root.join("android").join("sdk");
     if !sdk.join("settings.gradle.kts").is_file() {
         return Ok(Vec::new());
@@ -337,7 +406,7 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
         let source = scan::read_text(&found.path)?;
         let kind = if found.components.is_empty() { Kind::Root } else { Kind::Module };
         let module = match kind {
-            Kind::Module => found.path.parent().and_then(|parent| parent.file_name()).and_then(|name| name.to_str()),
+            Kind::Module | Kind::App => found.path.parent().and_then(|parent| parent.file_name()).and_then(|name| name.to_str()),
             Kind::Root => None,
         };
         errors.extend(violations(&shown, &source, kind, module));
@@ -697,6 +766,115 @@ plugins {
         let scratch = setup();
         let errors = check(&scratch.0).unwrap();
         assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    const LEGAL_APP: &str = r#"// The sample app: the SDK by its coordinates, and nothing else of its own.
+plugins {
+    id("craftbridge.android.application")
+}
+
+android {
+    namespace = "io.github.christopherlinnett.craftbridge.postcardstudio"
+}
+
+dependencies {
+    implementation("io.github.christopherlinnett.craftbridge:effects")
+    implementation(libs.androidx.compose.ui)
+}
+"#;
+
+    /// A tree with a legal sample beside the SDK.
+    fn with_sample() -> Scratch {
+        let scratch = setup();
+        scratch.write("android/samples/postcard-studio/settings.gradle.kts", "include(\":app\")\n");
+        scratch.write("android/samples/postcard-studio/build.gradle.kts", LEGAL_ROOT);
+        scratch.write("android/samples/postcard-studio/app/build.gradle.kts", LEGAL_APP);
+        scratch
+    }
+
+    fn app(text: &str) -> Vec<String> {
+        violations("android/samples/postcard-studio/app/build.gradle.kts", text, Kind::App, Some("postcardstudio"))
+    }
+
+    #[test]
+    fn a_legal_sample_passes() {
+        let scratch = with_sample();
+        let errors = check(&scratch.0).unwrap();
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn a_sample_app_applies_the_application_convention_and_not_the_librarys() {
+        let library = app(&LEGAL_APP.replace("craftbridge.android.application", "craftbridge.android.library"));
+        assert!(library.iter().any(|e| e.contains(":3:") && e.contains("a sample app's build file holds only")), "{library:?}");
+        assert!(library.iter().any(|e| e.contains("must apply its convention plugin (id(\"craftbridge.android.application\"))")), "{library:?}");
+        let module = module("android/sdk/core/build.gradle.kts", &LEGAL_APP.replace("postcardstudio", "core"));
+        assert!(module.iter().any(|e| e.contains("a module's build file holds only")), "{module:?}");
+    }
+
+    #[test]
+    fn a_sample_takes_the_sdk_by_coordinate_without_a_version_and_a_module_may_not() {
+        for line in [
+            "implementation(\"io.github.christopherlinnett.craftbridge:effects:1.0\")",
+            "implementation(\"com.example:effects\")",
+            "implementation(\"io.github.christopherlinnett.craftbridge:\")",
+            "implementation(\"io.github.christopherlinnett.craftbridge:Effects\")",
+        ] {
+            let errors = app(&LEGAL_APP.replace("implementation(\"io.github.christopherlinnett.craftbridge:effects\")", line));
+            assert!(errors.iter().any(|e| e.contains(":11:")), "{line}: {errors:?}");
+        }
+        let in_module = module(
+            "android/sdk/effects/build.gradle.kts",
+            &LEGAL_MODULE.replace("api(project(\":core\"))", "api(\"io.github.christopherlinnett.craftbridge:core\")"),
+        );
+        assert!(in_module.iter().any(|e| e.contains(":13:")), "{in_module:?}");
+    }
+
+    #[test]
+    fn a_sample_app_names_its_namespace_after_its_sample() {
+        let errors = app(&LEGAL_APP.replace("postcardstudio", "other"));
+        assert!(errors.iter().any(|e| e.contains("must be `postcardstudio`, not `other`")), "{errors:?}");
+        let scratch = with_sample();
+        scratch.write("android/samples/postcard-studio/app/build.gradle.kts", LEGAL_APP.replace("postcardstudio", "postcard"));
+        let errors = check(&scratch.0).unwrap();
+        assert!(
+            errors.iter().any(|e| e.starts_with("android/samples/postcard-studio/app/build.gradle.kts:") && e.contains("must be `postcardstudio`")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_sample_build_file_that_rewires_a_check_is_refused() {
+        let scratch = with_sample();
+        scratch.write("android/samples/postcard-studio/app/build.gradle.kts", format!("{LEGAL_APP}tasks.named(\"lintDebug\") {{ onlyIf {{ false }} }}\n"));
+        scratch.write("android/samples/postcard-studio/build.gradle.kts", format!("{LEGAL_ROOT}subprojects {{ }}\n"));
+        let errors = check(&scratch.0).unwrap();
+        assert!(errors.iter().any(|e| e.starts_with("android/samples/postcard-studio/app/build.gradle.kts:14:")), "{errors:?}");
+        assert!(errors.iter().any(|e| e.starts_with("android/samples/postcard-studio/build.gradle.kts:7:")), "{errors:?}");
+    }
+
+    #[test]
+    fn a_sample_has_no_groovy_file_no_build_source_and_no_second_settings_file() {
+        let scratch = with_sample();
+        scratch.write("android/samples/postcard-studio/app/build.gradle", "tasks.named(\"lintDebug\") { onlyIf { false } }\n");
+        scratch.write("android/samples/postcard-studio/buildSrc/src/main/kotlin/Late.kt", "\n");
+        scratch.write("android/samples/postcard-studio/app/settings.gradle.kts", "rootProject.name = \"apart\"\n");
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 3, "{errors:?}");
+        assert!(errors.iter().any(|e| e.starts_with("android/samples/postcard-studio/app/build.gradle: Gradle reads this Groovy file")), "{errors:?}");
+        assert!(errors.iter().any(|e| e.starts_with("android/samples/postcard-studio/buildSrc") && e.contains("Gradle builds a buildSrc")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.starts_with("android/samples/postcard-studio/app/settings.gradle.kts: a settings file of a build of its own")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_sample_without_its_root_build_file_is_an_error() {
+        let scratch = with_sample();
+        std::fs::remove_file(scratch.0.join("android/samples/postcard-studio/build.gradle.kts")).unwrap();
+        let errors = check(&scratch.0).unwrap();
+        assert!(errors.iter().any(|e| e.starts_with("android/samples/postcard-studio/build.gradle.kts: the root build file is missing")), "{errors:?}");
     }
 
     #[test]

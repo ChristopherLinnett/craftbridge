@@ -12,6 +12,9 @@ import org.gradle.kotlin.dsl.configure
 /** The runtime classpaths whose modules the licence check reads: what ships, and what each kind of test runs with. */
 private val licenceClasspaths = listOf("releaseRuntimeClasspath", "debugUnitTestRuntimeClasspath", "debugAndroidTestRuntimeClasspath")
 
+/** The classpath of the instrumented tests, which an app builds none of (the application convention disables them). */
+private const val INSTRUMENTED_CLASSPATH = "debugAndroidTestRuntimeClasspath"
+
 /**
  * The formatting rules for every Kotlin file of the Android build: Spotless running ktlint. A module
  * checks its own written Kotlin and build script; the build's root project checks what no module owns,
@@ -19,7 +22,7 @@ private val licenceClasspaths = listOf("releaseRuntimeClasspath", "debugUnitTest
  * cannot otherwise reach. The repository's .editorconfig is the one definition of the style; nothing
  * here repeats it. What each Spotless task will really compare is read back after the project's own
  * build file has run, so no project can quietly decide for itself what gets formatted. The root project
- * also lists what the library modules ship, for the licence check.
+ * also lists what the library modules ship and what the apps run with, for the licence check.
  */
 class QualityConventionPlugin : Plugin<Project> {
     override fun apply(target: Project): Unit =
@@ -146,18 +149,27 @@ class QualityConventionPlugin : Plugin<Project> {
                     notCompatibleWithConfigurationCache("reads the resolved dependency graph at execution time")
                     doLast {
                         val modules = sortedSetOf<String>()
-                        rootProject.subprojects.filter { it.plugins.hasPlugin("com.android.library") }.forEach { library ->
-                            // What ships, and what the tests run with: AGENTS §8 holds every dependency to
-                            // the allowlist, as cargo-deny does a crate's dev-dependencies. A library
-                            // without one of these classpaths would add nothing and look clean, so its
-                            // absence is an error rather than an empty answer.
-                            val classpaths =
-                                licenceClasspaths.map { name ->
-                                    library.configurations.findByName(name)
-                                        ?: throw GradleException("${library.path} has no $name, so what it uses cannot be listed")
-                                }
-                            LicenceListing.addResolvedModules(classpaths, modules)
-                        }
+                        rootProject.subprojects
+                            .filter {
+                                it.plugins.hasPlugin("com.android.library") ||
+                                    it.plugins.hasPlugin("com.android.application")
+                            }.forEach { library ->
+                                // What ships, and what the tests run with: AGENTS §8 holds every dependency to
+                                // the allowlist, as cargo-deny does a crate's dev-dependencies. A library
+                                // without one of these classpaths would add nothing and look clean, so its
+                                // absence is an error rather than an empty answer.
+                                val classpaths =
+                                    licenceClasspaths
+                                        .filter {
+                                            library.plugins.hasPlugin(
+                                                "com.android.library",
+                                            ) || it != INSTRUMENTED_CLASSPATH
+                                        }.map { name ->
+                                            library.configurations.findByName(name)
+                                                ?: throw GradleException("${library.path} has no $name, so what it uses cannot be listed")
+                                        }
+                                LicenceListing.addResolvedModules(classpaths, modules)
+                            }
                         modules.forEach { println(it) }
                     }
                 }

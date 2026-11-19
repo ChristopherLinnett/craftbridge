@@ -212,34 +212,15 @@ pub(crate) fn package_manifests(ios: &Path) -> Result<Vec<PathBuf>, String> {
         .collect())
 }
 
-/// Every Xcode project of the iOS samples, at any depth under `ios/samples`: a `<name>.xcodeproj` folder that
-/// holds the `project.pbxproj` Xcode reads, the walk skipping build output as every rule does. This is the one
-/// answer to which apps the samples are: `swift_build` builds each (`cargo xtask swift-samples`) and the licence
-/// check reads each one's pins, so no sample is built and left unread, or read and left unbuilt.
-pub(crate) fn sample_projects(ios: &Path) -> Result<Vec<PathBuf>, String> {
-    Ok(scan::walk(&ios.join("samples"), "project.pbxproj")?
-        .into_iter()
-        .filter(|file| file.path.file_name().is_some_and(|name| name == "project.pbxproj"))
-        .filter_map(|file| file.path.parent().filter(|project| project.extension().is_some_and(|extension| extension == "xcodeproj")).map(Path::to_path_buf))
-        .collect())
-}
-
 /// Every `Package.resolved` the Swift under `ios/` ships with: the SDK package's, beside its manifest, and each
 /// sample project's, which Xcode writes at `<name>.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/`.
 /// A file elsewhere under `ios/samples` is not one Xcode reads for a project, so it is no pin of an app.
 pub(crate) fn resolved_files(ios: &Path) -> Result<Vec<PathBuf>, String> {
     let mut files = vec![ios.join("sdk").join("Package.resolved")];
-    for project in sample_projects(ios)? {
+    for project in crate::samples::ios_projects(ios)? {
         files.push(project.join("project.xcworkspace").join("xcshareddata").join("swiftpm").join("Package.resolved"));
     }
     Ok(files)
-}
-
-/// `cargo xtask swift-samples`: the Xcode projects of the iOS samples, one path from the repository root per
-/// line.
-pub(crate) fn samples(root: &Path) -> std::process::ExitCode {
-    let projects = sample_projects(&root.join("ios")).map(|projects| projects.iter().map(|project| crate::report::shown(root, project)).collect());
-    crate::report::print_lines(projects, "swift-samples")
 }
 
 /// Compare what the builds use against what is declared: every use needs a declaration with an allowed
@@ -356,22 +337,38 @@ fn unpinned(shown: &str, published: &[String], resolved: bool) -> Option<String>
 }
 
 /// The external modules Gradle resolves for the licences check: what lands on the Android library
-/// modules' runtime classpaths, and what lands on the gate's own detekt tooling (the rule project's
-/// compile, runtime and test classpaths, and the analyser the gate forks). Gradle
-/// itself answers — `android/sdk`'s `runtimeLicences` and `:build-logic:detekt-rules:gateToolLicences`
-/// tasks print their resolved graphs — because the transitive modules are the whole point and no build
-/// file lists them. A tree without the Gradle wrapper (a scratch tree) has no answer to ask for; a
-/// Gradle that fails is an error, because the licences of what ships cannot be guessed at in its place.
+/// modules' runtime classpaths, what lands on each sample's (a sample is a build of its own under
+/// `android/samples`, which takes the SDK as an included build and ships to its users what its classpaths
+/// hold), and what lands on the gate's own detekt tooling (the rule project's compile, runtime and test
+/// classpaths, and the analyser the gate forks). Gradle itself answers — `runtimeLicences` of each build and
+/// `:build-logic:detekt-rules:gateToolLicences` print their resolved graphs — because the transitive modules
+/// are the whole point and no build file lists them. A tree without the Gradle wrapper (a scratch tree) has no
+/// answer to ask for; a Gradle that fails is an error, because the licences of what ships cannot be guessed at
+/// in its place.
 fn gradle_resolved_modules(root: &Path) -> Result<Vec<String>, String> {
     let sdk = root.join("android").join("sdk");
     if !sdk.join("gradlew").is_file() {
         return Ok(Vec::new());
     }
+    let mut modules = ask_gradle(&sdk, &sdk, "android/sdk", &["runtimeLicences", ":build-logic:detekt-rules:gateToolLicences"])?;
+    // Each sample's build, as the one list of them gives it (rust/xtask/src/samples.rs), which the gate builds.
+    for build in crate::samples::android_builds(&root.join("android"))? {
+        modules.extend(ask_gradle(&sdk, &build, &crate::report::shown(root, &build), &["runtimeLicences"])?);
+    }
+    Ok(modules)
+}
+
+/// Runs the SDK's Gradle wrapper, the one Gradle every build of the repository runs on, on the build at `project`
+/// (named `shown` in a message) for `tasks`, and answers the modules they print.
+fn ask_gradle(sdk: &Path, project: &Path, shown: &str, tasks: &[&str]) -> Result<Vec<String>, String> {
     let output = std::process::Command::new(sdk.join("gradlew"))
-        .current_dir(&sdk)
-        .args(["--quiet", "--no-daemon", "--console=plain", "runtimeLicences", ":build-logic:detekt-rules:gateToolLicences"])
+        .current_dir(sdk)
+        .arg("-p")
+        .arg(project)
+        .args(["--quiet", "--no-daemon", "--console=plain"])
+        .args(tasks)
         .output()
-        .map_err(|error| format!("android/sdk: cannot ask Gradle for the runtime classpaths: {error}"))?;
+        .map_err(|error| format!("{shown}: cannot ask Gradle for the runtime classpaths: {error}"))?;
     if !output.status.success() {
         let text = String::from_utf8_lossy(&output.stderr);
         // Gradle buries the reason under `What went wrong`; the tail of the log is help-links noise.
@@ -393,7 +390,8 @@ fn gradle_resolved_modules(root: &Path) -> Result<Vec<String>, String> {
         // Gradle needs the JDK and Android SDK tools/env.sh finds; run by hand, a shell without them gets
         // Gradle's own complaint, so the message says where the environment comes from.
         return Err(format!(
-            "android/sdk: `runtimeLicences`/`gateToolLicences` failed, so the licences of what ships and of the gate's own tooling cannot be checked: {} (tools/ci.sh rules runs it with the JDK and Android SDK tools/env.sh finds)",
+            "{shown}: `{}` failed, so the licences of what ships and of the gate's own tooling cannot be checked: {} (tools/ci.sh rules runs it with the JDK and Android SDK tools/env.sh finds)",
+            tasks.join("`/`"),
             reason.join(" ")
         ));
     }
@@ -564,27 +562,6 @@ mod tests {
         // A project folder Xcode cannot open, holding no `project.pbxproj`, is no app either.
         repo.0.write(&project_pins("Other/Other.xcodeproj"), SWIFT_LOG_PIN);
         assert!(repo.errors().is_empty(), "{:?}", repo.errors());
-    }
-
-    /// The samples' projects are the `.xcodeproj` folders Xcode can open, however deep, and nothing in build
-    /// output or somebody else's packages: what `swift_build` builds and what the licence check reads are this one
-    /// list.
-    #[test]
-    fn the_samples_projects_are_every_project_xcode_opens_under_the_samples() {
-        let scratch = Scratch::new("sample-projects");
-        for file in [
-            "ios/samples/App/App.xcodeproj/project.pbxproj",
-            "ios/samples/Group/Other/Other.xcodeproj/project.pbxproj",
-            "ios/samples/Empty/Empty.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
-            "ios/samples/Loose/project.pbxproj",
-            "ios/samples/Backup/Backup.xcodeproj/old-project.pbxproj",
-            "ios/samples/App/node_modules/Copy.xcodeproj/project.pbxproj",
-        ] {
-            scratch.write(file, "");
-        }
-        let ios = scratch.0.join("ios");
-        let projects: Vec<String> = sample_projects(&ios).unwrap().iter().map(|project| crate::report::shown(&scratch.0, project)).collect();
-        assert_eq!(projects, ["ios/samples/App/App.xcodeproj", "ios/samples/Group/Other/Other.xcodeproj"]);
     }
 
     #[test]

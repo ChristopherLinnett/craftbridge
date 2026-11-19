@@ -12,6 +12,10 @@
 /android/sdk/local.properties
 /android/sdk/**/build/
 /android/sdk/*/src/main/jniLibs/
+/android/samples/**/.gradle/
+/android/samples/**/.kotlin/
+/android/samples/**/local.properties
+/android/samples/**/build/
 
 # The plan (plan/.gitignore covers its dependencies and renders): the bundle and the raw device logs stay
 # on the machine that made them.

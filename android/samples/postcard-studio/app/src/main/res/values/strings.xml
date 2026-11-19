@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Postcard Studio</string>
+    <string name="name_label">Name</string>
+    <string name="pick_photo">Pick a photo</string>
+    <string name="use_sample_photo">Use the sample photo</string>
+    <string name="play">Play</string>
+    <string name="pause">Pause</string>
+    <string name="export">Export</string>
+    <string name="export_again">Export again</string>
+    <string name="stop">Stop</string>
+    <string name="share">Share</string>
+    <string name="exported">The card is ready.</string>
+    <string name="stopped">The export was stopped. Export again to make the card.</string>
+    <string name="exported_frames">Frame %1$d of %2$d</string>
+    <string name="export_channel">Card export</string>
+    <string name="exporting_title">Exporting the card</string>
+</resources>

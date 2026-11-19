@@ -42,6 +42,10 @@ gradlePlugin {
             id = "craftbridge.android.library"
             implementationClass = "io.github.christopherlinnett.craftbridge.convention.AndroidLibraryConventionPlugin"
         }
+        register("androidApplication") {
+            id = "craftbridge.android.application"
+            implementationClass = "io.github.christopherlinnett.craftbridge.convention.AndroidApplicationConventionPlugin"
+        }
         register("quality") {
             id = "craftbridge.quality"
             implementationClass = "io.github.christopherlinnett.craftbridge.convention.QualityConventionPlugin"

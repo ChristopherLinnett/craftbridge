@@ -1,8 +1,7 @@
 package io.github.christopherlinnett.craftbridge.convention
 
-import com.android.build.api.dsl.LibraryExtension
+import com.android.build.api.dsl.CommonExtension
 import com.android.build.api.variant.Component
-import com.android.build.api.variant.LibraryAndroidComponentsExtension
 import org.gradle.api.DefaultTask
 import org.gradle.api.Project
 import org.gradle.api.Task
@@ -153,8 +152,8 @@ internal const val GENERATED_BINDINGS = "io/github/christopherlinnett/craftbridg
  * it; nothing here names one.
  */
 internal fun Project.configureDetekt() {
-    val android = extensions.getByType<LibraryExtension>()
-    val androidComponents = extensions.getByType<LibraryAndroidComponentsExtension>()
+    val android = extensions.getByType<CommonExtension>()
+    val androidComponents = androidComponents()
     // Tool classpaths of the build's own, detached from the module's configurations: no module code
     // compiles or ships against them, so the dependency direction the settings check reads off every
     // module configuration (§2) is not theirs to answer, and a module build file cannot reach them.
@@ -165,7 +164,7 @@ internal fun Project.configureDetekt() {
             attributes.attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage::class.java, Usage.JAVA_RUNTIME))
         }
 
-    val profiles = rootDir.resolve("build-logic/detekt-rules/profiles")
+    val profiles = buildLogicFolder.resolve("detekt-rules/profiles")
     val base = profiles.resolve("base.yml")
     val written = profiles.resolve("written.yml")
     val shipped = profiles.resolve("shipped.yml")
@@ -177,7 +176,7 @@ internal fun Project.configureDetekt() {
             // that namespace for written code, and §9's ffi spelling of it for the bindings.
             val namespace =
                 provider {
-                    android.namespace ?: error("$path names no namespace: craftbridge.android.library derives the package rule from it")
+                    android.namespace ?: error("$path names no namespace: the convention plugin derives the package rule from it")
                 }
             writtenPackage.set(namespace)
             bindingsPackage.set(namespace.map { "${it.substringBeforeLast('.')}.ffi.${it.substringAfterLast('.')}" })
