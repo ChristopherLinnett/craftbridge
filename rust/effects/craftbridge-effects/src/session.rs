@@ -18,12 +18,18 @@ use crate::hardware::{HardwareChoice, HardwareExporter};
 use crate::{fonts, plugins};
 
 /// The importer EffectCraft's host uses: a probe is EffectCraft's own media probe, so a phone reads
-/// footage exactly as the command line does (AD1).
+/// footage exactly as the command line does (AD1), and an import says what it left out of a file (a 3D
+/// model's texture it could not take) as the command line's does, which the trait's own default would
+/// leave unsaid.
 struct MediaImporter;
 
 impl Importer for MediaImporter {
     fn probe(&self, path: &str) -> std::result::Result<Footage, String> {
         effectcraft_media::probe(path).map_err(|error| error.to_string())
+    }
+
+    fn probe_noting(&self, path: &str) -> std::result::Result<(Footage, Option<String>), String> {
+        effectcraft_media::probe_noting(path).map_err(|error| error.to_string())
     }
 }
 
@@ -136,6 +142,24 @@ pub(crate) mod tests {
         // so this test pins the type, and the export tests pin what an export of each kind comes to.
         let _: Arc<HardwareExporter> = exporter(HardwareChoice::default());
         assert!(build(Platform::current(), &folders(None), &HardwareChoice::default()).exporter.is_some());
+    }
+
+    #[test]
+    fn an_import_says_what_it_left_out_of_a_file_as_the_command_line_does() {
+        // A model whose material names a texture that is not beside it: the import takes the model and
+        // says the texture is not there, which the command line's importer reports as the import's warning.
+        let dir = tempfile::tempdir().expect("a scratch folder");
+        let model = dir.path().join("card.obj");
+        std::fs::write(dir.path().join("card.mtl"), "newmtl skin\nmap_Kd missing.png\n").unwrap();
+        std::fs::write(&model, "mtllib card.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nusemtl skin\nf 1/1 2/2 3/3\n").unwrap();
+        let mut backend = backend_running([]);
+        let imported = backend.exec("file.import", serde_json::json!({ "paths": [model.to_string_lossy()] })).unwrap();
+        let path = model.to_string_lossy().into_owned();
+        assert_eq!(
+            imported.get("warnings"),
+            Some(&serde_json::json!([format!("{path}: texture `missing.png` was not found next to the model")])),
+            "{imported}"
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@
 
 use std::io::{Seek, SeekFrom, Write};
 
-use filmcraft_isobmff::{AvcConfig, Brand, ColorInfo, HevcConfig, Mp4Writer, SampleEntry, TrackConfig, WriteSample, WriterOptions};
+use filmcraft_isobmff::{AvcConfig, Brand, ColorInfo, Edit, HevcConfig, Mp4Writer, SampleEntry, TrackConfig, WriteSample, WriterOptions};
 
 use crate::encode::{ColourCodes, EncodeError, Reorder, VideoCodec, VideoSpec, Yuv420};
 
@@ -53,6 +53,10 @@ pub struct AudioTrack {
     pub priming: i64,
     /// The access units, each [`AAC_FRAME`] samples.
     pub units: Vec<Vec<u8>>,
+    /// The sound's own samples: what was fed to the encoder, without its priming and without what it made
+    /// past the sound's end. The track's edit ends where this ends, so the movie's sound stops with the
+    /// sound, not with the last whole unit the encoder padded the track to.
+    pub frames: usize,
 }
 
 /// The sample entry of the picture track: the encoder's own record, the picture's size and the colour tag
@@ -76,6 +80,15 @@ fn sample_entry(spec: &VideoSpec, record: &[u8]) -> Result<SampleEntry, EncodeEr
 
 fn mux(error: impl std::fmt::Display) -> EncodeError {
     EncodeError::Failed(format!("writing the movie failed: {error}"))
+}
+
+/// The edit that plays the sound and stops: past the encoder's priming, the sound's own samples, at the
+/// usual rate, as one segment of the movie's timescale. `None` when no edit of nonzero length can say
+/// the span — a sound shorter than one movie tick, or numbers too large to multiply — and the track then
+/// spans its whole media from the priming on.
+fn sound_edit(frames: usize, sample_rate: u32, priming: i64, movie_timescale: u32) -> Option<Edit> {
+    let ticks = u64::try_from(frames).ok()?.checked_mul(u64::from(movie_timescale))?.checked_div(u64::from(sample_rate))?;
+    (ticks > 0).then_some(Edit { segment_duration: ticks, media_time: priming, media_rate: 0x0001_0000 })
 }
 
 /// The tracks once the picture's record is known, and what is left of the sound to write.
@@ -168,13 +181,26 @@ impl<B: Backend, W: Write + Seek> Movie<B, W> {
     fn open_writer(&mut self) -> Result<Open<W>, EncodeError> {
         let record = self.backend.record().ok_or_else(|| EncodeError::Failed("the encoder returned a picture without its record".into()))?;
         let out = self.out.take().ok_or_else(|| EncodeError::Failed("the movie's file was already given up".into()))?;
-        let mut writer = Mp4Writer::new(out, WriterOptions::new(Brand::Mp4)).map_err(mux)?;
+        let options = WriterOptions::new(Brand::Mp4);
+        let movie_timescale = options.movie_timescale;
+        let mut writer = Mp4Writer::new(out, options).map_err(mux)?;
         let video = writer.add_track(TrackConfig::new(sample_entry(&self.spec, &record)?, self.spec.rate_num)).map_err(mux)?;
         let audio = match &self.audio {
             Some(track) => {
                 let entry = SampleEntry::aac(track.config.clone(), track.channels, track.sample_rate);
                 let mut config = TrackConfig::new(entry, track.sample_rate);
-                config.media_start = Some(track.priming);
+                // Apple's decoders take an AAC track's priming from its edit list alone only when the
+                // samples sit in a roll sample group: without one AVFoundation drops the priming itself
+                // and then skips the edit's as well, so the sound plays that many samples early and its
+                // start is lost. The distance is -1 because each AAC unit overlaps the one before it: a
+                // decoder must decode the unit before a sample for that sample to come out right.
+                config.roll_distance = Some(-1);
+                // The edit ends where the sound does: one spanning the media's whole end would read on
+                // through whatever the encoder padded past the sound's end, silence running after it.
+                match sound_edit(track.frames, track.sample_rate, track.priming, movie_timescale) {
+                    Some(edit) => config.edits = vec![edit],
+                    None => config.media_start = Some(track.priming),
+                }
                 Some(writer.add_track(config).map_err(mux)?)
             }
             None => None,
@@ -289,6 +315,31 @@ mod tests {
         Yuv420 { y: Vec::new(), u: Vec::new(), v: Vec::new() }
     }
 
+    /// Gives a record at the end that is not the one it gave for the first packet.
+    struct Continued {
+        fake: Fake,
+        finished: bool,
+    }
+
+    impl Backend for Continued {
+        fn encode(&mut self, index: u64, frame: &Yuv420) -> Result<Vec<Packet>, EncodeError> {
+            self.fake.encode(index, frame)
+        }
+        fn finish(&mut self) -> Result<Vec<Packet>, EncodeError> {
+            self.finished = true;
+            self.fake.finish()
+        }
+        fn record(&self) -> Option<Vec<u8>> {
+            let record = self.fake.record()?;
+            let mut config = AvcConfig::parse(&record).ok()?;
+            config.level = config.level.saturating_add(if self.finished { 9 } else { 0 });
+            Some(config.to_bytes())
+        }
+        fn continued(&self) -> bool {
+            true
+        }
+    }
+
     fn movie(frames: u64, audio: Option<AudioTrack>) -> (Movie<Fake, Cursor<Vec<u8>>>, Rc<RefCell<Vec<u64>>>) {
         let (fake, fed) = Fake::new(avcc());
         (Movie::new(fake, Cursor::new(Vec::new()), spec(VideoCodec::H264), frames, audio).unwrap(), fed)
@@ -299,7 +350,18 @@ mod tests {
     }
 
     fn track(units: usize) -> AudioTrack {
-        AudioTrack { config: vec![0x11, 0x90], channels: 2, sample_rate: 48_000, priming: 2112, units: (0..units).map(|n| vec![n as u8; 4]).collect() }
+        // The sound fills these units: everything past the priming is the sound's own samples.
+        let frames = units.saturating_mul(AAC_FRAME as usize).saturating_sub(2112);
+        AudioTrack { config: vec![0x11, 0x90], channels: 2, sample_rate: 48_000, priming: 2112, units: (0..units).map(|n| vec![n as u8; 4]).collect(), frames }
+    }
+
+    /// Write a movie of `pictures` blank frames over `sound`, finish it, and read the file back.
+    fn written_with(pictures: u64, sound: AudioTrack) -> Mp4File {
+        let (mut movie, _) = movie(pictures, Some(sound));
+        for index in 0..pictures {
+            movie.push_frame(index, blank()).unwrap();
+        }
+        read(movie.finish().unwrap().out.into_inner())
     }
 
     /// The file read back.
@@ -367,29 +429,6 @@ mod tests {
 
     #[test]
     fn a_stream_that_went_on_in_another_encoder_is_written_with_the_record_that_covers_the_whole_of_it() {
-        /// Gives a record at the end that is not the one it gave for the first packet.
-        struct Continued {
-            fake: Fake,
-            finished: bool,
-        }
-        impl Backend for Continued {
-            fn encode(&mut self, index: u64, frame: &Yuv420) -> Result<Vec<Packet>, EncodeError> {
-                self.fake.encode(index, frame)
-            }
-            fn finish(&mut self) -> Result<Vec<Packet>, EncodeError> {
-                self.finished = true;
-                self.fake.finish()
-            }
-            fn record(&self) -> Option<Vec<u8>> {
-                let record = self.fake.record()?;
-                let mut config = AvcConfig::parse(&record).ok()?;
-                config.level = config.level.saturating_add(if self.finished { 9 } else { 0 });
-                Some(config.to_bytes())
-            }
-            fn continued(&self) -> bool {
-                true
-            }
-        }
         let level = |bytes: Vec<u8>| match read(bytes).tracks.first().and_then(|track| track.entries.first()).map(|entry| (entry.format, entry.codec.clone())) {
             Some((format, CodecConfig::Avc(record))) => Some((format, record.level)),
             _ => None,
@@ -492,15 +531,69 @@ mod tests {
 
     #[test]
     fn the_sound_track_carries_the_encoders_priming_as_its_edit_and_every_unit() {
-        let (mut movie, _) = movie(30, Some(track(47)));
-        for index in 0..30 {
-            movie.push_frame(index, blank()).unwrap();
-        }
-        let file = read(movie.finish().unwrap().out.into_inner());
+        let file = written_with(30, track(47));
         let audio = of_kind(&file, TrackKind::Audio);
         assert_eq!(audio.timescale, 48_000);
         assert_eq!(audio.samples.len(), 47);
         assert_eq!(audio.edits.first().map(|edit| edit.media_time), Some(2112));
+    }
+
+    #[test]
+    fn the_sound_sits_in_a_roll_group_so_the_apple_decoders_read_the_priming_from_the_edit() {
+        // Without the group AVFoundation drops the encoder's priming twice, its own skip and the edit's,
+        // and reads the sound 2,112 samples early, its first 44 ms lost.
+        let file = written_with(30, track(47));
+        let audio = of_kind(&file, TrackKind::Audio);
+        let roll = audio.sample_groups.iter().find(|group| group.grouping_type == FourCc(*b"roll")).expect("a roll sample group");
+        assert_eq!(roll.descriptions, vec![vec![0xFF, 0xFF]], "one description, a roll distance of -1: the unit before each one decoded first");
+        assert_eq!(roll.runs, vec![(47, 1)], "every sample of the sound in that one group");
+    }
+
+    #[test]
+    fn the_edit_ends_where_the_sound_ends_and_not_where_the_last_unit_ends() {
+        // 192,000 samples of sound behind a priming of 2,112 reach into unit 189, so the encoder's 190
+        // whole units end at 194,560 samples: an edit spanning the media would read 448 silent samples
+        // past the sound. The edit ends at 4.000 s, where the sound does.
+        let mut sound = track(190);
+        sound.frames = 192_000;
+        let file = written_with(120, sound);
+        let audio = of_kind(&file, TrackKind::Audio);
+        assert_eq!(audio.samples.len(), 190, "every unit the encoder made is in the file");
+        assert_eq!(
+            audio.edits.first().map(|edit| (edit.media_time, edit.segment_duration, edit.media_rate)),
+            Some((2112, 4000, 0x0001_0000)),
+            "past the priming, the sound's own 4.000 s at the usual rate, and there the edit ends"
+        );
+    }
+
+    #[test]
+    fn a_movie_whose_sound_is_too_short_to_fill_one_edit_falls_back_to_the_medias_span() {
+        // A sub-millisecond sound has no nonzero segment in the movie's timescale; the track then spans
+        // its media from the priming.
+        let mut sound = track(3);
+        sound.frames = 10;
+        let file = written_with(1, sound);
+        let audio = of_kind(&file, TrackKind::Audio);
+        // Three whole units behind the priming leave 960 samples of media, which is 20 movie ticks.
+        assert_eq!(audio.edits.first().map(|edit| (edit.media_time, edit.segment_duration)), Some((2112, 20)), "the media's own span, starting at the priming");
+    }
+
+    #[test]
+    fn a_continued_movie_keeps_the_roll_group_and_the_sounds_edit() {
+        // The continued stream's sample entry is rewritten at the end; the sound track's group and edit,
+        // set when its track opened, stand through that rewrite. The sound ends 10 ms into its media's
+        // 20, so an edit spanning the media would show.
+        let mut sound = track(3);
+        sound.frames = 480;
+        let (fake, _) = Fake::new(avcc());
+        let mut movie = Movie::new(Continued { fake, finished: false }, Cursor::new(Vec::new()), spec(VideoCodec::H264), 2, Some(sound)).unwrap();
+        (0..2).for_each(|index| movie.push_frame(index, blank()).unwrap());
+        let file = read(movie.finish().unwrap().out.into_inner());
+        let audio = of_kind(&file, TrackKind::Audio);
+        let roll =
+            audio.sample_groups.iter().find(|group| group.grouping_type == FourCc(*b"roll")).map(|group| (group.descriptions.clone(), group.runs.clone()));
+        assert_eq!(roll, Some((vec![vec![0xFF, 0xFF]], vec![(3, 1)])), "the roll group the sound opened with, over every unit");
+        assert_eq!(audio.edits.first().map(|edit| (edit.media_time, edit.segment_duration)), Some((2112, 10)), "the edit ends with the sound");
     }
 
     #[test]

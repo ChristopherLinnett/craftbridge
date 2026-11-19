@@ -5,4 +5,4 @@
 pub(crate) const ENGINE_VERSION: &str = "0.24.1";
 
 /// The commit of EffectCraft this plugin is built from, in full, so the same pin reads the same however `rust/Cargo.toml` spells it.
-pub(crate) const ENGINE_PIN: &str = "103760584a60074c9aaeef686d2d05d89f08155e";
+pub(crate) const ENGINE_PIN: &str = "665bfac0b33904b1dcda6de889f43f43a94ad3f8";

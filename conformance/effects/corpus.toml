@@ -75,7 +75,7 @@ equals = "0.24.1"
 [[scenario.expect]]
 step = 0
 pointer = "/commands"
-equals = 763
+equals = 764
 [[scenario.expect]]
 step = 0
 pointer = "/effects"
@@ -100,7 +100,7 @@ params = { schemas = true }
 [[scenario.expect]]
 step = 0
 pointer = ""
-length = 763
+length = 764
 # A phone starts no helper process, so its session lists the helper commands as it cannot run them
 # (`enabled`, `why`), where the command line lists them as it can; their ids, labels and schemas are compared.
 [[scenario.same]]

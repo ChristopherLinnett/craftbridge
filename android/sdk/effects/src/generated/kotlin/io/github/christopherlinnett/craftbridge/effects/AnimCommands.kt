@@ -88,7 +88,8 @@ public class AnimCommands internal constructor(
     /**
      * Apply Animation Preset.
      *
-     * The engine describes its parameters as: {path | preset, layers?}
+     * The engine describes its parameters as: {path | preset, layers?} — saved effects and text animators are added to each layer, with
+     *  their keys at the CTI
      *
      * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
      * @param path The key `path`: path | preset
@@ -226,7 +227,8 @@ public class AnimCommands internal constructor(
     /**
      * Save Animation Preset.
      *
-     * The engine describes its parameters as: {path (.ecpreset), name?} — saves the selected properties/effects
+     * The engine describes its parameters as: {path (.ecpreset), name?} — saves the selected properties/effects; a text animator with a
+     *  selected property is saved whole
      *
      * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
      * @param path The key `path`: path (.ecpreset)

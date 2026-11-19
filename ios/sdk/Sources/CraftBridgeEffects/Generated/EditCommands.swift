@@ -187,23 +187,6 @@ extension EffectsEngine.EditCommands {
         )
     }
 
-    /// Edit Original.
-    ///
-    /// The engine describes its parameters as: {}
-    ///
-    /// - Parameter extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-    /// - Returns: The engine's reply.
-    /// - Throws: Whatever the engine refuses the call with.
-    public func editOriginal(
-        extra: [String: JSONValue] = [:]
-    ) async throws -> JSONValue {
-        try await self.engine.command(
-            "edit.editOriginal",
-            [:],
-            extra: extra
-        )
-    }
-
     /// Extract Work Area.
     ///
     /// The engine describes its parameters as: {layers?}

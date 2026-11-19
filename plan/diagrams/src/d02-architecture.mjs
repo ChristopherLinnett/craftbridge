@@ -13,7 +13,7 @@ const cx = (c, f = 0.5) => col[c] + W * f;
 export default {
   id,
   xml: diagram({ id, name: 'What changes, where', width: 1400, height: 'auto' }, (d) => {
-    d.title('CraftBridge wraps the unchanged engine; everything new lives in its own repository', 'New repository ChristopherLinnett/craftbridge · EffectCraft at its official revision 10376058, never modified', { w: 820 });
+    d.title('CraftBridge wraps the unchanged engine; everything new lives in its own repository', 'New repository ChristopherLinnett/craftbridge · EffectCraft at the official revision rust/Cargo.toml pins, never modified', { w: 820 });
     d.legend({ x: 880, y: 26, items: ['new', 'chk', 'none'], names: { new: 'New', chk: 'Unchanged', none: 'Platform, app' } });
 
     const n = (key, c, r, main, sub, kind) => d.node(key, main, { x: col[c], y: row[r], w: W, h: H, kind, sub });
@@ -36,7 +36,7 @@ export default {
     n('host', 'B', 'R5', 'host', 'FileExporter', 'chk');
     n('gpu', 'C', 'R5', 'GPU compositor', 'Gpu::new · render_display', 'chk');
     n('eng', 'A', 'R6', 'engine · text · export', 'Session · render queue · fonts', 'chk');
-    n('reg', 'B', 'R6', 'FilmCraft decoder registry', 'filmcraft-codecs at d5ead4ba', 'chk');
+    n('reg', 'B', 'R6', 'FilmCraft decoder registry', 'filmcraft-codecs at EffectCraft’s pin', 'chk');
 
     d.group('gplat', 'Platform', { x: 850, y: 660, w: 510, h: 126 });
     n('gfx', 'D', 'R5', 'Metal · Vulkan', 'through wgpu', 'none');

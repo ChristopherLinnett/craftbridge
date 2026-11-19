@@ -85,27 +85,27 @@ boa_engine = { version = "0.22", default-features = false }
 # own hasher may. It resolves to the one copy boa's interner already brings into every build.
 siphasher = "1"
 
-effectcraft-engine = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
-effectcraft-host = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
-effectcraft-automation = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
-effectcraft-gpu = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
-effectcraft-render = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
-effectcraft-time = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
-effectcraft-text = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
-effectcraft-media = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
-effectcraft-expr = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
-effectcraft-script = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
-effectcraft-plugin = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
-effectcraft-raster = { git = "https://github.com/storytold/effectcraft", rev = "10376058" }
-filmcraft-codecs = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
-filmcraft-color = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
-filmcraft-frame = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
-filmcraft-isobmff = { git = "https://github.com/storytold/filmcraft", rev = "d5ead4ba1ee2f1cd13cb86a4239aee2730a3d9f5" }
+effectcraft-engine = { git = "https://github.com/storytold/effectcraft", rev = "665bfac0b33904b1dcda6de889f43f43a94ad3f8" }
+effectcraft-host = { git = "https://github.com/storytold/effectcraft", rev = "665bfac0b33904b1dcda6de889f43f43a94ad3f8" }
+effectcraft-automation = { git = "https://github.com/storytold/effectcraft", rev = "665bfac0b33904b1dcda6de889f43f43a94ad3f8" }
+effectcraft-gpu = { git = "https://github.com/storytold/effectcraft", rev = "665bfac0b33904b1dcda6de889f43f43a94ad3f8" }
+effectcraft-render = { git = "https://github.com/storytold/effectcraft", rev = "665bfac0b33904b1dcda6de889f43f43a94ad3f8" }
+effectcraft-time = { git = "https://github.com/storytold/effectcraft", rev = "665bfac0b33904b1dcda6de889f43f43a94ad3f8" }
+effectcraft-text = { git = "https://github.com/storytold/effectcraft", rev = "665bfac0b33904b1dcda6de889f43f43a94ad3f8" }
+effectcraft-media = { git = "https://github.com/storytold/effectcraft", rev = "665bfac0b33904b1dcda6de889f43f43a94ad3f8" }
+effectcraft-expr = { git = "https://github.com/storytold/effectcraft", rev = "665bfac0b33904b1dcda6de889f43f43a94ad3f8" }
+effectcraft-script = { git = "https://github.com/storytold/effectcraft", rev = "665bfac0b33904b1dcda6de889f43f43a94ad3f8" }
+effectcraft-plugin = { git = "https://github.com/storytold/effectcraft", rev = "665bfac0b33904b1dcda6de889f43f43a94ad3f8" }
+effectcraft-raster = { git = "https://github.com/storytold/effectcraft", rev = "665bfac0b33904b1dcda6de889f43f43a94ad3f8" }
+filmcraft-codecs = { git = "https://github.com/storytold/filmcraft", rev = "3f137a7ed420cac79b32145f5243b7f98b31f71c" }
+filmcraft-color = { git = "https://github.com/storytold/filmcraft", rev = "3f137a7ed420cac79b32145f5243b7f98b31f71c" }
+filmcraft-frame = { git = "https://github.com/storytold/filmcraft", rev = "3f137a7ed420cac79b32145f5243b7f98b31f71c" }
+filmcraft-isobmff = { git = "https://github.com/storytold/filmcraft", rev = "3f137a7ed420cac79b32145f5243b7f98b31f71c" }
 # The software H.264 encoder a movie goes on in when its hardware encoder is lost (plan §18): the one EffectCraft's
 # own export encodes with, at the library revision EffectCraft builds it at, with the same library's H.264 parameter
 # set and slice header readers and its bit reader and writer, which rename the encoder's parameter sets.
-craft-video = { git = "https://github.com/storytold/craft-libs", rev = "e7c3dda7f3e339dd2c8d40fc4eb405472be1a1e4", default-features = false, features = ["h264-encode", "h264-decode"] }
-craft-media = { git = "https://github.com/storytold/craft-libs", rev = "e7c3dda7f3e339dd2c8d40fc4eb405472be1a1e4", default-features = false, features = ["bitstream"] }
+craft-video = { git = "https://github.com/storytold/craft-libs", rev = "5a7a63a21dd03dd1a2bc6c308a3a6ce818caae87", default-features = false, features = ["h264-encode", "h264-decode"] }
+craft-media = { git = "https://github.com/storytold/craft-libs", rev = "5a7a63a21dd03dd1a2bc6c308a3a6ce818caae87", default-features = false, features = ["bitstream"] }
 
 # Apple's frameworks, through the bindings generated from their headers: the media ones for the iOS hardware
 # decoder in craftbridge-media (plan §18), CoreText for the faces craftbridge-core's iOS platform module reads
@@ -197,9 +197,6 @@ opt-level = 3
 [profile.dev.package.effectcraft-media]
 opt-level = 3
 
-[profile.dev.package.effectcraft-opusenc]
-opt-level = 3
-
 [profile.dev.package.effectcraft-export]
 opt-level = 3
 
@@ -236,8 +233,8 @@ codegen-units = 1
 
 # Written by tools/update-upstream.sh from the pinned EffectCraft; never edit by hand (AGENTS.md §6, §7).
 [patch.crates-io]
-hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "e7c3dda7f3e339dd2c8d40fc4eb405472be1a1e4", version = "=0.7.2" }
-hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "e7c3dda7f3e339dd2c8d40fc4eb405472be1a1e4", version = "=0.3.0" }
+hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "808730f49b9637b7909fe2ae56f9d63fdb100cae", version = "=0.7.2" }
+hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "808730f49b9637b7909fe2ae56f9d63fdb100cae", version = "=0.3.0" }
 ecolor = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
 emath = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
 epaint = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }

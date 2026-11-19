@@ -190,25 +190,6 @@ public class EditCommands internal constructor(
         )
 
     /**
-     * Edit Original.
-     *
-     * The engine describes its parameters as: {}
-     *
-     * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
-     * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
-     * @return The engine's reply.
-     * @throws kotlin.Throwable Whatever the engine refuses the call with.
-     */
-    public suspend fun editOriginal(
-        vararg namedOnly: NamedArguments,
-        extra: Map<String, JSONValue>? = null,
-    ): JSONValue =
-        this.engine.command(
-            "edit.editOriginal",
-            extra,
-        )
-
-    /**
      * Extract Work Area.
      *
      * The engine describes its parameters as: {layers?}

@@ -106,17 +106,19 @@ extension EffectsEngine.ProjectCommands {
 
     /// New Folder.
     ///
-    /// The engine describes its parameters as: {name?, parent?}
+    /// The engine describes its parameters as: {name?, parent?, items?: [id|name] (moved into it)}
     ///
     /// - Parameters:
     ///   - name: The key `name`: name?
     ///   - parent: The key `parent`: parent?
+    ///   - items: The key `items`: items?: [id|name] (moved into it)
     ///   - extra: Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
     /// - Returns: The engine's reply.
     /// - Throws: Whatever the engine refuses the call with.
     public func newFolder(
         name: JSONValue? = nil,
         parent: JSONValue? = nil,
+        items: JSONValue? = nil,
         extra: [String: JSONValue] = [:]
     ) async throws -> JSONValue {
         try await self.engine.command(
@@ -124,6 +126,7 @@ extension EffectsEngine.ProjectCommands {
             [
                 "name": name?.jsonValue,
                 "parent": parent?.jsonValue,
+                "items": items?.jsonValue,
             ],
             extra: extra
         )

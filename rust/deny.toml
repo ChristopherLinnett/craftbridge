@@ -37,11 +37,13 @@ unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # Official repositories only: EffectCraft is built from storytold revisions as they are, never from a fork
-# (AGENTS.md §7); the others are the sources EffectCraft's own manifest uses.
+# (AGENTS.md §7); the others are the official sources the pinned EffectCraft's own lock resolves from, as
+# its own manifest and those of the Craft libraries it takes name them.
 allow-git = [
     "https://github.com/storytold/effectcraft",
     "https://github.com/storytold/filmcraft",
     "https://github.com/storytold/craft-libs",
     "https://github.com/storytold/egui.git",
     "https://github.com/storytold/winit.git",
+    "https://github.com/storytold/vectorcraft.git",
 ]

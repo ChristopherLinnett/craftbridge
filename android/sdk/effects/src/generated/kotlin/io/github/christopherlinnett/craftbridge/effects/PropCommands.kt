@@ -466,7 +466,8 @@ public class PropCommands internal constructor(
      *  selected? (also the other selected layers), offset? (them by the same change), proportional? (with offset: Proportional
      *  Scrubbing, each layer by its share in selection order, the first none, the last all), dims? (with selected, a typed value: the
      *  components edited, e.g. [2] for Z; the other layers keep the rest of their own value), follow? (with dims: components that move
-     *  on each other layer by the change its first typed component takes)}
+     *  on each other layer by the change its first typed component takes), factor? (with selected, a typed `*` or `/`: the other layers
+     *  take their own value times it, in the dims components of a vector), addend? (the same for a typed `+`: their own value plus it)}
      *
      * @param namedOnly Takes no value: it stands first so that every argument after it is passed by name.
      * @param layer The key `layer`: layer?
@@ -484,6 +485,9 @@ public class PropCommands internal constructor(
      *  rest of their own value)
      * @param follow The key `follow`: follow? (with dims: components that move on each other layer by the change its first typed component
      *  takes)
+     * @param factor The key `factor`: factor? (with selected, a typed `*` or `/`: the other layers take their own value times it, in the
+     *  dims components of a vector)
+     * @param addend The key `addend`: addend? (the same for a typed `+`: their own value plus it)
      * @param extra Keys the typed parameters do not cover, passed through as they are; the engine checks every key.
      * @return The engine's reply.
      * @throws kotlin.Throwable Whatever the engine refuses the call with.
@@ -502,6 +506,8 @@ public class PropCommands internal constructor(
         proportional: JSONValue? = null,
         dims: JSONValue? = null,
         follow: JSONValue? = null,
+        factor: JSONValue? = null,
+        addend: JSONValue? = null,
         extra: Map<String, JSONValue>? = null,
     ): JSONValue =
         this.engine.command(
@@ -519,6 +525,8 @@ public class PropCommands internal constructor(
             "proportional" to proportional?.jsonValue,
             "dims" to dims?.jsonValue,
             "follow" to follow?.jsonValue,
+            "factor" to factor?.jsonValue,
+            "addend" to addend?.jsonValue,
         )
 
     /**
