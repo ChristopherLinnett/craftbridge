@@ -37,19 +37,22 @@ private func names<Key: CaseIterable & CodingKey>(_ keys: Key.Type) -> Set<Strin
     Set(keys.allCases.map(\.stringValue))
 }
 
+/// A file of `conformance/effects`, the data every platform reads. On a phone it is the copy the device runner
+/// puts inside the app (`conformance/effects` at the bundle's root), since the machine that built the tests is
+/// not there; everywhere else it is found from where the compiler read this source, which is the repository on
+/// the machine that builds the tests, the simulator's host.
+func conformanceFile(_ name: String) -> URL {
+    let bundled = Bundle.main.bundleURL.appending(path: "conformance/effects/\(name)")
+    if FileManager.default.fileExists(atPath: bundled.path(percentEncoded: false)) { return bundled }
+    return URL(filePath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+        .appending(path: "conformance/effects/\(name)")
+}
+
 extension Corpus {
-    /// The corpus file the desktop runner reads. On a phone it is the copy the device runner puts inside the
-    /// app (`conformance/effects` at the bundle's root), since the machine that built the tests is not there;
-    /// everywhere else it is found from where the compiler read this source, which is the repository on the
-    /// machine that builds the tests, the simulator's host.
-    static let file: URL = {
-        let bundled = Bundle.main.bundleURL.appending(path: "conformance/effects/corpus.toml")
-        if FileManager.default.fileExists(atPath: bundled.path(percentEncoded: false)) { return bundled }
-        return URL(filePath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .appending(path: "conformance/effects/corpus.toml")
-    }()
+    /// The corpus file the desktop runner reads.
+    static let file = conformanceFile("corpus.toml")
 }
 
 /// Which sides run a scenario.
@@ -86,21 +89,22 @@ struct Corpus: Decodable, Sendable {
 }
 
 extension JSONValue {
-    /// The JSON value a TOML document holds. TOMLDecoder reads the document and gives each value its
-    /// Swift type; a date or time, which JSON has no value for, is refused, the corpus having none.
-    fileprivate init(toml text: String) throws {
-        self = try JSONValue(tomlValue: try [String: Any](TOMLTable(source: text)))
+    /// The JSON value a TOML document holds, its refusals naming it as `file`. TOMLDecoder reads the document
+    /// and gives each value its Swift type; a date or time, which JSON has no value for, is refused, neither the
+    /// corpus nor the baseline having one.
+    init(toml text: String, of file: String = "the corpus") throws {
+        self = try JSONValue(tomlValue: try [String: Any](TOMLTable(source: text)), of: file)
     }
 
-    private init(tomlValue value: Any) throws {
+    private init(tomlValue value: Any, of file: String) throws {
         switch value {
         case let value as Bool: self = .bool(value)
         case let value as Int64: self = .number(Double(value))
         case let value as Double: self = .number(value)
         case let value as String: self = .string(value)
-        case let value as [Any]: self = .array(try value.map { try JSONValue(tomlValue: $0) })
-        case let value as [String: Any]: self = .object(try value.mapValues { try JSONValue(tomlValue: $0) })
-        default: throw CraftError.InvalidParams(detail: "the corpus holds a TOML value JSON has none for: \(value)")
+        case let value as [Any]: self = .array(try value.map { try JSONValue(tomlValue: $0, of: file) })
+        case let value as [String: Any]: self = .object(try value.mapValues { try JSONValue(tomlValue: $0, of: file) })
+        default: throw CraftError.InvalidParams(detail: "\(file) holds a TOML value JSON has none for: \(value)")
         }
     }
 }

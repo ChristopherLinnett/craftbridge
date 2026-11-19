@@ -415,27 +415,36 @@ private fun decodeScenario(value: JSONValue): Scenario {
     )
 }
 
-/** The JSON value a TOML value holds. A date or time, which JSON has no value for, is refused, the corpus having none. */
-private fun jsonOf(value: Any?): JSONValue =
+/**
+ * The JSON value a TOML value of [file] holds. A date or time, which JSON has no value for, is refused, neither the
+ * corpus nor the baseline having one.
+ */
+private fun jsonOf(
+    value: Any?,
+    file: String,
+): JSONValue =
     when (value) {
         is Boolean -> JSONValue.Bool(value)
         is Long -> JSONValue.Number(value.toDouble())
         is Double -> JSONValue.Number(value)
         is String -> JSONValue.Text(value)
-        is TomlArray -> JSONValue.Array(value.toList().map(::jsonOf))
-        is TomlTable -> jsonOf(value.toMap())
-        is List<*> -> JSONValue.Array(value.map(::jsonOf))
-        is Map<*, *> -> JSONValue.Object(value.entries.associate { (key, entry) -> key.toString() to jsonOf(entry) })
-        else -> throw RunnerFailure("the corpus holds a TOML value JSON has none for: $value")
+        is TomlArray -> JSONValue.Array(value.toList().map { jsonOf(it, file) })
+        is TomlTable -> jsonOf(value.toMap(), file)
+        is List<*> -> JSONValue.Array(value.map { jsonOf(it, file) })
+        is Map<*, *> -> JSONValue.Object(value.entries.associate { (key, entry) -> key.toString() to jsonOf(entry, file) })
+        else -> throw RunnerFailure("$file holds a TOML value JSON has none for: $value")
     }
 
-/** The TOML document [text] holds, as the JSON value the model reads. */
-internal fun tomlDocument(text: String): JSONValue {
+/** The TOML document [text] holds, as the JSON value the model reads, its failures naming it as [file]. */
+internal fun tomlDocument(
+    text: String,
+    file: String = "the corpus",
+): JSONValue {
     val parsed = Toml.parse(text)
     if (parsed.hasErrors()) {
-        throw RunnerFailure("the corpus is not TOML: ${parsed.errors().joinToString("; ") { it.toString() }}")
+        throw RunnerFailure("$file is not TOML: ${parsed.errors().joinToString("; ") { it.toString() }}")
     }
-    return jsonOf(parsed.toMap())
+    return jsonOf(parsed.toMap(), file)
 }
 
 /** The corpus [text] holds, parsed as TOML. */

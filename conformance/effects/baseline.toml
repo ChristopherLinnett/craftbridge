@@ -1,0 +1,222 @@
+# The per-device baseline of the running example (plan §5): how long its first preview and its full export take
+# on each acceptance phone, and the most memory the process holds over the run. The release script reads the
+# `[[device]]` records below to report a release's figures beside them and to flag each `flagged` figure more than
+# `flag_slower_than_percent` above its baseline (plan §9, §29); the plan points here and keeps no second copy.
+#
+# This one file is read by the Swift real-app test (`ios/sdk/Tests`, RealAppBaselineTests) and the Kotlin
+# instrumented check (`android/sdk/effects/src/androidTest`, BaselineOnDevice), so what they measure, the name
+# of each figure and the line they print are written once, here. A run prints one line,
+#
+#   <line> <figure>=<value> <figure>=<value> ...
+#
+# with the figures in the order of the `[[figure]]` tables and each value in decimal with that table's
+# `decimals`, and a script reads the values off it by name.
+
+line = "craftbridge-baseline"
+flag_slower_than_percent = 10
+
+# How a release is held to the record, which a phone's own noise decides. Each `flagged` figure is measured as the
+# record was, in at least `runs` fresh installs of the release, each a process of its own on a quiet phone, under the
+# conditions the record names and its condition figures show run by run, and it is flagged when the median of those
+# runs is more than `flag_slower_than_percent` above the record's median and the fastest of them is slower than the
+# record's slowest run. One run is never compared, and a median alone is not either: the iPhone's export takes about
+# 2.83 s in some fresh processes and about 3.15 s in others, with the same thermal state, pool and GPU, and a whole
+# quiet series can fall in either, one run at a time under the shared lock (three series of one build at EffectCraft
+# 10376058 had medians 2.83, 2.99 and 3.16 s, 11.5 % apart), so the median moves past the 10 % with no change of the
+# build, while a slower build moves every run, its fastest past the record's slowest. A record rests on at least this
+# many runs.
+[comparison]
+runs = 10
+
+# The running example, §5: Leo's card as Maya opens it, previewed at 2 s into a layer or surface of the card's
+# own size, and exported as an H.264 movie of every frame, by the calls §5 shows, with no option given.
+[running_example]
+width = 1080
+height = 1080
+seconds = 6
+frame_rate = 30
+frames = 180
+format = "h264"
+preview_at_seconds = 2
+# After the export, the path of the first preview (open the card, set Name and Photo, draw the frame) is made this
+# many more times on the engine that is warm by then, and `preview_path_ms` is the median of them.
+preview_repeats = 9
+
+[[figure]]
+name = "first_preview_ms"
+decimals = 1
+flagged = true
+# From the call that starts the engine, with the folders and the GPU an app asks for, to the return of the
+# call that draws the card's frame at 2 s into the preview target, after the template is opened and its Name
+# and Photo are set. The template is made by an engine started and shut down before the clock starts, as an app
+# bundles its template. Most of it is the engine's GPU start (`gpu_start_ms`), which builds the compositor's
+# kernels as it takes the device, so a release is held to the rest by `preview_path_ms`.
+what = "milliseconds from the engine's start to the first preview frame drawn"
+
+[[figure]]
+name = "gpu_start_ms"
+decimals = 1
+flagged = false
+# From the call that starts the engine to the return of the first call made on it, which waits behind the engine
+# thread's own start of the GPU: the part of `first_preview_ms` that is the platform's shader build on a fresh
+# install, which the first preview holds and the path after it does not. Reported, and held through
+# `first_preview_ms`, which it is a part of.
+what = "milliseconds from the engine's start until it answers its first call, the GPU start it waits behind"
+
+[[figure]]
+name = "first_path_ms"
+decimals = 1
+flagged = true
+# What is left of `first_preview_ms` after the GPU start: the first open of the card, the two sets, the layer's
+# attach and the first draw, made cold, which the GPU start's own spread (a cold shader build) is too wide to show.
+what = "milliseconds of the first preview after the GPU start: open, set Name and Photo, attach and draw, cold"
+
+[[figure]]
+name = "preview_path_ms"
+decimals = 1
+flagged = true
+# What the code CraftBridge ships decides of a preview, apart from the GPU start: the median of `preview_repeats`
+# runs of opening the card, setting Name and Photo and drawing the frame into the target that is already attached,
+# made after the export, which a slower open, set or draw moves by its own cost and the GPU start never hides.
+what = "milliseconds of a preview of the card on a warm engine: open, set Name and Photo, draw"
+
+[[figure]]
+name = "full_export_ms"
+decimals = 1
+flagged = true
+# From the call that starts the export to the return of its result, with every frame counted by the progress
+# reports and the movie's length checked. The progress handler does nothing but store the total, and costs 0.05 ms of
+# the iPhone's 3 s and 0.02 ms of the Xiaomi's 1.7 s.
+what = "milliseconds of the full export of the running example"
+
+[[figure]]
+name = "peak_memory_bytes"
+decimals = 0
+flagged = true
+# Read at the end of the export, from the process's start, so it holds the template's making, the engine's
+# start, the preview and the export: the run happens in a process of its own that runs nothing else.
+what = "bytes: the most memory the process held over the run"
+
+[[figure]]
+name = "export_threads"
+decimals = 0
+flagged = false
+# Read after the export, while its pool still runs: the threads the export rendered on, which the exporter sizes
+# from the memory the device reports free (plan AD7), at most the cores, so a phone with more memory free runs
+# more frames at once and peaks higher. A run's own condition, not a cost: it is recorded and reported beside
+# the figures, so a peak or an export time is compared with one made on as many threads, and never flagged.
+what = "the threads the export ran on, as the device's free memory sized its pool"
+
+[[figure]]
+name = "thermal_state"
+decimals = 0
+flagged = false
+platforms = ["ios"]
+# `ProcessInfo.thermalState` as the system's own raw value (0 nominal, 1 fair, 2 serious, 3 critical), the higher of
+# its reading before the engine starts and after the export: the phone slows itself as it heats, so a run at serious
+# or critical is not one a release is compared on.
+what = "the system's thermal state, 0 nominal to 3 critical, the higher of before the run and after its export"
+
+[[figure]]
+name = "cpu_cap_mhz"
+decimals = 0
+flagged = false
+platforms = ["android"]
+# The `scaling_max_freq` of the fastest cores (those whose `cpuinfo_max_freq` is the highest), in MHz, read before the
+# engine starts. The Xiaomi caps its own cores by charge, battery and temperature, its two prime cores furthest: 2880
+# of their 4608 MHz on a cool battery, 2438 or lower as it warms, below the 2746 it leaves its six others, so the
+# highest cap of any core would read the slower cores' then. Under 2438 its first preview ran about a third longer and
+# its export 5 % longer, which `thermal status` never shows.
+what = "the frequency cap of the fastest cores, in MHz, before the run"
+
+[[figure]]
+name = "battery_c"
+decimals = 1
+flagged = false
+platforms = ["android"]
+# The battery's temperature in degrees Celsius, as the platform's battery broadcast gives it, read before the
+# engine starts: the phone's own cap follows it, and a run on a hot battery is not one a release is compared on.
+what = "the battery's temperature in degrees Celsius before the run"
+
+# What each platform's peak memory is, and why it is the figure to read there.
+[peak_memory.ios]
+figure = "ledger_phys_footprint_peak of task_info(TASK_VM_INFO)"
+why = "phys_footprint is the figure the system's memory-pressure killer (jetsam) holds an app to, dirty, compressed and wired pages counted and clean file-backed pages not, and the ledger's peak is its high-water mark since the process started"
+
+[peak_memory.android]
+figure = "VmHWM of /proc/self/status"
+why = "Android holds an app's native memory to no limit of its own: the low-memory killer (lmkd) ends processes when the whole system runs short, the foreground app last, and reports what each kill freed as resident pages; the kernel keeps a high-water mark of the resident set alone, so VmHWM is the one peak the platform gives, file-backed pages counted, which iOS's footprint leaves out"
+
+# The record. A device's figures are the median and the range of one series of runs, made on one tree and one
+# build, each run's value kept in `values`, so a record that lost or changed a run is refused (`BaselineTests`): each
+# run a fresh install and a process of its own that runs nothing but the baseline's own test or checks, on a phone with
+# nothing else of CraftBridge's installed or running, checked before and after the run (on the iPhone inside the lock
+# its device runs share), with time between runs for the phone to settle. `build` says what was measured: the native
+# library as an app ships it (`cargo --release`, thin LTO) under the device runner's Debug build of the Swift package
+# or the debug variant of the Kotlin test APK, and what a Release build of that layer moved, measured beside the
+# series. `conditions` says what the phone itself was doing, which a later release is compared under, and the
+# conditions' own figures (`thermal_state`, `cpu_cap_mhz`, `battery_c`) say it run by run. The export is the call §5
+# shows, with no option given, so EffectCraft's own H.264 encoder.
+#
+# The two phones are five years of chips apart, so their figures say how each phone runs the example, not how one
+# platform compares with the other. A first preview is mostly the engine's GPU start, which builds the compositor's
+# kernels as it takes the device, and both phones measure it from a fresh install, so cold: on the iPhone Metal
+# compiles them into a shader cache the install holds empty, 3.7 of its 3.8 s (a second engine in the same process
+# took its GPU in 20 ms), so the GPU start is reported (`gpu_start_ms`) and the rest of the preview is what a release is
+# held to (`first_path_ms` cold, `preview_path_ms` warm).
+#
+# The Xiaomi 17 Pro Max has no record under this definition yet: its series of ten runs, with its `cpu_cap_mhz` and
+# `battery_c` read run by run, is owed, to V5a. It is measured settled, as the iPhone's is quiet: its prime cores at 2880 MHz
+# and its battery at or under 33.0 C before the series starts, each run a fresh install 60 s after the last, with
+# `-e only '^baseline: the running'`; on its cable at 100 % charge the phone can hold its battery near 37 C and its
+# prime cores at 2438 MHz or lower for hours, and a series is not made then. Its record is added in the shape the
+# iPhone's has, with `platform = "android"`.
+[[device]]
+id = "iphone-12-pro"
+platform = "ios"
+device = "iPhone 12 Pro (iPhone13,3): Apple A14 Bionic of 2020, 2 performance and 4 efficiency cores, 6 GB, Metal"
+os = "iOS 26.6.1"
+build = "release native library at EffectCraft 665bfac0b339, on CraftBridge 9eda570 with V5's own tests; the Swift package in the Debug configuration, whose Release build, measured beside an earlier series at EffectCraft 10376058, took 10 to 27 ms less over the first preview's parts outside the GPU start and exported inside the range; tools/ios-device-test.sh --swift -- --filter RealAppBaselineTests"
+conditions = "thermal state 0 (nominal) before and after the export in every run; nothing else of CraftBridge's installed or running, checked before and after each run inside the shared lock (one run whose check before it could not read the phone's apps was left out and an eleventh made); each run a fresh install, 30 s after the last; the export ran on its 6 cores, the free memory (3.0 GB in split runs) holding nothing back"
+recorded = "2026-11-19"
+runs = 10
+[device.first_preview_ms]
+median = 3821.65
+min = 3746.0
+max = 3911.5
+values = [3911.5, 3908.0, 3827.4, 3880.6, 3768.3, 3864.1, 3747.7, 3746.0, 3754.9, 3815.9]
+[device.gpu_start_ms]
+median = 3697.0
+min = 3628.8
+max = 3786.4
+values = [3786.4, 3785.2, 3702.5, 3754.3, 3647.4, 3742.9, 3630.6, 3628.8, 3634.0, 3691.5]
+[device.first_path_ms]
+median = 122.0
+min = 117.1
+max = 126.3
+values = [125.0, 122.8, 124.9, 126.3, 120.9, 121.2, 117.1, 117.1, 120.9, 124.5]
+[device.preview_path_ms]
+median = 17.3
+min = 16.8
+max = 18.4
+values = [17.2, 17.8, 17.8, 16.9, 17.4, 16.8, 17.5, 17.1, 18.4, 17.2]
+[device.full_export_ms]
+median = 2834.9
+min = 2813.4
+max = 2945.2
+values = [2835.2, 2930.2, 2827.8, 2813.4, 2820.5, 2834.6, 2941.9, 2945.2, 2837.6, 2830.4]
+[device.peak_memory_bytes]
+median = 479914752.0
+min = 479185600.0
+max = 484444864.0
+values = [479808128.0, 480086848.0, 484248384.0, 479529600.0, 479546048.0, 479414912.0, 484444864.0, 480021376.0, 484330176.0, 479185600.0]
+[device.export_threads]
+median = 6.0
+min = 6.0
+max = 6.0
+values = [6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0]
+[device.thermal_state]
+median = 0.0
+min = 0.0
+max = 0.0
+values = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]

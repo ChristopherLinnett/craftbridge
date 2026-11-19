@@ -23,7 +23,7 @@ internal const val SURFACE_SIDE = 64
 private const val PRESENTS_TO_FIND_A_LOSS = 10
 
 /** How long a check waits for a frame it presented to arrive at the surface's reader. */
-private const val WAIT_FOR_FRAME_MILLIS = 30_000L
+internal const val WAIT_FOR_FRAME_MILLIS = 30_000L
 
 /** How many of the first window ids a check asks the address of: far more than the checks of one run hand out. */
 private const val WINDOW_IDS_ASKED = 4096L
@@ -44,9 +44,9 @@ private val OPAQUE_RED = listOf(255, 0, 0, 255)
 /**
  * A surface an app could hand over, with its consumer in hand: an image reader is the platform's own
  * stand-in for a view's surface, whose buffers the check can read, and which the check abandons by
- * closing it, as an app does when its view goes away.
+ * closing it, as an app does when its view goes away. It is [side] pixels square.
  */
-internal fun reader(): ImageReader = ImageReader.newInstance(SURFACE_SIDE, SURFACE_SIDE, PixelFormat.RGBA_8888, 3)
+internal fun reader(side: Int = SURFACE_SIDE): ImageReader = ImageReader.newInstance(side, side, PixelFormat.RGBA_8888, 3)
 
 /**
  * A surface whose consumer is a [SurfaceTexture] the check holds: the platform's stand-in for a

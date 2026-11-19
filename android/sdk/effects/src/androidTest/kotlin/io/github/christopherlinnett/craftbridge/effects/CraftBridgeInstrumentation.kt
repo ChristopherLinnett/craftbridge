@@ -15,6 +15,18 @@ import java.util.regex.PatternSyntaxException
 /** The tag every line of a device run is written under, for whoever is reading with `logcat`. */
 internal const val LOG_TAG = "CraftBridge"
 
+/** What the check in hand said for the run's reader, beside whether it passed: each line goes to logcat and into the check's report. */
+private val said = mutableListOf<String>()
+
+/** Says [line] in the report of the check that is running, and in logcat under [LOG_TAG]. */
+internal fun say(line: String) {
+    Log.i(LOG_TAG, line)
+    said += line
+}
+
+/** The lines the check that has run said, one to a line, and nothing after: they are said once. */
+private fun spoken(): String = said.joinToString("") { "$it\n" }.also { said.clear() }
+
 /** One check on a device, with the name it is reported under, and the id of the corpus scenario it runs, if it runs one. */
 internal class Case(
     internal val name: String,
@@ -32,7 +44,7 @@ private fun cases(context: Context): List<Case> {
     val checks =
         folderChecks + engineChecks + wordsChecks + hardwareDecodingChecks + fp16FloorChecks + exportPoolChecks + frameChecks +
             previewChecks + apiChecks + typedCallChecks + selectionChecks + corpusModelChecks + scenarioRunnerChecks +
-            conformanceChecks(context) + plugInPolicyChecks + memoryGuardChecks
+            conformanceChecks(context) + plugInPolicyChecks + memoryGuardChecks + baselineChecks
     return checks + scenarioCountCheck(checks)
 }
 
@@ -175,14 +187,15 @@ public class CraftBridgeInstrumentation : Instrumentation() {
             // An empty line, since `am instrument` prints every key of a report that has no line at all.
             sendStatus(STARTED, report(case, index, cases.size, ""))
             val refused = runCatching { runBlocking { case.check(targetContext) } }.exceptionOrNull()
+            val heard = spoken()
             if (refused == null) {
-                sendStatus(PASSED, report(case, index, cases.size, "PASS  ${case.name}\n"))
+                sendStatus(PASSED, report(case, index, cases.size, "PASS  ${case.name}\n$heard"))
             } else {
                 failures += "${case.name}: ${refused.message}"
                 Log.e(LOG_TAG, "failed:  ${case.name}", refused)
                 sendStatus(
                     FAILED,
-                    report(case, index, cases.size, "FAIL  ${case.name}: ${refused.message}\n").apply {
+                    report(case, index, cases.size, "FAIL  ${case.name}: ${refused.message}\n$heard").apply {
                         putString(STACK_KEY, refused.stackTraceToString())
                     },
                 )
