@@ -1,0 +1,306 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		83239D505714BEAE538C509E /* PostcardStudioApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 050A5C0E393D9183E09A2E80 /* PostcardStudioApp.swift */; };
+		2EEA08F73C4B1519A29D87C2 /* PostcardPhoto.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EF8674636878C3AC66A9C3E /* PostcardPhoto.swift */; };
+		42DE0F642521FBC176332181 /* PreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4315F61D6566DC05B6FD6 /* PreviewView.swift */; };
+		1C6018F111759407F8EC96B6 /* Studio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D0AD5B2015BEBA499A0FF2C /* Studio.swift */; };
+		987F78E79A47964118DBAB4E /* StudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04EF3B0E342476FA6835AEE2 /* StudioView.swift */; };
+		C25905DDD9501888A0811938 /* ExportRecipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56B5A8A010BF72FAFF982B70 /* ExportRecipe.swift */; };
+		0EB3BEFFFA7C425162407147 /* Spine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3B5C50D1F937E2E1DCBC6A2 /* Spine.swift */; };
+		D3155E50266766C1C2E91084 /* Birthday Card.ectemplate in Resources */ = {isa = PBXBuildFile; fileRef = C1F0F88819E14BE8EDE0D856 /* Birthday Card.ectemplate */; };
+		B453099D1D8185262A145638 /* CraftBridge in Frameworks */ = {isa = PBXBuildFile; productRef = 331B6A21D64592CDEA010618 /* CraftBridge */; };
+		1F3B43CA9A673611A709885C /* CraftBridgeEffects in Frameworks */ = {isa = PBXBuildFile; productRef = CE7585D37CBB7122AA53C7A2 /* CraftBridgeEffects */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		050A5C0E393D9183E09A2E80 /* PostcardStudioApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostcardStudioApp.swift; sourceTree = "<group>"; };
+		7EF8674636878C3AC66A9C3E /* PostcardPhoto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostcardPhoto.swift; sourceTree = "<group>"; };
+		C3D4315F61D6566DC05B6FD6 /* PreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewView.swift; sourceTree = "<group>"; };
+		6D0AD5B2015BEBA499A0FF2C /* Studio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Studio.swift; sourceTree = "<group>"; };
+		04EF3B0E342476FA6835AEE2 /* StudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioView.swift; sourceTree = "<group>"; };
+		56B5A8A010BF72FAFF982B70 /* ExportRecipe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportRecipe.swift; sourceTree = "<group>"; };
+		A3B5C50D1F937E2E1DCBC6A2 /* Spine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Spine.swift; sourceTree = "<group>"; };
+		46FAA4EA53279B55FDEB4681 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		C1F0F88819E14BE8EDE0D856 /* Birthday Card.ectemplate */ = {isa = PBXFileReference; lastKnownFileType = file; name = "Birthday Card.ectemplate"; path = "Template/Birthday Card.ectemplate"; sourceTree = SOURCE_ROOT; };
+		38A007151ABE87CC01A5B6E9 /* PostcardStudio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PostcardStudio.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7561BFB015D8F536760CB671 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B453099D1D8185262A145638 /* CraftBridge in Frameworks */,
+				1F3B43CA9A673611A709885C /* CraftBridgeEffects in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		DC76E9F0C0006E8F919E0C51 = {
+			isa = PBXGroup;
+			children = (
+				3A2A88DEEFF3D1D23E496597 /* PostcardStudio */,
+				BFE00B156DCFC34C4751A6E5 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		3A2A88DEEFF3D1D23E496597 /* PostcardStudio */ = {
+			isa = PBXGroup;
+			children = (
+				050A5C0E393D9183E09A2E80 /* PostcardStudioApp.swift */,
+				7EF8674636878C3AC66A9C3E /* PostcardPhoto.swift */,
+				C3D4315F61D6566DC05B6FD6 /* PreviewView.swift */,
+				6D0AD5B2015BEBA499A0FF2C /* Studio.swift */,
+				04EF3B0E342476FA6835AEE2 /* StudioView.swift */,
+				56B5A8A010BF72FAFF982B70 /* ExportRecipe.swift */,
+				A3B5C50D1F937E2E1DCBC6A2 /* Spine.swift */,
+				46FAA4EA53279B55FDEB4681 /* Info.plist */,
+				C1F0F88819E14BE8EDE0D856 /* Birthday Card.ectemplate */,
+			);
+			path = PostcardStudio;
+			sourceTree = "<group>";
+		};
+		BFE00B156DCFC34C4751A6E5 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				38A007151ABE87CC01A5B6E9 /* PostcardStudio.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0E8A3AD980EC179856012B7E /* PostcardStudio */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8D8B67C81BE4F695571BC034 /* Build configuration list for PBXNativeTarget "PostcardStudio" */;
+			buildPhases = (
+				D56D985300D4B52EB6E189BE /* Check the Birthday Card */,
+				BCE16DD0260827ECF338C787 /* Sources */,
+				7561BFB015D8F536760CB671 /* Frameworks */,
+				0189424A5A60FED329FA868E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PostcardStudio;
+			packageProductDependencies = (
+				331B6A21D64592CDEA010618 /* CraftBridge */,
+				CE7585D37CBB7122AA53C7A2 /* CraftBridgeEffects */,
+			);
+			productName = PostcardStudio;
+			productReference = 38A007151ABE87CC01A5B6E9 /* PostcardStudio.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		98F54143AB4E86B28C3AFEE0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+			};
+			buildConfigurationList = 01DF1D3A7F02866ECA6BB742 /* Build configuration list for PBXProject "PostcardStudio" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = DC76E9F0C0006E8F919E0C51;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				5896047EEAE44FC0E9857DDD /* XCLocalSwiftPackageReference "../../sdk" */,
+			);
+			productRefGroup = BFE00B156DCFC34C4751A6E5 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0E8A3AD980EC179856012B7E /* PostcardStudio */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		0189424A5A60FED329FA868E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D3155E50266766C1C2E91084 /* Birthday Card.ectemplate in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		D56D985300D4B52EB6E189BE /* Check the Birthday Card */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Check the Birthday Card";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ ! -f \"${SRCROOT}/Template/Birthday Card.ectemplate\" ]; then\n  echo \"error: ${SRCROOT}/Template/Birthday Card.ectemplate is made by the template recipe, which is never committed: run tools/birthday-card.sh '${SRCROOT}/Template' from the repository root, then build again\" >&2\n  exit 1\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		BCE16DD0260827ECF338C787 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				83239D505714BEAE538C509E /* PostcardStudioApp.swift in Sources */,
+				2EEA08F73C4B1519A29D87C2 /* PostcardPhoto.swift in Sources */,
+				42DE0F642521FBC176332181 /* PreviewView.swift in Sources */,
+				1C6018F111759407F8EC96B6 /* Studio.swift in Sources */,
+				987F78E79A47964118DBAB4E /* StudioView.swift in Sources */,
+				C25905DDD9501888A0811938 /* ExportRecipe.swift in Sources */,
+				0EB3BEFFFA7C425162407147 /* Spine.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		B05BEBB064D0A38CFA49E7B1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		8C8F75B80E1CEC91DA7341A3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		258A38BC256D3BE0936BEE7F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PostcardStudio/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Postcard Studio";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.christopherlinnett.craftbridge.sample.postcard-studio;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		AF08645F33FB7E7450F93573 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PostcardStudio/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Postcard Studio";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.christopherlinnett.craftbridge.sample.postcard-studio;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		01DF1D3A7F02866ECA6BB742 /* Build configuration list for PBXProject "PostcardStudio" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B05BEBB064D0A38CFA49E7B1 /* Debug */,
+				8C8F75B80E1CEC91DA7341A3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8D8B67C81BE4F695571BC034 /* Build configuration list for PBXNativeTarget "PostcardStudio" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				258A38BC256D3BE0936BEE7F /* Debug */,
+				AF08645F33FB7E7450F93573 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		5896047EEAE44FC0E9857DDD /* XCLocalSwiftPackageReference "../../sdk" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../sdk;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		331B6A21D64592CDEA010618 /* CraftBridge */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CraftBridge;
+		};
+		CE7585D37CBB7122AA53C7A2 /* CraftBridgeEffects */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CraftBridgeEffects;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+	};
+	rootObject = 98F54143AB4E86B28C3AFEE0 /* Project object */;
+}

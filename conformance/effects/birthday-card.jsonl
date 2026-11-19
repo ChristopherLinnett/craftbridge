@@ -1,0 +1,7 @@
+{"start": "new"}
+{"command": "templates.create", "params": {"id": "social-square"}}
+{"command": "file.import", "params": {"paths": ["photo.png"]}}
+{"command": "layer.addItem", "params": {"comp": 1, "item": "photo.png", "position": [76, 116]}}
+{"command": "essential.addProperty", "params": {"comp": 1, "layer": "Big news", "path": "text/sourceText", "name": "Name"}}
+{"command": "essential.addMedia", "params": {"layer": "photo.png", "name": "Photo"}}
+{"command": "essential.exportTemplate", "params": {"comp": 1, "path": "Birthday Card.ectemplate"}}
