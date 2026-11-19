@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!--
+        The baseline's measurement keeps the phone awake while it runs, as it is while its user watches an export;
+        a phone that nothing keeps awake, off its cable with the screen off, suspends in the middle of the export.
+    -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!--
         The device checks run on the platform's own Instrumentation. The usual instrumented-test runner
         is androidx.test's, which needs JUnit 4, and JUnit 4's EPL-1.0 is on no branch of the licence
         allowlist (rust/deny.toml) that the licence check reads the test classpaths against.

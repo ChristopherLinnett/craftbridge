@@ -161,55 +161,67 @@ why = "Android holds an app's native memory to no limit of its own: the low-memo
 # The two phones are five years of chips apart, so their figures say how each phone runs the example, not how one
 # platform compares with the other. A first preview is mostly the engine's GPU start, which builds the compositor's
 # kernels as it takes the device, and both phones measure it from a fresh install, so cold: on the iPhone Metal
-# compiles them into a shader cache the install holds empty, 3.7 of its 3.8 s (a second engine in the same process
+# compiles them into a shader cache the install holds empty, 3.8 of its 3.9 s (a second engine in the same process
 # took its GPU in 20 ms), so the GPU start is reported (`gpu_start_ms`) and the rest of the preview is what a release is
 # held to (`first_path_ms` cold, `preview_path_ms` warm).
 #
-# The Xiaomi 17 Pro Max has no record under this definition yet: its series of ten runs, with its `cpu_cap_mhz` and
-# `battery_c` read run by run, is owed, to V5a. It is measured settled, as the iPhone's is quiet: its prime cores at 2880 MHz
-# and its battery at or under 33.0 C before the series starts, each run a fresh install 60 s after the last, with
-# `-e only '^baseline: the running'`; on its cable at 100 % charge the phone can hold its battery near 37 C and its
-# prime cores at 2438 MHz or lower for hours, and a series is not made then. Its record is added in the shape the
-# iPhone's has, with `platform = "android"`.
+# Both series were made on one tree (CraftBridge 0b93b3e, V5 merged, with EffectCraft 665bfac0b339; the tree they land
+# on, 35e4b91, differs from it only in the device runner's own lock, a host tool no figure measures), the iPhone's on
+# 2026-11-19 and the Xiaomi's on 2026-11-20. The Xiaomi's is measured settled, as the iPhone's is quiet: its prime cores
+# at 2880 MHz and its battery at or under 33.0 C before every run, each run a fresh install 60 s after the last, with
+# `-e only '^baseline: the running'`; on its cable at 100 % charge it can hold its battery near 37 C and its prime cores
+# at 2438 MHz or lower for hours, and a series is not made then. Off its cable with the screen off, nothing but the
+# check's own wake lock keeps it awake while it measures: without one it suspends in the middle of runs, and its
+# export then ranges 1742 to 2206 ms, where kept awake it ranges 1741 to 1756 ms.
+# Its prime cores' cap is its own to move: runs made while it held them at 2112 to 2438 MHz (`cpu_cap_mhz`, read before
+# each run) exported in 2.05 to 2.65 s, so a release is compared only on runs that read the cap the record's runs read.
+#
+# A figure is flagged only once a release's fastest run is slower than the record's slowest, so what the rule can see
+# is each figure's spread on its phone. On the iPhone every flagged figure spreads under 7 % run to run, and a release
+# 12 % slower in any of them is flagged. On the Xiaomi the export and the peak memory spread under 3 %, and are held
+# as closely; its previews spread wider with the same cap, battery and threads and nothing else of CraftBridge's
+# running, the first preview 590 to 771 ms, the first path 59 to 131 ms (the series' last four runs in a band of their
+# own, 116 to 131 ms) and the preview path 20 to 34 ms, so a slower preview is flagged there only once its fastest run
+# passes the record's slowest.
 [[device]]
 id = "iphone-12-pro"
 platform = "ios"
 device = "iPhone 12 Pro (iPhone13,3): Apple A14 Bionic of 2020, 2 performance and 4 efficiency cores, 6 GB, Metal"
 os = "iOS 26.6.1"
-build = "release native library at EffectCraft 665bfac0b339, on CraftBridge 9eda570 with V5's own tests; the Swift package in the Debug configuration, whose Release build, measured beside an earlier series at EffectCraft 10376058, took 10 to 27 ms less over the first preview's parts outside the GPU start and exported inside the range; tools/ios-device-test.sh --swift -- --filter RealAppBaselineTests"
-conditions = "thermal state 0 (nominal) before and after the export in every run; nothing else of CraftBridge's installed or running, checked before and after each run inside the shared lock (one run whose check before it could not read the phone's apps was left out and an eleventh made); each run a fresh install, 30 s after the last; the export ran on its 6 cores, the free memory (3.0 GB in split runs) holding nothing back"
+build = "release native library at EffectCraft 665bfac0b339, on CraftBridge 0b93b3e (V5 merged); the Swift package in the Debug configuration, whose Release build, measured beside an earlier series at EffectCraft 10376058, took 10 to 27 ms less over the first preview's parts outside the GPU start and exported inside the range; tools/ios-device-test.sh --swift -- --filter RealAppBaselineTests"
+conditions = "thermal state 0 (nominal) before and after the export in every run; nothing else of CraftBridge's installed or running, checked by name before and after each run inside the shared lock (20 checks, each listing no app and no process of CraftBridge's, as a listing the phone left unanswered would also read; the runner, which uninstalls all it installs, reached the phone in every run); each run a fresh install, 30 s after the last; the export ran on its 6 cores, the free memory (3.0 GB in split runs) holding nothing back"
 recorded = "2026-11-19"
 runs = 10
 [device.first_preview_ms]
-median = 3821.65
-min = 3746.0
-max = 3911.5
-values = [3911.5, 3908.0, 3827.4, 3880.6, 3768.3, 3864.1, 3747.7, 3746.0, 3754.9, 3815.9]
+median = 3894.05
+min = 3792.7
+max = 3967.8
+values = [3967.8, 3894.6, 3896.5, 3809.4, 3848.3, 3846.9, 3893.5, 3898.8, 3792.7, 3912.7]
 [device.gpu_start_ms]
-median = 3697.0
-min = 3628.8
-max = 3786.4
-values = [3786.4, 3785.2, 3702.5, 3754.3, 3647.4, 3742.9, 3630.6, 3628.8, 3634.0, 3691.5]
+median = 3769.9
+min = 3669.1
+max = 3840.6
+values = [3840.6, 3769.6, 3772.5, 3687.3, 3724.9, 3725.6, 3770.2, 3777.0, 3669.1, 3788.4]
 [device.first_path_ms]
-median = 122.0
-min = 117.1
-max = 126.3
-values = [125.0, 122.8, 124.9, 126.3, 120.9, 121.2, 117.1, 117.1, 120.9, 124.5]
+median = 123.5
+min = 121.3
+max = 127.2
+values = [127.2, 125.0, 124.0, 122.1, 123.5, 121.3, 123.3, 121.8, 123.5, 124.3]
 [device.preview_path_ms]
-median = 17.3
-min = 16.8
-max = 18.4
-values = [17.2, 17.8, 17.8, 16.9, 17.4, 16.8, 17.5, 17.1, 18.4, 17.2]
+median = 17.5
+min = 16.9
+max = 18.0
+values = [17.7, 17.7, 17.2, 17.6, 16.9, 18.0, 17.4, 17.7, 17.2, 17.4]
 [device.full_export_ms]
-median = 2834.9
-min = 2813.4
-max = 2945.2
-values = [2835.2, 2930.2, 2827.8, 2813.4, 2820.5, 2834.6, 2941.9, 2945.2, 2837.6, 2830.4]
+median = 2825.2
+min = 2813.8
+max = 2851.6
+values = [2830.3, 2838.5, 2813.8, 2820.7, 2829.5, 2824.6, 2823.2, 2851.6, 2818.2, 2825.8]
 [device.peak_memory_bytes]
-median = 479914752.0
-min = 479185600.0
-max = 484444864.0
-values = [479808128.0, 480086848.0, 484248384.0, 479529600.0, 479546048.0, 479414912.0, 484444864.0, 480021376.0, 484330176.0, 479185600.0]
+median = 484051712.0
+min = 479365888.0
+max = 484477696.0
+values = [484477696.0, 484346816.0, 484150016.0, 480136064.0, 483953408.0, 484215552.0, 479365888.0, 479923072.0, 479742720.0, 484264704.0]
 [device.export_threads]
 median = 6.0
 min = 6.0
@@ -220,3 +232,58 @@ median = 0.0
 min = 0.0
 max = 0.0
 values = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+[[device]]
+id = "xiaomi-17-pro-max"
+platform = "android"
+device = "Xiaomi 17 Pro Max (2509FPN0BC): Qualcomm SM8850 (Snapdragon 8 Elite Gen 5) of 2025, 2 prime and 6 performance cores, 16 GB, Adreno 840, Vulkan"
+os = "Android 17 (API 37)"
+build = "release native library (arm64-v8a) at EffectCraft 665bfac0b339, on CraftBridge 0b93b3e (V5 merged) with the check holding its wake lock; the test APK in the debug variant, whose release variant (not debuggable), run in turn with it beside an earlier series, peaked 11 to 18 MB lower and spread its times as the debug one did; am instrument -e only '^baseline: the running'"
+conditions = "settled before every run (prime cores' cap 2880 of 4608 MHz, the six others' 2745.6 MHz, battery 31.2 to 31.5 C by the phone's own reading, 30.9 to 31.2 C by the app's, thermal status 0), off its cable at 99 to 98 % charge over wireless debugging with the screen locked and dozing, kept awake by the check's own partial wake lock through each measurement and asleep for none of it; only this change's test package installed and no CraftBridge process running, checked before and after each of the ten runs; each run a fresh install, 60 s after the last; the export ran on its 8 cores, the free memory holding nothing back"
+recorded = "2026-11-20"
+runs = 10
+[device.first_preview_ms]
+median = 646.05
+min = 589.7
+max = 771.0
+values = [652.9, 631.9, 639.2, 609.4, 589.7, 628.4, 736.4, 707.4, 741.0, 771.0]
+[device.gpu_start_ms]
+median = 578.95
+min = 530.1
+max = 643.0
+values = [589.5, 572.8, 572.8, 550.4, 530.1, 565.1, 605.4, 585.1, 624.8, 643.0]
+[device.first_path_ms]
+median = 64.85
+min = 59.1
+max = 131.0
+values = [63.3, 59.1, 66.4, 59.1, 59.6, 63.3, 131.0, 122.3, 116.2, 127.9]
+[device.preview_path_ms]
+median = 25.5
+min = 20.0
+max = 33.7
+values = [29.9, 24.0, 20.0, 24.8, 26.2, 23.7, 30.6, 21.7, 33.7, 28.5]
+[device.full_export_ms]
+median = 1747.55
+min = 1741.2
+max = 1756.2
+values = [1749.5, 1746.7, 1744.6, 1742.2, 1752.7, 1748.1, 1747.0, 1755.8, 1756.2, 1741.2]
+[device.peak_memory_bytes]
+median = 768878592.0
+min = 754798592.0
+max = 773861376.0
+values = [773820416.0, 769425408.0, 773861376.0, 773857280.0, 768475136.0, 769282048.0, 763850752.0, 763793408.0, 764624896.0, 754798592.0]
+[device.export_threads]
+median = 8.0
+min = 8.0
+max = 8.0
+values = [8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0]
+[device.cpu_cap_mhz]
+median = 2880.0
+min = 2880.0
+max = 2880.0
+values = [2880.0, 2880.0, 2880.0, 2880.0, 2880.0, 2880.0, 2880.0, 2880.0, 2880.0, 2880.0]
+[device.battery_c]
+median = 31.2
+min = 30.9
+max = 31.2
+values = [30.9, 30.9, 31.2, 31.2, 31.2, 31.2, 31.2, 31.2, 31.2, 31.2]

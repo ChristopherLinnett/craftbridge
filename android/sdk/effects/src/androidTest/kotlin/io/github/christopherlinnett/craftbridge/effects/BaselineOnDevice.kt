@@ -14,6 +14,8 @@ import android.media.MediaMetadataRetriever
 import android.os.BatteryManager
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.PowerManager
+import android.os.SystemClock
 import android.view.Surface
 import io.github.christopherlinnett.craftbridge.core.Folders
 import io.github.christopherlinnett.craftbridge.core.JSONValue
@@ -189,6 +191,37 @@ private class ShownSurface(
     override fun close() {
         reader.close()
         thread.quitSafely()
+    }
+}
+
+/** The longest a run keeps the phone awake: far longer than its measurement takes, so a hung run still lets the phone sleep. */
+private const val AWAKE_FOR_MILLIS = 10 * 60 * 1000L
+
+/** The most the two clocks may part by over an awake run: each counts in whole milliseconds. */
+private const val SLEPT_MILLIS = 5L
+
+/**
+ * What [measure] answers, made with the phone kept awake, as it is while its user watches an app export. A phone that
+ * nothing keeps awake, off its cable with the screen off, suspends in the middle of an export: the monotonic clock the
+ * figures read stops while it sleeps, but every waking costs the export time of its own, so the run is slower by what
+ * the phone's sleep decides. The time the phone slept, which [SystemClock.elapsedRealtime] counts and
+ * [SystemClock.uptimeMillis] does not, must be none.
+ */
+private suspend fun <T> keptAwake(
+    context: Context,
+    measure: suspend () -> T,
+): T {
+    val lock = context.getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "craftbridge:baseline")
+    lock.acquire(AWAKE_FOR_MILLIS)
+    try {
+        val asleep = { SystemClock.elapsedRealtime() - SystemClock.uptimeMillis() }
+        val before = asleep()
+        val measured = measure()
+        val slept = asleep() - before
+        require(slept <= SLEPT_MILLIS) { "the phone slept $slept ms during the run, which no figure of it counts" }
+        return measured
+    } finally {
+        if (lock.isHeld) lock.release()
     }
 }
 
@@ -374,61 +407,72 @@ internal val baselineChecks: List<Case> =
                 val movie = File(folder, "card.mp4")
                 val cap = cpuCapMhz()
                 val battery = batteryCelsius(context)
-                val clock = TimeSource.Monotonic
-                val started = clock.markNow()
-                val engine = EffectsEngine.start(context, gpu = GpuChoice.PREFERRED)
-                try {
-                    // The first call waits behind the engine thread's own start of the GPU, which ends when it answers.
-                    engine.request("info", JSONValue.Object(emptyMap()))
-                    val gpuStart = started.elapsedNow().inWholeMicroseconds / 1000.0
-                    val card = engine.previewedCard(template, sam, target.surface, example.previewAtSeconds)
-                    val firstPreview = started.elapsedNow().inWholeMicroseconds / 1000.0
+                val line =
+                    keptAwake(context) {
+                        val clock = TimeSource.Monotonic
+                        val started = clock.markNow()
+                        val engine = EffectsEngine.start(context, gpu = GpuChoice.PREFERRED)
+                        try {
+                            // The first call waits behind the engine thread's own start of the GPU, which ends when it answers.
+                            engine.request("info", JSONValue.Object(emptyMap()))
+                            val gpuStart = started.elapsedNow().inWholeMicroseconds / 1000.0
+                            val card = engine.previewedCard(template, sam, target.surface, example.previewAtSeconds)
+                            val firstPreview = started.elapsedNow().inWholeMicroseconds / 1000.0
 
-                    var counted = 0uL
-                    val exporting = clock.markNow()
-                    engine.export(
-                        request = mapOf("comp" to card.comp, "output" to movie.path.jsonValue, "format" to example.format.jsonValue),
-                        onProgress = { _, total, _ -> counted = total },
-                    )
-                    val fullExport = exporting.elapsedNow().inWholeMicroseconds / 1000.0
-                    // Read before the checks below, which no app of the example's makes, and while the engine that
-                    // exported still holds its pool.
-                    val peak = peakResidentBytes()
-                    val threads = exportThreads().toDouble()
-                    val paths =
-                        List(example.previewRepeats) {
-                            val began = clock.markNow()
-                            engine.previewedCard(template, sam, target.surface, example.previewAtSeconds)
-                            began.elapsedNow().inWholeMicroseconds / 1000.0
+                            var counted = 0uL
+                            val exporting = clock.markNow()
+                            engine.export(
+                                request =
+                                    mapOf(
+                                        "comp" to card.comp,
+                                        "output" to movie.path.jsonValue,
+                                        "format" to example.format.jsonValue,
+                                    ),
+                                onProgress = { _, total, _ -> counted = total },
+                            )
+                            val fullExport = exporting.elapsedNow().inWholeMicroseconds / 1000.0
+                            // Read before the checks below, which no app of the example's makes, and while the engine that
+                            // exported still holds its pool.
+                            val peak = peakResidentBytes()
+                            val threads = exportThreads().toDouble()
+                            val paths =
+                                List(example.previewRepeats) {
+                                    val began = clock.markNow()
+                                    engine.previewedCard(template, sam, target.surface, example.previewAtSeconds)
+                                    began.elapsedNow().inWholeMicroseconds / 1000.0
+                                }
+                            engine.endPreview()
+                            val previews = 1 + example.previewRepeats
+                            require(
+                                target.shows(previews),
+                            ) { "the surface showed ${target.uncounted} of the $previews previews drawn into it" }
+                            require(
+                                counted == example.frames.toULong(),
+                            ) { "the export counted $counted frames, not the running example's ${example.frames}" }
+                            require(
+                                abs(movieSeconds(movie) - example.seconds) < 0.1,
+                            ) { "the movie does not last the running example's ${example.seconds} s" }
+                            val figures =
+                                mapOf(
+                                    "first_preview_ms" to firstPreview,
+                                    "gpu_start_ms" to gpuStart,
+                                    "first_path_ms" to firstPreview - gpuStart,
+                                    "preview_path_ms" to median(paths),
+                                    "full_export_ms" to fullExport,
+                                    "peak_memory_bytes" to peak,
+                                    "export_threads" to threads,
+                                    "cpu_cap_mhz" to cap,
+                                    "battery_c" to battery,
+                                )
+                            val costs = baseline.measured.filter { it.flagged }.map { it.name } + "export_threads"
+                            require(costs.all { figures.getValue(it) > 0 }) { "a figure is no measurement: $figures" }
+                            baseline.line(figures)
+                        } finally {
+                            engine.shutDown()
+                            target.close()
                         }
-                    engine.endPreview()
-                    val previews = 1 + example.previewRepeats
-                    require(target.shows(previews)) { "the surface showed ${target.uncounted} of the $previews previews drawn into it" }
-                    require(
-                        counted == example.frames.toULong(),
-                    ) { "the export counted $counted frames, not the running example's ${example.frames}" }
-                    require(
-                        abs(movieSeconds(movie) - example.seconds) < 0.1,
-                    ) { "the movie does not last the running example's ${example.seconds} s" }
-                    val figures =
-                        mapOf(
-                            "first_preview_ms" to firstPreview,
-                            "gpu_start_ms" to gpuStart,
-                            "first_path_ms" to firstPreview - gpuStart,
-                            "preview_path_ms" to median(paths),
-                            "full_export_ms" to fullExport,
-                            "peak_memory_bytes" to peak,
-                            "export_threads" to threads,
-                            "cpu_cap_mhz" to cap,
-                            "battery_c" to battery,
-                        )
-                    val costs = baseline.measured.filter { it.flagged }.map { it.name } + "export_threads"
-                    require(costs.all { figures.getValue(it) > 0 }) { "a figure is no measurement: $figures" }
-                    say(baseline.line(figures))
-                } finally {
-                    engine.shutDown()
-                    target.close()
-                }
+                    }
+                say(line)
             } finally {
                 folder.deleteRecursively()
             }
