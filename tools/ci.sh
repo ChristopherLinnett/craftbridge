@@ -381,9 +381,11 @@ stage_swift_build() {
 # to end — and says which it did, and why; it shuts down only one whose boot began under a run of it, never
 # one somebody else had booted, once nothing uses it; and its
 # test runner takes a sandbox of its own, so a run of the suite started by hand on the same simulator
-# never meets this one's files. The suite runs in the one configuration that command names, the one a
-# developer and `swift test` run it in. The Simulator is macOS's own, so the hosted macOS job runs this
-# stage on the runner's simulator.
+# never meets this one's files. The run starts with no `TEST_RUNNER_` or `SIMCTL_CHILD_` variable of the
+# environment the stage was called in and only those the stage names for it, so what a developer's shell
+# happens to export cannot decide which tests the suite runs. The suite runs in the one configuration
+# that command names, the one a developer and `swift test` run it in. The Simulator is macOS's own, so
+# the hosted macOS job runs this stage on the runner's simulator.
 stage_swift_test() {
   local suites configuration destination architectures status=0
   xcframework || return 1
@@ -433,7 +435,13 @@ swift_suite_on() {
   # test run names one device, so `generic/` — any device of this platform — is replaced by the simulator
   # `cargo xtask simulator` puts where the argument says, and the destination stays the table's.
   (mkdir -p "$sandbox/tmp" && cd ios/sdk &&
-    export TEST_RUNNER_HOME="$sandbox" TEST_RUNNER_CFFIXED_USER_HOME="$sandbox" TEST_RUNNER_TMPDIR="$sandbox/tmp/" &&
+    # The run takes the environment its tests see from the call below alone: what the calling shell
+    # exports and leaves standing — `TEST_RUNNER_CRAFTBRIDGE_BASELINE=1`, or the same with
+    # `SIMCTL_CHILD_`, which the boot of the run's simulator hands on, after a baseline measurement
+    # asked for by hand — would reach the test that reads it, running the measurement beside every
+    # other suite, and the gate's result would depend on the developer's shell rather than on the
+    # tree. The sandbox assignments are the run's own, named in that call, and stay.
+    craftbridge_set_test_runner_env "TEST_RUNNER_HOME=$sandbox" "TEST_RUNNER_CFFIXED_USER_HOME=$sandbox" "TEST_RUNNER_TMPDIR=$sandbox/tmp/" &&
     xtask simulator -- xcodebuild "${package[@]}" -destination "${destination#generic/},id={simulator}" \
       -resultBundlePath "$result" test-without-building) || status=1
   # How many tests ran is read from the report the tool that ran them wrote, through that tool: a run that

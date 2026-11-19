@@ -223,6 +223,54 @@ craftbridge_refuse_switches() {
   return 1
 }
 
+# Set this shell's test environment to exactly the given `TEST_RUNNER_<name>=<value>` assignments:
+# every variable the calling shell exported that would reach the tests is dropped first, and only
+# what the caller names is exported after. Two prefixes reach them. `xcodebuild test` hands every
+# `TEST_RUNNER_<name>` of its own environment to the process it starts the tests in, under `<name>`
+# with the prefix dropped; and `simctl` hands every `SIMCTL_CHILD_<name>` of its own to what it
+# starts in the simulator, a boot's whole session among them, so a simulator `cargo xtask simulator`
+# boots for the run gives its tests each such variable too. A variable one of the suite's own gates
+# reads, left exported in the shell the gate was called from — `TEST_RUNNER_CRAFTBRIDGE_BASELINE=1`
+# or `SIMCTL_CHILD_CRAFTBRIDGE_BASELINE=1`, still standing after a baseline measurement asked for by
+# hand — would reach that test in every later run, and the gate's result would depend on the
+# developer's shell rather than on the tree. swift_test therefore starts its suite after this,
+# naming only its sandbox's home, temporary folder and Foundation's home (tools/ci.sh). What it
+# drops goes from the caller's own environment too, so a stage runs it in a subshell of its own,
+# and every variable without either prefix passes through untouched. A word that is no
+# `TEST_RUNNER_` assignment is refused, rather than exported or dropped for a misspelling, and so is
+# an inherited variable of either prefix that the shell cannot drop, which would reach the tests. The
+# stage calls this on the left of an `&&`, where bash holds its `set -e` off within the function, so
+# each drop and each export is checked where it runs: one that failed would otherwise pass, and the
+# run would go ahead with a variable left standing or an assignment missing.
+craftbridge_set_test_runner_env() {
+  local assignment entry name
+  # The names are read from the environment the shell hands what it starts, not from its own list of
+  # variables: one whose name no shell variable may take, with a dash or a dot in it, is handed on all
+  # the same, yet bash 5 leaves it out of `compgen -e` and no bash will unset it.
+  while IFS= read -r -d '' entry; do
+    name="${entry%%=*}"
+    case "$name" in
+      TEST_RUNNER_* | SIMCTL_CHILD_*) unset -v "$name" && continue ;;
+      *) continue ;;
+    esac
+    echo "$(basename "$0" .sh): craftbridge_set_test_runner_env cannot drop the inherited $name, a name the shell will not unset, so it would reach the tests: run again without it" >&2
+    return 2
+  done < <(env -0)
+  for assignment in "$@"; do
+    case "$assignment" in
+      # The case pattern has just told the value to be a `NAME=value` assignment itself, so exporting
+      # that value is the export; the `${assignment?}` form is what says so to shellcheck, whose plain
+      # `export "$assignment"` reading expects a bare name. A word whose own name the shell will not
+      # export — one with a space or a dash where a name may hold only letters, numbers and underscores
+      # — fails here and falls to the refusal beside a word without the prefix, rather than leave the
+      # run one sandbox assignment short.
+      TEST_RUNNER_*=*) export "${assignment?}" && continue ;;
+    esac
+    echo "$(basename "$0" .sh): craftbridge_set_test_runner_env takes the run's TEST_RUNNER_ assignments, and $assignment is none" >&2
+    return 2
+  done
+}
+
 # The gate's lint library (AGENTS.md §3), which `cargo dylint` builds with the nightly its own
 # rust-toolchain.toml pins and runs over the workspace, and the cargo-dylint release that runs it. The gate
 # pins the release: one can change how a library is built and driven, so an upgrade is an edit here and a

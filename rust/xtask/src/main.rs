@@ -657,6 +657,169 @@ mod tests {
             "a cleanup that names no function is refused"
         );
     }
+
+    /// Every bash this machine can run the gate's scripts with: the one `bash` names on the search
+    /// path, plus every standard place a machine's own or an installed bash sits, each file named
+    /// once. The two bashes the gate meets say different things about the names a shell cannot hold
+    /// that an environment hands its children: bash 5 — the hosted Linux job's — leaves them out of
+    /// `compgen -e` altogether, while bash 3.2, which macOS ships at `/bin/bash`, lists them beside
+    /// every other exported name, and that is the only difference between the two listings, since
+    /// `compgen -e` holds exported names and nothing else. So a case that catches a drop reading its
+    /// names from `compgen -e` rather than from the environment can only fail under bash 5; every
+    /// case therefore runs under every bash found, and the hosted Linux job is one that always finds
+    /// one. Under bash 3.2 alone no such case is writable, which is why the loop asks for more.
+    fn the_bashes_the_gate_runs_under() -> Vec<std::path::PathBuf> {
+        let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        candidates.extend(std::env::split_paths(&path).map(|folder| folder.join("bash")));
+        candidates.extend(["/bin/bash", "/opt/homebrew/bin/bash", "/usr/local/bin/bash"].map(std::path::PathBuf::from));
+        let mut found: Vec<std::path::PathBuf> = Vec::new();
+        for candidate in candidates {
+            if !candidate.is_file() {
+                continue;
+            }
+            let Ok(bash) = candidate.canonicalize() else {
+                continue;
+            };
+            if found.contains(&bash) {
+                continue;
+            }
+            let answer = std::process::Command::new(&bash).arg("--version").output();
+            if !matches!(answer, Ok(run) if run.status.success()) {
+                continue;
+            }
+            found.push(bash);
+        }
+        assert!(!found.is_empty(), "these scripts run under a bash, and none answers here");
+        found
+    }
+
+    /// The `swift_test` stage hands the suite's test run its environment through `craftbridge_set_test_runner_env`,
+    /// because `xcodebuild test` gives every `TEST_RUNNER_<name>` variable of its environment to the test
+    /// process under `<name>`, the prefix dropped, and `simctl` gives every `SIMCTL_CHILD_<name>` to what it
+    /// starts in the simulator, the boot of the run's own simulator among them: left alone, a
+    /// `TEST_RUNNER_CRAFTBRIDGE_BASELINE=1` or `SIMCTL_CHILD_CRAFTBRIDGE_BASELINE=1` still exported after a
+    /// measurement run asked for by hand would ask that measurement for its figures beside every other
+    /// suite. What the environment holds afterwards of either prefix is exactly the `TEST_RUNNER_`
+    /// assignments the run names — an inherited one of the same name gives way to the run's — and every
+    /// other variable stands as it was. A name is read off the environment whole, whatever its value
+    /// holds: a value with a newline or another `=` in it drops as any other does, and the run's own
+    /// assignment of such a value stands as any other does. A word that is no such assignment is
+    /// refused in these words, and so is an inherited variable of either prefix whose name the shell
+    /// will not unset, however it is spelt — a dash, a dot, a bang or a space in it: bash hands every
+    /// such one on to the tests all the same. A refusal is status 2 whether the call stands alone or
+    /// opens an `&&` as the stage runs it, and what follows the call never runs. Every case runs under
+    /// every bash the machine has, which `the_bashes_the_gate_runs_under` lists; no simulator is
+    /// asked for, since what is judged is the environment itself.
+    #[test]
+    fn the_suite_run_holds_only_the_test_environment_its_stage_names() {
+        let env = crate::repo_root().join("tools/env.sh");
+        let started = |bash: &std::path::Path, shape: &str, caller: &[(&str, &str)], named: &[&str]| {
+            let script = match shape {
+                // The stage calls the helper on the left of an `&&`, where bash holds its `set -e` off:
+                // a refusal must skip what runs after it, and the call's own status must stand.
+                "and" => "set -euo pipefail\nsource \"$1\"\nshift\ncraftbridge_set_test_runner_env \"$@\" && printenv\nexit $?",
+                _ => "set -euo pipefail\nsource \"$1\"\nshift\ncraftbridge_set_test_runner_env \"$@\"\nprintenv",
+            };
+            let mut command = std::process::Command::new(bash);
+            command.arg("-c").arg(script).arg("bash").arg(&env).args(named);
+            for (name, value) in caller {
+                command.env(name, value);
+            }
+            let output = command.output().unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let mut held: Vec<&str> = stdout.lines().filter(|line| line.starts_with("TEST_RUNNER_") || line.starts_with("SIMCTL_CHILD_")).collect();
+            held.sort_unstable();
+            (output.status.code(), held.join("\n"), stdout, String::from_utf8_lossy(&output.stderr).trim_end().to_string())
+        };
+        for bash in the_bashes_the_gate_runs_under() {
+            let (code, held, all, err) = started(
+                &bash,
+                "direct",
+                &[
+                    ("TEST_RUNNER_CRAFTBRIDGE_BASELINE", "1"),
+                    ("SIMCTL_CHILD_CRAFTBRIDGE_BASELINE", "1"),
+                    ("TEST_RUNNER_HOME", "/the/developer/home"),
+                    ("TEST_RUNNER_TMPDIR", "/the/simulator/own/temp"),
+                    ("CRAFTBRIDGE_NOT_A_RUNNER_VARIABLE", "stays"),
+                ],
+                &["TEST_RUNNER_HOME=/the/run/sandbox", "TEST_RUNNER_CFFIXED_USER_HOME=/the/run/sandbox", "TEST_RUNNER_TMPDIR=/the/run/sandbox/tmp/"],
+            );
+            assert_eq!(
+                (code, held.as_str(), err.as_str()),
+                (Some(0), "TEST_RUNNER_CFFIXED_USER_HOME=/the/run/sandbox\nTEST_RUNNER_HOME=/the/run/sandbox\nTEST_RUNNER_TMPDIR=/the/run/sandbox/tmp/", ""),
+                "the run's own assignments are all the TEST_RUNNER_ and SIMCTL_CHILD_ environment holds"
+            );
+            assert!(
+                all.lines().any(|line| line == "CRAFTBRIDGE_NOT_A_RUNNER_VARIABLE=stays"),
+                "a variable without the prefix passes through as it was:\n{all}"
+            );
+            let (code, held, all, err) = started(
+                &bash,
+                "direct",
+                &[("TEST_RUNNER_B3EQ", "a=b"), ("TEST_RUNNER_B3NL", "first\nsecond"), ("B3_PLAIN", "stays")],
+                &["TEST_RUNNER_HOME=/run/a=b", "TEST_RUNNER_TMP=/run/x\ny"],
+            );
+            assert_eq!(
+                (code, held.as_str(), err.as_str()),
+                (Some(0), "TEST_RUNNER_HOME=/run/a=b\nTEST_RUNNER_TMP=/run/x", ""),
+                "a name reads whole however its value spells itself: an inherited value with a newline or another = in it drops, and the run's own such value stands"
+            );
+            assert!(all.contains("TEST_RUNNER_TMP=/run/x\ny"), "the newline in the value passes into the environment whole:\n{all}");
+            assert!(all.lines().any(|line| line == "B3_PLAIN=stays"), "a variable without the prefix passes through as it was:\n{all}");
+            let (code, _, _, err) = started(&bash, "direct", &[], &["TEST_RUNNER_A B=x", "TEST_RUNNER_HOME=/ok"]);
+            assert_eq!(
+                (code, err.lines().last().unwrap_or("")),
+                (Some(2), "bash: craftbridge_set_test_runner_env takes the run's TEST_RUNNER_ assignments, and TEST_RUNNER_A B=x is none"),
+                "a word whose name the shell itself will not export is refused in the same words, even beside a good word after it"
+            );
+            for name in ["TEST_RUNNER_A-B", "SIMCTL_CHILD_C.D", "TEST_RUNNER_A!B", "SIMCTL_CHILD_A B"] {
+                let (code, held, _, err) = started(&bash, "direct", &[(name, "1"), ("TEST_RUNNER_DROPPED", "1")], &["TEST_RUNNER_ONLY=one"]);
+                assert_eq!(
+                    (code, held.as_str(), err.lines().last().unwrap_or("")),
+                    (
+                        Some(2),
+                        "",
+                        format!(
+                            "bash: craftbridge_set_test_runner_env cannot drop the inherited {name}, a name the shell will not unset, so it would reach the tests: run again without it"
+                        )
+                        .as_str()
+                    ),
+                    "an inherited variable whose name the shell will not unset stops the run"
+                );
+            }
+            let (code, all, _, err) = started(&bash, "and", &[("TEST_RUNNER_A-B", "1"), ("TEST_RUNNER_DROPPED", "1")], &["TEST_RUNNER_ONLY=one"]);
+            assert_eq!(
+                (code, all.as_str(), err.lines().last().unwrap_or("")),
+                (
+                    Some(2),
+                    "",
+                    "bash: craftbridge_set_test_runner_env cannot drop the inherited TEST_RUNNER_A-B, a name the shell will not unset, so it would reach the tests: run again without it"
+                ),
+                "the stage's own shape — the call on the left of an `&&` — stops on the refusal with the same status and nothing after it running"
+            );
+            let (code, held, _, err) = started(&bash, "direct", &[("SIMCTL_CHILD_CRAFTBRIDGE_BASELINE", "1")], &["TEST_RUNNER_ONLY=one"]);
+            assert_eq!(
+                (code, held.as_str(), err.as_str()),
+                (Some(0), "TEST_RUNNER_ONLY=one", ""),
+                "a SIMCTL_CHILD_ variable inherited with no TEST_RUNNER_ one beside it"
+            );
+            let (code, held, _, err) = started(&bash, "direct", &[], &["TEST_RUNNER_ONLY=one"]);
+            assert_eq!((code, held.as_str(), err.as_str()), (Some(0), "TEST_RUNNER_ONLY=one", ""), "a run of its own with nothing inherited");
+            let (code, held, _, err) = started(&bash, "direct", &[], &[]);
+            assert_eq!((code, held.as_str(), err.as_str()), (Some(0), "", ""), "a scrub with nothing to keep leaves none");
+            assert_eq!(
+                started(&bash, "direct", &[], &["PATH=/nowhere"]),
+                (
+                    Some(2),
+                    String::new(),
+                    String::new(),
+                    "bash: craftbridge_set_test_runner_env takes the run's TEST_RUNNER_ assignments, and PATH=/nowhere is none".to_string()
+                ),
+                "a word that is no TEST_RUNNER_ assignment is refused"
+            );
+        }
+    }
 }
 
 /// The one reading of the root, proved: the folder found from the run, its checks, and the refusal of
