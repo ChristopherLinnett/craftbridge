@@ -351,9 +351,12 @@ stage_swift_build() {
 # iPhone Simulator. The destination is the table's own (`cargo xtask swift-suite`, rust/xtask/src/pins.rs),
 # the one list of slices, with one of this machine's own simulators named in it, which `cargo xtask
 # simulator` chooses and shares one at a time with every other run on the machine
-# (rust/xtask/src/simulator.rs): the stage creates no device, boots an iPhone simulator only when none is
-# running, waits its turn when another run is testing on the simulator it chose, and shuts down only one
-# whose boot began under a run of it, never one somebody else had booted, once nothing uses it; and its
+# (rust/xtask/src/simulator.rs): the stage creates no device, boots an iPhone simulator only when none it
+# may take is running, waits its turn when another run is testing on the simulator it chose, and takes
+# none that a run started by hand is seen using, since that run shuts down when it ends a simulator it
+# booted — another available iPhone of its runtime is booted in its place, or the stage waits for that run
+# to end — and says which it did, and why; it shuts down only one whose boot began under a run of it, never
+# one somebody else had booted, once nothing uses it; and its
 # test runner takes a sandbox of its own, so a run of the suite started by hand on the same simulator
 # never meets this one's files. The suite runs in the one configuration that command names, the one a
 # developer and `swift test` run it in. The Simulator is macOS's own, so the hosted macOS job runs this
