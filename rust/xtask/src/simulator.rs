@@ -57,14 +57,11 @@
 
 use serde_json::Value;
 use std::fs::File;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, ExitCode, Stdio};
 
 /// What a program's arguments say where the simulator's id goes.
 const PLACEHOLDER: &str = "{simulator}";
-
-/// The variable naming the folder of the locks, which `tools/env.sh` sets for every run on the machine.
-const LOCKS: &str = "CRAFTBRIDGE_SIMULATOR_LOCKS";
 
 /// The tool that answers whether any process on the machine matches a pattern in its arguments.
 const PGREP: &str = "pgrep";
@@ -135,10 +132,10 @@ fn naming_the_simulator<'a>(arguments: &'a [&'a str]) -> Result<(&'a str, &'a [&
 /// The simulator is left behind even when it did not finish booting or the program could not start, so a
 /// run that booted one never leaves it running for want of a program.
 fn on_simulator(program: &str, arguments: &[&str]) -> Result<ExitCode, String> {
-    let locks = locks_folder()?;
+    let locks = crate::filelock::folder()?;
     std::fs::create_dir_all(&locks).map_err(|error| format!("could not create {}: {error}", locks.display()))?;
     let (device, theirs, using) = take(&locks)?;
-    let marker = lock_file(&locks, &device);
+    let marker = crate::filelock::for_id(&locks, &device.udid);
     let ran = ready(&marker, &device, theirs.as_deref()).and_then(|()| {
         println!("simulator: the suite runs on {} ({})", device.name, device.udid);
         Command::new(program).args(with_simulator(arguments, &device.udid)).status().map_err(|error| format!("could not run {program}: {error}"))
@@ -165,7 +162,7 @@ fn take(locks: &Path) -> Result<(Device, Option<String>, File), String> {
     // command is never on a simulator without holding its lock, so while the lock is held the simulator is
     // another run's own, waited for in the lock itself, and this answers nothing of it.
     let used = |device: &Device| -> Result<Option<String>, String> {
-        if busy_with_it(&lock_file(locks, device))? {
+        if crate::filelock::held(&crate::filelock::for_id(locks, &device.udid))? {
             return Ok(None);
         }
         used_outside_the_lock(device, device.running)
@@ -183,8 +180,8 @@ fn take(locks: &Path) -> Result<(Device, Option<String>, File), String> {
                 continue;
             }
         };
-        let marker = lock_file(locks, &device);
-        if busy_with_it(&marker)? {
+        let marker = crate::filelock::for_id(locks, &device.udid);
+        if crate::filelock::held(&marker)? {
             println!("simulator: the suite waits for {} ({}): another run is testing on it", device.name, device.udid);
         }
         let using = crate::filelock::hold(&marker)?;
@@ -255,11 +252,6 @@ fn until_unused(look: &mut dyn FnMut() -> Result<Option<String>, String>, pause:
     Ok(())
 }
 
-/// The simulator's lock file, in the folder of the locks.
-fn lock_file(locks: &Path, device: &Device) -> PathBuf {
-    locks.join(format!("{}.lock", device.udid))
-}
-
 /// Make the taken simulator ready for the program. The lock file says whose its boot is as soon as it runs,
 /// since a run killed while it waits for the boot never lets go of the simulator, and leaves it running with
 /// only the file to tell the next run it is the runs'; and again once it has finished booting, since
@@ -281,21 +273,6 @@ fn record(marker: &Path, device: &Device, theirs: Option<&str>) -> Result<(), St
 /// Write the simulator's lock file.
 fn say(marker: &Path, words: &str) -> Result<(), String> {
     std::fs::write(marker, words).map_err(|error| format!("could not write {}: {error}", marker.display()))
-}
-
-/// Whether another run is testing on this simulator: its lock file exists and someone holds it. A run
-/// found busy is said for before this one waits behind it, so the queue shows in the stage's log.
-fn busy_with_it(marker: &Path) -> Result<bool, String> {
-    let Ok(held) = File::open(marker) else { return Ok(false) };
-    crate::filelock::try_lock(&held).map_err(|error| format!("could not lock {}: {error}", marker.display())).map(|free| !free)
-}
-
-/// The folder `tools/env.sh` names for the locks.
-fn locks_folder() -> Result<PathBuf, String> {
-    std::env::var_os(LOCKS)
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .ok_or_else(|| format!("{LOCKS} is not set to an absolute path: run through tools/env.sh, which names the folder where the runs on this machine take turns on its simulators"))
 }
 
 /// The program's arguments with the simulator's id where each says.

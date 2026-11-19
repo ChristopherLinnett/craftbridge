@@ -20,8 +20,11 @@ const SWEEPER_NAME: &str = "sweeper";
 /// What a group's guard runs. It reads its end of a socket whose other end only the program that started
 /// the group holds, and which that program never writes, so `read` returns only once the kernel closes the
 /// program's end as the program ends, however it ends; then it kills its own process group, which it leads.
-/// That one kill can leave a process of the group running, which the sweeper ([`sweeper_script`]) ends.
-const GUARD: &str = "read -r held; kill -s KILL 0";
+/// That one kill can leave a process of the group running, which the sweeper ([`sweeper_script`]) ends. It
+/// ignores the signals a softer stop sends ([`signal_group`]): the program may ask its group to end its own
+/// way, and the guard, which leads the group and so hears that request too, stays to kill what is left
+/// should the program itself go first.
+const GUARD: &str = "trap '' INT TERM HUP; read -r held; kill -s KILL 0";
 
 /// What the sweeper of the group `group` runs. It waits as the guard does, on a socket of its own, then kills
 /// the group at once and again every [`POLL`] for as long as a kill of it succeeds. One kill can leave a
@@ -401,6 +404,29 @@ mod tests {
             stop_group(&mut shell).unwrap();
             assert_eq!(shell.try_wait().unwrap().map(|status| status.success()), Some(false), "the leader was reaped: {script}");
             assert!(!group_has_live_process(group).unwrap(), "a process of the group is still alive: {script}");
+        }
+    }
+
+    /// A softer stop sent to a guarded group reaches its process, which ends its own way, and leaves its
+    /// guard watching: the process's end is its exit, never a watcher gone while it still runs.
+    #[test]
+    fn a_softer_stop_ends_the_groups_process_its_own_way_and_spares_its_guard() {
+        for signal in ["TERM", "INT", "HUP"] {
+            let script = format!("trap 'sleep 1; exit 3' {signal}; sleep {OUTLASTING} & wait");
+            let mut group = Group::spawn(Command::new("sh").args(["-c", &script])).unwrap();
+            let id = group.id();
+            wait_for_processes(id, 3, &script);
+            signal_group(id, signal).unwrap();
+            let mut ended = Ok(None);
+            assert!(
+                poll_until(STUCK_AFTER, || {
+                    ended = group.try_wait().map_err(|error| error.to_string());
+                    !matches!(ended, Ok(None))
+                }),
+                "{signal}: the process never ended"
+            );
+            assert_eq!(ended.map(|status| status.and_then(|status| status.code())), Ok(Some(3)), "{signal}: the process did not end its own way");
+            group.stop().unwrap();
         }
     }
 

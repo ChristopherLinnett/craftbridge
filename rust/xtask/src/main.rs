@@ -26,6 +26,7 @@ mod attributes;
 mod bindings;
 mod buildfiles;
 mod compiled;
+mod device_lock;
 mod direction;
 mod duplicates;
 mod effects_api;
@@ -250,6 +251,7 @@ fn dispatch(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
         ["swift-builds"] => pins::builds(&root),
         ["swift-suite"] => pins::suite(&root),
         ["swift-products"] => pins::products(&root),
+        ["device-lock", device, "--", program, arguments @ ..] => device_lock::run(device, program, arguments),
         ["simulator", "--", program @ ..] => simulator::run(program),
         ["xcframework"] => xcframework::run(&root),
         ["sdk-library"] => layers::run_sdk_library(),
@@ -288,6 +290,9 @@ fn usage() {
     eprintln!("       cargo xtask swift-products   (the Swift package's library products, as its manifest lists them: what an app's extension links)");
     eprintln!(
         "       cargo xtask simulator -- <program> <argument>...   (the program on one of the machine's iPhone simulators, its id where an argument says {{simulator}})"
+    );
+    eprintln!(
+        "       cargo xtask device-lock <device> -- <program> <argument>...   (the program under the machine's lock for one device, which the runs of one device take turns on)"
     );
     eprintln!("       cargo xtask xcframework   (through tools/build-xcframework.sh: the native library's XCFramework, joined again only when it changed)");
     eprintln!("       cargo xtask sdk-library   (the native library the SDK ships, as the layer table gives it, for tools/build-android.sh)")

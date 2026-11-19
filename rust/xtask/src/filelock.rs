@@ -7,7 +7,39 @@
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// The variable naming the folder of the locks, which `tools/env.sh` sets for every run on the machine.
+const FOLDER: &str = "CRAFTBRIDGE_SIMULATOR_LOCKS";
+
+/// The folder `tools/env.sh` names for the locks.
+pub(crate) fn folder() -> Result<PathBuf, String> {
+    std::env::var_os(FOLDER)
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| format!("{FOLDER} is not set to an absolute path: run through tools/env.sh, which names the folder where the runs on this machine take turns on its simulators and devices"))
+}
+
+/// The lock file of the machine's simulator `id`, its UDID: one per simulator, named after it, in the folder
+/// `folder` — outside every checkout, so a run in one worktree sees the runs of another's.
+pub(crate) fn for_id(locks: &Path, id: &str) -> PathBuf {
+    locks.join(format!("{id}.lock"))
+}
+
+/// The lock file of the physical device `id`, in the same folder: named apart from every simulator's, so
+/// that no name a device may be given, a simulator's UDID among them, makes a device's runs and a
+/// simulator's wait on one lock.
+pub(crate) fn for_device(locks: &Path, id: &str) -> PathBuf {
+    for_id(locks, &format!("device-{id}"))
+}
+
+/// Whether somebody holds the lock at `path` now: the lock file exists and its lock is taken. Only a lock
+/// tried answers one held apart from one free, since the file being open would exclude even this holder;
+/// a caller found busy says so before waiting behind it, so the queue shows in the log.
+pub(crate) fn held(path: &Path) -> Result<bool, String> {
+    let Ok(held) = File::open(path) else { return Ok(false) };
+    try_lock(&held).map_err(|error| format!("could not lock {}: {error}", path.display())).map(|free| !free)
+}
 
 /// Wait for the exclusive lock on `path`: on the folder itself when it is one, and otherwise on the file
 /// there, made empty when it is missing. The lock is held for as long as the returned file is kept: bound
@@ -76,5 +108,23 @@ mod tests {
     fn a_folder_is_locked_as_a_file_is() {
         let scratch = Scratch::new("filelock-folder");
         takes_turns(&scratch.0);
+    }
+
+    /// `held` answers a lock held apart from one free and apart from no lock file at all, which is what
+    /// a run says busy before it waits: `for_id` names that file, one per simulator, and `for_device` one per
+    /// device, never a simulator's.
+    #[test]
+    fn held_knows_a_lock_held_from_one_free() {
+        let scratch = Scratch::new("filelock-held");
+        let marker = for_id(&scratch.0, "DEVICE");
+        assert_eq!(marker.file_name().and_then(|name| name.to_str()), Some("DEVICE.lock"), "one lock file per device, named after it");
+        let udid = "E33474EA-1897-4EF8-9DFB-DD3FFA178C8D";
+        assert_eq!(for_device(&scratch.0, "DEVICE").file_name().and_then(|name| name.to_str()), Some("device-DEVICE.lock"));
+        assert_ne!(for_device(&scratch.0, udid), for_id(&scratch.0, udid), "a device given a simulator's UDID never takes the simulator's lock");
+        assert!(!held(&scratch.0.join("no-such")).unwrap(), "no lock file is held by nobody");
+        let holding = hold(&marker).unwrap();
+        assert!(held(&marker).unwrap(), "someone holds it");
+        drop(holding);
+        assert!(!held(&marker).unwrap(), "nobody holds it once the holder lets go");
     }
 }

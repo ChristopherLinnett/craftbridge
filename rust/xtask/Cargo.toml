@@ -26,9 +26,10 @@ toml_edit.workspace = true
 roxmltree.workspace = true
 unicode-normalization.workspace = true
 
-# The tests that must meet a changed environment run one of their own again in a child; that code is the
-# support crate's, shared with the conformance runner and the core's tests.
-[dev-dependencies]
+# `cargo xtask device-lock` runs a device's whole run in a process group of its own, which the support
+# crate's watchers end together when the run is killed; the tests that must meet a changed environment
+# run one of their own again in a child, in that crate's code too, shared with the conformance runner
+# and the core's tests.
 craftbridge-process.workspace = true
 
 [lints]
