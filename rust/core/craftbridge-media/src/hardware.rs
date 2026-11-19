@@ -3,7 +3,9 @@
 
 use crate::aac::AacSpec;
 use crate::encode::{EncodeError, VideoSpec, Yuv420};
+use crate::failover::Failover;
 use crate::movie::{AudioTrack, Backend, Packet};
+use crate::software::SoftwareEncoder;
 
 #[cfg(target_vendor = "apple")]
 type Inner = crate::platform::videotoolbox_encoder::Encoder;
@@ -42,6 +44,18 @@ impl HardwareEncoder {
     #[cfg(all(test, target_os = "android"))]
     pub(crate) fn started_over(encoder: Inner) -> Self {
         Self(encoder)
+    }
+}
+
+/// The encoder an export uses: the hardware's, and the software encoder behind it when the hardware's session
+/// is lost (see [`crate::failover`]).
+pub type Resilient = Failover<HardwareEncoder, SoftwareEncoder>;
+
+impl Resilient {
+    /// Starts the hardware encoder for `spec`, as [`HardwareEncoder::start`] does, with the software encoder
+    /// behind it.
+    pub fn start(spec: VideoSpec) -> Result<Self, EncodeError> {
+        HardwareEncoder::start(spec).map(|hardware| Self::new(hardware, spec))
     }
 }
 
@@ -109,7 +123,13 @@ pub fn encode_aac(spec: AacSpec, samples: &[i16]) -> Result<AudioTrack, EncodeEr
 mod tests {
     use super::*;
     use crate::encode::{ColourCodes, RateControl, VideoCodec};
+    use std::sync::Arc;
+
     use crate::encodetests as device;
+    use crate::failover::Software;
+    use crate::failover::{Failover, Tally};
+    use crate::movie::Movie;
+    use crate::software::SoftwareEncoder;
     use filmcraft_isobmff::ColorInfo;
 
     /// A Mac has a hardware encoder for each codec; the iOS Simulator has what its host lends it, so a
@@ -156,6 +176,33 @@ mod tests {
             entry.video.as_ref().and_then(|video| video.color.clone()),
             Some(ColorInfo::Nclx { primaries: 12, transfer: 13, matrix: 1, full_range: false })
         );
+    }
+
+    #[test]
+    fn an_h264_movie_whose_hardware_session_is_lost_goes_on_in_software_with_every_picture_within_d12() {
+        device::check_session_lost_midway(hardware);
+    }
+
+    #[test]
+    fn an_hevc_movie_whose_hardware_session_is_lost_ends_in_the_error_naming_it() {
+        let tally = Arc::new(Tally::default());
+        let spec = device::spec(VideoCodec::Hevc);
+        let Ok(encoder) = hardware(spec).map(|encoder| {
+            Failover::<_, SoftwareEncoder>::counting(device::LosesSession::after(12, encoder), spec, tally.clone(), Box::new(SoftwareEncoder::start))
+        }) else {
+            return;
+        };
+        let mut movie = Movie::new(encoder, std::io::Cursor::new(Vec::new()), spec, device::FRAMES, None).unwrap();
+        let ended = (0..device::FRAMES).try_for_each(|index| movie.push_frame(index, device::picture_of(spec.width, spec.height, index)));
+        let words = ended.unwrap_err().to_string();
+        assert!(words.starts_with("the hardware video encoder's session was lost at frame "), "{words}");
+        assert!(
+            words.ends_with(
+                "(encoding the picture failed (-12903)) and the movie cannot go on in the software encoder: there is no software encoder for HEVC here"
+            ),
+            "{words}"
+        );
+        assert_eq!(tally.read().fallbacks, 0);
     }
 
     #[test]

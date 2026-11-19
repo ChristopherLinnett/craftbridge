@@ -34,6 +34,12 @@ pub trait Backend {
     fn finish(&mut self) -> Result<Vec<Packet>, EncodeError>;
     /// The `avcC` or `hvcC` record, known once the first packet has been returned.
     fn record(&self) -> Option<Vec<u8>>;
+    /// Whether the stream went on in another encoder after its first packet: [`record`](Self::record) then holds
+    /// both encoders' parameter sets, which the first record did not, so the movie reads it again at its end, once
+    /// the stream's last picture is known, in place of the first one's.
+    fn continued(&self) -> bool {
+        false
+    }
 }
 
 /// The sound of a movie, already encoded as AAC-LC.
@@ -133,6 +139,10 @@ impl<B: Backend, W: Write + Seek> Movie<B, W> {
             return Err(EncodeError::Failed(format!("the encoder produced {} pictures for {} frames", open.pictures, self.order.passed())));
         }
         self.write_sound(&mut open, None)?;
+        if self.backend.continued() {
+            let record = self.backend.record().ok_or_else(|| EncodeError::Failed("the encoder returned a picture without its record".into()))?;
+            open.writer.set_sample_entry(open.video, sample_entry(&self.spec, &record)?).map_err(mux)?;
+        }
         let frames = open.pictures;
         let mut out = open.writer.finish().map_err(mux)?;
         out.flush().map_err(mux)?;
@@ -215,7 +225,7 @@ mod tests {
     use std::io::Cursor;
     use std::rc::Rc;
 
-    use filmcraft_isobmff::{CodecConfig, Mp4File, Track, TrackKind};
+    use filmcraft_isobmff::{CodecConfig, FourCc, Mp4File, Track, TrackKind};
 
     use super::*;
     use crate::encode::RateControl;
@@ -284,6 +294,10 @@ mod tests {
         (Movie::new(fake, Cursor::new(Vec::new()), spec(VideoCodec::H264), frames, audio).unwrap(), fed)
     }
 
+    fn movie_of_two() -> (Movie<Fake, Cursor<Vec<u8>>>, Rc<RefCell<Vec<u64>>>) {
+        movie(2, None)
+    }
+
     fn track(units: usize) -> AudioTrack {
         AudioTrack { config: vec![0x11, 0x90], channels: 2, sample_rate: 48_000, priming: 2112, units: (0..units).map(|n| vec![n as u8; 4]).collect() }
     }
@@ -349,6 +363,45 @@ mod tests {
         let keys: Vec<bool> = video.samples.iter().map(|sample| sample.is_sync).collect();
         assert_eq!(keys, [true, false, false, true, false]);
         assert!(video.edits.is_empty(), "no reordering, so no edit");
+    }
+
+    #[test]
+    fn a_stream_that_went_on_in_another_encoder_is_written_with_the_record_that_covers_the_whole_of_it() {
+        /// Gives a record at the end that is not the one it gave for the first packet.
+        struct Continued {
+            fake: Fake,
+            finished: bool,
+        }
+        impl Backend for Continued {
+            fn encode(&mut self, index: u64, frame: &Yuv420) -> Result<Vec<Packet>, EncodeError> {
+                self.fake.encode(index, frame)
+            }
+            fn finish(&mut self) -> Result<Vec<Packet>, EncodeError> {
+                self.finished = true;
+                self.fake.finish()
+            }
+            fn record(&self) -> Option<Vec<u8>> {
+                let record = self.fake.record()?;
+                let mut config = AvcConfig::parse(&record).ok()?;
+                config.level = config.level.saturating_add(if self.finished { 9 } else { 0 });
+                Some(config.to_bytes())
+            }
+            fn continued(&self) -> bool {
+                true
+            }
+        }
+        let level = |bytes: Vec<u8>| match read(bytes).tracks.first().and_then(|track| track.entries.first()).map(|entry| (entry.format, entry.codec.clone())) {
+            Some((format, CodecConfig::Avc(record))) => Some((format, record.level)),
+            _ => None,
+        };
+        let (fake, _) = Fake::new(avcc());
+        let first = AvcConfig::parse(&avcc()).unwrap().level;
+        let mut movie = Movie::new(Continued { fake, finished: false }, Cursor::new(Vec::new()), spec(VideoCodec::H264), 2, None).unwrap();
+        (0..2).for_each(|index| movie.push_frame(index, blank()).unwrap());
+        assert_eq!(level(movie.finish().unwrap().out.into_inner()), Some((FourCc(*b"avc1"), first + 9)), "the record read at the end is the entry's");
+        let (mut movie, _) = movie_of_two();
+        (0..2).for_each(|index| movie.push_frame(index, blank()).unwrap());
+        assert_eq!(level(movie.finish().unwrap().out.into_inner()), Some((FourCc(*b"avc1"), first)), "a stream of one encoder keeps its first record");
     }
 
     #[test]

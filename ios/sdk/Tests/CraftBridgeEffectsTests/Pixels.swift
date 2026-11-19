@@ -2,6 +2,7 @@
 // tolerance as the desktop runner holds them, in its words: the compositor's rule for a render on the GPU
 // against the CPU's, which a phone can make against its own CPU's render.
 
+import AVFoundation
 import CraftBridge
 import Foundation
 import ImageIO
@@ -106,4 +107,97 @@ func pixels(_ actual: URL, against reference: URL, within tolerance: Tolerance) 
         failures.append("a pixel is \(furthest) levels from the reference's, past the \(tolerance.cap) allowed")
     }
     return failures
+}
+
+/// How a test reads a movie's pictures: as stills, each made afresh from the key picture before it; as a user
+/// scrubbing in a player does, one player seeking from each picture to the next with the decoder it kept; or as a
+/// player shows each picture when it starts there, a new one for every picture.
+enum MovieReading {
+    case stills
+    case scrubbing
+    case playerAfresh
+}
+
+/// One picture of a movie as 32-bit pixels, with the place of the alpha byte in each.
+private typealias Picture = (data: Data, alphaAt: Int)
+
+/// The pictures of `file` read the way `reading` says, frame by frame of the 30 frames a second of the running
+/// example.
+private func reader(of file: URL, _ reading: MovieReading) async throws -> (Int) async throws -> Picture {
+    switch reading {
+    case .stills:
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: file))
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        return { frame in
+            let (image, _) = try await generator.image(at: CMTime(value: Int64(frame), timescale: 30))
+            guard let data = image.dataProvider?.data as Data?, image.bitsPerPixel == 32 else {
+                throw RunnerFailure(description: "cannot read frame \(frame) as 32-bit pixels")
+            }
+            let first: [CGImageAlphaInfo] = [.first, .noneSkipFirst, .premultipliedFirst]
+            return (data, first.contains(image.alphaInfo) ? 0 : 3)
+        }
+    case .scrubbing:
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+        ])
+        let item = AVPlayerItem(url: file)
+        item.add(output)
+        let player = AVPlayer(playerItem: item)
+        for _ in 0..<500 where item.status != .readyToPlay {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard item.status == .readyToPlay else {
+            throw RunnerFailure(
+                description: "the player never readied \(file.lastPathComponent): \(String(describing: item.error))")
+        }
+        return { frame in
+            let time = CMTime(value: Int64(frame), timescale: 30)
+            await player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+            for _ in 0..<500 {
+                if let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) {
+                    CVPixelBufferLockBaseAddress(buffer, .readOnly)
+                    defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+                    let (width, height) = (CVPixelBufferGetWidth(buffer), CVPixelBufferGetHeight(buffer))
+                    let stride = CVPixelBufferGetBytesPerRow(buffer)
+                    guard let base = CVPixelBufferGetBaseAddress(buffer) else { break }
+                    let rows = Data(bytes: base, count: stride * height)
+                    var data = Data(capacity: width * height * 4)
+                    for row in 0..<height { data.append(rows[(row * stride)..<(row * stride + width * 4)]) }
+                    return (data, 3)
+                }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            throw RunnerFailure(
+                description: "the player gave no picture for frame \(frame) of \(file.lastPathComponent)")
+        }
+    case .playerAfresh:
+        return { frame in try await reader(of: file, .scrubbing)(frame) }
+    }
+}
+
+/// The lowest PSNR, in dB, between the pictures of two movies at `frames`, in that order, colour channels only:
+/// the alpha a decoded picture carries is a constant that would raise it. `movie` is read as `reading` says, as a
+/// user's player reads it, and `reference` the same way unless `referenceReading` names another.
+func lowestPSNR(
+    of movie: URL, against reference: URL, atFrames frames: [Int], reading: MovieReading = .stills,
+    referenceReading: MovieReading? = nil
+) async throws -> Double {
+    let actual = try await reader(of: movie, reading)
+    let expected = try await reader(of: reference, referenceReading ?? reading)
+    var lowest = Double.infinity
+    for frame in frames {
+        let (ours, theirs) = (try await actual(frame), try await expected(frame))
+        guard ours.data.count == theirs.data.count, ours.alphaAt == theirs.alphaAt else {
+            throw RunnerFailure(description: "frame \(frame) of the two movies differs in size or layout")
+        }
+        var squares = 0.0
+        for (at, (a, b)) in zip(ours.data, theirs.data).enumerated() where at % 4 != ours.alphaAt {
+            let difference = Double(a) - Double(b)
+            squares += difference * difference
+        }
+        let error = squares / Double(ours.data.count / 4 * 3)
+        lowest = min(lowest, error == 0 ? .infinity : 10 * log10(255 * 255 / error))
+    }
+    return lowest
 }

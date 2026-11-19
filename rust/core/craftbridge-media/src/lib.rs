@@ -3,8 +3,9 @@
 //! The decoders, VideoToolbox on iOS and MediaCodec on Android, are registered through FilmCraft's public
 //! decoder registry so the software decoders stay the fallback. The encoders, VideoToolbox and AudioToolbox
 //! on Apple platforms and MediaCodec on Android, feed [`Movie`], which writes the MP4; a platform without
-//! them answers [`EncodeError::Unavailable`], and its caller encodes another way. Platform code lives in
-//! `platform/`.
+//! them answers [`EncodeError::Unavailable`], and its caller encodes another way. A hardware encoder whose
+//! session is lost part way hands its movie to the software encoder behind it ([`Failover`]). Platform code
+//! lives in `platform/`.
 
 mod aac;
 #[cfg(any(target_os = "ios", target_os = "android", test))]
@@ -13,6 +14,7 @@ mod codec_list;
 mod encode;
 #[cfg(test)]
 mod encodetests;
+mod failover;
 mod fallback;
 mod hardware;
 #[cfg(any(target_os = "ios", target_os = "android", test))]
@@ -29,6 +31,7 @@ mod order;
 mod platform;
 #[cfg(any(target_vendor = "apple", target_os = "android", test))]
 mod settings;
+mod software;
 
 use filmcraft_codecs::hw::{HwStats, StreamInfo, hardware_decoding, hw_stats, note_hw_declined, set_hardware_decoding, set_hw_backend};
 use filmcraft_codecs::{Result, VideoDecoder, register_video_decoder};
@@ -38,9 +41,11 @@ use std::sync::RwLock;
 pub use aac::AacSpec;
 pub use codec_list::CodecInfo;
 pub use encode::{ColourCodes, EncodeError, RateControl, Reorder, VideoCodec, VideoSpec, Yuv420};
+pub use failover::{EncodingStats, Failover, Software};
 pub use fallback::{Draining, Fallback};
-pub use hardware::{HardwareEncoder, encode_aac};
+pub use hardware::{HardwareEncoder, Resilient, encode_aac};
 pub use movie::{AAC_FRAME, AudioTrack, Backend, Finished, Movie, Packet};
+pub use software::SoftwareEncoder;
 
 /// What [`register`] left the process able to do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,6 +174,13 @@ pub struct DecodingStats {
 /// went on in software, which the pictures themselves do not show, since the two decoders give the same ones.
 pub fn decoding_stats() -> DecodingStats {
     stats_of(hw_stats())
+}
+
+/// Which encoder made the pictures of the movies exported since the process started, which only grow: an app
+/// subtracts two readings to measure what happened between them, and a movie that went on in software after
+/// its hardware encoder was lost shows in `fallbacks`, which the pictures themselves do not show.
+pub fn encoding_stats() -> EncodingStats {
+    failover::Tally::process().read()
 }
 
 /// FilmCraft's counters under the names this crate's callers read them by.

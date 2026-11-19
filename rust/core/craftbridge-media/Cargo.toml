@@ -18,6 +18,10 @@ filmcraft-isobmff.workspace = true
 # layout.
 filmcraft-color.workspace = true
 filmcraft-frame.workspace = true
+# The software encoder a movie goes on in when its hardware encoder is lost, and what renames its parameter sets
+# (src/software.rs).
+craft-video.workspace = true
+craft-media.workspace = true
 
 # Apple's frameworks, which only an iPhone, its simulator or a Mac has; the features are the framework headers
 # the decoder (iOS only) and the encoders read (src/platform/). The encoders build on a Mac too, so the host

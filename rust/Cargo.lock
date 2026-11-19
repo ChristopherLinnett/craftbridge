@@ -739,6 +739,8 @@ dependencies = [
 name = "craftbridge-media"
 version = "0.1.0"
 dependencies = [
+ "craft-media 0.1.0 (git+https://github.com/storytold/craft-libs?rev=e7c3dda7f3e339dd2c8d40fc4eb405472be1a1e4)",
+ "craft-video",
  "craftbridge-process",
  "filmcraft-codecs",
  "filmcraft-color",

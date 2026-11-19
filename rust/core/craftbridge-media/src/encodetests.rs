@@ -4,15 +4,21 @@
 //! encoder, so the same checks run over the production hardware path and over a codec a proof names (plan §18).
 
 use std::io::Cursor;
+use std::sync::Arc;
 
 use filmcraft_frame::PixelData;
 use filmcraft_isobmff::{CodecConfig, ColorInfo, TrackKind};
 
 use crate::aac::AacSpec;
 use crate::encode::{ColourCodes, EncodeError, RateControl, VideoCodec, VideoSpec, Yuv420};
+use crate::failover::{Failover, Software, Tally};
 use crate::hardware::{HardwareEncoder, encode_aac};
-use crate::movie::{AudioTrack, Backend, Movie};
+use crate::movie::{AudioTrack, Backend, Movie, Packet};
+use crate::software::SoftwareEncoder;
 
+/// How a phone's checks start its encoder: T23's footage on each, and on Android each check over each way the
+/// device encodes.
+#[cfg(any(target_os = "ios", target_os = "android"))]
 pub(crate) type Start = fn(VideoSpec) -> Result<HardwareEncoder, EncodeError>;
 
 pub(crate) const SIZE: u32 = 128;
@@ -55,8 +61,93 @@ pub(crate) fn psnr(a: &[u8], b: &[u8]) -> f64 {
     if error == 0.0 { f64::INFINITY } else { 10.0 * (255.0f64 * 255.0 / error).log10() }
 }
 
+/// An encoder whose session is lost after it has taken `kept` pictures, as VideoToolbox's is when the app goes to
+/// the background: every call after that fails with the status it answers, and the pictures the encoder held at
+/// the time are never given back.
+pub(crate) struct LosesSession<B> {
+    inner: B,
+    kept: u64,
+    taken: u64,
+}
+
+impl<B> LosesSession<B> {
+    pub(crate) fn after(kept: u64, inner: B) -> Self {
+        Self { inner, kept, taken: 0 }
+    }
+
+    fn lost(&self) -> Result<(), EncodeError> {
+        if self.taken < self.kept { Ok(()) } else { Err(EncodeError::Failed("encoding the picture failed (-12903)".into())) }
+    }
+}
+
+impl<B: Backend> Backend for LosesSession<B> {
+    fn encode(&mut self, index: u64, frame: &Yuv420) -> Result<Vec<Packet>, EncodeError> {
+        self.lost()?;
+        self.taken += 1;
+        self.inner.encode(index, frame)
+    }
+
+    fn finish(&mut self) -> Result<Vec<Packet>, EncodeError> {
+        self.lost()?;
+        self.inner.finish()
+    }
+
+    fn record(&self) -> Option<Vec<u8>> {
+        self.inner.record()
+    }
+}
+
+/// A movie whose hardware session is lost after twelve of its pictures goes on in the software encoder: every
+/// picture is there within D-12 of the one that went in, the stream's record covers both encoders' pictures, a
+/// reader that seeks back over the switch still decodes the pictures before it, and the counters say which
+/// encoder made which pictures. The start may decline the codec, which skips the check.
+pub(crate) fn check_session_lost_midway<B: Backend>(start: impl Fn(VideoSpec) -> Result<B, EncodeError>) {
+    let tally = Arc::new(Tally::default());
+    let spec = spec(VideoCodec::H264);
+    let losing = |spec| {
+        start(spec)
+            .map(|encoder| Failover::<_, SoftwareEncoder>::counting(LosesSession::after(12, encoder), spec, tally.clone(), Box::new(SoftwareEncoder::start)))
+    };
+    let Some(bytes) = check_movie(spec, losing) else { return };
+    let stats = tally.read();
+    // The encoder held a few pictures when the session went, so the software encoder began where its packets
+    // stopped, not where the loss was noticed.
+    assert_eq!(stats.fallbacks, 1);
+    assert_eq!(stats.hardware_pictures + stats.software_pictures, FRAMES);
+    assert_eq!(stats.last_fallback_frame, Some(stats.hardware_pictures));
+    assert!(stats.hardware_pictures > 0 && stats.software_pictures > 0, "{stats:?}");
+    let file = filmcraft_isobmff::open(bytes.clone()).unwrap();
+    let entry = file.tracks.first().and_then(|track| track.entries.first()).unwrap();
+    // A player that seeks back over the switch keeps its decoder, and the parameter sets the software's pictures
+    // brought: the hardware's first picture decodes after the software's first from the sets the record holds.
+    let mut decoder = filmcraft_codecs::software_video_decoder(entry).unwrap();
+    for at in [stats.hardware_pictures, 0] {
+        let sample = file.tracks.first().and_then(|track| track.samples.get(at as usize)).unwrap();
+        assert!(sample.is_sync, "frame {at} is a key picture");
+        let mut decoded = decoder.decode(&file.read_sample(&bytes, 0, at as usize).unwrap(), sample.pts).unwrap();
+        decoded.extend(decoder.flush());
+        let PixelData::Yuv8 { planes, .. } = &decoded.first().unwrap().frame.data else { panic!("8-bit planes expected") };
+        let quality = psnr(planes.first().unwrap(), &picture_of(spec.width, spec.height, at).y);
+        assert!(quality >= D12_DB, "frame {at} after a seek back over the switch: luma PSNR {quality}");
+    }
+    // The record covers both encoders' pictures: no lower a level than the hardware's own movie holds.
+    let level = |entry: &filmcraft_isobmff::SampleEntry| match &entry.codec {
+        CodecConfig::Avc(record) => Some((record.profile, record.level)),
+        _ => None,
+    };
+    let whole = movie_of(spec, start, FRAMES, None).map(|bytes| filmcraft_isobmff::open(bytes).unwrap());
+    let whole = whole.as_ref().and_then(|file| file.tracks.first()).and_then(|track| track.entries.first()).and_then(level);
+    let continued = level(entry);
+    assert!(continued.zip(whole).is_some_and(|(continued, whole)| continued.0 >= whole.0 && continued.1 >= whole.1), "{continued:?} against {whole:?}");
+}
+
 /// The frames of a `spec`'s movie, fed out of order on purpose: the movie puts them back.
-pub(crate) fn movie_of(spec: VideoSpec, start: Start, frames: u64, audio: Option<AudioTrack>) -> Option<Vec<u8>> {
+pub(crate) fn movie_of<B: Backend>(
+    spec: VideoSpec,
+    start: impl Fn(VideoSpec) -> Result<B, EncodeError>,
+    frames: u64,
+    audio: Option<AudioTrack>,
+) -> Option<Vec<u8>> {
     let encoder = start(spec).ok()?;
     let mut movie = Movie::new(encoder, Cursor::new(Vec::new()), spec, frames, audio).unwrap();
     for index in (0..frames).rev() {
@@ -68,10 +159,11 @@ pub(crate) fn movie_of(spec: VideoSpec, start: Start, frames: u64, audio: Option
 /// Every picture of a movie the platform encoded is there, timed as asked, with a picture decoding can start
 /// at no further apart than the interval asked for, and each of its planes within D-12 of the picture that
 /// went in: an encoder that garbles, drops or retimes pictures, or was handed them in a layout other than the
-/// one it reads, fails here, not downstream.
-pub(crate) fn check_movie(spec: VideoSpec, start: Start) {
+/// one it reads, fails here, not downstream. Gives back the movie it checked, or nothing where the start
+/// declined the codec.
+pub(crate) fn check_movie<B: Backend>(spec: VideoSpec, start: impl Fn(VideoSpec) -> Result<B, EncodeError>) -> Option<Vec<u8>> {
     let codec = spec.codec;
-    let Some(bytes) = movie_of(spec, start, FRAMES, None) else { return };
+    let bytes = movie_of(spec, start, FRAMES, None)?;
     let file = filmcraft_isobmff::open(bytes.clone()).unwrap();
     let track = file.tracks.iter().find(|track| track.kind == TrackKind::Video).unwrap();
     assert_eq!((track.timescale, track.samples.len()), (spec.rate_num, FRAMES as usize));
@@ -110,6 +202,7 @@ pub(crate) fn check_movie(spec: VideoSpec, start: Start) {
             assert!(quality >= D12_DB, "{codec:?} picture {index}: {name} PSNR {quality}");
         }
     }
+    Some(bytes)
 }
 
 /// One second of a tone, 48 kHz stereo.
@@ -158,7 +251,7 @@ fn burst() -> Vec<i16> {
 /// priming cut off by an edit that is the encoder's own, so the sound decodes with every sample where it went
 /// in: an edit that skipped more or less than the encoder primed would put the sound early or late against
 /// the pictures, and an encoder that kept the sound's end would show in its units.
-pub(crate) fn check_movie_with_sound(start: Start) {
+pub(crate) fn check_movie_with_sound<B: Backend>(start: impl Fn(VideoSpec) -> Result<B, EncodeError>) {
     let sound = encode_aac(AacSpec { sample_rate: 48_000, channels: 2 }, &burst()).unwrap();
     let units = sound.units.len();
     let Some(movie) = movie_of(spec(VideoCodec::H264), start, FRAMES, Some(sound)) else { return };
@@ -175,7 +268,7 @@ pub(crate) fn check_movie_with_sound(start: Start) {
 /// A picture that is not one of the movie's is refused by the encoder where the encoder is asked for one:
 /// a wrongly sized plane is no picture at all, and an encoder that encoded it would write a frame the
 /// movie never asked for. The start may decline the codec (a platform with none), which skips the check.
-pub(crate) fn wrong_size_is_refused(start: Start) {
+pub(crate) fn wrong_size_is_refused<B: Backend>(start: impl Fn(VideoSpec) -> Result<B, EncodeError>) {
     let Ok(mut encoder) = start(spec(VideoCodec::H264)) else { return };
     let wrong = Yuv420 { y: vec![0; 4], u: vec![0], v: vec![0] };
     assert_eq!(encoder.encode(0, &wrong).unwrap_err().to_string(), "the frame's planes are not those of a 128x128 picture");

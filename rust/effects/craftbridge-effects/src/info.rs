@@ -1,7 +1,7 @@
 //! The `info` method: the engine's state as one document, in the command line's shape (plan §14).
 
 use craftbridge_core::{CraftError, Result};
-use craftbridge_media::{Availability, DecodingStats};
+use craftbridge_media::{Availability, DecodingStats, EncodingStats};
 use effectcraft_automation::Backend;
 use serde_json::Value;
 
@@ -11,7 +11,7 @@ use crate::methods::{empty_params, object, tool_json};
 /// The engine this plugin answers for, named as plan §21 spells it.
 const ENGINE: &str = "effectcraft";
 
-/// `info`: `{engine, version, pin, commands, effects, project, activeComp, gpu, hardwareDecoding, decoding}`.
+/// `info`: `{engine, version, pin, commands, effects, project, activeComp, gpu, hardwareDecoding, decoding, encoding}`.
 ///
 /// The project and active comp come from EffectCraft's own tools, so the document is the command
 /// line's `info` with the plugin's identity beside it. `gpu` says where the engine renders
@@ -22,7 +22,8 @@ const ENGINE: &str = "effectcraft";
 /// VideoToolbox's on an iPhone, or on Android one the codec list the app handed over names; false where it
 /// found none, as in the iOS Simulator, on the desktop, and on an Android device whose list names none or
 /// that was handed no list. `decoding` counts what the hardware decoders have done since the process
-/// started (see [`decoding`]), so an app can tell that one failed and the stream went on in software.
+/// started (see [`decoding`]), so an app can tell that one failed and the stream went on in software, and
+/// `encoding` counts which encoder made the pictures of the hardware exports (see [`encoding`]).
 pub(crate) fn info(backend: &mut Backend, params: &Value) -> Result<Value> {
     if !(params.is_null() || params.as_object().is_some_and(serde_json::map::Map::is_empty)) {
         return Err(CraftError::invalid_params("`info`: takes no parameters"));
@@ -50,6 +51,7 @@ pub(crate) fn info(backend: &mut Backend, params: &Value) -> Result<Value> {
         ("gpu", gpu),
         ("hardwareDecoding", Value::Bool(decodes_on_hardware(craftbridge_media::availability()))),
         ("decoding", decoding(craftbridge_media::decoding_stats())),
+        ("encoding", encoding(craftbridge_media::encoding_stats())),
     ]))
 }
 
@@ -61,6 +63,19 @@ fn decoding(stats: DecodingStats) -> Value {
         ("pictures", Value::from(stats.pictures)),
         ("declined", Value::from(stats.declined)),
         ("fallbacks", Value::from(stats.fallbacks)),
+    ])
+}
+
+/// `info.encoding`: `{hardwarePictures, softwarePictures, fallbacks, lastFallbackFrame}`, the counters for the
+/// movies exported through the hardware path, which only grow: a movie whose hardware encoder was lost and went
+/// on in software adds one to `fallbacks`, and `lastFallbackFrame` is the first frame the software encoder made
+/// in the latest such movie (null when none has), so every frame before it is the hardware's.
+fn encoding(stats: EncodingStats) -> Value {
+    object([
+        ("hardwarePictures", Value::from(stats.hardware_pictures)),
+        ("softwarePictures", Value::from(stats.software_pictures)),
+        ("fallbacks", Value::from(stats.fallbacks)),
+        ("lastFallbackFrame", stats.last_fallback_frame.map_or(Value::Null, Value::from)),
     ])
 }
 
@@ -86,5 +101,12 @@ mod tests {
     fn decoding_names_each_counter_for_what_it_counts() {
         let stats = DecodingStats { sessions: 1, pictures: 5, declined: 2, fallbacks: 3 };
         assert_eq!(decoding(stats), serde_json::json!({"sessions": 1, "pictures": 5, "declined": 2, "fallbacks": 3}));
+    }
+
+    #[test]
+    fn encoding_names_each_counter_for_what_it_counts() {
+        let stats = EncodingStats { hardware_pictures: 3, software_pictures: 5, fallbacks: 1, last_fallback_frame: Some(3) };
+        assert_eq!(encoding(stats), serde_json::json!({"hardwarePictures": 3, "softwarePictures": 5, "fallbacks": 1, "lastFallbackFrame": 3}));
+        assert_eq!(encoding(EncodingStats::default()).get("lastFallbackFrame"), Some(&Value::Null));
     }
 }
