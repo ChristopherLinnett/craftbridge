@@ -254,8 +254,13 @@ stage_plan_views() {
   xtask plan-views --check
 }
 # Every Swift and Kotlin block the guides show must be a run of lines of a file the samples' builds compile,
-# as the samples' one definition lists them (rust/xtask/src/guide_samples.rs, rust/xtask/src/samples.rs);
-# the compiling of those files is the swift_build and android_samples stages' own job.
+# as the samples' one definition lists them (rust/xtask/src/guide_samples.rs, rust/xtask/src/samples.rs),
+# and never a run lying wholly on lines that compile to nothing: which lines those are is each language's
+# own parser's answer — detekt's `CompilesToNothing`, run by the sample build itself over the folders its
+# variants compile, for Kotlin, and tools/guide-swift-lines.swift, reading the Swift with the pinned Xcode's
+# swift-syntax on every build swift_build makes, under the conditions Xcode resolves for each, for Swift — so
+# a block quoted from inside a comment, a KDoc, a string or a branch no shipping build compiles is refused. The compiling of those
+# files is the swift_build and android_samples stages' own job.
 stage_guide_samples() { xtask guide-samples; }
 # swift-format over every Swift file the rules' walk lists, generated Swift included: it ships as written
 # Swift does, so it meets the same rules, bar those UniFFI's fixed templates cannot meet, which the folder
@@ -614,7 +619,7 @@ left_to_macos=(
   "conformance: its steps that ask for the GPU fail where the machine gives none (rust/effects/craftbridge-effects-conformance/src/host.rs), and the oracle they are compared with is an EffectCraft build of its own (tools/oracle.sh)"
   "rust_mobile: the iOS targets need Xcode's SDKs, and the Android targets the NDK r28 tools/env.sh pins, which the macOS image carries and Ubuntu's does not"
   "swift_format swift_build swift_lint: Xcode and SwiftPM"
-  "guide_samples: it reads which files each iOS sample's project compiles through plutil, macOS's own reader of the project file"
+  "guide_samples: it reads which files each iOS sample's project compiles, and under what conditions, through plutil, xcodebuild and the Xcode toolchain's own swift-syntax, macOS's own readers of the project, its settings and the language"
   "swift_test: the suite runs on the iOS Simulator, which is macOS's own, so the hosted macOS job runs it on the runner's simulator"
   "android_samples: each sample bundles the running example's template, which the EffectCraft command line at the pin makes (tools/birthday-card.sh): the macOS job builds that command line once, for conformance, and the Linux job would build it a second time, cold"
   "shell: Homebrew's shellcheck is the release the doctor's fix installs, while Ubuntu's is an older one whose checks differ"

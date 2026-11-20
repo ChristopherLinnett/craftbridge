@@ -825,3 +825,75 @@ class GeneratedNameTakenTest {
         assertFalse(underFolder("/x/effects/src/generated/kotlin", "/x/effects/src/generated/kotlin"))
     }
 }
+
+// The guide check's Kotlin answer (AGENTS.md §10): a line is reported exactly when every non-blank
+// character of it sits in a comment, a KDoc, or a multi-line string, so the lines of a quoted block
+// read back which regions a build compiles to nothing.
+class CompilesToNothingTest {
+    private val rule = CompilesToNothing(active)
+
+    private fun deadLines(code: String): List<Int> = rule.lint(code).map { it.entity.location.source.line }
+
+    @Test
+    fun `each form of comment reports its own lines and no others`() {
+        assertEquals(listOf(2), deadLines("live()\n// a line comment\nlive()\n"))
+        assertEquals(listOf(2, 3), deadLines("live()\n/* a note\n   on two lines */\nlive()\n"))
+        assertEquals(listOf(1, 2, 3), deadLines("/**\n * A KDoc stands in for the code it sits over.\n */\nfun f() = Unit\n"))
+    }
+
+    @Test
+    fun `a line with code before its comment is not reported, and a blank line is not`() {
+        assertEquals(emptyList(), deadLines("live() // after code, the line compiles\n\nlive()\n"))
+    }
+
+    @Test
+    fun `a multi-line string reports its body and its closing line, not its opening one`() {
+        assertEquals(listOf(2, 3, 4), deadLines("val poem = \"\"\"\none\ntwo\n\"\"\"\n"))
+        // Code after the closing quote, here the trim, compiles, so that line stands.
+        assertEquals(listOf(2, 3), deadLines("val poem = \"\"\"\none\ntwo\n\"\"\".trimIndent()\n"))
+    }
+
+    @Test
+    fun `interpolated code keeps its line live, however short`() {
+        // Only the string's own glue sits around the call on line 3, so the call compiles and the line stands.
+        assertEquals(listOf(2), deadLines("val s = \"\"\"\nprose\n${'$'}{call()}\n\"\"\".trimIndent()\n"))
+        assertEquals(emptyList(), deadLines("val s = \"\"\"\n${'$'}name\n\"\"\".trimIndent()\n"))
+    }
+
+    @Test
+    fun `a one-line string is the code that uses it`() {
+        assertEquals(emptyList(), deadLines("val s = \"x\"\n"))
+        // Triple-quoted on one line, standing alone on its line as an argument, it is still code.
+        assertEquals(emptyList(), deadLines("val s =\n    listOf(\n        \"\"\"x\"\"\"\n    )\n"))
+    }
+
+    @Test
+    fun `a comment nested in a comment is one comment, however it closes`() {
+        assertEquals(listOf(1, 2, 3, 4), deadLines("/* outer\n   /* inner */\n   fun hidden() = 1\n*/\nfun live() = 2\n"))
+    }
+
+    @Test
+    fun `a dollar that names nothing is the string's own text, and one that names a value is code`() {
+        assertEquals(listOf(2, 4), deadLines("val s = \"\"\"\ncosts ${'$'} 5\nby ${'$'}name\n\"\"\"\n"))
+    }
+
+    @Test
+    fun `code before a string opens and after it closes keeps those lines`() {
+        assertEquals(listOf(2), deadLines("val s = listOf(\"\"\"\nbody\n\"\"\", \"tail\")\n"))
+    }
+
+    @Test
+    fun `a suppression on a declaration does not reach a line`() {
+        // The finding sits on the file: no annotation written beside the code it reports can silence it.
+        assertEquals(listOf(2), deadLines("@Suppress(\"CompilesToNothing\")\n/* dead */\nfun f() = Unit\n"))
+    }
+
+    @Test
+    fun `every report names the line and says what it sits in`() {
+        val finding = rule.lint("/* dead */\n").first()
+        assertEquals(
+            "this line compiles to nothing: every non-blank character of it sits in a comment, a KDoc, or a multi-line string",
+            finding.message,
+        )
+    }
+}

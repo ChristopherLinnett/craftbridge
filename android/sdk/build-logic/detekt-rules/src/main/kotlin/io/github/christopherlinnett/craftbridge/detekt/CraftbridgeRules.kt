@@ -5,6 +5,7 @@ package io.github.christopherlinnett.craftbridge.detekt
 // this one file: split over a file each, that header would be the same lines over and over, which is
 // the duplication AGENTS.md §5 refuses. The profiles in detekt-rules/profiles name which run where.
 
+import com.intellij.lang.ASTNode
 import dev.detekt.api.Config
 import dev.detekt.api.Detektion
 import dev.detekt.api.Entity
@@ -16,8 +17,11 @@ import dev.detekt.api.RequiresAnalysisApi
 import dev.detekt.api.Rule
 import dev.detekt.api.RuleSetId
 import dev.detekt.api.SetupContext
+import dev.detekt.api.SourceLocation
+import dev.detekt.api.TextLocation
 import dev.detekt.api.config
 import dev.detekt.core.suppressors.isSuppressedBy
+import org.jetbrains.kotlin.KtNodeTypes
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.components.KaDiagnosticCheckerFilter
 import org.jetbrains.kotlin.analysis.api.components.evaluate
@@ -29,6 +33,7 @@ import org.jetbrains.kotlin.analysis.api.symbols.KaPropertySymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolVisibility
 import org.jetbrains.kotlin.analysis.api.types.symbol
 import org.jetbrains.kotlin.descriptors.annotations.AnnotationUseSiteTarget
+import org.jetbrains.kotlin.kdoc.lexer.KDocTokens
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.StandardClassIds
@@ -767,6 +772,138 @@ class UnrunTest(
                 "returns `${returnClass.asString()}${if (nullable) "?" else ""}`: TestNG drops it as it reads the class and $UNSEEN: " +
                     "bound the body to `Unit`, with the assertions inside it"
             }
+        }
+    }
+}
+
+/**
+ * A line that compiles to nothing: every non-blank character of it sits inside a comment, a KDoc, or
+ * the body of a multi-line string — text the parser reads but no build compiles (AGENTS.md §10). The
+ * guide check, `cargo xtask guide-samples`, runs this rule alone over the files the samples' builds
+ * compile: a block a guide quotes whose every line this rule reports is a copy of a comment or prose,
+ * not of code, and the guide is refused for it. Types are not needed to see a comment or a string,
+ * so the run is a light one; the answer it reads is the line numbers, not the messages.
+ *
+ * The innermost marking wins, which is how the tree reads: a multi-line string's body is dead text,
+ * a `${ … }` inside it is code again, and a comment inside such code is dead again. A string on one
+ * line, triple-quoted or not, is no body: its line is the code that uses it, as an argument or a value
+ * standing alone on its line still is. Interpolated `$name` compiles, so it keeps its line; a `$` that
+ * names nothing is the string's own text.
+ *
+ * A finding sits on the file, not on any declaration, because a line belongs to no declaration: a
+ * suppression written beside the code reaches no line, and the only suppression that could is
+ * `@file:Suppress`, which [FileWideSuppression] refuses in the written run every such file passes
+ * through, so no line goes quiet here by a switch in the source.
+ */
+class CompilesToNothing(
+    config: Config,
+) : Rule(config, "every non-blank character of this line sits in a comment or a string, which compiles to nothing") {
+    override fun visitKtFile(file: KtFile) {
+        super.visitKtFile(file)
+        val text = file.text
+        val marks = mutableListOf<Mark>()
+        collect(file.node, marks)
+        if (marks.isEmpty()) {
+            return
+        }
+        val inert = BooleanArray(text.length)
+        // Deepest marking last: a nested range is always the shorter one, so sorting by length and
+        // writing in order leaves every character marked by the tightest range that covers it.
+        for (mark in marks.sortedByDescending { it.length }) {
+            for (offset in mark.start until minOf(mark.start + mark.length, text.length)) {
+                inert[offset] = !mark.live
+            }
+        }
+        val path = Path.of(file.virtualFilePath)
+        var line = 0
+        var start = 0
+        while (start <= text.length) {
+            val end = text.indexOf('\n', start).let { if (it < 0) text.length else it }
+            line += 1
+            val content = (start until end).firstOrNull { !text[it].isWhitespace() }
+            if (content != null && (start until end).none { !text[it].isWhitespace() && !inert[it] }) {
+                report(
+                    Finding(
+                        Entity(
+                            "$path:$line",
+                            Location(SourceLocation(line, 1), SourceLocation(line, 1), TextLocation(start, end), path),
+                            file,
+                        ),
+                        "this line compiles to nothing: every non-blank character of it sits in a comment, a KDoc, or a multi-line string",
+                    ),
+                )
+            }
+            if (end == text.length) {
+                break
+            }
+            start = end + 1
+        }
+    }
+
+    /** A span of text marked dead (inside a comment or a string body) or live (code again: an interpolation). */
+    private class Mark(
+        val start: Int,
+        val length: Int,
+        val live: Boolean,
+    )
+
+    private fun collect(
+        node: ASTNode,
+        into: MutableList<Mark>,
+    ) {
+        when (node.elementType) {
+            KtTokens.BLOCK_COMMENT, KtTokens.EOL_COMMENT, KDocTokens.KDOC -> {
+                into += Mark(node.startOffset, node.textLength, false)
+            }
+
+            KtNodeTypes.STRING_TEMPLATE -> {
+                // Only a string whose text spans lines has a body: one quote cannot.
+                if (node.text.contains('\n')) {
+                    into += Mark(node.startOffset, node.textLength, false)
+                    var entry = node.firstChildNode
+                    while (entry != null) {
+                        when (entry.elementType) {
+                            // `${ … }`: the braces are glue of the string, what sits between them compiles.
+                            KtNodeTypes.LONG_STRING_TEMPLATE_ENTRY -> {
+                                val head = entry.firstChildNode
+                                val tail = entry.lastChildNode
+                                if (head != null && tail != null && head.startOffset + head.textLength < tail.startOffset) {
+                                    into +=
+                                        Mark(
+                                            head.startOffset + head.textLength,
+                                            tail.startOffset - head.startOffset - head.textLength,
+                                            true,
+                                        )
+                                }
+                                collectBetween(entry, into)
+                            }
+
+                            // `$name` compiles too: only the `$` is glue.
+                            KtNodeTypes.SHORT_STRING_TEMPLATE_ENTRY -> {
+                                into += Mark(entry.startOffset + 1, entry.textLength - 1, true)
+                            }
+
+                            else -> {}
+                        }
+                        entry = entry.treeNext
+                    }
+                }
+            }
+
+            else -> {
+                collectBetween(node, into)
+            }
+        }
+    }
+
+    private fun collectBetween(
+        node: ASTNode,
+        into: MutableList<Mark>,
+    ) {
+        var child = node.firstChildNode
+        while (child != null) {
+            collect(child, into)
+            child = child.treeNext
         }
     }
 }

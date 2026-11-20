@@ -29,6 +29,7 @@ class CraftbridgeRuleSetProvider : RuleSetProvider {
                 ::ErrorSuppression,
                 ::GeneratedNameTaken,
                 ::UnrunTest,
+                ::CompilesToNothing,
             ),
         )
 

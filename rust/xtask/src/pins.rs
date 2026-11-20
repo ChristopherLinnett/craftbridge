@@ -39,7 +39,7 @@ pub(crate) const CATALOG_PINS: [&str; 4] = ["android-compileSdk", "android-minSd
 
 /// The configurations the Swift package ships as: the Debug a developer builds, and the Release a library
 /// is shipped in. An `#if !DEBUG` compiles code no Debug build sees, so both ship.
-const SWIFT_CONFIGURATIONS: [&str; 2] = ["Debug", "Release"];
+pub(crate) const SWIFT_CONFIGURATIONS: [&str; 2] = ["Debug", "Release"];
 
 /// The configuration the Swift Testing suite runs in: the one a developer and `swift test` run it in.
 /// `swift_build` compiles the test targets in both configurations, so the Release build of every `#if`
@@ -47,11 +47,12 @@ const SWIFT_CONFIGURATIONS: [&str; 2] = ["Debug", "Release"];
 /// at the suite's whole cost again, to test the same code with the optimiser on.
 const SWIFT_TEST_CONFIGURATION: &str = "Debug";
 
-/// One Apple slice: the Rust target that names it, the architecture and environment its Swift target
-/// triple is built from, the SDK `xcrun` names, how a message names it, and the destination `xcodebuild`
-/// compiles it as.
+/// One Apple slice: the Rust target that names it, the operating system, architecture and environment its
+/// Swift target triple is built from, the first as an `#if os(…)` names it, the SDK `xcrun` names, how a
+/// message names it, and the destination `xcodebuild` compiles it as.
 pub(crate) struct Slice {
     pub(crate) target: &'static str,
+    pub(crate) os: &'static str,
     pub(crate) architecture: &'static str,
     pub(crate) environment: &'static str,
     pub(crate) sdk: &'static str,
@@ -65,9 +66,18 @@ pub(crate) struct Slice {
 /// builds, whatever processor the machine running it has. A slice of the toolchain's this table does not
 /// know stops the stage rather than going unread or unbuilt.
 const APPLE_SLICES: &[&Slice; 3] = &[
-    &Slice { target: "aarch64-apple-ios", architecture: "arm64", environment: "", sdk: "iphoneos", message: "iOS device", destination: "generic/platform=iOS" },
+    &Slice {
+        target: "aarch64-apple-ios",
+        os: "iOS",
+        architecture: "arm64",
+        environment: "",
+        sdk: "iphoneos",
+        message: "iOS device",
+        destination: "generic/platform=iOS",
+    },
     &Slice {
         target: "aarch64-apple-ios-sim",
+        os: "iOS",
         architecture: "arm64",
         environment: "-simulator",
         sdk: "iphonesimulator",
@@ -76,6 +86,7 @@ const APPLE_SLICES: &[&Slice; 3] = &[
     },
     &Slice {
         target: "x86_64-apple-ios",
+        os: "iOS",
         architecture: "x86_64",
         environment: "-simulator",
         sdk: "iphonesimulator",

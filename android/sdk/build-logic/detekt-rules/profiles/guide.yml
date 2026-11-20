@@ -1,0 +1,12 @@
+# The run `cargo xtask guide-samples` gives each module's compiled Kotlin, beside no other profile:
+# only the rule that says which lines a build compiles to nothing (AGENTS.md §10). A guide may quote
+# code, not prose that sits where code should be, and this is the check that tells them apart — a block
+# whose every line the rule reports quotes a comment, a KDoc, or a string body, and the guide is
+# refused. The run stands alone and is a light one: whether a line's characters sit in a comment or a
+# string the parser alone answers, so no classpath and no types join the run, and the validator reads
+# a config whose every named rule runs. The findings are the answer the task reads from its report,
+# not failures: the run asks for the report, and not for a red build.
+
+craftbridge:
+  CompilesToNothing:
+    active: true

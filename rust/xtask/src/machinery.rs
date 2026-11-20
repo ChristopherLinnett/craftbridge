@@ -82,6 +82,9 @@ const MACHINERY: &[&str] = &[
     "tools/device-tests.tsv",
     // The app the runner wraps a Swift package's test bundle in to run its Swift Testing suite on the phone.
     "tools/ios-test-host.swift",
+    // The guide check's Swift reader: which lines of the Swift the samples' projects compile compile to
+    // nothing is its answer, read with the compiler's own parser, and nothing else builds it.
+    "tools/guide-swift-lines.swift",
     // The builds of the native library: the XCFramework the Swift stages build and link against, and the
     // Android libraries the Android stage packages from `jniLibs`.
     "tools/build-xcframework.sh",

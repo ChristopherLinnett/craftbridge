@@ -10,6 +10,7 @@ import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.FileCollection
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.Classpath
 import org.gradle.api.tasks.IgnoreEmptyDirectories
 import org.gradle.api.tasks.Input
@@ -27,6 +28,44 @@ import java.io.File
 import javax.inject.Inject
 
 /**
+ * The plumbing one detekt run of its own needs: the tool, the build's own rules, the files to read, the
+ * configs to merge, the report to write, and the JVM of its own to run in. Two task bodies put that one
+ * definition to opposite uses — [CraftbridgeDetekt], where any finding fails the build, and
+ * [CraftbridgeGuideKotlin], where every finding is the answer being asked for — and neither says it twice.
+ */
+abstract class CraftbridgeDetektRun : DefaultTask() {
+    /** The detekt command-line tool and its own libraries, at the catalog's version. */
+    @get:Classpath
+    abstract val toolClasspath: ConfigurableFileCollection
+
+    /** The rules this build adds to detekt's own, loaded as the tool's plugin jar. */
+    @get:Classpath
+    abstract val rulePlugins: ConfigurableFileCollection
+
+    /** The folders and files this module's components compile, as AGP's variant API lists them. */
+    @get:InputFiles
+    @get:SkipWhenEmpty
+    @get:IgnoreEmptyDirectories
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val checkedSources: ConfigurableFileCollection
+
+    /** The profiles the run merges into its one config. */
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val configFiles: ConfigurableFileCollection
+
+    /** The run's report over the checked files, written by the tool whether or not it found anything. */
+    @get:OutputFile
+    abstract val reportFile: RegularFileProperty
+
+    @get:Inject
+    protected abstract val execOperations: ExecOperations
+
+    /** A collection spelt the way detekt reads several inputs: absolute paths, separated the host's way. */
+    protected fun ConfigurableFileCollection.joined(): String = files.joinToString(File.pathSeparator) { it.absolutePath }
+}
+
+/**
  * One detekt run over one set of a module's sources, launched from the detekt command line in a JVM of
  * its own. detekt's analysis starts the Kotlin compiler's IntelliJ core, which sets IntelliJ's
  * JVM-wide settings as it starts (`idea.config.path` among them) — the settings Lint reads inside
@@ -40,15 +79,7 @@ import javax.inject.Inject
  * component with nothing to check is NO-SOURCE — it says so rather than pretending to have checked
  * something — and any finding fails the task, because the profiles it is given let no issue stand.
  */
-abstract class CraftbridgeDetekt : DefaultTask() {
-    /** The detekt command-line tool and its own libraries, at the catalog's version. */
-    @get:Classpath
-    abstract val toolClasspath: ConfigurableFileCollection
-
-    /** The rules this build adds to detekt's own, loaded as the tool's plugin jar. */
-    @get:Classpath
-    abstract val rulePlugins: ConfigurableFileCollection
-
+abstract class CraftbridgeDetekt : CraftbridgeDetektRun() {
     /**
      * What the checked sources compile against, the Kotlin stdlib among it (the run passes `-no-stdlib`,
      * so detekt brings no copy of its own): a rule that resolves types sees what the compiler sees.
@@ -64,27 +95,8 @@ abstract class CraftbridgeDetekt : DefaultTask() {
     @get:Input
     abstract val jvmTarget: Property<String>
 
-    @get:InputFiles
-    @get:SkipWhenEmpty
-    @get:IgnoreEmptyDirectories
-    @get:PathSensitive(PathSensitivity.RELATIVE)
-    abstract val checkedSources: ConfigurableFileCollection
-
-    /** The profiles from build-logic, then the module's packages, which detekt merges into one config. */
-    @get:InputFiles
-    @get:PathSensitive(PathSensitivity.RELATIVE)
-    abstract val configFiles: ConfigurableFileCollection
-
-    /** The run's findings as Markdown, written by the tool whether or not there were any. */
-    @get:OutputFile
-    abstract val reportFile: RegularFileProperty
-
-    @get:Inject
-    protected abstract val execOperations: ExecOperations
-
     @TaskAction
     fun analyse() {
-        fun ConfigurableFileCollection.joined() = files.joinToString(File.pathSeparator) { it.absolutePath }
         // Full mode resolves types against both halves of the classpath, and detekt leaves a call it
         // cannot resolve unreported. Without the compile classpath the stdlib's `exitProcess` and `TODO`
         // pass in silence: the run passes `-no-stdlib`, so the stdlib arrives on that half alone.
@@ -168,6 +180,7 @@ internal fun Project.configureDetekt() {
     val base = profiles.resolve("base.yml")
     val written = profiles.resolve("written.yml")
     val shipped = profiles.resolve("shipped.yml")
+    val guide = profiles.resolve("guide.yml")
     val packages =
         tasks.register<CraftbridgeDetektConfig>("craftbridgeDetektConfig") {
             description = "Writes the packages this module's sources and bindings declare, and its folder, for the rules"
@@ -198,6 +211,7 @@ internal fun Project.configureDetekt() {
             exclude("$GENERATED_BINDINGS/**")
         }
     val bindings = fileTree(generated) { include("$GENERATED_BINDINGS/**/*.kt") }
+    val allGenerated = fileTree(generated) { include("**/*.kt") }
     val nothing = files()
 
     fun register(
@@ -217,10 +231,9 @@ internal fun Project.configureDetekt() {
             compileClasspath.from(component.compileClasspath)
             bootClasspath.from(androidComponents.sdkComponents.bootClasspath)
             jvmTarget.set(catalogVersion("java-bytecode"))
-            val kotlin = component.sources.kotlin ?: error("$path: ${component.name} has no Kotlin sources for detekt to read")
             // AGP lists a source set's folders whether or not the module has them, and the analyser
             // reads only folders that exist; a declared-but-unused folder is no finding.
-            checkedSources.from(kotlin.all.map { all -> all.map { it.asFile }.filter { it.isDirectory && directories(it) } })
+            checkedSources.from(component.kotlinFolders(path).map { folders -> folders.filter(directories) })
             checkedSources.from(generatedFiles)
             configFiles.from(profileFiles, packages.flatMap(packagesFile))
             reportFile.set(layout.buildDirectory.file("craftbridge-detekt/$name.md"))
@@ -269,6 +282,44 @@ internal fun Project.configureDetekt() {
             testChecks.configure { dependsOn(test) }
         },
     )
+
+    // The guide check's Kotlin answer for this module: the folders the very same variant API lists for
+    // every component — written, generated, test, whatever a compilation reads — are the files it
+    // says the build compiles, so no second list of folders exists (§3, §10), and the lines those
+    // files compile to nothing come from `CompilesToNothing` in a light run over them alone.
+    val guideSources = mutableListOf<Any>()
+    forEachComponent(
+        main = { variant -> guideSources.add(variant.kotlinFolders(path)) },
+        test = { nested -> guideSources.add(nested.kotlinFolders(path)) },
+    )
+    tasks.register<CraftbridgeGuideKotlin>("guideKotlin") {
+        description = "Writes which Kotlin this module compiles, and which lines of it compile to nothing, for the guide check"
+        group = "verification"
+        toolClasspath.from(detektCli)
+        rulePlugins.from(detektRules)
+        checkedSources.from(guideSources)
+        checkedSources.from(allGenerated)
+        // guide.yml alone: whether a line compiles to nothing, the parser alone says, so this run
+        // resolves no types and carries no classpath, and its config names only the rule that answers.
+        configFiles.from(guide)
+        reportFile.set(layout.buildDirectory.file("craftbridge-detekt/guideKotlin.xml"))
+        // The answer is written into the folder xtask names when it asks, as a file the guide check
+        // reads once the task has run and removes after: an up-to-date task would write no answer at
+        // all and the guide check would find a module compiling nothing. What the task writes follows
+        // the files as they are now, and it must answer every time it is asked.
+        outputs.upToDateWhen { false }
+    }
+}
+
+/**
+ * The folders AGP lists for the component's Kotlin, the ones that exist: AGP lists a source set's
+ * folders whether or not the module has them, and no tool reads a folder that is not there. A
+ * component listing no Kotlin at all has nothing for detekt to read, which is not a thing a module
+ * quietly gets to be.
+ */
+private fun Component.kotlinFolders(where: String): Provider<List<File>> {
+    val kotlin = sources.kotlin ?: error("$where: $name has no Kotlin sources for detekt to read")
+    return kotlin.all.map { folders -> folders.map { it.asFile }.filter { it.isDirectory } }
 }
 
 private fun Project.aggregate(
