@@ -437,13 +437,16 @@ craftbridge_xtask_build() {
 # fetch cache is not a source, and no build reads it.
 export CRAFTBRIDGE_UPSTREAM_CACHE="${CRAFTBRIDGE_UPSTREAM_CACHE:-$HOME/.cache/craftbridge/upstream/effectcraft}"
 
-# Where the runs that share this machine's iPhones take turns on them: simulators (`cargo xtask simulator`,
+# Where the runs that share this machine take turns: the iPhones — simulators (`cargo xtask simulator`,
 # rust/xtask/src/simulator.rs) and the physical acceptance device (`cargo xtask device-lock`, held by
 # tools/ios-device-test.sh, rust/xtask/src/device_lock.rs) alike, one lock file per device in the one
-# folder, so the runs of one device wait behind each other and never on another's. Outside every checkout,
-# so a run in one worktree sees the runs in another. The name says simulators because it is what every
-# checkout on the machine reads, those not yet taking device locks too, and a run's own folder set under
-# it (a review's private one for its plants) would be dropped without a word by a new name.
+# folder, so the runs of one device wait behind each other and never on another's — and, since `cargo
+# xtask release-lock` (rust/xtask/src/release_lock.rs, held by tools/release.sh), a repository being
+# staged: one lock file per repository, which a second staging run is refused rather than waits on.
+# Outside every checkout, so a run in one worktree sees the runs in another. The name says simulators
+# because it is what every checkout on the machine reads, those not yet taking the other locks too, and
+# a run's own folder set under it (a review's private one for its plants) would be dropped without a
+# word by a new name.
 export CRAFTBRIDGE_SIMULATOR_LOCKS="${CRAFTBRIDGE_SIMULATOR_LOCKS:-$HOME/.cache/craftbridge/simulators}"
 
 # The Xcode release the iOS build is made and tested with.

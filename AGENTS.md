@@ -91,6 +91,7 @@ Never duplicate code by copying it into a second place: not functions, types, wi
 
 - One version for every artifact: the Rust crates, the Swift package and both Maven artifacts. It is written only in `rust/Cargo.toml` (`[workspace.package] version`); the release script passes it to Gradle and tags the release with it.
 - Semantic versioning: a breaking change is a major version from 0.1.0 on, an addition a minor version, a fix a patch. Tags are `X.Y.Z`. Every user-visible change adds a line to `CHANGELOG.md` under Unreleased in the same pull request.
+- Each line under Unreleased stands under a heading of its kind, written by hand: one of Keep a Changelog's (`### Added`, `### Changed`, `### Deprecated`, `### Removed`, `### Fixed`, `### Security`), or `### Breaking changes`, which holds every change that breaks what a release shipped, whatever its kind — a call, type or key removed or renamed, a signature or a behaviour an app relies on changed — and nothing else. `tools/release.sh` reads a release's class from those headings, each defined there once: a line under `### Breaking changes` takes the next major version and one under `### Added` the next minor; it refuses any other heading there, a line under none, and `### Breaking changes` in the first release, which breaks no release before it.
 - Nothing is published without the owner's go-ahead.
 
 ## 12. Changes, commits and pull requests

@@ -48,12 +48,14 @@ mod layers;
 mod layout;
 mod licences;
 mod lints;
+mod lock_run;
 mod machinery;
 mod meta;
 mod pin;
 mod pins;
 mod plan_views;
 mod plist;
+mod release_lock;
 mod report;
 mod rust_syntax;
 mod samples;
@@ -261,6 +263,7 @@ fn dispatch(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
         ["swift-samples"] => samples::run_swift(&root),
         ["android-samples"] => samples::run_android(&root),
         ["device-lock", device, "--", program, arguments @ ..] => device_lock::run(device, program, arguments),
+        ["release-lock", lock, "--", program, arguments @ ..] => release_lock::run(lock, program, arguments),
         ["simulator", "--", program @ ..] => simulator::run(program),
         ["xcframework"] => xcframework::run(&root),
         ["sdk-library"] => layers::run_sdk_library(),
@@ -309,6 +312,9 @@ fn usage() {
     );
     eprintln!(
         "       cargo xtask device-lock <device> -- <program> <argument>...   (the program under the machine's lock for one device, which the runs of one device take turns on)"
+    );
+    eprintln!(
+        "       cargo xtask release-lock <lock> -- <program> <argument>...   (the program under the machine's lock for one repository's staging, which a second staging run of it is refused, not queued, naming the lock)"
     );
     eprintln!("       cargo xtask xcframework   (through tools/build-xcframework.sh: the native library's XCFramework, joined again only when it changed)");
     eprintln!("       cargo xtask sdk-library   (the native library the SDK ships, as the layer table gives it, for tools/build-android.sh)")

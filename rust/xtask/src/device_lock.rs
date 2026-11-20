@@ -8,147 +8,53 @@
 //! host app on the phone under one pair of bundle ids: two runs started at once replace each other's apps
 //! mid-run, and the one that ends first uninstalls what the other is still testing on, so what fails is the
 //! runs, not the code. One lock per device makes them queue instead, and a run that waits for another says
-//! so with the device's name, so the queue shows in the log.
-//!
-//! The run belongs to the process that started this command, its caller: a run still waiting when its
-//! caller has gone never starts, and one running is asked to end (`TERM` to its process group, which a
-//! run's own cleanup, its apps taken off the phone, answers) and is killed once [`GRACE`] is out. The lock
-//! is let go only once the run has ended, so the next run never meets this one's cleanup on the phone. The
-//! program runs in a process group of its own that `craftbridge-process`'s watchers keep, so a kill of this
-//! command itself leaves nothing of the run behind either, though nothing then cleans the phone up; and the
-//! system lets go of the lock however this command ends.
-//!
-//! The program is told it holds the lock by [`HOLDER`], which names the device and this command's process
-//! id: a program checks it against its own parent, the one fact no inherited or exported variable can carry
-//! for it, so a shell that exported the variable, or a run started inside a run, holds no lock by it.
+//! so with the device's name, so the queue shows in the log. The run's guard — its caller watched, the run
+//! asked and waited out and killed, the lock let go only once the run has ended, the program told it holds
+//! the lock — is `crate::lock_run`'s, the same one `cargo xtask release-lock` holds a staging run under.
 
-use crate::report;
-use craftbridge_process::Group;
-use std::io::Write;
-use std::os::unix::process::parent_id;
-use std::process::{Command, ExitCode, ExitStatus};
-use std::time::{Duration, Instant};
-
-/// How often the wait for the program looks again, at the program and at the caller.
-const POLL: Duration = Duration::from_millis(20);
-
-/// How long a run whose caller has gone is given to end its own way before it is killed: the runner's
-/// cleanup is a few calls to the phone, each well inside it, and a run past it has stopped answering.
-const GRACE: Duration = Duration::from_secs(120);
+use std::process::ExitCode;
 
 /// The variable the program runs with: `<device>:<pid>`, the device whose lock it runs under and the
 /// process id of this command, which holds that lock and is the program's parent.
 const HOLDER: &str = "CRAFTBRIDGE_DEVICE_LOCK";
 
-/// `cargo xtask device-lock <device> -- <program> <argument>…`.
+/// A device's lock, named by the identifier CoreDevice answers for an iPhone: letters, digits and
+/// dashes, which a lock file can be named after.
+const LOCK: crate::lock_run::Lock = crate::lock_run::Lock {
+    command: "device-lock",
+    names: "device",
+    written_as: "its identifier",
+    called: "device",
+    marker: crate::filelock::for_device,
+    holder: HOLDER,
+};
+
+/// `cargo xtask device-lock <device> -- <program> <argument>…`: hold the lock of `device` and run the
+/// program under it. The runs of one device queue, and a run that finds the device taken says so, naming
+/// the device, before it waits.
 pub(crate) fn run(device: &str, program: &str, arguments: &[&str]) -> ExitCode {
-    match under_the_device_lock(device, program, arguments) {
-        Ok(exit) => exit,
-        Err(failure) => report::failed("device-lock", failure),
-    }
-}
-
-/// Hold the lock of `device`, run the program under it, and end as the program did. The lock is taken
-/// before the program starts, so a run that waits never builds anything or reaches the phone while
-/// another holds it; it is held whole until the program ends, its cleanup too when its caller has gone,
-/// and letting go of it is the last thing this command does.
-fn under_the_device_lock(device: &str, program: &str, arguments: &[&str]) -> Result<ExitCode, String> {
-    said_name(device)?;
-    let caller = parent_id();
-    let locks = crate::filelock::folder()?;
-    std::fs::create_dir_all(&locks).map_err(|error| format!("could not create {}: {error}", locks.display()))?;
-    let marker = crate::filelock::for_device(&locks, device);
-    if crate::filelock::held(&marker)? {
-        println!("device-lock: the run waits for device {device}: another run is testing on it");
-    }
-    let _held = crate::filelock::hold(&marker)?;
-    if parent_id() != caller {
-        return Err(format!("the caller of the run for device {device} went while it waited for the device, so the run never started"));
-    }
-    let mut command = Command::new(program);
-    command.args(arguments).env(HOLDER, format!("{device}:{}", std::process::id()));
-    let mut group = Group::spawn(&mut command).map_err(|error| format!("could not run {program}: {error}"))?;
-    let status = loop {
-        if let Some(status) = ended(&mut group, program)? {
-            break status;
-        }
-        if parent_id() != caller {
-            // Said to the standard error, and lost without failing should that have gone with the caller.
-            let _ = writeln!(std::io::stderr(), "device-lock: the caller of the run for device {device} has gone: the run is asked to end");
-            break stopped(&mut group, device, program, GRACE)?;
-        }
-        std::thread::sleep(POLL);
+    let busy = crate::lock_run::Busy::Waits {
+        said: format!("device-lock: the run waits for device {device}: another run is testing on it"),
+        gave_up: format!("the caller of the run for device {device} went while it waited for the device, so the run never started"),
     };
-    Ok(report::exit_of("device-lock", program, status))
-}
-
-/// The program's exit status once it has ended.
-fn ended(group: &mut Group, program: &str) -> Result<Option<ExitStatus>, String> {
-    group.try_wait().map_err(|error| format!("could not wait for {program}: {error}"))
-}
-
-/// Stop the run of a caller that has gone: its process group is asked to end, as a terminal's Ctrl-C asks
-/// the run in its foreground, so the run's own cleanup takes its apps off the phone while this command
-/// still holds the lock, and whatever has not ended once `grace` is out is killed. The command gives the
-/// run [`GRACE`] — the bound a real cleanup of the phone needs room for; `grace` is a parameter so its
-/// test can outwait it without waiting out the bound itself.
-fn stopped(group: &mut Group, device: &str, program: &str, grace: Duration) -> Result<ExitStatus, String> {
-    craftbridge_process::signal_group(group.id(), "TERM")?;
-    let deadline = Instant::now() + grace;
-    while Instant::now() < deadline {
-        if let Some(status) = ended(group, program)? {
-            return Ok(status);
-        }
-        std::thread::sleep(POLL);
-    }
-    group.stop()?;
-    Err(format!("the run for device {device} did not end within {} seconds of being asked, and was killed", grace.as_secs()))
-}
-
-/// Whether `device` is what a lock file can be named after: the identifier CoreDevice answers for an
-/// iPhone is letters, digits and dashes, and nothing that spells a path can be let name a lock file,
-/// which would point it at another folder than the machine's.
-fn said_name(device: &str) -> Result<(), String> {
-    if device.is_empty() || !device.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_') {
-        return Err(format!("{device} is no device a lock can be named after: name it by its identifier, of letters, digits, dashes and underscores"));
-    }
-    Ok(())
+    crate::lock_run::run(&LOCK, device, &busy, program, arguments)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::scratch::Scratch;
+    use super::HOLDER;
+    use crate::scratch::{Scratch, xtask_binary};
     use std::io::BufRead;
     use std::path::{Path, PathBuf};
-    use std::process::Stdio;
-    use std::sync::{OnceLock, mpsc};
+    use std::process::{Command, Stdio};
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
 
     /// How long a wait inside a test may run before the test calls it lost.
     const PATIENCE: Duration = Duration::from_secs(120);
 
     /// A phone no machine has, named as CoreDevice names one.
     const FAKE_PHONE: &str = "00000000-0000-4000-8000-0000000000A1";
-
-    /// The `xtask` binary the command runs as: built once here into the very folder the test binary sits
-    /// beside, because a command run by a test is the program's own self, not the test's.
-    fn xtask_binary() -> &'static Path {
-        static BUILT: OnceLock<PathBuf> = OnceLock::new();
-        BUILT
-            .get_or_init(|| {
-                let made = Command::new(env!("CARGO"))
-                    .args(["build", "--package", "xtask", "--locked", "--quiet"])
-                    .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join(".."))
-                    .status()
-                    .unwrap();
-                assert!(made.success(), "the build of xtask for its own tests failed");
-                let test = std::env::current_exe().unwrap();
-                let built = test.parent().and_then(Path::parent).map(|debug| debug.join("xtask")).expect("the test binary sits under the build folder");
-                assert!(built.exists(), "{} is not the built binary", built.display());
-                built
-            })
-            .as_path()
-    }
 
     /// The command, run on the locks in `locks`: a test's own device id keeps every test its own lane,
     /// and the lock file is the command's own to make.
@@ -290,8 +196,9 @@ mod tests {
 
     /// A run that answers the ask with nothing — a phone hung, a `devicectl` that never answers — is
     /// killed once the ask's grace is out, and nothing of it is left to keep the next run waiting. The
-    /// ask, the waiting and the kill are [`stopped`] whole, at a grace short enough for a test to
-    /// outwait; the bound the command actually runs it at is [`GRACE`], named where it is used alone.
+    /// ask, the waiting and the kill are `crate::lock_run::stopped` whole, at a grace short enough for a
+    /// test to outwait; the bound the command actually runs it at is `crate::lock_run::GRACE`, named
+    /// where it is used alone.
     /// The run ignores every softer signal, so only the kill of the whole group ends it: were the guard
     /// not to see the ask out, the waiting would error on the gone watcher instead of ending the run.
     #[test]
@@ -303,11 +210,11 @@ mod tests {
         let script = format!("trap '' TERM INT HUP; printf x > {}; while :; do sleep 1; done", started.display());
         let mut command = Command::new("/bin/sh");
         command.args(["-c", &script]);
-        let mut group = Group::spawn(&mut command).unwrap();
+        let mut group = craftbridge_process::Group::spawn(&mut command).unwrap();
         assert!(craftbridge_process::poll_until(PATIENCE, || started.exists()), "the run never started");
         let grace = Duration::from_secs(2);
         let asked = Instant::now();
-        match stopped(&mut group, "CB-GRACE-1", "/bin/sh", grace) {
+        match crate::lock_run::stopped(&mut group, "device CB-GRACE-1", "/bin/sh", grace) {
             Ok(status) => panic!("a run that ignores every ask ended on its own: {status}"),
             Err(failure) => assert_eq!(failure, "the run for device CB-GRACE-1 did not end within 2 seconds of being asked, and was killed"),
         }

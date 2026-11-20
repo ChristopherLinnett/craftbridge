@@ -12,12 +12,15 @@ use std::path::{Path, PathBuf};
 /// The variable naming the folder of the locks, which `tools/env.sh` sets for every run on the machine.
 const FOLDER: &str = "CRAFTBRIDGE_SIMULATOR_LOCKS";
 
-/// The folder `tools/env.sh` names for the locks.
+/// The folder `tools/env.sh` names for the locks, made when it is missing, since every lock file is made in
+/// it.
 pub(crate) fn folder() -> Result<PathBuf, String> {
-    std::env::var_os(FOLDER)
+    let locks = std::env::var_os(FOLDER)
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
-        .ok_or_else(|| format!("{FOLDER} is not set to an absolute path: run through tools/env.sh, which names the folder where the runs on this machine take turns on its simulators and devices"))
+        .ok_or_else(|| format!("{FOLDER} is not set to an absolute path: run through tools/env.sh, which names the folder where the runs on this machine take turns on its simulators and devices"))?;
+    std::fs::create_dir_all(&locks).map_err(|error| format!("could not create {}: {error}", locks.display()))?;
+    Ok(locks)
 }
 
 /// The lock file of the machine's simulator `id`, its UDID: one per simulator, named after it, in the folder
@@ -33,6 +36,19 @@ pub(crate) fn for_device(locks: &Path, id: &str) -> PathBuf {
     for_id(locks, &format!("device-{id}"))
 }
 
+/// The lock file of the staging run of the repository whose hash is `name`, in the same folder: named
+/// apart from every device's and simulator's too, so that no name any of the three may be given makes a
+/// staging run and a device or simulator run wait on one lock.
+pub(crate) fn for_release(locks: &Path, name: &str) -> PathBuf {
+    for_id(locks, &format!("release-{name}"))
+}
+
+/// Whether `name` is one a lock file may be named after: letters, digits, dashes and underscores, so
+/// that nothing spelling a path names one, which would point it at another folder than the machine's.
+pub(crate) fn is_name(name: &str) -> bool {
+    !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
 /// Whether somebody holds the lock at `path` now: the lock file exists and its lock is taken. Only a lock
 /// tried answers one held apart from one free, since the file being open would exclude even this holder;
 /// a caller found busy says so before waiting behind it, so the queue shows in the log.
@@ -41,12 +57,25 @@ pub(crate) fn held(path: &Path) -> Result<bool, String> {
     try_lock(&held).map_err(|error| format!("could not lock {}: {error}", path.display())).map(|free| !free)
 }
 
+/// Open `path` for locking: the folder itself when it is one, and otherwise the file there, made empty
+/// when it is missing.
+fn open(path: &Path) -> Result<File, io::Error> {
+    if path.is_dir() { File::open(path) } else { OpenOptions::new().create(true).write(true).truncate(false).open(path) }
+}
+
 /// Wait for the exclusive lock on `path`: on the folder itself when it is one, and otherwise on the file
 /// there, made empty when it is missing. The lock is held for as long as the returned file is kept: bound
 /// to `_` it would be let go at once.
 pub(crate) fn hold(path: &Path) -> Result<File, String> {
-    let file = if path.is_dir() { File::open(path) } else { OpenOptions::new().create(true).write(true).truncate(false).open(path) };
-    file.and_then(|file| file.lock().map(|()| file)).map_err(|error| format!("could not lock {}: {error}", path.display()))
+    open(path).and_then(|file| file.lock().map(|()| file)).map_err(|error| format!("could not lock {}: {error}", path.display()))
+}
+
+/// Take the exclusive lock on `path` now, or answer `None`: the lock `hold` takes, tried once instead of
+/// waited for, so a command that refuses a run rather than queueing it reads one held apart from one free
+/// and holds neither a moment longer than its own run.
+pub(crate) fn try_hold(path: &Path) -> Result<Option<File>, String> {
+    let file = open(path).map_err(|error| format!("could not lock {}: {error}", path.display()))?;
+    try_lock(&file).map(|free| free.then_some(file)).map_err(|error| format!("could not lock {}: {error}", path.display()))
 }
 
 /// Take the exclusive lock on the open `file` if nobody holds it now: `false` when somebody does. Whoever
@@ -71,6 +100,12 @@ mod tests {
     /// copy of it until the child's own program replaces this one, an instant a loaded machine stretches,
     /// and the lock is let go only once every copy is gone.
     const OUTLASTS: Duration = Duration::from_secs(600);
+
+    /// Whether `path`'s lock comes free within [`OUTLASTS`] once its holder has let go: until then a
+    /// child another test started may still hold a copy of it.
+    fn comes_free(path: &Path) -> bool {
+        craftbridge_process::poll_until(OUTLASTS, || !held(path).unwrap_or(true))
+    }
 
     /// While one holder has `path`, neither `try_lock` nor a second `hold` gets it, in this one process
     /// too, and once the first lets go the waiting `hold` gets it, and `try_lock` once that one has. A
@@ -125,6 +160,27 @@ mod tests {
         let holding = hold(&marker).unwrap();
         assert!(held(&marker).unwrap(), "someone holds it");
         drop(holding);
-        assert!(!held(&marker).unwrap(), "nobody holds it once the holder lets go");
+        assert!(comes_free(&marker), "nobody holds it once the holder lets go");
+    }
+
+    /// `try_hold` answers one it took apart from one another run holds, which is what a run that refuses
+    /// rather than waits asks before it refuses: `for_release` names that file too, never a device's or
+    /// a simulator's, and `is_name` keeps every name to what a lock file may be named after.
+    #[test]
+    fn try_hold_answers_one_held_from_one_free() {
+        let scratch = Scratch::new("filelock-try");
+        assert_eq!(for_release(&scratch.0, "AB12").file_name().and_then(|name| name.to_str()), Some("release-AB12.lock"));
+        assert_ne!(for_release(&scratch.0, "AB12"), for_device(&scratch.0, "AB12"), "a release naming itself as a device never takes the device's lock");
+        assert!(is_name("device-CB-1_x"), "letters, digits, dashes and underscores name a lock file");
+        assert!(!is_name(""), "nothing names no lock file");
+        assert!(!is_name("a/b") && !is_name("a b") && !is_name("a.b"), "nothing spelling a path, a space or a dot names a lock file");
+        let marker = for_release(&scratch.0, "AB12");
+        let taken = try_hold(&marker).unwrap();
+        assert!(taken.is_some(), "a free lock was not taken");
+        assert!(try_hold(&marker).unwrap().is_none(), "a held lock was taken twice");
+        assert!(held(&marker).unwrap(), "the taken lock reads free");
+        drop(taken);
+        let retaken = craftbridge_process::poll_until(OUTLASTS, || try_hold(&marker).is_ok_and(|taken| taken.is_some()));
+        assert!(retaken, "the lock stayed held once its holder let go");
     }
 }
