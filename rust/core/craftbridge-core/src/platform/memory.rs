@@ -103,7 +103,19 @@ fn sysctl_number(name: &std::ffi::CStr) -> Result<u64, String> {
     if status != 0 {
         return Err(format!("the kernel did not answer {}: {}", name.to_string_lossy(), std::io::Error::last_os_error()));
     }
-    sysctl_value(answer, size).ok_or_else(|| format!("the kernel answered {} in {size} bytes, which is no number", name.to_string_lossy()))
+    let number = sysctl_value(answer, size).ok_or_else(|| format!("the kernel answered {} in {size} bytes, which is no number", name.to_string_lossy()))?;
+    #[cfg(test)]
+    KERNEL_ANSWERS.with_borrow_mut(|answers| answers.push((name.to_string_lossy().into_owned(), number)));
+    Ok(number)
+}
+
+#[cfg(all(test, any(target_os = "macos", all(target_os = "ios", target_env = "sim"))))]
+thread_local! {
+    /// Each number the kernel answered [`sysctl_number`] on this thread, under the name it was asked by,
+    /// in the order asked, so a test holds the figure to the answers of the very call that made it: the
+    /// level follows the machine's memory, which other work takes and gives back between any two reads,
+    /// so no level a test reads again says what that call was answered.
+    static KERNEL_ANSWERS: std::cell::RefCell<Vec<(String, u64)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// The number in a sysctl's answer, in the machine's own byte order: its first four bytes for an `int`,
@@ -207,25 +219,135 @@ mod tests {
         }
     }
 
+    /// The names a Mac's figure is read under, as its `sysctl` command is asked for them and in the order
+    /// the core asks: the share of the memory available, in whole percents, then the whole memory, in
+    /// bytes. Spelt here apart from the core's own, so the command checks which names the core asks for
+    /// rather than repeating them.
+    const HOST_NAMES: [&str; 2] = ["kern.memorystatus_level", "hw.memsize"];
+
+    /// Whether `figure` is the share the core makes of what the kernel answered it, and if not, why, in
+    /// words: `answers` holds each name the core asked for with the number answered, and the `sysctl`
+    /// command reads the whole memory as `memory`. The core asked for [`HOST_NAMES`] in their order, was
+    /// answered that whole memory, and the figure is exactly what [`host_figure`], the one place the share
+    /// is computed, makes of it at the level answered. Only the whole memory is held to a read of the
+    /// test's own, since it alone stays put between two reads.
+    fn held_to_the_kernels_answers(figure: u64, answers: &[(String, u64)], memory: u64) -> Result<(), String> {
+        let asked: Vec<&str> = answers.iter().map(|(name, _)| name.as_str()).collect();
+        let (true, [(_, level), (_, answered)]) = (asked == HOST_NAMES, answers) else {
+            return Err(format!("the core asked the kernel for {asked:?}, not {HOST_NAMES:?}"));
+        };
+        if *answered != memory {
+            return Err(format!("the kernel answered the core {answered} bytes of memory, where sysctl reads {memory}"));
+        }
+        if host_figure(*level, memory) != Ok(figure) {
+            return Err(format!("{figure} bytes is not {level} percent of {memory} bytes, the level the kernel answered the core"));
+        }
+        Ok(())
+    }
+
+    /// The whole memory of a hosted macOS runner, 7 GiB, where a level is some 75 MB of it.
+    const RUNNER_MEMORY: u64 = 7_516_192_768;
+
+    /// What the kernel answers the core at `level` percent of `memory` bytes, in the order it asks.
+    fn answered(level: u64, memory: u64) -> Vec<(String, u64)> {
+        HOST_NAMES.iter().map(|name| name.to_string()).zip([level, memory]).collect()
+    }
+
+    #[test]
+    fn a_figure_holds_at_the_level_the_kernel_answered_however_far_the_level_moved() {
+        // sysctl can read the level as 68 just before the call and just after it while the call is
+        // answered 69 and makes this figure: the level rose and fell back between the reads. No level
+        // read around the call enters the check, so no move of the level can fail it.
+        assert_eq!(held_to_the_kernels_answers(5_186_173_009, &answered(69, RUNNER_MEMORY), RUNNER_MEMORY), Ok(()));
+        for level in [0, 58, 67, 78, 100] {
+            let figure = host_figure(level, RUNNER_MEMORY).expect("a share of the whole memory");
+            assert_eq!(held_to_the_kernels_answers(figure, &answered(level, RUNNER_MEMORY), RUNNER_MEMORY), Ok(()), "at {level} percent");
+        }
+    }
+
+    #[test]
+    fn a_figure_no_whole_level_gives_is_refused() {
+        let figure = host_figure(69, RUNNER_MEMORY).expect("a share of the whole memory") + 1;
+        assert_eq!(
+            held_to_the_kernels_answers(figure, &answered(69, RUNNER_MEMORY), RUNNER_MEMORY),
+            Err("5186173010 bytes is not 69 percent of 7516192768 bytes, the level the kernel answered the core".to_string())
+        );
+    }
+
+    #[test]
+    fn a_figure_at_any_level_but_the_one_answered_is_refused() {
+        // One level off either way, and far off either way: the level the call was answered is known.
+        for level in [59, 68, 70, 79] {
+            let figure = host_figure(level, RUNNER_MEMORY).expect("a share of the whole memory");
+            let words = format!("{figure} bytes is not 69 percent of 7516192768 bytes, the level the kernel answered the core");
+            assert_eq!(held_to_the_kernels_answers(figure, &answered(69, RUNNER_MEMORY), RUNNER_MEMORY), Err(words), "at {level} percent");
+        }
+    }
+
+    #[test]
+    fn a_figure_of_another_memory_is_refused() {
+        let half = RUNNER_MEMORY / 2;
+        let figure = host_figure(69, half).expect("a share of the whole memory");
+        // The kernel answered the core another whole memory than sysctl reads, and the figure is its share.
+        assert_eq!(
+            held_to_the_kernels_answers(figure, &answered(69, half), RUNNER_MEMORY),
+            Err("the kernel answered the core 3758096384 bytes of memory, where sysctl reads 7516192768".to_string())
+        );
+        // The kernel answered the whole memory, and the figure is a share of another.
+        assert_eq!(
+            held_to_the_kernels_answers(figure, &answered(69, RUNNER_MEMORY), RUNNER_MEMORY),
+            Err("2593086504 bytes is not 69 percent of 7516192768 bytes, the level the kernel answered the core".to_string())
+        );
+        // A memory answered a byte short is refused even where its share rounds down to the same figure.
+        let figure = host_figure(69, RUNNER_MEMORY).expect("a share of the whole memory");
+        assert_eq!(host_figure(69, RUNNER_MEMORY - 1), Ok(figure), "a byte less of memory, the same share");
+        assert_eq!(
+            held_to_the_kernels_answers(figure, &answered(69, RUNNER_MEMORY - 1), RUNNER_MEMORY),
+            Err("the kernel answered the core 7516192767 bytes of memory, where sysctl reads 7516192768".to_string())
+        );
+    }
+
+    #[test]
+    fn the_core_asks_for_the_level_then_the_whole_memory_and_nothing_else() {
+        let figure = host_figure(69, RUNNER_MEMORY).expect("a share of the whole memory");
+        let refused = |asked: &str| Err(format!("the core asked the kernel for {asked}, not [\"kern.memorystatus_level\", \"hw.memsize\"]"));
+        let pressure = vec![("kern.memorystatus_vm_pressure_level".to_string(), 69), ("hw.memsize".to_string(), RUNNER_MEMORY)];
+        assert_eq!(held_to_the_kernels_answers(figure, &pressure, RUNNER_MEMORY), refused("[\"kern.memorystatus_vm_pressure_level\", \"hw.memsize\"]"));
+        let usable = vec![("kern.memorystatus_level".to_string(), 69), ("hw.memsize_usable".to_string(), RUNNER_MEMORY)];
+        assert_eq!(held_to_the_kernels_answers(figure, &usable, RUNNER_MEMORY), refused("[\"kern.memorystatus_level\", \"hw.memsize_usable\"]"));
+        let mut swapped = answered(69, RUNNER_MEMORY);
+        swapped.reverse();
+        assert_eq!(held_to_the_kernels_answers(figure, &swapped, RUNNER_MEMORY), refused("[\"hw.memsize\", \"kern.memorystatus_level\"]"));
+        let level_only = answered(69, RUNNER_MEMORY)[..1].to_vec();
+        assert_eq!(held_to_the_kernels_answers(figure, &level_only, RUNNER_MEMORY), refused("[\"kern.memorystatus_level\"]"));
+        let twice = [answered(69, RUNNER_MEMORY), answered(69, RUNNER_MEMORY)].concat();
+        assert_eq!(
+            held_to_the_kernels_answers(figure, &twice, RUNNER_MEMORY),
+            refused("[\"kern.memorystatus_level\", \"hw.memsize\", \"kern.memorystatus_level\", \"hw.memsize\"]")
+        );
+        assert_eq!(held_to_the_kernels_answers(figure, &[], RUNNER_MEMORY), refused("[]"));
+    }
+
     /// A Mac's figure is the kernel's own, as its `sysctl` command reads the same two values, not a
-    /// number of the core's: the level moves while the test runs, so the figure is held to the levels
-    /// read just before and just after it.
+    /// number of the core's: the core asks the kernel for the names the command is asked, is answered
+    /// the whole memory the command reads, and makes its figure of the level it is answered. That level
+    /// is the one the call itself was given, never one read again around it, which other work moves and
+    /// gives back between any two reads.
     #[cfg(target_os = "macos")]
     #[test]
     fn a_mac_reports_the_kernels_share_of_its_memory() {
-        let read = || {
-            let output = std::process::Command::new("/usr/sbin/sysctl").args(["-n", "kern.memorystatus_level", "hw.memsize"]).output().expect("sysctl runs");
-            let text = String::from_utf8(output.stdout).expect("sysctl writes text");
-            let numbers: Vec<u64> = text.split_whitespace().map(|word| word.parse().expect("a number")).collect();
-            assert_eq!(numbers.len(), 2, "{text:?}");
-            (numbers[0], numbers[1])
-        };
-        let (before, total) = read();
+        let output = std::process::Command::new("/usr/sbin/sysctl").arg("-n").args(HOST_NAMES).output().expect("sysctl runs");
+        let text = String::from_utf8(output.stdout).expect("sysctl writes text");
+        let numbers: Vec<u64> = text.split_whitespace().map(|word| word.parse().expect("a number")).collect();
+        assert_eq!(numbers.len(), HOST_NAMES.len(), "{text:?}");
+        let (level, memory) = (numbers[0], numbers[1]);
         let figure = available_memory().expect("a Mac reports its figure");
-        let (after, _) = read();
-        eprintln!("available_memory() = {figure} of {total} bytes, at levels {before} and {after}");
-        let shares = [before.min(after), before.max(after)].map(|level| u128::from(total) * u128::from(level) / 100);
-        assert!((shares[0]..=shares[1]).contains(&u128::from(figure)), "{figure} bytes, against {shares:?}");
+        // A test runs on a thread of its own, so these are the call's answers and no other's.
+        let answers = KERNEL_ANSWERS.take();
+        eprintln!("available_memory() = {figure} of {memory} bytes, from the kernel's answers {answers:?}; sysctl read level {level} just before");
+        if let Err(why) = held_to_the_kernels_answers(figure, &answers, memory) {
+            panic!("{why}");
+        }
     }
 
     /// A Linux machine's figure is its kernel's `MemAvailable`, as the report reads it just before and
