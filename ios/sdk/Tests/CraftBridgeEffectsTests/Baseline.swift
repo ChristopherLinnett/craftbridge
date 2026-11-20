@@ -40,6 +40,10 @@ struct Baseline {
 
     /// The word the line starts with.
     let line: String
+    /// The word the run's warm preview repeats are printed under, after the figures.
+    let repeatsWord: String
+    /// The decimals each warm preview repeat is printed with.
+    let repeatsDecimals: Int
     /// The percentage a release's figure may be above its baseline before the release notes flag it.
     let flagSlowerThanPercent: Double
     /// The fewest fresh runs a release's median, and a record, rests on.
@@ -56,12 +60,15 @@ struct Baseline {
             throw CraftError.InvalidParams(detail: "the baseline is not a TOML table")
         }
         let known: Set<String> = [
-            "line", "flag_slower_than_percent", "comparison", "running_example", "figure", "peak_memory", "device",
+            "line", "repeats_word", "repeats_decimals", "flag_slower_than_percent", "comparison", "running_example",
+            "figure", "peak_memory", "device",
         ]
         if let unknown = document.keys.filter({ !known.contains($0) }).min() {
             throw CraftError.InvalidParams(detail: "the baseline holds the table `\(unknown)`, which no runner reads")
         }
         line = try Baseline.string(document["line"], "line")
+        repeatsWord = try Baseline.string(document["repeats_word"], "repeats_word")
+        repeatsDecimals = Int(try Baseline.number(document["repeats_decimals"], "repeats_decimals"))
         flagSlowerThanPercent = try Baseline.number(document["flag_slower_than_percent"], "flag_slower_than_percent")
         comparisonRuns = Int(
             try Baseline.number(try Baseline.table(document["comparison"], "comparison")["runs"], "comparison runs"))
@@ -123,17 +130,23 @@ struct Baseline {
     }
 
     /// The line a run on iOS prints for `values`, one for each figure it measures by name and no other, in the
-    /// order the file gives.
-    func line(for values: [String: Double]) throws -> String {
+    /// order the file gives, then every one of the run's warm preview `repeats` in the order they ran.
+    func line(for values: [String: Double], repeats: [Double]) throws -> String {
         let measured = figures(on: Baseline.platform)
         guard Set(values.keys) == Set(measured.map(\.name)) else {
             throw CraftError.InvalidParams(
                 detail: "the run measured \(values.keys.sorted()), and the baseline names \(measured.map(\.name))")
         }
+        guard repeats.count == example.previewRepeats else {
+            throw CraftError.InvalidParams(
+                detail: "the run made \(repeats.count) warm previews, "
+                    + "and the running example makes \(example.previewRepeats)")
+        }
         let words = measured.map { figure in
             "\(figure.name)=\(String(format: "%.\(figure.decimals)f", values[figure.name] ?? 0))"
         }
-        return ([line] + words).joined(separator: " ")
+        let said = repeats.map { String(format: "%.\(repeatsDecimals)f", $0) }.joined(separator: ",")
+        return ([line] + words + ["\(repeatsWord)=\(said)"]).joined(separator: " ")
     }
 
     /// What is wrong with the device records the baseline holds: each must say what it was measured on and under,

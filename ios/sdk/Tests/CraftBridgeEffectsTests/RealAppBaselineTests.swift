@@ -105,7 +105,7 @@ private func thermalState() -> Double { Double(ProcessInfo.processInfo.thermalSt
             figures.filter { costs.contains($0.key) }.values.allSatisfy { $0 > 0 }
                 && threads > 0 && paths.count == example.previewRepeats,
             "every cost is a measurement: \(figures)")
-        let line = try baseline.line(for: figures)
+        let line = try baseline.line(for: figures, repeats: paths)
         print(line)
         fflush(stdout)
         #expect(line.hasPrefix(baseline.line + " first_preview_ms="), "the line starts with the baseline's words")
