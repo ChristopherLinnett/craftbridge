@@ -221,12 +221,13 @@ stage_rust_deny() {
   return "$status"
 }
 # The Swift package's binary target is the XCFramework tools/build-xcframework.sh builds and nobody
-# commits, and SwiftPM neither builds nor describes a package whose binary is missing, so the three stages
-# that need it — the builds, the lint, which builds the package for the language server, and the suite's
-# run — build it first, once per run; the script joins it again only when what it holds changed. The rules
-# read the package through its manifest alone, which needs no binary. --keep-bindings: the `generated` stage
-# must see a hand edit to the committed Swift bindings, which a regeneration here would write over before
-# that stage looked.
+# commits. SwiftPM neither builds nor describes a package whose binary is missing, and xcodebuild resolves
+# a project's local packages before it answers anything about the project, so the four stages that need it
+# — the guide check, which asks xcodebuild what each sample's build compiles its Swift under, the builds,
+# the lint, which builds the package for the language server, and the suite's run — build it first, once
+# per run; the script joins it again only when what it holds changed. The rules read the package through
+# its manifest alone, which needs no binary. --keep-bindings: the `generated` stage must see a hand edit
+# to the committed Swift bindings, which a regeneration here would write over before that stage looked.
 xcframework_built=no
 xcframework() {
   if [ "$xcframework_built" = no ]; then
@@ -261,7 +262,13 @@ stage_plan_views() {
 # swift-syntax on every build swift_build makes, under the conditions Xcode resolves for each, for Swift — so
 # a block quoted from inside a comment, a KDoc, a string or a branch no shipping build compiles is refused. The compiling of those
 # files is the swift_build and android_samples stages' own job.
-stage_guide_samples() { xtask guide-samples; }
+stage_guide_samples() {
+  # The Swift side asks xcodebuild what each sample's build compiles its Swift under, and xcodebuild
+  # resolves the sample's local package first, whose binary target is the XCFramework. Like the Swift
+  # stages this check reports on, the guide check therefore takes that framework from the shared step
+  # before it asks, so it answers on any tree whichever stages ran on it before.
+  xcframework && xtask guide-samples
+}
 # swift-format over every Swift file the rules' walk lists, generated Swift included: it ships as written
 # Swift does, so it meets the same rules, bar those UniFFI's fixed templates cannot meet, which the folder
 # its bindings are generated into alone is exempt from (rust/xtask/src/swift_format.rs).

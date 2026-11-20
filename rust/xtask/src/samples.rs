@@ -237,16 +237,25 @@ fn kotlin_guide_answer(wrapper: &Path, build: &Path, folder: &Path) -> Result<St
 /// `sdk`, as Xcode resolves them: `xcodebuild -showBuildSettings` reads the target's settings over the
 /// project's, `$(inherited)`, a configuration file and a setting written for one SDK alone the way the
 /// build `swift_build` makes of the sample reads them, so nothing here reads the settings a second way.
+///
+/// The read keeps a derived-data folder of its own, removed once it has answered: left to itself, xcodebuild
+/// writes one into the user's own DerivedData for every project path it is asked about, a new one for every
+/// scratch project a test asks about, and keeps them there. xcodebuild takes such a folder only with a
+/// scheme, so the read names the scheme of the target's own name, the one `swift_build` builds and the one
+/// xcodebuild makes for a target when the project keeps none of its own.
 fn swift_conditions(project: &Path, target: &str, configuration: &str, sdk: &str) -> Result<Vec<String>, String> {
     use serde_json::Value;
+    let derived = crate::scratch::create("guide-derived-data")?;
     let said = Command::new("xcodebuild")
         .arg("-showBuildSettings")
         .arg("-json")
         .arg("-project")
         .arg(project)
-        .args(["-target", target, "-configuration", configuration, "-sdk", sdk, "-disableAutomaticPackageResolution"])
-        .output()
-        .map_err(|failure| format!("xcodebuild could not run to read {}: {failure}", project.display()))?;
+        .args(["-scheme", target, "-configuration", configuration, "-sdk", sdk, "-disableAutomaticPackageResolution", "-derivedDataPath"])
+        .arg(&derived)
+        .output();
+    let _ = std::fs::remove_dir_all(&derived);
+    let said = said.map_err(|failure| format!("xcodebuild could not run to read {}: {failure}", project.display()))?;
     let asked = format!("{} builds {target} in {configuration} for {sdk}", project.display());
     if !said.status.success() {
         return Err(format!("xcodebuild cannot say what {asked} with: {}", String::from_utf8_lossy(&said.stderr).trim()));
@@ -544,21 +553,129 @@ mod tests {
 
     /// The conditions a sample's Swift compiles under are Xcode's own answer for each configuration the gate
     /// builds, on each SDK: Debug's `DEBUG` from the project's settings, none for Release, and a configuration
-    /// the project lacks refused, rather than read as the default one xcodebuild falls back on.
+    /// the project lacks refused, rather than read as the default one xcodebuild falls back on. The read is
+    /// proved on a project of the test's own, in the shape every sample's has — one app target, `DEBUG` written
+    /// on the project's own Debug configuration so the target's inherits it, Release writing nothing — because
+    /// a real sample's project answers only once the package's XCFramework stands where its binary target
+    /// points, which is the guide stage's shared first step to have built and no unit test's to pay for; the
+    /// stage reads every real sample's own conditions on every run.
     #[test]
     #[cfg_attr(not(target_os = "macos"), ignore = "asks xcodebuild, which only macOS has")]
     fn the_guide_reads_each_builds_conditions_as_xcode_resolves_them() {
-        let project = crate::repo_root().join("ios/samples/PostcardStudio/PostcardStudio.xcodeproj");
-        assert_eq!(swift_conditions(&project, "PostcardStudio", "Debug", "iphoneos").unwrap(), ["DEBUG"]);
-        assert_eq!(swift_conditions(&project, "PostcardStudio", "Release", "iphonesimulator").unwrap(), Vec::<String>::new());
+        let scratch = Scratch::new("guide-conditions");
+        scratch.write("Probe.xcodeproj/project.pbxproj", PROBE_PROJECT);
+        let project = scratch.0.join("Probe.xcodeproj");
+        assert_eq!(swift_conditions(&project, "Probe", "Debug", "iphoneos").unwrap(), ["DEBUG"]);
+        assert_eq!(swift_conditions(&project, "Probe", "Release", "iphonesimulator").unwrap(), Vec::<String>::new());
         assert_eq!(
-            swift_conditions(&project, "PostcardStudio", "Profile", "iphoneos").unwrap_err(),
-            format!(
-                "xcodebuild answered CONFIGURATION \"Release\" for what {} builds PostcardStudio in Profile for iphoneos with, so the project builds no such configuration",
-                project.display()
-            )
+            swift_conditions(&project, "Probe", "Profile", "iphoneos").unwrap_err().replace(&project.display().to_string(), "<project>"),
+            "xcodebuild answered CONFIGURATION \"Release\" for what <project> builds Probe in Profile for iphoneos with, so the project builds no such configuration"
         );
     }
+
+    /// A project written as a sample's is written, small enough for xcodebuild to resolve with no package of
+    /// ours involved: its object ids are Xcode's own shape, and what it defines is only what the test above
+    /// asks about — `SDKROOT` and the `DEBUG` condition on the project's Debug configuration, nothing on its
+    /// Release one, and no third configuration at all.
+    const PROBE_PROJECT: &str = r##"// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+		AA00000000000000000000A1 /* Probe */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA00000000000000000000A6;
+			buildPhases = (
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Probe;
+			productName = Probe;
+			productType = "com.apple.product-type.application";
+		};
+		AA00000000000000000000A2 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+			};
+			buildConfigurationList = AA00000000000000000000A5;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = AA00000000000000000000A3;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = AA00000000000000000000A3;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AA00000000000000000000A1 /* Probe */,
+			);
+		};
+		AA00000000000000000000A3 = {
+			isa = PBXGroup;
+			children = (
+			);
+			sourceTree = "<group>";
+		};
+		AA00000000000000000000B1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+			};
+			name = Debug;
+		};
+		AA00000000000000000000B2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				SDKROOT = iphoneos;
+			};
+			name = Release;
+		};
+		AA00000000000000000000B3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+			};
+			name = Debug;
+		};
+		AA00000000000000000000B4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+			};
+			name = Release;
+		};
+		AA00000000000000000000A5 /* Project config list */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA00000000000000000000B1 /* Debug */,
+				AA00000000000000000000B2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA00000000000000000000A6 /* Target config list */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA00000000000000000000B3 /* Debug */,
+				AA00000000000000000000B4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+	};
+	rootObject = AA00000000000000000000A2 /* Project object */;
+}
+"##;
 
     /// The Swift helper marks dead exactly what no shipping build compiles, read as the compiler reads it:
     /// an `#elseif` and an `#else` after a clause that always holds, a nested `#if` no build under its outer
