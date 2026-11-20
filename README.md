@@ -14,7 +14,7 @@ CraftBridge is an independent SDK, based on EffectCraft by the ArtCraft team (ht
 | `ios/sdk/` | The Swift package: products `CraftBridge` and `CraftBridgeEffects` |
 | `android/sdk/` | The Gradle build: `io.github.christopherlinnett.craftbridge:core` and `:effects` |
 | `conformance/` | The scenarios every platform runs against the EffectCraft command line |
-| `tools/` | `doctor.sh` (prerequisites), `ci.sh` (the gate), `env.sh` (the build environment); the build and release scripts arrive with the waves that need them |
+| `tools/` | `doctor.sh` (prerequisites), `ci.sh` (the gate), `env.sh` (the build environment), `release.sh` (stages a release, publishing nothing), and the scripts that build the native library, move the upstream pin, run the device tests and run the conformance oracle |
 | `plan/` | The plan of record |
 | `.github/` | The hosted CI workflow: the full gate, on every pull request to `main` and every push to it |
 

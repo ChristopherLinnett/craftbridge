@@ -133,7 +133,6 @@ fn naming_the_simulator<'a>(arguments: &'a [&'a str]) -> Result<(&'a str, &'a [&
 /// run that booted one never leaves it running for want of a program.
 fn on_simulator(program: &str, arguments: &[&str]) -> Result<ExitCode, String> {
     let locks = crate::filelock::folder()?;
-    std::fs::create_dir_all(&locks).map_err(|error| format!("could not create {}: {error}", locks.display()))?;
     let (device, theirs, using) = take(&locks)?;
     let marker = crate::filelock::for_id(&locks, &device.udid);
     let ran = ready(&marker, &device, theirs.as_deref()).and_then(|()| {

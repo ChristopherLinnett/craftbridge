@@ -75,6 +75,27 @@ pub(crate) fn rust_tree_copy(tag: &str) -> Scratch {
     scratch
 }
 
+/// The `xtask` binary a test runs a command as: built once into the very folder the test binary sits
+/// beside, because a command run by a test is the program's own self, not the test's.
+#[cfg(test)]
+pub(crate) fn xtask_binary() -> &'static std::path::Path {
+    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BUILT
+        .get_or_init(|| {
+            let made = std::process::Command::new(env!("CARGO"))
+                .args(["build", "--package", "xtask", "--locked", "--quiet"])
+                .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join(".."))
+                .status()
+                .unwrap();
+            assert!(made.success(), "the build of xtask for its own tests failed");
+            let test = std::env::current_exe().unwrap();
+            let built = test.parent().and_then(Path::parent).map(|debug| debug.join("xtask")).expect("the test binary sits under the build folder");
+            assert!(built.exists(), "{} is not the built binary", built.display());
+            built
+        })
+        .as_path()
+}
+
 /// Copy one directory tree, skipping build output; a scratch needs the manifests and sources only.
 #[cfg(test)]
 pub(crate) fn copy_tree(from: &std::path::Path, to: &std::path::Path) {
