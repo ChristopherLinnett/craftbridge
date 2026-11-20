@@ -395,6 +395,14 @@ export CRAFTBRIDGE_DYLINT="6.4.0"
 # starts the binary from debug/, would not find it.
 export CARGO_TARGET_DIR="$CRAFTBRIDGE_ROOT/rust/target"
 unset CARGO_BUILD_TARGET
+# The greps every script here runs. `cargo xtask early-pipes`, the shell stage's own rule, reads a grep's
+# options from the grep's own words, which holds only while nothing else hands the grep words or decides
+# where its options end: macOS's grep takes option words out of GREP_OPTIONS, so a grep quits early at a
+# word no script wrote, and POSIXLY_CORRECT makes either grep read a word after the pattern as a file rather
+# than as an option, so a file no script named is read instead of the pipe and its writer dies of SIGPIPE.
+# Both out of the environment, from this one definition; a script that sets either is refused by that rule,
+# because under it the rule cannot tell what the script's greps read.
+unset GREP_OPTIONS POSIXLY_CORRECT
 
 # Every cargo command the scripts run, and never while the repository root holds a Cargo configuration.
 # Cargo merges a .cargo/config.toml from every folder above the one it runs in, so one at the root would
@@ -558,7 +566,14 @@ craftbridge_android_test() (
 # Gradle runs on the catalog's JDK, the release AGP is tested with here — the `jdk` pin craftbridge_load_pins
 # read. JAVA_HOME wins when it is that major; else macOS's registry, else Homebrew's keg (keg-only, so the
 # registry never lists it), else the JDK Android Studio bundles.
-craftbridge_java_major() { "$1/bin/java" -version 2>&1 | sed -n 's/.*version "\([0-9]*\).*/\1/p' | head -n 1; }
+craftbridge_java_major() {
+  local majors
+  # The whole output is read before its first line is taken: `head -n 1` ends the pipe at that line, sed
+  # dies of SIGPIPE with the rest still to write, and under `pipefail` a candidate's major version would
+  # depend on timing instead of on what `java -version` printed.
+  majors="$( "$1/bin/java" -version 2>&1 | sed -n 's/.*version "\([0-9]*\).*/\1/p' )"
+  printf '%s\n' "${majors%%$'\n'*}"
+}
 craftbridge_find_jdk() {
   local candidate
   for candidate in "${JAVA_HOME:-}" "$(/usr/libexec/java_home -v "$CRAFTBRIDGE_JDK_MAJOR" 2>/dev/null || true)" \

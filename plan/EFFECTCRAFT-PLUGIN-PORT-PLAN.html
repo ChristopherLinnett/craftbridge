@@ -1627,7 +1627,7 @@ pub fn set_device_codecs(codecs: Vec&lt;CodecInfo&gt;);   // the device&#39;s co
 </tr>
 <tr>
 <td>Shell</td>
-<td><code>shellcheck --norc</code> on every script the rules&#39; walk lists, told by its <code>.sh</code> ending or a <code>#!</code> line naming sh, bash, dash or ksh, bar the Gradle wrapper, which Gradle writes; <code>plan/<wbr></code> holds no script but the plan kit&#39;s <code>plan/<wbr>plan</code> and the probes kept in <code>plan/<wbr>evidence/<wbr></code></td>
+<td><code>shellcheck --norc</code> on every script the rules&#39; walk lists, told by its <code>.sh</code> ending or a <code>#!</code> line naming sh, bash, dash or ksh, bar the Gradle wrapper, which Gradle writes, and over the same scripts <code>cargo xtask early-pipes</code>, which reads each through the syntax tree <code>shfmt --to-json</code> prints and refuses, under <code>pipefail</code>, a pipe feeding a reader that can quit before its input ends; <code>plan/<wbr></code> holds no script but the plan kit&#39;s <code>plan/<wbr>plan</code> and the probes kept in <code>plan/<wbr>evidence/<wbr></code></td>
 </tr>
 <tr>
 <td>Duplicates</td>

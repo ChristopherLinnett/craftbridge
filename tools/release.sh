@@ -391,7 +391,9 @@ headings=("$breaking_heading" "$added_heading" "### Changed" "### Deprecated" "#
 unreleased=""
 # The rows (`- ` items) of [Unreleased] that stand under one of its headings, or under none for "".
 rows_under() {
-  printf '%s\n' "$unreleased" | awk -v heading="$1" '/^### / { under = $0; next } /^- / && under == heading { n++ } END { print n + 0 }'
+  # The section is handed to awk whole, as a here-string: an awk a pipe fed could stop before its input
+  # ends, and under `pipefail` the writer dying of SIGPIPE would make the count answer by timing.
+  awk -v heading="$1" '/^### / { under = $0; next } /^- / && under == heading { n++ } END { print n + 0 }' <<<"$unreleased"
 }
 changelog_rows=0 breaking_rows=0 added_rows=0
 reading_the_changelog() {
@@ -626,8 +628,10 @@ writing_the_distribution_package() {
   committed="$(git -C "$repo" ls-tree -r --format='%(objectname) %(path)' "$commit" -- ios/sdk | sed 's#^\([0-9a-f]*\) ios/sdk/#\1 #' | grep -v ' Package.swift$' | sort -k 2)"
   files="$(cd "$distribution_tree" && find . -type f ! -path ./Package.swift | sed 's#^\./##' | LC_ALL=C sort)"
   written="$(paste -d ' ' <(cd "$distribution_tree" && printf '%s\n' "$files" | git hash-object --no-filters --stdin-paths) <(printf '%s\n' "$files") | sort -k 2)"
+  # The first three differing lines are kept from the whole difference: `head -n 3` reading the pipe
+  # would end it there, and grep and diff would die of SIGPIPE with the rest unwritten.
   [ "$written" = "$committed" ] ||
-    fail "the written package's files are not the ones $commit holds under ios/sdk: $(diff <(printf '%s\n' "$committed") <(printf '%s\n' "$written") | grep '^[<>]' | head -n 3 | tr '\n' ' ')"
+    fail "the written package's files are not the ones $commit holds under ios/sdk: $(head -n 3 <<<"$(diff <(printf '%s\n' "$committed") <(printf '%s\n' "$written") | grep '^[<>]')" | tr '\n' ' ')"
   [ "$(diff <(git -C "$repo" show "$commit:ios/sdk/Package.swift") "$distribution_tree/Package.swift" | grep -c '^[<>]')" = 2 ] ||
     fail "the written Package.swift differs from the one $commit holds in more than the binary target's line"
   to_package="$(swift_package dump-package --package-path "$distribution_tree")" ||

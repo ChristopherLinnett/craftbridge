@@ -570,7 +570,14 @@ stage_shell() {
   # Gradle writes. --norc: an rc file beside the scripts would be read as directives for all of them; the
   # rules refuse one, and shellcheck reads none.
   listed shell || return 1
-  shellcheck --norc -x "${files[@]}"
+  local status=0
+  shellcheck --norc -x "${files[@]}" || status=1
+  # A pipe whose reader quits early answers 141 under pipefail, by timing rather than by the answer
+  # read. shellcheck has no check for that shape, so the gate reads it itself, over this same list and
+  # through the syntax tree shfmt prints of each script, from the one definition in
+  # rust/xtask/src/early_pipes.rs; both checks run so one run says all.
+  xtask early-pipes || status=1
+  return "$status"
 }
 stage_duplicates() {
   # The owner's first rule: reuse by extraction, never a second copy. Ten repeated lines, or seventy

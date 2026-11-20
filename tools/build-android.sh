@@ -61,7 +61,11 @@ find "$jni_libs" -name '*.so' ! -name "$library" -delete
 
 # V6: every segment of every library is aligned to the 16 KB pages Android 15 maps with. The NDK's own
 # llvm-readelf reads the program headers, and xtask judges what it printed.
-readelf="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -name llvm-readelf | head -n 1)"
+# The first path find prints, taken from its whole output: `head -n 1` ends the pipe at the first line,
+# find dies of SIGPIPE walking the tree it has not finished, and under `pipefail` the build would stop
+# here by timing rather than by what the NDK holds.
+readelf="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -name llvm-readelf)"
+readelf="${readelf%%$'\n'*}"
 libraries=()
 while IFS= read -r file; do libraries+=("$file"); done < <(find "$jni_libs" -name "$library" | sort)
 "$xtask" elf-alignment "$readelf" "${libraries[@]}"

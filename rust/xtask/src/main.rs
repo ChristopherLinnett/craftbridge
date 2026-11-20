@@ -13,7 +13,8 @@
 //! `cargo xtask swift-api <graphs>…`; the XCFramework `tools/build-xcframework.sh` builds,
 //! `cargo xtask xcframework`; and for `tools/build-android.sh`, the native library the SDK ships,
 //! `cargo xtask sdk-library`, and the 16 KB alignment it hands over, `cargo xtask elf-alignment
-//! <llvm-readelf> <library>…`.
+//! <llvm-readelf> <library>…`; and what no shell linter reads but the `shell` stage must refuse,
+//! `cargo xtask early-pipes`.
 //!
 //! The rules in `AGENTS.md` that no compiler, formatter or linter already enforces are checked here,
 //! behind one command, so a change cannot merge with one broken. Each check lives in its own module: a
@@ -32,6 +33,7 @@ mod compiled;
 mod device_lock;
 mod direction;
 mod duplicates;
+mod early_pipes;
 mod effects_api;
 mod elf_alignment;
 mod filelock;
@@ -247,6 +249,7 @@ fn dispatch(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
         ["plan-views", "--check"] => plan_views::run(&root),
         ["skipped-tasks", log] => gradle_log::run(log),
         ["files", kind] => files::run(&root, kind),
+        ["early-pipes"] => early_pipes::run(&root),
         ["compiled"] => compiled::run(&root),
         ["dylint", arguments @ ..] => lints::run_dylint(&root, arguments),
         ["upstream", "update", rev] => update::run(&root, rev),
@@ -286,6 +289,7 @@ fn usage() {
     eprintln!("       cargo xtask plan-views --check");
     eprintln!("       cargo xtask skipped-tasks <gradle log>");
     eprintln!("       cargo xtask files <swift|shell|duplicates>");
+    eprintln!("       cargo xtask early-pipes   (the shell stage's own rule, read through shfmt: no pipe under pipefail feeds a reader that can quit early)");
     eprintln!("       cargo xtask upstream update <rev>   (through tools/update-upstream.sh: plan \u{a7}24 to <rev>, a commit of official EffectCraft main)");
     eprintln!("       cargo xtask upstream source   (the official URL and the full commit the pin names on official main, for tools/oracle.sh)");
     eprintln!("       cargo xtask upstream pin   (the EffectCraft revision rust/Cargo.toml pins, for tools/update-upstream.sh to fetch into a new cache)");
