@@ -834,94 +834,150 @@ mod tests {
         }
     }
 
-    /// The build and test stages refuse, before anything is built or any simulator is taken, a scheme or a
-    /// test plan a developer's Xcode left where `xcodebuild` reads schemes: given `-scheme <name>` it runs
-    /// the file `<name>.xcscheme` on disk — its test environment and any test plan it names included —
+    /// Why a scheme or test plan git does not track is refused: the words `tools/env.sh` says, spelled once
+    /// for the stages' test and the device runner's, which pin the same refusal together.
+    const LEFTOVER_SCHEME_REASON: &str = "xcodebuild reads the schemes kept there in place of the ones it generates from the tree, and runs the test plans they name, so a run would answer for what this machine's Xcode left there, not for the tree";
+
+    /// Why a workspace or project git does not track beside the package's manifest is refused, in the words
+    /// `tools/env.sh` says.
+    const LEFTOVER_BUNDLE_REASON: &str = "xcodebuild opens a workspace or project beside the package's manifest in place of the package, and runs the schemes it holds or names, so a run would answer for what this machine's Xcode left there, not for the tree";
+
+    /// Why a file left in the package's own configuration folder is refused, in the words `tools/env.sh`
+    /// says: `swift build` and `xcodebuild`, as the stages and the runner call them, read that configuration
+    /// when they resolve the package's dependencies.
+    const LEFTOVER_CONFIG_REASON: &str = "swift build and xcodebuild read the configuration written here when they resolve the package's dependencies, fetching what they build from the source a mirror here points at in place of the one a dependency's URL names, so a run would answer for what this machine's swift package configuration left there, not for the tree";
+
+    /// The tree a run of `tools/` answers for, in a scratch folder: copies of the scripts named, from which
+    /// `tools/env.sh` takes the scratch for the repository's root, and, when it is a checkout, git ignoring the
+    /// package's state folder and tracking the package's manifest as the repository does, with `tracked`
+    /// added to its index too and `left` on disk beside them, never added.
+    fn scratch_tree(tag: &str, scripts: &[&str], checkout: bool, tracked: &[&str], left: &[&str]) -> crate::scratch::Scratch {
+        let scratch = crate::scratch::Scratch::new(tag);
+        let tools = crate::repo_root().join("tools");
+        for name in scripts {
+            scratch.write(&format!("tools/{name}"), std::fs::read(tools.join(name)).unwrap());
+        }
+        for path in tracked.iter().chain(left) {
+            scratch.write(path, "planted by the test, untouched by the refusal\n");
+        }
+        if checkout {
+            crate::git::output(&scratch.0, &["init", "-q"]).unwrap();
+            scratch.write(".gitignore", "/ios/sdk/.swiftpm/\n");
+            scratch.write("ios/sdk/Package.swift", "// swift-tools-version: 6.0\n");
+            let mut add = vec!["add", "--", "ios/sdk/Package.swift"];
+            add.extend(tracked);
+            crate::git::output(&scratch.0, &add).unwrap();
+        }
+        scratch
+    }
+
+    /// `program` started in `scratch` as the gate starts its scripts, with git's repository variables removed,
+    /// so a run from a hook asks the checkout it is in, not the repository the hook was started for; with the
+    /// scratch's own `machine` folder for the home SwiftPM takes its machine-wide configuration from, and no
+    /// `SWIFTPM_MIRROR_CONFIG`, so the mirrors of the machine and the shell the tests run in decide nothing,
+    /// and then the variables `env` sets; its status, its output and its error output.
+    fn run_in(scratch: &crate::scratch::Scratch, mut command: std::process::Command, env: &[(&str, &str)]) -> (Option<i32>, String, String) {
+        command.current_dir(&scratch.0).env("CFFIXED_USER_HOME", scratch.0.join("machine")).env_remove("SWIFTPM_MIRROR_CONFIG");
+        for variable in crate::git::local_env_vars() {
+            command.env_remove(variable);
+        }
+        command.envs(env.iter().copied());
+        let output = command.output().unwrap();
+        (output.status.code(), String::from_utf8_lossy(&output.stdout).trim_end().to_string(), String::from_utf8_lossy(&output.stderr).trim_end().to_string())
+    }
+
+    /// The script that calls the helper in one of its shapes: "direct" stands alone under `set -e`, as the
+    /// stages' `... || return 1` does; "and" stands on the left of an `&&`, where bash holds its `set -e` off
+    /// all the same; "from-package" is called from inside the package's own folder.
+    fn leftover_script(shape: &str) -> &'static str {
+        match shape {
+            "and" => "set -euo pipefail\nsource tools/env.sh\ncraftbridge_refuse_leftover_xcode_and_swiftpm_settings \"$@\" && echo ran after\nexit $?",
+            "from-package" => {
+                "set -euo pipefail\ncd ios/sdk\nsource ../../tools/env.sh\ncraftbridge_refuse_leftover_xcode_and_swiftpm_settings \"$@\"\necho ran after"
+            }
+            _ => "set -euo pipefail\nsource tools/env.sh\ncraftbridge_refuse_leftover_xcode_and_swiftpm_settings \"$@\"\necho ran after",
+        }
+    }
+
+    /// The helper as a stage's call runs it, in a scratch tree: `bash`, the call's shape (`leftover_script`),
+    /// whether the scratch is a checkout at all, what its git tracks, what was left on its disk,
+    /// and the sample bundles the call names; the run's status, output and error output, whether each planted
+    /// file survived, and the scratch itself, which a caller that pastes a removal line back needs alive.
+    fn leftover_call(
+        bash: &std::path::Path,
+        shape: &str,
+        checkout: bool,
+        tracked: &[&str],
+        left: &[&str],
+        projects: &[&str],
+    ) -> (Option<i32>, String, String, Vec<bool>, crate::scratch::Scratch) {
+        let scratch = scratch_tree("leftover-schemes", &["env.sh"], checkout, tracked, left);
+        let mut command = std::process::Command::new(bash);
+        command.arg("-c").arg(leftover_script(shape)).arg("bash").args(projects);
+        let (code, out, err) = run_in(&scratch, command, &[]);
+        let kept: Vec<bool> = tracked.iter().chain(left).map(|path| scratch.0.join(path).exists()).collect();
+        (code, out, err, kept, scratch)
+    }
+
+    /// `leftover_call` in a checkout, without the scratch: every case that does not paste a removal line back.
+    fn leftover_run(bash: &std::path::Path, shape: &str, tracked: &[&str], left: &[&str], projects: &[&str]) -> (Option<i32>, String, String, Vec<bool>) {
+        let (code, out, err, kept, _) = leftover_call(bash, shape, true, tracked, left, projects);
+        (code, out, err, kept)
+    }
+
+    /// The build and test stages refuse, before anything is built or any simulator is taken, the schemes and
+    /// the test plans a developer's Xcode left where `xcodebuild` reads schemes: given `-scheme <name>` it
+    /// runs the file `<name>.xcscheme` on disk — its test environment and any test plan it names included —
     /// instead of the scheme it generates from the tree, so under such a file the gate would answer for the
-    /// machine rather than the tree. Only a file git does not track is refused, an ignored one as much as any:
-    /// a scheme the tree commits is the tree's own, and passes. The refusal is status 2, and what follows
-    /// the call never runs, whether the call stands alone under `set -e` or stands on the left of a list,
-    /// where bash holds `set -e` off: the stages run it as `... || return 1`, and a case below runs it on
-    /// the left of an `&&`. It names every file from the root on a line of its own, with what it is and a
-    /// removal command that, pasted as printed, removes that file whatever its name holds; and it leaves
-    /// every file as it found it, since removing a developer's own file is the developer's choice.
-    /// Whatever else the folders of Xcode's state hold — the management files and folders Xcode writes
-    /// beside its schemes — passes, and so does a folder that is not there; a git that cannot answer,
-    /// outside a checkout, refuses, since the check could not tell a left file from the tree's. No
-    /// simulator is asked for: what is judged is the disk.
+    /// machine rather than the tree. The package's places are the helper's own to read, and a caller names
+    /// only the sample bundles it builds through a scheme; one refusal still lists what each folder holds,
+    /// every file from the repository's root on a line of its own beside a removal command that, pasted as
+    /// printed, removes that file whatever its name holds. Nothing is deleted or edited: a developer's file
+    /// stays exactly as it was found, since removing it is the developer's choice, and the refusal is status
+    /// 2, with nothing after the call running — whether the call stands alone under `set -e` or stands on the
+    /// left of a list, where bash holds `set -e` off: the stages run it as `... || return 1`, and a case
+    /// below runs it on the left of an `&&`. A scheme the tree commits is the tree's own and passes; a git
+    /// that cannot answer, outside a checkout, refuses, since the check could not tell a left file from the
+    /// tree's. No simulator is asked for: what is judged is the disk.
     #[test]
     fn the_stages_refuse_the_schemes_and_test_plans_xcode_left_on_disk() {
-        let env = crate::repo_root().join("tools/env.sh");
-        let scheme = "pkg/.swiftpm/xcode/xcshareddata/xcschemes/CraftBridge-Package.xcscheme";
-        let plan = "pkg/.swiftpm/xcode/xcshareddata/xcschemes/OneTest.xctestplan";
-        let user_scheme = "app/PostcardStudio.xcodeproj/project.xcworkspace/xcuserdata/dev.xcuserdatad/xcschemes/PostcardStudio.xcscheme";
-        let shared_scheme = "app/PostcardStudio.xcodeproj/xcshareddata/xcschemes/PostcardStudio.xcscheme";
-        let odd_plan = "app/PostcardStudio.xcodeproj/xcshareddata/xcschemes/it's a \"plan\".xctestplan";
-        let reason = "xcodebuild reads the schemes kept there in place of the ones it generates from the tree, and runs the test plans they name, so a run would answer for what this machine's Xcode left there, not for the tree";
-        // The tree a run judges: a checkout that ignores the package's state folder, as the repository does,
-        // and commits `tracked`; `left` is on disk beside it, never added. `checkout` false leaves git out.
-        let started = |bash: &std::path::Path, shape: &str, checkout: bool, tracked: &[&str], left: &[&str], folders: &[&str]| {
-            let script = match shape {
-                // The stages call the helper as `... || return 1`; this shape calls it on the left of an
-                // `&&`. Either stands on the left of a list, where bash holds its `set -e` off: a refusal
-                // must skip what runs after it, and the call's own status must stand.
-                "and" => "set -euo pipefail\nsource \"$1\"\nshift\ncraftbridge_refuse_leftover_schemes_and_test_plans \"$@\" && echo ran after\nexit $?",
-                _ => "set -euo pipefail\nsource \"$1\"\nshift\ncraftbridge_refuse_leftover_schemes_and_test_plans \"$@\"\necho ran after",
-            };
-            let scratch = crate::scratch::Scratch::new("leftover-schemes");
-            if checkout {
-                crate::git::output(&scratch.0, &["init", "-q"]).unwrap();
-                scratch.write(".gitignore", "/pkg/.swiftpm/\n");
-            }
-            for path in tracked.iter().chain(left) {
-                scratch.write(path, "planted by the test, untouched by the refusal\n");
-            }
-            if !tracked.is_empty() {
-                let mut add = vec!["add", "--"];
-                add.extend(tracked);
-                crate::git::output(&scratch.0, &add).unwrap();
-            }
-            let mut command = std::process::Command::new(bash);
-            command.arg("-c").arg(script).arg("bash").arg(&env).args(folders).current_dir(&scratch.0);
-            // As the gate runs it: tools/ci.sh starts with git's repository variables removed, so a run from
-            // a hook asks the checkout it is in, not the repository the hook was started for.
-            for variable in crate::git::local_env_vars() {
-                command.env_remove(variable);
-            }
-            let output = command.output().unwrap();
-            let kept: Vec<bool> = tracked.iter().chain(left).map(|path| scratch.0.join(path).exists()).collect();
-            (
-                output.status.code(),
-                String::from_utf8_lossy(&output.stdout).trim_end().to_string(),
-                String::from_utf8_lossy(&output.stderr).trim_end().to_string(),
-                kept,
-                scratch,
-            )
-        };
+        let scheme = "ios/sdk/.swiftpm/xcode/xcshareddata/xcschemes/CraftBridge-Package.xcscheme";
+        let plan = "ios/sdk/.swiftpm/xcode/xcshareddata/xcschemes/OneTest.xctestplan";
+        let sample = "ios/samples/PostcardStudio/PostcardStudio.xcodeproj";
+        let user_scheme =
+            "ios/samples/PostcardStudio/PostcardStudio.xcodeproj/project.xcworkspace/xcuserdata/dev.xcuserdatad/xcschemes/PostcardStudio.xcscheme";
+        let shared_scheme = "ios/samples/PostcardStudio/PostcardStudio.xcodeproj/xcshareddata/xcschemes/PostcardStudio.xcscheme";
         for bash in the_bashes_the_gate_runs_under() {
-            let run = |shape: &str, tracked: &[&str], left: &[&str], folders: &[&str]| {
-                let (code, out, err, kept, _) = started(&bash, shape, true, tracked, left, folders);
-                (code, out, err, kept)
-            };
-            let (code, out, err, kept) = run("direct", &[], &[scheme], &["pkg/.swiftpm"]);
-            assert_eq!((code, out.as_str()), (Some(2), ""), "a scheme left in the package's ignored state folder is refused, and nothing runs after it");
-            assert_eq!(
-                err,
-                format!(
-                    "bash: craftbridge_refuse_leftover_schemes_and_test_plans refuses the scheme {scheme}, which git does not track: {reason}\nbash:   remove it and run again: rm -f -- {scheme}"
-                ),
-                "the refusal names the file from the root, what it is, and the command that removes it"
+            let (code, out, err, kept) = leftover_run(&bash, "direct", &[], &[scheme], &[]);
+            // The refusal this file should earn, spelled once: a later case compares the same words earned
+            // from another folder.
+            let expected_scheme = format!(
+                "bash: craftbridge_refuse_leftover_xcode_and_swiftpm_settings refuses the scheme {scheme}, which git does not track: {LEFTOVER_SCHEME_REASON}\nbash:   remove it and run again: rm -f -- {scheme}"
             );
+            assert_eq!(
+                (code, out.as_str()),
+                (Some(2), ""),
+                "a scheme left in the package's ignored state folder is refused with no folder named, and nothing runs after it"
+            );
+            assert_eq!(err, expected_scheme, "the refusal names the file from the root, what it is, and the command that removes it");
             assert_eq!(kept, vec![true], "the developer's own file is left exactly as it was found");
-            let (code, _out, err, kept) = run("direct", &[], &[plan], &["pkg/.swiftpm"]);
+            let (code, _out, err, _kept) = leftover_run(&bash, "from-package", &[], &[scheme], &[]);
+            assert_eq!(
+                (code, err.as_str()),
+                (Some(2), expected_scheme.as_str()),
+                "called from inside the package's folder, as a developer checking by hand stands, the refusal is the same: the names are the repository's root's, where the removal line pastes"
+            );
+            let (code, _out, err, kept) = leftover_run(&bash, "direct", &[], &[plan], &[]);
             assert_eq!(code, Some(2), "a test plan left beside the schemes is refused too: {err}");
             assert!(
-                err.starts_with(&format!("bash: craftbridge_refuse_leftover_schemes_and_test_plans refuses the test plan {plan}, which git does not track:")),
+                err.starts_with(&format!(
+                    "bash: craftbridge_refuse_leftover_xcode_and_swiftpm_settings refuses the test plan {plan}, which git does not track:"
+                )),
                 "the refusal says which it is: {err}"
             );
             assert_eq!(kept, vec![true], "the developer's own file is left exactly as it was found");
-            let (code, out, err, kept) = run("direct", &[], &[scheme, plan, user_scheme], &["pkg/.swiftpm", "app/PostcardStudio.xcodeproj"]);
-            assert_eq!((code, out.as_str()), (Some(2), ""), "the stages name the sample projects beside the package, and one refusal lists them all");
+            let (code, out, err, kept) = leftover_run(&bash, "direct", &[], &[scheme, plan, user_scheme], &[sample]);
+            assert_eq!((code, out.as_str()), (Some(2), ""), "the stages name the sample projects, and one refusal lists them with the package's");
             for named in [scheme, plan, user_scheme] {
                 assert!(
                     err.contains(&format!(
@@ -933,50 +989,268 @@ mod tests {
             }
             assert_eq!(err.lines().count(), 6, "each file is named on its own line beside its removal line: {err}");
             assert_eq!(kept, vec![true, true, true], "no file of any folder is touched");
-            let (code, out, _err, _) = run("and", &[], &[scheme], &["pkg/.swiftpm"]);
+            let (code, out, _err, _) = leftover_run(&bash, "and", &[], &[scheme], &[]);
             assert_eq!(
                 (code, out.as_str()),
                 (Some(2), ""),
                 "a call on the left of an `&&`, where bash holds `set -e` off as it does in the stages' `... || return 1`, stops on the refusal with its own status and nothing after it running"
             );
-            let (code, out, err, kept) = run("direct", &[shared_scheme], &[], &["pkg/.swiftpm", "app/PostcardStudio.xcodeproj"]);
+            let (code, out, err, kept) = leftover_run(&bash, "direct", &[shared_scheme], &[], &[sample]);
             assert_eq!(
                 (code, out.as_str(), err.as_str(), kept),
                 (Some(0), "ran after", "", vec![true]),
                 "a shared scheme the tree commits is the tree's own, and passes"
             );
-            let (code, _out, err, kept) = run("direct", &[shared_scheme], &[user_scheme], &["app/PostcardStudio.xcodeproj"]);
+            let (code, _out, err, kept) = leftover_run(&bash, "direct", &[shared_scheme], &[user_scheme], &[sample]);
             assert_eq!(code, Some(2), "a user's scheme left beside a committed one is still refused: {err}");
             assert!(err.contains(user_scheme) && !err.contains(shared_scheme), "only the file git does not track is named: {err}");
             assert_eq!(kept, vec![true, true], "neither file is touched");
-            let (code, _out, err, kept, scratch) = started(&bash, "direct", true, &[], &[odd_plan], &["app/PostcardStudio.xcodeproj"]);
-            assert_eq!((code, kept), (Some(2), vec![true]), "a name holding a space and quotes is refused like any other: {err}");
-            let removal = err.lines().last().and_then(|line| line.strip_prefix("bash:   remove it and run again: ")).unwrap_or_default().to_string();
-            let pasted = std::process::Command::new(&bash).arg("-c").arg(&removal).current_dir(&scratch.0).output().unwrap();
-            assert!(
-                pasted.status.success() && !scratch.0.join(odd_plan).exists() && scratch.0.join("app/PostcardStudio.xcodeproj/xcshareddata/xcschemes").is_dir(),
-                "the removal line, pasted as printed, removes exactly that file: {removal}"
-            );
-            let (code, out, err, _) =
-                run("direct", &[], &["pkg/.swiftpm/xcode/xcschememanagement.plist", "pkg/.swiftpm/configuration/stub"], &["pkg/.swiftpm"]);
-            assert_eq!(
-                (code, out.as_str(), err.as_str()),
-                (Some(0), "ran after", ""),
-                "the rest of what Xcode leaves beside its schemes is nobody's business: only a scheme or a test plan refuses"
-            );
-            let (code, out, err, _) = run("direct", &[], &[], &["pkg/.swiftpm"]);
-            assert_eq!((code, out.as_str(), err.as_str()), (Some(0), "ran after", ""), "the tree with none of them left passes, state folder or not");
-            let (code, out, err, _, _) = started(&bash, "direct", false, &[], &[], &["pkg/.swiftpm"]);
+            let (code, out, err, _) = leftover_run(&bash, "direct", &[], &[], &[sample]);
+            assert_eq!((code, out.as_str(), err.as_str()), (Some(0), "ran after", ""), "the tree with none of them left passes, state folders or not");
+            let (code, out, err, _, _) = leftover_call(&bash, "direct", false, &[], &[], &[]);
             assert_eq!(
                 (code, out.as_str(), err.lines().last().unwrap_or("")),
                 (
                     Some(2),
                     "",
-                    "bash: craftbridge_refuse_leftover_schemes_and_test_plans cannot ask git which files it tracks under pkg/.swiftpm, so it cannot tell a scheme Xcode left there from one the tree commits"
+                    "bash: craftbridge_refuse_leftover_xcode_and_swiftpm_settings cannot ask git which files the tree tracks, so it cannot tell a scheme Xcode left from one the tree commits"
                 ),
                 "outside a checkout git cannot answer, and the check refuses rather than pass what it could not read"
             );
         }
+    }
+
+    /// The same call refuses, from the same one definition, what else stands where the tools read before they
+    /// build: a workspace or project left beside the package's manifest, which `xcodebuild` opens in place of
+    /// the package and runs the schemes it holds or names, refused whole whatever it holds inside; and every
+    /// file left in the package's own configuration folder, which `swift build` and `xcodebuild` read when
+    /// they resolve dependencies — a mirror written there changes from where a run's dependency sources are
+    /// fetched. The rest of what Xcode and SwiftPM leave in the state folder passes, since no tool reads it;
+    /// a workspace deeper in the package passes, since no call in the package's folder opens it; and a
+    /// workspace the tree commits is the tree's own. A bundle's removal line removes the whole bundle, and a
+    /// case below pastes both removal forms exactly as printed, through names that hold spaces and quotes.
+    #[test]
+    fn the_stages_refuse_the_workspace_and_package_configuration_left_on_disk() {
+        let sample = "ios/samples/PostcardStudio/PostcardStudio.xcodeproj";
+        let odd_plan = "ios/samples/PostcardStudio/PostcardStudio.xcodeproj/xcshareddata/xcschemes/it's a \"plan\".xctestplan";
+        let workspace = "ios/sdk/Dev.xcworkspace";
+        let workspace_files =
+            ["ios/sdk/Dev.xcworkspace/contents.xcworkspacedata", "ios/sdk/Dev.xcworkspace/xcshareddata/xcschemes/CraftBridge-Package.xcscheme"];
+        let project_file = "ios/sdk/Dev.xcodeproj/project.pbxproj";
+        let mirror = "ios/sdk/.swiftpm/configuration/mirrors.json";
+        let registry = "ios/sdk/.swiftpm/configuration/registries.json";
+        for bash in the_bashes_the_gate_runs_under() {
+            let (code, out, err, kept) = leftover_run(&bash, "direct", &[], &workspace_files, &[]);
+            assert_eq!(
+                (code, out.as_str(), err.as_str(), kept),
+                (
+                    Some(2),
+                    "",
+                    format!(
+                        "bash: craftbridge_refuse_leftover_xcode_and_swiftpm_settings refuses the workspace {workspace}, which git does not track: {LEFTOVER_BUNDLE_REASON}\nbash:   remove it and run again: rm -rf -- {workspace}"
+                    )
+                    .as_str(),
+                    vec![true, true]
+                ),
+                "a workspace left beside the manifest is refused whole, once, with the scheme it holds, and kept"
+            );
+            let (code, _out, err, _) = leftover_run(&bash, "direct", &[], &[project_file], &[]);
+            assert_eq!(
+                (code, err.lines().next().unwrap_or("")),
+                (
+                    Some(2),
+                    format!("bash: craftbridge_refuse_leftover_xcode_and_swiftpm_settings refuses the project ios/sdk/Dev.xcodeproj, which git does not track: {LEFTOVER_BUNDLE_REASON}").as_str()
+                ),
+                "so is a project left there"
+            );
+            let (code, out, err, kept) = leftover_run(&bash, "direct", &workspace_files[..1], &[], &[]);
+            assert_eq!(
+                (code, out.as_str(), err.as_str(), kept),
+                (Some(0), "ran after", "", vec![true]),
+                "a workspace the tree commits beside the manifest is the tree's own, and passes"
+            );
+            // A folder git tracks a file of, so git names the workspace in it rather than the folder whole.
+            let (code, out, err, _) =
+                leftover_run(&bash, "direct", &["ios/sdk/Tests/Probe/Keep.swift"], &["ios/sdk/Tests/Probe/Inner.xcworkspace/contents.xcworkspacedata"], &[]);
+            assert_eq!(
+                (code, out.as_str(), err.as_str()),
+                (Some(0), "ran after", ""),
+                "a workspace deeper in the package is none that a call in its folder opens"
+            );
+            for (left, gone) in [(odd_plan, odd_plan), ("ios/sdk/it's \"mine\".xcworkspace/contents.xcworkspacedata", "ios/sdk/it's \"mine\".xcworkspace")] {
+                let (code, _out, err, kept, scratch) = leftover_call(&bash, "direct", true, &[], &[left], &[sample]);
+                assert_eq!((code, kept), (Some(2), vec![true]), "a name holding a space and quotes is refused like any other: {err}");
+                let removal = err.lines().last().and_then(|line| line.strip_prefix("bash:   remove it and run again: ")).unwrap_or_default().to_string();
+                let parent = std::path::Path::new(gone).parent().unwrap();
+                let pasted = std::process::Command::new(&bash).arg("-c").arg(&removal).current_dir(&scratch.0).output().unwrap();
+                assert!(
+                    pasted.status.success() && !scratch.0.join(gone).exists() && scratch.0.join(parent).is_dir(),
+                    "the removal line, pasted as printed, removes exactly what it names: {removal}"
+                );
+            }
+            let (code, out, err, kept) = leftover_run(&bash, "direct", &[], &[mirror, registry], &[]);
+            assert_eq!(
+                (code, out.as_str(), err.lines().count(), kept),
+                (Some(2), "", 4, vec![true, true]),
+                "the configuration written into the package's own configuration folder is refused too, each file beside its own removal line: {err}"
+            );
+            assert_eq!(
+                err,
+                format!(
+                    "bash: craftbridge_refuse_leftover_xcode_and_swiftpm_settings refuses the package configuration {mirror}, which git does not track: {LEFTOVER_CONFIG_REASON}\nbash:   remove it and run again: rm -f -- {mirror}\nbash: craftbridge_refuse_leftover_xcode_and_swiftpm_settings refuses the package configuration {registry}, which git does not track: {LEFTOVER_CONFIG_REASON}\nbash:   remove it and run again: rm -f -- {registry}"
+                ),
+                "a mirror written there is what replaces the source a dependency's URL names when a run fetches, and the registry beside it stands in the one folder no file of the tree ever reaches"
+            );
+            let (code, out, err, _) =
+                leftover_run(&bash, "direct", &[], &["ios/sdk/.swiftpm/xcode/xcschememanagement.plist", "ios/sdk/.swiftpm/state/stub"], &[]);
+            assert_eq!(
+                (code, out.as_str(), err.as_str()),
+                (Some(0), "ran after", ""),
+                "the rest of what Xcode and SwiftPM leave in the state folder is nobody's business: only what the tools read from those folders refuses"
+            );
+        }
+    }
+
+    /// The same call refuses a mirror named from outside the tree, which `swift build` and `xcodebuild` read
+    /// as they read one in the package's own folder: one in the machine's own SwiftPM configuration folder,
+    /// under the home `CFFIXED_USER_HOME` names here, whether the command line's `.swiftpm/configuration`
+    /// links to the `Library` folder Xcode reads, as SwiftPM lays it out, and is refused once, or the two
+    /// stand apart, each refused; and the file `SWIFTPM_MIRROR_CONFIG` names, refused by the variable. The
+    /// rest of the machine's folder passes — the package collections and registries it keeps decide nothing
+    /// the gate builds — and so does the variable set empty.
+    #[test]
+    fn the_stages_refuse_a_mirror_the_machine_or_the_shell_names() {
+        let machine_reason = "swift build and xcodebuild read the mirrors SwiftPM keeps for the whole machine when they resolve any package's dependencies, fetching what they build from the source a mirror there points at in place of the one a dependency's URL names, so a run would answer for this machine's configuration, not for the tree";
+        let shell_reason = "swift build and xcodebuild read the mirrors the file it names holds when they resolve the package's dependencies, fetching what they build from the source a mirror there points at in place of the one a dependency's URL names, so a run would answer for what this shell exports, not for the tree";
+        let library = "machine/Library/org.swift.swiftpm/configuration";
+        for bash in the_bashes_the_gate_runs_under() {
+            let run = |files: &[&str], linked: bool, env: &[(&str, &str)]| {
+                let scratch = scratch_tree("leftover-mirrors", &["env.sh"], true, &[], files);
+                if linked {
+                    std::fs::create_dir_all(scratch.0.join("machine/.swiftpm")).unwrap();
+                    std::os::unix::fs::symlink(scratch.0.join(library), scratch.0.join("machine/.swiftpm/configuration")).unwrap();
+                }
+                let mut command = std::process::Command::new(&bash);
+                command.arg("-c").arg(leftover_script("direct")).arg("bash");
+                let (code, out, err) = run_in(&scratch, command, env);
+                (code, out, err, scratch)
+            };
+            let (code, out, err, scratch) = run(&[&format!("{library}/mirrors.json"), &format!("{library}/collections.json")], true, &[]);
+            let mirrors = scratch.0.join("machine/.swiftpm/configuration/mirrors.json").display().to_string();
+            assert_eq!(
+                (code, out.as_str(), err),
+                (
+                    Some(2),
+                    "",
+                    format!(
+                        "bash: craftbridge_refuse_leftover_xcode_and_swiftpm_settings refuses the machine's mirrors {mirrors}: {machine_reason}\nbash:   move it aside and run again: mv -- {mirrors} {mirrors}.aside"
+                    )
+                ),
+                "a mirror kept for the whole machine is refused once, through the link SwiftPM lays from its command line's folder to Xcode's, and the collections beside it are not"
+            );
+            assert!(scratch.0.join(library).join("mirrors.json").exists(), "the machine's file is left exactly as it was found");
+            let (code, _out, err, _) = run(&["machine/.swiftpm/configuration/mirrors.json", &format!("{library}/mirrors.json")], false, &[]);
+            assert_eq!(
+                (code, err.lines().filter(|line| line.contains("refuses the machine's mirrors")).count()),
+                (Some(2), 2),
+                "the two folders standing apart, as on a machine set up before SwiftPM moved its own, are each refused: {err}"
+            );
+            let (code, out, err, _) = run(&[&format!("{library}/collections.json"), &format!("{library}/registries.json")], true, &[]);
+            assert_eq!((code, out.as_str(), err.as_str()), (Some(0), "ran after", ""), "the rest of the machine's folder decides nothing the gate builds");
+            let (code, out, err, _) = run(&[], false, &[("SWIFTPM_MIRROR_CONFIG", "/somewhere/it's mine/mirrors.json")]);
+            assert_eq!(
+                (code, out.as_str(), err),
+                (
+                    Some(2),
+                    "",
+                    format!(
+                        "bash: craftbridge_refuse_leftover_xcode_and_swiftpm_settings refuses SWIFTPM_MIRROR_CONFIG=/somewhere/it\\'s\\ mine/mirrors.json: {shell_reason}\nbash:   unset it and run again: unset SWIFTPM_MIRROR_CONFIG"
+                    )
+                ),
+                "a mirror file the shell names is refused by the variable that names it"
+            );
+            let (code, out, err, _) = run(&[], false, &[("SWIFTPM_MIRROR_CONFIG", "")]);
+            assert_eq!((code, out.as_str(), err.as_str()), (Some(0), "ran after", ""), "the variable set empty names no file");
+        }
+    }
+
+    /// The device runner refuses, before it builds anything, takes the device's lock or looks at the phone,
+    /// a scheme, test plan or package configuration an Xcode session or the official `swift package config`
+    /// left where `xcodebuild` and `swift build` read the package's schemes and resolve, or a workspace or
+    /// project beside the manifest: its `--swift` run builds the package's tests through
+    /// `-scheme CraftBridge-Package`, so under such a file the phone run would answer for what this machine
+    /// left, not for the tree. The refusal is status 2, the runner's own way of saying the run never started
+    /// — no test ran, so it is no test failure's 1 — and it stands ahead of every other ask: the runner names
+    /// its device, identity and profile only after it, so a run meets it before any lock is taken, anything is
+    /// built or any tool of the phone is asked for. With nothing left the run goes on to exactly that first
+    /// ask, which is as far as a run without a phone gets. A run of a package's cargo test binaries builds nothing an `xcodebuild`
+    /// scheme can redirect, so a left scheme does not refuse it and it reaches that same ask with one left.
+    /// The run is of a copy of the script in a scratch checkout, so no plant stands in this repository while
+    /// other tests of the same script run beside this one, and no lock of the machine is taken.
+    #[test]
+    fn the_device_runner_refuses_a_leftover_scheme_before_it_locks_the_phone() {
+        let started = |args: &[&str], left: &[&str]| {
+            // The script as it stands, with the environment it sources and the switch list it refuses by.
+            let scratch = scratch_tree("device-runner-leftovers", &["ios-device-test.sh", "env.sh", "refused-switches.tsv"], true, &[], left);
+            let mut command = std::process::Command::new("bash");
+            command
+                .arg(scratch.0.join("tools/ios-device-test.sh"))
+                .args(args)
+                // No phone is set up here, and none may be reached: the run ends at the scheme refusal or,
+                // with no scheme, at its first ask — which stands where no phone, lock or build is reached.
+                .env_remove("CRAFTBRIDGE_DEVICE_ID")
+                .env_remove("CRAFTBRIDGE_SIGNING_IDENTITY")
+                .env_remove("CRAFTBRIDGE_PROVISIONING_PROFILE");
+            let (code, out, err) = run_in(&scratch, command, &[]);
+            (code, out, err, scratch)
+        };
+        let scheme = "ios/sdk/.swiftpm/xcode/xcshareddata/xcschemes/CraftBridge-Package.xcscheme";
+        let ask = "ios-device-test: CRAFTBRIDGE_DEVICE_ID is not set: see the header of tools/ios-device-test.sh";
+        let (code, out, err, scratch) = started(&["--swift"], &[scheme]);
+        assert_eq!(
+            (code, out.as_str()),
+            (Some(2), ""),
+            "a scheme left in the package's ignored state folder stops the run before it builds, locks the device or touches the phone: {err}"
+        );
+        assert_eq!(
+            err,
+            format!(
+                "ios-device-test: craftbridge_refuse_leftover_xcode_and_swiftpm_settings refuses the scheme {scheme}, which git does not track: {LEFTOVER_SCHEME_REASON}\nios-device-test:   remove it and run again: rm -f -- {scheme}"
+            ),
+            "the refusal names the file from the root, what it is, and the command that removes it, and nothing else the run would ask for stands before it"
+        );
+        assert!(scratch.0.join(scheme).exists(), "the developer's own file is left exactly as it was found");
+        let (code, _out, err, _) = started(&["--swift"], &["ios/sdk/Dev.xcworkspace/contents.xcworkspacedata"]);
+        assert_eq!(
+            (code, err.lines().next().unwrap_or("")),
+            (
+                Some(2),
+                format!("ios-device-test: craftbridge_refuse_leftover_xcode_and_swiftpm_settings refuses the workspace ios/sdk/Dev.xcworkspace, which git does not track: {LEFTOVER_BUNDLE_REASON}").as_str()
+            ),
+            "a workspace left beside the manifest, which the run's xcodebuild would open in place of the package, stops it too"
+        );
+        let (code, _out, err, _) = started(&["--swift"], &["ios/sdk/.swiftpm/configuration/mirrors.json"]);
+        assert_eq!(
+            (code, err.lines().next().unwrap_or("")),
+            (
+                Some(2),
+                format!("ios-device-test: craftbridge_refuse_leftover_xcode_and_swiftpm_settings refuses the package configuration ios/sdk/.swiftpm/configuration/mirrors.json, which git does not track: {LEFTOVER_CONFIG_REASON}").as_str()
+            ),
+            "a mirror written into the package's own configuration folder, which the run's own resolve would fetch a dependency through, stops the phone run too"
+        );
+        let (code, out, err, _) = started(&["--swift"], &[]);
+        assert_eq!(
+            (code, out.as_str(), err.as_str()),
+            (Some(1), "", ask),
+            "with nothing left the run passes the check and is stopped by its first ask, so no other refusal or ask stands ahead of the scheme check"
+        );
+        let (code, out, err, scratch) = started(&["craftbridge-core"], &[scheme]);
+        assert_eq!(
+            (code, out.as_str(), err.as_str()),
+            (Some(1), "", ask),
+            "a run of a package's cargo test binaries builds nothing through a scheme, so the left scheme does not refuse it"
+        );
+        assert!(scratch.0.join(scheme).exists(), "the untouched scheme stays exactly as it was found");
     }
 }
 

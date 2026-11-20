@@ -49,7 +49,11 @@
 # host's executable under another bundle id, to the front for those seconds (a few, by default) and brings the
 # host back.
 #
-# Exit status 0 when every binary passed, 1 when a test failed, a binary could not run or no test ran at all.
+# Exit status 0 when every binary passed, 1 when a test failed, a binary could not run or no test ran at all,
+# and 2 when the run refused to start at all, before building anything or taking the device's lock, because a
+# scheme, test plan or package configuration git does not track, or a workspace or project beside the
+# package's manifest, stands where xcodebuild and swift build read the package's schemes and resolve, or the
+# machine's own SwiftPM configuration or the shell names a mirror.
 set -euo pipefail
 # shellcheck disable=SC2046 # one variable name per word, split on purpose
 unset $(git rev-parse --local-env-vars 2>/dev/null)
@@ -104,6 +108,21 @@ if [ "$swift_mode" = yes ]; then
   [ "${#packages[@]}" -eq 0 ] || die "$usage"
 else
   [ "${#packages[@]}" -gt 0 ] || die "$usage"
+fi
+
+# Before anything is built and before the device's lock is taken: the Swift run asks `xcodebuild` for the
+# package through `-scheme CraftBridge-Package`, so a scheme or test plan an Xcode session left where it
+# reads the package's schemes, or a mirror or registry left in the package's own configuration folder, or a
+# mirror the machine's own configuration or the shell names, which the run's resolve reads and fetches a
+# dependency's sources through, would be what the run builds and runs on the phone, rather than what the
+# manifest gives (tools/env.sh, which reads the package's places and the mirrors' itself).
+# The runner builds no sample, so it names no project bundle, and a run of a package's cargo test binaries
+# builds nothing a scheme can redirect. The run under the lock starts this file again and meets the check
+# again, which then also covers a file Xcode wrote while the run waited for the lock. The refusal is status 2,
+# not a test failure's 1: the run never started.
+if [ "$swift_mode" = yes ]; then
+  # shellcheck disable=SC2119 # the helper's arguments are the sample bundles a caller builds, and this builds none
+  craftbridge_refuse_leftover_xcode_and_swiftpm_settings || exit 2
 fi
 
 for variable in CRAFTBRIDGE_DEVICE_ID CRAFTBRIDGE_SIGNING_IDENTITY CRAFTBRIDGE_PROVISIONING_PROFILE; do

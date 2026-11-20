@@ -271,52 +271,115 @@ craftbridge_set_test_runner_env() {
   done
 }
 
-# Refuse a gate run that would build or test under a scheme or test plan a developer's Xcode left on disk.
+# Refuse a gate run that would build or test under an Xcode or SwiftPM setting left in place of the tree's
+# own: a scheme or a test plan a developer's Xcode left on disk, a workspace or project left beside the
+# package's manifest, every file left in the package's own configuration folder, a mirror in the machine's
+# own SwiftPM configuration folder, and the mirror file `SWIFTPM_MIRROR_CONFIG` names.
 # Given `-scheme <name>`, xcodebuild runs the file `<name>.xcscheme` wherever Xcode keeps a project's or a
 # package's schemes in preference to the scheme it generates itself: it builds and tests exactly what that
 # file says, its test environment and any test plan it names among them. So a scheme left by opening the
-# package in Xcode — `ios/sdk/.swiftpm`, which git ignores — or edited into a sample's project bundle,
-# would make the gate answer for what the machine's Xcode left rather than for the tree: one holding
-# `CRAFTBRIDGE_BASELINE=1`, with nothing exported in the shell, was shown to make swift_test run the
-# baseline measurement beside every other suite. A stage that builds or tests calls this on the folders Xcode
-# keeps state in — the package's `.swiftpm`, and each sample's own project bundle, where both the user's and
-# the shared schemes sit — before it builds or takes a simulator, and the refusal is where the stage starts.
-# Only a file git does not track is refused, ignored or not: a scheme the tree commits, as a project may to
-# fix its build and test settings for everyone, is the tree's own, and the gate answers for it as for any
-# other tracked file. Nothing here deletes or edits anything: a developer's file stays exactly as it was
-# found, because removing it is the developer's choice, and the refusal repeats until it has been made. Each
-# refused file is one line naming it from the repository's root and what it is, and one with the command
-# that removes it, quoted so that it pastes whatever the name holds; the refusal is status 2.
-craftbridge_refuse_leftover_schemes_and_test_plans() {
-  local listing found kind quoted
-  local -a leftovers=()
+# package in Xcode — `ios/sdk/.swiftpm`, which git ignores — or edited into a sample's project bundle, would
+# make the gate answer for what the machine's Xcode left rather than for the tree: one holding
+# `CRAFTBRIDGE_BASELINE=1`, with nothing exported in the shell, was shown to make swift_test run the baseline
+# measurement beside every other suite. A workspace or project left beside the package's manifest does the
+# same with no file in `.swiftpm`: run in the package's folder with no `-project` or `-workspace`, xcodebuild
+# opens that bundle in place of the package, and runs the schemes it holds or the schemes of the packages and
+# projects it names, one of another checkout among them. So does the configuration left in the package's own
+# ignored `configuration` folder: `swift build` and `xcodebuild`, exactly as the stages and the runner call
+# them, read a mirror or a registry written there — as the official `swift package config` writes it — when
+# they resolve dependencies, and fetch the sources they build from the source a mirror there points at in
+# place of the one a dependency's URL names; every file left under `ios/sdk/.swiftpm/configuration` is refused
+# from here too, since nothing of the tree sits there. Both tools read mirrors from two more places: the file
+# `SWIFTPM_MIRROR_CONFIG` names, and the machine's own SwiftPM configuration folder, which every package's
+# resolve reads — under the home `CFFIXED_USER_HOME` names when it is set, as the tools take it, and the
+# user's home otherwise. A mirror there is refused too, by the variable's name or the file's, since it fetches
+# as one in the package's folder does and neither is the tree's; the rest of the machine's folder, its package
+# collections among them, decides nothing the gate builds. Every caller that builds the package through a
+# scheme — the Swift stages and the device runner — calls this before it builds, takes a simulator or takes
+# the device's lock, naming the sample project bundles it builds through a scheme too, where both the user's
+# and the shared schemes sit; the package's own places are read here, from this one spelling of its folder, so
+# no caller names them again. Of the tree's places, only a file git does not track is refused, ignored or not:
+# a scheme the tree commits, as a project may to fix its build and test settings for everyone, is the tree's
+# own, and the gate answers for it as for any other tracked file. Nothing here deletes or edits anything: a
+# developer's file stays exactly as it was found, because removing it is the developer's choice, and the
+# refusal repeats until it has been made. Each refusal is one line naming the file — one of the tree's from
+# the repository's root, the machine's by its own path — or the variable, and what it is, and one with the
+# command that removes it, moves it aside or unsets it, quoted so that it pastes, from the root, whatever the
+# name holds; the refusal is status 2.
+craftbridge_refuse_leftover_xcode_and_swiftpm_settings() {
+  local package=ios/sdk listing found kind reason removal quoted tail machine mirrors
+  local -a leftovers=() machine_mirrors=()
+  # The machine's folder as each tool keeps it: the command line's `.swiftpm/configuration`, on macOS a link
+  # to the `Library` folder Xcode reads, which a machine set up before that move may still hold apart.
+  machine="${CFFIXED_USER_HOME:-$HOME}"
+  for mirrors in "$machine/.swiftpm/configuration/mirrors.json" "$machine/Library/org.swift.swiftpm/configuration/mirrors.json"; do
+    [ -e "$mirrors" ] || continue
+    [ ${#machine_mirrors[@]} -eq 0 ] || [ ! "$mirrors" -ef "${machine_mirrors[0]}" ] || continue
+    machine_mirrors+=("$mirrors")
+  done
   # `git ls-files --others` names every file git does not track, the ignored ones too, since it applies
-  # no ignore rule unless asked to. Its answer goes through a file, where its status can be read: a git
-  # that cannot answer would otherwise read as a tree with nothing left in it.
+  # no ignore rule unless asked to; the second listing stops at a folder git tracks nothing of
+  # (`--directory`), so a workspace or project left whole beside the manifest is one entry, and the build
+  # output beside it is read no further. Their answer goes through a file, where its status can be read: a
+  # git that cannot answer would otherwise read as a tree with nothing left in it.
   listing="$(mktemp)" || return 2
-  if ! git --literal-pathspecs ls-files -z --others -- "$@" >"$listing"; then
+  if ! {
+    git -C "$CRAFTBRIDGE_ROOT" --literal-pathspecs ls-files -z --others -- "$package/.swiftpm" "$@" &&
+      git -C "$CRAFTBRIDGE_ROOT" --literal-pathspecs ls-files -z --others --directory -- "$package"
+  } >"$listing"; then
     rm -f "$listing"
-    echo "$(basename "$0" .sh): craftbridge_refuse_leftover_schemes_and_test_plans cannot ask git which files it tracks under $*, so it cannot tell a scheme Xcode left there from one the tree commits" >&2
+    echo "$(basename "$0" .sh): craftbridge_refuse_leftover_xcode_and_swiftpm_settings cannot ask git which files the tree tracks, so it cannot tell a scheme Xcode left from one the tree commits" >&2
     return 2
   fi
   while IFS= read -r -d '' found; do
     case "$found" in
       *.xcscheme | *.xctestplan) leftovers+=("$found") ;;
+      "$package"/.swiftpm/configuration/*) leftovers+=("$found") ;;
+      "$package"/*.xcworkspace/ | "$package"/*.xcodeproj/)
+        # Only a bundle beside the manifest is one xcodebuild opens for the package.
+        case "${found#"$package"/}" in
+          */*/) ;;
+          *) leftovers+=("${found%/}") ;;
+        esac
+        ;;
     esac
   done <"$listing"
   rm -f "$listing"
-  if [ ${#leftovers[@]} -eq 0 ]; then
+  if [ ${#leftovers[@]} -eq 0 ] && [ ${#machine_mirrors[@]} -eq 0 ] && [ -z "${SWIFTPM_MIRROR_CONFIG:-}" ]; then
     return 0
   fi
-  for found in "${leftovers[@]}"; do
+  for found in ${leftovers[@]+"${leftovers[@]}"}; do
+    reason="xcodebuild reads the schemes kept there in place of the ones it generates from the tree, and runs the test plans they name"
+    tail="so a run would answer for what this machine's Xcode left there, not for the tree"
+    removal="rm -f --"
     case "$found" in
       *.xcscheme) kind=scheme ;;
-      *) kind="test plan" ;;
+      *.xctestplan) kind="test plan" ;;
+      "$package"/.swiftpm/configuration/*)
+        kind="package configuration"
+        reason="swift build and xcodebuild read the configuration written here when they resolve the package's dependencies, fetching what they build from the source a mirror here points at in place of the one a dependency's URL names"
+        tail="so a run would answer for what this machine's swift package configuration left there, not for the tree"
+        ;;
+      *)
+        case "$found" in *.xcworkspace) kind=workspace ;; *) kind=project ;; esac
+        reason="xcodebuild opens a workspace or project beside the package's manifest in place of the package, and runs the schemes it holds or names"
+        removal="rm -rf --"
+        ;;
     esac
     printf -v quoted '%q' "$found"
-    echo "$(basename "$0" .sh): craftbridge_refuse_leftover_schemes_and_test_plans refuses the $kind $found, which git does not track: xcodebuild reads the schemes kept there in place of the ones it generates from the tree, and runs the test plans they name, so a run would answer for what this machine's Xcode left there, not for the tree" >&2
-    echo "$(basename "$0" .sh):   remove it and run again: rm -f -- $quoted" >&2
+    echo "$(basename "$0" .sh): craftbridge_refuse_leftover_xcode_and_swiftpm_settings refuses the $kind $found, which git does not track: $reason, $tail" >&2
+    echo "$(basename "$0" .sh):   remove it and run again: $removal $quoted" >&2
   done
+  for found in ${machine_mirrors[@]+"${machine_mirrors[@]}"}; do
+    printf -v quoted '%q' "$found"
+    echo "$(basename "$0" .sh): craftbridge_refuse_leftover_xcode_and_swiftpm_settings refuses the machine's mirrors $found: swift build and xcodebuild read the mirrors SwiftPM keeps for the whole machine when they resolve any package's dependencies, fetching what they build from the source a mirror there points at in place of the one a dependency's URL names, so a run would answer for this machine's configuration, not for the tree" >&2
+    echo "$(basename "$0" .sh):   move it aside and run again: mv -- $quoted $quoted.aside" >&2
+  done
+  if [ -n "${SWIFTPM_MIRROR_CONFIG:-}" ]; then
+    printf -v quoted '%q' "$SWIFTPM_MIRROR_CONFIG"
+    echo "$(basename "$0" .sh): craftbridge_refuse_leftover_xcode_and_swiftpm_settings refuses SWIFTPM_MIRROR_CONFIG=$quoted: swift build and xcodebuild read the mirrors the file it names holds when they resolve the package's dependencies, fetching what they build from the source a mirror there points at in place of the one a dependency's URL names, so a run would answer for what this shell exports, not for the tree" >&2
+    echo "$(basename "$0" .sh):   unset it and run again: unset SWIFTPM_MIRROR_CONFIG" >&2
+  fi
   return 2
 }
 
