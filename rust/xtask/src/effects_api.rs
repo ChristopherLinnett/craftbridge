@@ -27,6 +27,9 @@ pub(crate) const KOTLIN_OUTPUT_DIR: &str = "android/sdk/effects/src/generated/ko
 /// Where the plugin's version constants live: the generated folder of the plugin's own source.
 pub(crate) const VERSION_OUTPUT_DIR: &str = "rust/effects/craftbridge-effects/src/generated";
 
+/// Where the command reference lives: the generated folder of the docs tree.
+pub(crate) const DOCS_OUTPUT_DIR: &str = "docs/generated";
+
 /// The codegen's package, and the binary it builds.
 const CODEGEN: &str = "craftbridge-effects-codegen";
 
@@ -49,6 +52,15 @@ fn pinned_commit(root: &Path) -> Result<String, String> {
 /// Write the Swift facade into `out_dir`.
 pub(crate) fn generate_swift(out_dir: &Path) -> Result<(), String> {
     run_codegen(&["swift"], out_dir)
+}
+
+/// Write the command reference into `out_dir`, from the surface file in this tree. The registry runs
+/// this generator after the one that writes that file, so a generate that pulls a new surface renders
+/// the reference from what it just wrote; a `--check` compares the reference against the surface the
+/// tree holds, and a surface that is itself stale fails the surface generator's own check.
+pub(crate) fn generate_docs(out_dir: &Path) -> Result<(), String> {
+    let surface = crate::repository_root()?.join(SURFACE_FILE);
+    run_codegen(&["docs", &surface.to_string_lossy()], out_dir)
 }
 
 /// Write the Kotlin facade into `out_dir`.

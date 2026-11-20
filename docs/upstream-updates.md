@@ -145,7 +145,7 @@ Lines to refresh in `tools/adaptations.toml`, which the revision change moved wi
 
 ### Commands added, changed and removed
 
-```
+```text
 compatible	changed	command	anim.applyPreset	params "{path | preset, layers?}" -> "{path | preset, layers?} — saved effects and text animators are added to each layer, with their keys at the CTI"
 compatible	changed	command	anim.savePreset	params "{path (.ecpreset), name?} — saves the selected properties/effects" -> "{path (.ecpreset), name?} — saves the selected properties/effects; a text animator with a selected property is saved whole"
 breaking	changed	command	edit.editOriginal	refusedUnderConfinement false -> true

@@ -37,6 +37,7 @@ pub(crate) fn generators() -> Vec<Generator> {
         Generator { name: "effects-swift-facade", output_dir: crate::effects_api::SWIFT_OUTPUT_DIR, generate: crate::effects_api::generate_swift },
         Generator { name: "effects-kotlin-facade", output_dir: crate::effects_api::KOTLIN_OUTPUT_DIR, generate: crate::effects_api::generate_kotlin },
         Generator { name: "effects-version", output_dir: crate::effects_api::VERSION_OUTPUT_DIR, generate: crate::effects_api::generate_version },
+        Generator { name: "docs-commands", output_dir: crate::effects_api::DOCS_OUTPUT_DIR, generate: crate::effects_api::generate_docs },
         Generator { name: "swift-bindings", output_dir: crate::swift_bindings::OUTPUT_DIR, generate: crate::swift_bindings::generate },
         Generator { name: "kotlin-bindings-core", output_dir: crate::kotlin_bindings::CORE_OUTPUT_DIR, generate: crate::kotlin_bindings::generate_core },
         Generator {
@@ -447,6 +448,22 @@ mod tests {
         assert!(inside.iter().any(|problem| problem.starts_with("bindings:") && problem.contains("lies in facade's")), "{inside:?}");
         let outside = registry_problems(&[generator("facade", "android/sdk/effects/src/main/kotlin/effects")]);
         assert!(!outside.is_empty(), "a folder with no generated directory above it is refused: {outside:?}");
+    }
+
+    /// The real registry's own shape, as far as a reader of a generated docs file needs to trust it:
+    /// the command reference is rendered from the surface file, so the generator that writes that file
+    /// must run before the one that reads it, and the reference lives in the docs tree's generated
+    /// folder, which no other generator writes into.
+    #[test]
+    fn the_command_reference_is_rendered_after_the_surface_it_reads() {
+        let registry = generators();
+        let place = |name: &str| registry.iter().position(|generator| generator.name == name);
+        let (surface, reference) = (place("effects-api-surface"), place("docs-commands"));
+        assert!(surface.is_some() && reference.is_some(), "both generators are in the registry");
+        assert!(surface < reference, "the reference reads the file the surface generator writes");
+        let docs = registry.iter().find(|generator| generator.name == "docs-commands").unwrap();
+        assert_eq!(docs.output_dir, "docs/generated");
+        assert!(registry_problems(&registry).is_empty(), "{:?}", registry_problems(&registry));
     }
 
     #[test]
