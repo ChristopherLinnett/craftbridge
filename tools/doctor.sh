@@ -102,8 +102,10 @@ if has rustup; then
       lint_toolchain="${lint_status#ok }"
       ok "lint library toolchain $lint_toolchain ($lint_library/rust-toolchain.toml)"
       rust_targets "$lint_toolchain" "lint library toolchain"
-      # clippy is one of the components the library's pin lists and the folder's install brings.
-      if rustup component list --installed --toolchain "$lint_toolchain" | grep -q '^clippy-'; then
+      # clippy is one of the components the library's pin lists and the folder's install brings. The
+      # component list is read whole: `grep -q` stops at its first match, rustup dies of SIGPIPE with the
+      # list half written, and under `pipefail` the pipe would answer 141 by timing, not by the list.
+      if rustup component list --installed --toolchain "$lint_toolchain" | grep '^clippy-' >/dev/null; then
         ok "lint library toolchain clippy"
       else
         gap "clippy on the lint library toolchain" "(cd $lint_library && rustup toolchain install)"
@@ -235,6 +237,8 @@ done
 
 # The gate's other tools.
 if has shellcheck; then ok "shellcheck $(shellcheck --version | sed -n 's/^version: //p')"; else gap "shellcheck" "brew install shellcheck"; fi
+# The shell stage's own rule reads every script through shfmt's syntax tree (rust/xtask/src/early_pipes.rs).
+if has shfmt; then ok "shfmt $(shfmt --version)"; else gap "shfmt" "brew install shfmt"; fi
 node_major="$(node --version 2>/dev/null | sed -n 's/^v\([0-9]*\).*/\1/p' || true)"
 if [ -n "$node_major" ] && [ "$node_major" -ge 20 ] && has npx; then ok "Node.js $(node --version) (runs $CRAFTBRIDGE_JSCPD)"; else gap "Node.js 20 or later" "brew install node"; fi
 # The plan stage rebuilds the plan's views with the kit's own builders, on the same Node the line above

@@ -15,14 +15,16 @@
 # devices.
 #
 # Every tool the repository pins comes from that pin, never a second list here: the Rust toolchains from
-# rust/rust-toolchain.toml and the lint library's, as rustup reads them; the Xcode, cargo-dylint and
-# SwiftLint releases from tools/env.sh; the phone targets and the JDK from `cargo xtask pins`; the plan
-# kit's packages from plan/package-lock.json. cargo-deny, cargo-ndk and shellcheck have no pinned release,
-# and the doctor takes any, so each is the newest, installed by the doctor's own fix. Both images carry the
-# Android platform and build tools the repository pins, which the doctor checks on macOS and the Gradle
-# build needs on Linux; the macOS image also carries the NDK r28 the doctor and rust_mobile take
-# (tools/env.sh). The Gradle build compiles no native code, so the Linux job needs no NDK, and Ubuntu's
-# image holds no r28.
+# rust/rust-toolchain.toml and the lint library's, as rustup reads them; the Xcode, cargo-dylint and SwiftLint
+# releases from tools/env.sh; the phone targets and the JDK from `cargo xtask pins`; the plan kit's packages
+# from plan/package-lock.json. cargo-deny, cargo-ndk, shellcheck and shfmt have no pinned release, and the
+# doctor takes any, so each is the newest its source gives, installed as the doctor's own fix says: cargo-deny
+# and cargo-ndk by `cargo install`, shellcheck and shfmt from Homebrew — bar shfmt on Linux, which comes from
+# Ubuntu's own package, an older release whose syntax tree the shell stage's rule reads alike
+# (rust/xtask/src/early_pipes.rs). Both images carry the Android platform and build tools the repository pins,
+# which the doctor checks on macOS and the Gradle build needs on Linux; the macOS image also carries the NDK
+# r28 the doctor and rust_mobile take (tools/env.sh). The Gradle build compiles no native code, so the Linux
+# job needs no NDK, and Ubuntu's image holds no r28.
 name: CI
 
 on:
@@ -153,6 +155,15 @@ jobs:
       - name: Install shellcheck
         if: runner.os == 'macOS'
         run: brew install shellcheck
+      # The shell stage reads every script's syntax tree through shfmt (rust/xtask/src/early_pipes.rs),
+      # and so do xtask's own tests, which both jobs run: the doctor's own formula on macOS, Ubuntu's own
+      # package on Linux.
+      - name: Install shfmt
+        if: runner.os == 'macOS'
+        run: brew install shfmt
+      - name: Install shfmt
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes shfmt
       - name: Install the plan kit's packages as plan/package-lock.json pins them
         working-directory: plan
         run: npm ci

@@ -384,7 +384,12 @@ listed_tests() {
 # The system version a binary was built to run on, which an app's plist must not claim to exceed, and which
 # the host app is built for so that it runs wherever the test bundle it loads does: `built_for <binary>`.
 built_for() {
-  xcrun vtool -show-build "$1" | awk '$1 == "minos" || $1 == "version" { print $2; exit }'
+  local build
+  # vtool's whole listing is taken before awk reads it: an awk a pipe fed could stop at its first answer,
+  # vtool would die of SIGPIPE with the listing half written, and under `pipefail` the build's minimum
+  # version would depend on which of the two finished first instead of on what vtool said.
+  build="$(xcrun vtool -show-build "$1")" || return 1
+  awk '$1 == "minos" || $1 == "version" { print $2; exit }' <<<"$build"
 }
 
 # Wrap one test binary in an app, sign it, and install it: `install_app <app name> <executable> [<folder>]`.
@@ -460,13 +465,16 @@ failed_tests() {
 # line of verdict and sets `passed` and `failed` for the caller.
 run_binary() {
   local package="$1" binary="$2" executable="$3" name
-  local universe filtered all_selected log result row kind test other child environment
+  local universe filtered all_selected log result rows row kind test other child environment
   local -a skips=() selected=() launches=() alone=() children=() children_env=() child_environment=()
   name="$package-${binary//_/-}"
   passed=0
   failed=0
+  # The table's rows for this binary, read once and handed to each awk below whole: an awk a pipe fed
+  # could stop before its input ends, which under `pipefail` makes the pipe's answer timing's.
+  rows="$(excluded_rows "$package" "$binary")"
   # A binary whose every test needs the host is not installed at all.
-  if excluded_rows "$package" "$binary" | awk -F'\t' '$2 == "*" { found = 1 } END { exit !found }'; then
+  if awk -F'\t' '$2 == "*" { found = 1 } END { exit !found }' <<<"$rows"; then
     echo "  not run: every test of $name (the table names it whole)"
     return 0
   fi
@@ -486,7 +494,11 @@ run_binary() {
     [ -n "$kind" ] || continue
     [ "$(listed_tests "$universe" | grep -Fxc -- "$test" || true)" = 1 ] || die "$excluded_tests names $test, which $name does not list: see $universe"
     [ "$(listed_tests "$universe" | grep -Fc -- "$test" || true)" = 1 ] || die "$excluded_tests names $test, a name that is part of another test of $name"
-    if listed_tests "$filtered" | grep -Fxq -- "$test"; then
+    # The listing is read whole: `grep -q` stops at its first match, `sed` then dies of SIGPIPE with the
+    # listing half written, and under `pipefail` the pipe answers 141 — so whether a test is left out
+    # would depend on which of the two finished first. A grep without `q` reads to the end and answers
+    # the same, and its output goes where no one reads it.
+    if listed_tests "$filtered" | grep -Fx -- "$test" >/dev/null; then
       skips+=(--skip "$test")
       if [ "$kind" = rerun ]; then
         children+=("$child")
@@ -495,12 +507,12 @@ run_binary() {
       fi
       echo "  not run: $test ($kind)"
     fi
-  done < <(excluded_rows "$package" "$binary")
+  done <<<"$rows"
 
   all_selected="$(listed_tests "$filtered")"
   while IFS= read -r test; do
     [ -n "$test" ] || continue
-    row="$(excluded_rows "$package" "$binary" | awk -F'\t' -v test="$test" '$2 == test')"
+    row="$(awk -F'\t' -v test="$test" '$2 == test' <<<"$rows")"
     [ -n "$row" ] || selected+=("$test")
   done <<<"$all_selected"
 
