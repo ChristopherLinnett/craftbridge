@@ -12,8 +12,10 @@ import io.github.christopherlinnett.craftbridge.effects.TemplateInstance
 import io.github.christopherlinnett.craftbridge.effects.open
 import io.github.christopherlinnett.craftbridge.effects.templates
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.time.Duration.Companion.seconds
 
@@ -54,12 +56,14 @@ class CardStudio(
 
     /**
      * The card, opened once: the template the app bundles is copied out for the engine to read, then the engine
-     * starts over the app's own folders asking for the GPU, and the template opens in it ([OpenedOnce]).
+     * starts over the app's own folders asking for the GPU, and the template opens in it ([OpenedOnce]). The copy
+     * and the start wait on the disk and the engine, so they run on the IO threads, never the caller's: the screen
+     * asks for its first preview from the main thread, which must not wait for either.
      *
      * @throws java.io.IOException when the template cannot be copied out of the app.
      * @throws CraftException when the engine does not start or the card does not open.
      */
-    private suspend fun card(): Opened<EffectsEngine, TemplateInstance> = opened.get()
+    private suspend fun card(): Opened<EffectsEngine, TemplateInstance> = withContext(Dispatchers.IO) { opened.get() }
 
     /** Opens the card, so the first preview does not wait for the engine to start. */
     suspend fun start() {

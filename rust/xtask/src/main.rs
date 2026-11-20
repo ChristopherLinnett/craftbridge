@@ -40,6 +40,7 @@ mod generate;
 mod generated;
 mod git;
 mod gradle_log;
+mod guide_samples;
 mod home;
 mod hygiene;
 mod kotlin_bindings;
@@ -52,6 +53,7 @@ mod meta;
 mod pin;
 mod pins;
 mod plan_views;
+mod plist;
 mod report;
 mod rust_syntax;
 mod samples;
@@ -239,6 +241,7 @@ fn dispatch(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
         ["rules"] => rules::run(&root),
         ["generate"] => generate::run(&root, false),
         ["generate", "--check"] => generate::run(&root, true),
+        ["guide-samples"] => guide_samples::run(&root),
         ["plan-views", "--check"] => plan_views::run(&root),
         ["skipped-tasks", log] => gradle_log::run(log),
         ["files", kind] => files::run(&root, kind),
@@ -276,6 +279,7 @@ const MISUSE: u8 = 64;
 fn usage() {
     eprintln!("usage: cargo xtask rules");
     eprintln!("       cargo xtask generate [--check]");
+    eprintln!("       cargo xtask guide-samples   (every Swift and Kotlin block of the guides is a run of lines of a file the samples' builds compile)");
     eprintln!("       cargo xtask plan-views --check");
     eprintln!("       cargo xtask skipped-tasks <gradle log>");
     eprintln!("       cargo xtask files <swift|shell|duplicates>");
@@ -468,8 +472,9 @@ mod tests {
     /// words for them): the Linux job runs the host tools' clippy and lint library runs and their tests, so
     /// the code only Linux compiles (`cfg(target_os = "linux")`) meets a compiler, the lints and a test
     /// there; the macOS job runs the whole workspace's, which the host tools' are part of, so Linux alone
-    /// runs those as stages of their own; and the stages that need Xcode, the phones' SDKs, the iOS
-    /// Simulator or the host's GPU stay on macOS.
+    /// runs those as stages of their own; and the stages that need Xcode, macOS's own tools, the phones'
+    /// SDKs, the iOS Simulator or the host's GPU stay on macOS, the guides' quotations among them, with the
+    /// sample builds that compile what they quote.
     #[test]
     fn the_linux_job_lints_and_tests_the_host_tools_and_macos_keeps_the_rest() {
         let job = |system: &str| {
@@ -491,6 +496,7 @@ mod tests {
             "conformance",
             "rust_mobile",
             "generated",
+            "guide_samples",
             "swift_format",
             "swift_build",
             "swift_test",

@@ -13,6 +13,7 @@
 		1C6018F111759407F8EC96B6 /* Studio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D0AD5B2015BEBA499A0FF2C /* Studio.swift */; };
 		987F78E79A47964118DBAB4E /* StudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04EF3B0E342476FA6835AEE2 /* StudioView.swift */; };
 		C25905DDD9501888A0811938 /* ExportRecipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56B5A8A010BF72FAFF982B70 /* ExportRecipe.swift */; };
+		4C6D8E0F1A2B3940857E6D51 /* GuideSnippets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E7C4A1B2D3F4061A5B8C703 /* GuideSnippets.swift */; };
 		0EB3BEFFFA7C425162407147 /* Spine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3B5C50D1F937E2E1DCBC6A2 /* Spine.swift */; };
 		D3155E50266766C1C2E91084 /* Birthday Card.ectemplate in Resources */ = {isa = PBXBuildFile; fileRef = C1F0F88819E14BE8EDE0D856 /* Birthday Card.ectemplate */; };
 		B453099D1D8185262A145638 /* CraftBridge in Frameworks */ = {isa = PBXBuildFile; productRef = 331B6A21D64592CDEA010618 /* CraftBridge */; };
@@ -26,6 +27,7 @@
 		6D0AD5B2015BEBA499A0FF2C /* Studio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Studio.swift; sourceTree = "<group>"; };
 		04EF3B0E342476FA6835AEE2 /* StudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioView.swift; sourceTree = "<group>"; };
 		56B5A8A010BF72FAFF982B70 /* ExportRecipe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportRecipe.swift; sourceTree = "<group>"; };
+		9E7C4A1B2D3F4061A5B8C703 /* GuideSnippets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideSnippets.swift; sourceTree = "<group>"; };
 		A3B5C50D1F937E2E1DCBC6A2 /* Spine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Spine.swift; sourceTree = "<group>"; };
 		46FAA4EA53279B55FDEB4681 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		C1F0F88819E14BE8EDE0D856 /* Birthday Card.ectemplate */ = {isa = PBXFileReference; lastKnownFileType = file; name = "Birthday Card.ectemplate"; path = "Template/Birthday Card.ectemplate"; sourceTree = SOURCE_ROOT; };
@@ -62,6 +64,7 @@
 				6D0AD5B2015BEBA499A0FF2C /* Studio.swift */,
 				04EF3B0E342476FA6835AEE2 /* StudioView.swift */,
 				56B5A8A010BF72FAFF982B70 /* ExportRecipe.swift */,
+				9E7C4A1B2D3F4061A5B8C703 /* GuideSnippets.swift */,
 				A3B5C50D1F937E2E1DCBC6A2 /* Spine.swift */,
 				46FAA4EA53279B55FDEB4681 /* Info.plist */,
 				C1F0F88819E14BE8EDE0D856 /* Birthday Card.ectemplate */,
@@ -177,6 +180,7 @@
 				1C6018F111759407F8EC96B6 /* Studio.swift in Sources */,
 				987F78E79A47964118DBAB4E /* StudioView.swift in Sources */,
 				C25905DDD9501888A0811938 /* ExportRecipe.swift in Sources */,
+				4C6D8E0F1A2B3940857E6D51 /* GuideSnippets.swift in Sources */,
 				0EB3BEFFFA7C425162407147 /* Spine.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

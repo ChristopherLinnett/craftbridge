@@ -165,7 +165,9 @@ fn section(old: &Revs, new: &Revs, comparison: &Comparison, surface: &SurfaceDif
     if surface.report.is_empty() {
         text.push_str("None.\n");
     } else {
-        text.push_str(&format!("```\n{}\n```\n", surface.report));
+        // A fence that names its language: the record sits under `docs`, where the guides' check refuses a block
+        // that says nothing of what it holds (rust/xtask/src/guide_samples.rs).
+        text.push_str(&format!("```text\n{}\n```\n", surface.report));
     }
     text.push('\n');
     text
@@ -858,7 +860,7 @@ mod tests {
         assert_eq!((outcome.state, outcome.code()), (State::Breaking, 2));
         assert!(outcome.report.contains("BREAKING") && outcome.report.contains("removed command anim.addKeyframe"), "{}", outcome.report);
         let recorded = fake.recorded.borrow().join("");
-        assert!(recorded.contains("breaking change") && recorded.contains("removed command anim.addKeyframe"), "{recorded}");
+        assert!(recorded.contains("breaking change") && recorded.contains("```text\nremoved command anim.addKeyframe\n```\n"), "{recorded}");
     }
 
     #[test]

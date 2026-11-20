@@ -112,11 +112,7 @@ fn static_library_of(artifacts: &[Artifact], library: &str, target: &str) -> Res
 /// format: each library's file and the headers folder beside it. `None` for no framework, or one this
 /// cannot read, which is then joined again.
 fn held(framework: &Path) -> Option<Vec<(PathBuf, PathBuf)>> {
-    let output = Command::new("plutil").args(["-convert", "json", "-o", "-"]).arg(framework.join("Info.plist")).output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let info: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let info = crate::plist::read_as_json(&framework.join("Info.plist")).ok()?;
     info.get("AvailableLibraries")?
         .as_array()?
         .iter()

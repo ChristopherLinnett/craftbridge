@@ -110,8 +110,9 @@ public class EffectsEngine internal constructor(
     ): JSONValue = request("exec", execEnvelope(command, JSONValue.Object(params)))
 
     /**
-     * Run a list of commands as one change to the document, in order, and answer the list of their
-     * replies: either every one of them took, or none did.
+     * Run a list of commands in order, and answer the list of their replies. Every step is read before
+     * the first runs, so a malformed step anywhere runs none of them; a step that fails stops the run
+     * there, and the steps before it keep what they did.
      *
      * @throws CraftException naming the step, with what the engine answered the failing step with.
      */
