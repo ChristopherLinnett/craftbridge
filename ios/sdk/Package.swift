@@ -16,7 +16,8 @@ let package = Package(
     targets: [
         // The framework is named for its target, never for a crate: which crate is the native library is
         // the layer table's to say (rust/xtask/src/layers.rs), and `cargo xtask xcframework` builds the one
-        // it gives into the folder named here.
+        // it gives. A checkout names the folder it is built into; a release's copy of this manifest names
+        // the zip its release serves, and that zip's checksum, in its place.
         .binaryTarget(name: "CraftBridgeFFIBinary", path: "Frameworks/CraftBridgeFFIBinary.xcframework"),
         .target(name: "CraftBridgeFFI", dependencies: ["CraftBridgeFFIBinary"]),
         .target(name: "CraftBridge", dependencies: ["CraftBridgeFFI"]),

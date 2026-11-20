@@ -8,7 +8,10 @@
 #                                     written (the build tools' shared caches are used as any build uses
 #                                     them), and the clone goes when the run ends
 #   tools/release.sh --stage          the owner's run: stage the release in the repository itself, at its
-#                                     fetched main's tip, which tags that commit X.Y.Z there, unpushed.
+#                                     fetched main's tip, which tags that commit X.Y.Z there, unpushed,
+#                                     and keeps what it staged — the proof repository, the XCFramework
+#                                     zip, the distribution package — in the repository's ignored
+#                                     release/X.Y.Z, for its owner to publish from.
 #                                     A run names one of the two, so no run tags a repository it was not
 #                                     told to. The run holds the machine's release lock on the repository
 #                                     for its whole life: a release stages one version of one tree once,
@@ -44,11 +47,12 @@
 # The steps run in the one list at the end of this script, each standing alone. The tag is the last step
 # that writes, and the run's one write to the repository's history: every step before it reads the
 # repository, or writes only the run's own folder and the build folders git ignores, and a run that does
-# not pass removes the tag it made, so a run that fails, or is stopped, at any step leaves no tag. The later
-# stages of a release — the built artifacts, the release notes and the Swift distribution package written
-# from ios/sdk — join that list before the tag, each taking the version from `version`, which one step
-# reads once and no step can change, so a release runs this one script start to finish and no step
-# moves for their coming.
+# not pass removes the tag it made, so a run that fails, or is stopped, at any step leaves no tag. The
+# release's artifacts stand in that list now: the XCFramework zip with the checksum SwiftPM will verify,
+# and the Swift distribution package written from ios/sdk, which is what an app resolves (D-24). The
+# release notes, and the copies of the AARs they ship with, join that list before the tag. Every step
+# takes the version from `version`, which one step reads once and no step can change, so a release runs
+# this one script start to finish and no step moves for their coming.
 set -euo pipefail
 # Git exports its repository variables (GIT_DIR and the rest) to a hook and to whatever `git rebase --exec`
 # or `git bisect run` starts. Every git command here must act on the repository the run was given.
@@ -105,10 +109,11 @@ done
   usage
   exit 64
 }
-# The two tools a release cannot do without, named before anything is read or written. tools/doctor.sh is
-# no help with either: it names what a build needs to start, and these two it neither reads nor reports,
-# as `tools/ios-device-test.sh` already finds when it asks for its own `jq`.
-for tool in jq git; do
+# Every tool a release cannot do without, named before anything is read or written, since a release
+# without one would otherwise fail only at the step that first calls it, far from its cause. The message
+# names the tool and no fix: tools/doctor.sh reports none of jq, git and zip, and the swift it reaches
+# only through the Xcode it checks.
+for tool in jq git swift zip; do
   command -v "$tool" >/dev/null 2>&1 || fail "no $tool on PATH"
 done
 
@@ -164,23 +169,78 @@ fi
 commit="$(git -C "$src" rev-parse -q --verify 'HEAD^{commit}')" || fail "$src has no commit to release"
 
 # Everything a run makes stands in one folder of its own — a rehearsal's clone, the build folders and the
-# proof Maven repository — which goes however the run ends: what a run reports, it has read back first.
-# The tag a run makes goes with it when the run does not pass: a release stopped or refused after its tag
-# is no release, and its tag would read as one, so the next run would refuse the version as released.
-# A run has passed only when it said so, ended on 0 and left nothing behind: the pass mark and the
-# status the exit trap records (tools/env.sh) are read as the trap reads them, and since the trap removes
-# the run's folder after this function, and a folder that will not go fails the run, the folder goes here
-# first, so a run failed by its own leftovers keeps no tag either.
+# proof Maven repository, the XCFramework zip with the written distribution package — which ends as its
+# mode promises: a rehearsal's folder goes however the run ends, since nothing a rehearsal writes stands
+# to be kept, while a staging run's folder is the release it staged, and a passed staging run's moves into
+# the repository's own ignored release folder, `release/<version>`, named at the end, for its owner to
+# publish from — publishing is the owner's alone (plan §26, G2), so the run stages everything and
+# publishes nothing. The folder the run works in stands in the temporary folder, which the system empties
+# of what nobody has opened for days, so a staged release never stays there: the owner's publish may come
+# days later. The tag a run makes goes with
+# it when the run does not pass: a release stopped or refused after its tag is no release, and its tag
+# would read as one, so the next run would refuse the version as released. A run has passed only when it
+# said so, ended on 0 and left its folder as its mode promises: the pass mark and the status the exit
+# trap records (tools/env.sh) are read as the trap reads them, and since the trap removes the run's
+# folder after this function, the folder goes or moves here first. A pass whose folder would not go or
+# move has to say its own failure, which a failing cleanup says — the trap reads it as a run that left
+# something behind, and ends even a 0-status run non-zero; a run already failing has its own status to
+# speak, so this function only fails for a pass that ended wrongly, and a failed run keeps no tag either.
 tag_made=""
+staged=""
 # shellcheck disable=SC2329 # tools/env.sh's exit trap calls it by the name handed to craftbridge_remove_on_exit
 removing_a_failed_runs_tag() {
-  if [ -n "$tag_made" ] && ! { [ "${craftbridge_passed:-}" = 1 ] && [ "$craftbridge_status" = 0 ] && rm -rf "$run"; }; then
-    # Only the tag naming this run's commit is this run's own to take back: a tag of the same name on
-    # another commit is somebody else's release and stays, and a run stopped between naming the tag
-    # here and git making it has made no tag to take back.
-    if [ "$(git -C "$repo" rev-parse -q --verify "refs/tags/$tag_made^{commit}")" = "$commit" ]; then
-      git -C "$repo" tag -d "$tag_made" >/dev/null
+  if [ -z "$tag_made" ]; then
+    return 0
+  fi
+  if [ "${craftbridge_passed:-}" = 1 ] && [ "$craftbridge_status" = 0 ] && ending_the_run_folder; then
+    # The pass ended its folder as its mode promised: there is nothing left to take back.
+    return 0
+  fi
+  removing_the_tag_if_still_ours
+  # A staging run that did not end as promised keeps nothing staged, what a move left half-made included:
+  # the version's release folder stood nowhere when the run began (settling_where_the_release_stands),
+  # and the release lock kept every other staging run off it since. What a rehearsal leaves behind, the
+  # trap's own removal of the run's folder fails over, which fails the run the same way.
+  if [ "$mode" = --stage ]; then
+    rm -rf "$run"
+    if [ -n "${move_began:-}" ]; then
+      rm -rf "$staged"
     fi
+  fi
+  if [ "${craftbridge_passed:-}" = 1 ] && [ "$craftbridge_status" = 0 ]; then
+    # The run's last words said where its release would stand; these take them back.
+    say "the release could not be moved to stand in ${staged:-$run}: nothing is kept staged and the tag ${tag_made} is taken back, so the run fails"
+    return 1
+  fi
+  return 0
+}
+# shellcheck disable=SC2329 # reached through removing_a_failed_runs_tag, which its own trap-call note keeps quiet
+removing_the_tag_if_still_ours() {
+  # Only the tag naming this run's commit is this run's own to take back: a tag of the same name on
+  # another commit is somebody else's release and stays, and a run stopped between naming the tag
+  # here and git making it has made no tag to take back.
+  if [ "$(git -C "$repo" rev-parse -q --verify "refs/tags/$tag_made^{commit}")" = "$commit" ]; then
+    git -C "$repo" tag -d "$tag_made" >/dev/null
+  fi
+}
+# shellcheck disable=SC2329 # reached through removing_a_failed_runs_tag, which its own trap-call note keeps quiet
+ending_the_run_folder() {
+  # A rehearsal's folder goes with it: a folder that will not go is a run that failed, and fails its tag
+  # too. A staging run's folder is its staged release, and it moves to its release folder on the pass: a
+  # move that cannot be made is a release that cannot stand staged where its owner will look, so that run
+  # fails too and keeps no tag, exactly as a rehearsal's stubborn folder does. A folder standing there
+  # already would take the run inside it rather than be replaced, so the move is made only into nothing.
+  if [ "$mode" = --dry-run ]; then
+    rm -rf "$run"
+  else
+    rm -rf "${run:?}/$run_temporary" || return 1
+    if [ -e "$staged" ]; then
+      return 1
+    fi
+    mkdir -p "$(dirname "$staged")" || return 1
+    # From here a failed move may have left part of the release in its folder, which is this run's own.
+    move_began=1
+    mv "$run" "$staged"
   fi
 }
 run="$(mktemp -d "${TMPDIR:-/tmp}/craftbridge-release.XXXXXX")"
@@ -239,10 +299,11 @@ else
   # tree, the release's builds join the builds that tree's own scripts make.
   export CARGO_TARGET_DIR="$repo/rust/target"
 fi
-# The run's folder, the tree it stages and the commit it tags are settled now, and no later step can move
-# them: the clean-up reads all three to take back the run's own tag and folder, so a step that pointed
-# one elsewhere would leave the run's tag standing, or take back another's.
-readonly run repo commit
+# The run's folder, the tree it stages, the commit it tags and the mode it runs in are settled now, and no
+# later step can move them: the clean-up reads them all, to take back the run's own tag and to end the
+# run's folder as its mode promises, so a step that pointed one elsewhere would leave the run's tag
+# standing, take back another's, or leave standing a folder no run said where it stands.
+readonly run repo commit mode
 
 # Each version's three numbers, or failure: a release tag is exactly X.Y.Z, and no other spelling is a
 # version — no leading zeros either, which make `08` one number that tools read two ways.
@@ -303,6 +364,21 @@ refusing_a_released_version() {
   if [ "$has_release" = 1 ] && [ "$version" = "$newest_major.$newest_minor.$newest_patch" ]; then
     fail "$version is tagged already: a version releases once"
   fi
+}
+
+# Where a staging run's release stands once it has passed: the version's own folder in the repository's
+# release folder, which git ignores, so a staged release is no change to the tree and stays where its
+# owner publishes from until that owner moves it. A version stages once, so a folder already standing
+# there is a release staged before — published or not — and this run refuses rather than mix the two.
+# Named once and fixed, since the clean-up reads it to know what a failed run must not leave behind.
+release_folder="release"
+settling_where_the_release_stands() {
+  if [ "$mode" = --stage ]; then
+    staged="$repo/$release_folder/$version"
+    [ ! -e "$staged" ] ||
+      fail "$staged stands already: a version stages once, so publish or move that release before staging $version again"
+  fi
+  readonly staged
 }
 
 # The headings the rows of [Unreleased] stand under, each spelt here once: AGENTS.md §11's own heading
@@ -399,6 +475,9 @@ proving_the_aar_versions() {
   # report a pin missing from a file that holds it, pointing the reader at the wrong file.
   pins="$(cd "$repo" && env -u CRAFTBRIDGE_ROOT "$xtask_bin" pins)" ||
     fail "the pins Gradle runs on could not be read from $repo"
+  # The tool was built only to read the pins, and goes now: the run's folder is the release a staging
+  # run keeps, and a build of the checks is no part of it.
+  rm -rf "$run/xtask"
   # xtask refuses a pin its files lack before it prints any, so a pins command that ends on 0 has printed
   # every pin, and lines env.sh's reader cannot read are that command's fault, which env.sh would lay on a
   # file that holds the pin. So its one reader judges the lines apart first, and the release says why.
@@ -427,6 +506,152 @@ proving_the_aar_versions() {
   done <<<"$modules"
 }
 
+# The run's own temporary folder, for the tools that leave theirs behind: SwiftPM's commands, the
+# builder's among them, leave temporary folders and lock files in the one they are given and remove none
+# of them, so given this one, what they leave stands in the run's folder and goes with the run, a staged
+# release's included (ending_the_run_folder).
+run_temporary="tmp"
+with_the_run_temporary() {
+  mkdir -p "$run/$run_temporary" && TMPDIR="$run/$run_temporary" "$@"
+}
+swift_package() {
+  with_the_run_temporary swift package "$@"
+}
+
+# The distribution repository apps resolve the Swift package from (D-24): its name is the plan's, held
+# here once so the folder it stands in, the address of its release and the words that send its owner to
+# it all say it alike.
+distribution_repository="ChristopherLinnett/SwiftEffects"
+# Where the zip a package names is served: the GitHub release standing on the distribution repository's
+# own tag of the version, as the distribution repositories the plan follows serve theirs
+# (evidence/07-repository-conventions.md Finding 2). The package and the bytes it promises then live,
+# version and stay together, and an app needs no repository but the one it resolves. Naming the place is
+# all a staging run does with it: the release itself is opened by the owner, who publishes nothing less
+# (plan §26, G2).
+releases_at="https://github.com/$distribution_repository/releases/download"
+
+# The XCFramework the package's binary target stands for, zipped for the release with the checksum SwiftPM
+# will verify on it. The builder is the tree's own tools/build-xcframework.sh — the gate's and the
+# package's one builder, never a second build: which crate is the distribution library, which targets
+# it is built for and which CPU each is built at are that script's and its xtask's definitions alone
+# (plan §22), so a release that joined the framework some other way would ship bytes no gate ever
+# compiled. --keep-bindings because the committed bindings are part of the tree the tag versions: a
+# release that regenerated them would be editing the very tree it stages.
+binary_path="" binary_name="" zip_name="" zip_path="" zip_url="" zip_checksum="" distribution_tree=""
+building_the_xcframework_zip() {
+  local binaries manifest
+  # dump-package is the official reader: the release parses no manifest text itself, and what it
+  # rewrites later is anchored on what this read says, not on what it hopes a manifest looks like.
+  manifest="$(swift_package dump-package --package-path "$repo/ios/sdk")" ||
+    fail "swift package dump-package could not read $repo/ios/sdk"
+  binaries="[$(printf '%s' "$manifest" | jq -c '.targets[] | select(.type == "binary")')]"
+  # One binary target holds the release's framework: two would leave the release guessing which of
+  # two the app is to download, and a source manifest already in the url form is a package released
+  # before anything was built to release.
+  [ "$(printf '%s' "$binaries" | jq 'length')" = 1 ] ||
+    fail "$repo/ios/sdk declares no single binary target for the release's XCFramework: the release cannot say which bytes its checksum is taken of"
+  binary_name="$(printf '%s' "$binaries" | jq -r '.[0].name')"
+  binary_path="$(printf '%s' "$binaries" | jq -r '.[0].path // ""')"
+  [ -n "$binary_path" ] ||
+    fail "$repo/ios/sdk declares its binary target as a url: the source declares the framework the build joins, in the folder it joins it; the url and its checksum belong to the copy a release writes (D-24)"
+  with_the_run_temporary bash "$repo/tools/build-xcframework.sh" --keep-bindings ||
+    fail "the XCFramework could not be built from the tree being released"
+  [ -d "$repo/ios/sdk/$binary_path" ] ||
+    fail "tools/build-xcframework.sh left no $binary_path where the package's binary target reads it"
+  # Named for the framework it holds and the release it belongs to, so a download, a note and a
+  # checksum can all quote one name.
+  zip_name="$(basename "$binary_path" .xcframework)-$version.xcframework.zip"
+  zip_path="$run/$zip_name"
+  # Zipped from the folder that holds the framework, so the archive opens straight to the
+  # .xcframework bundle at its root, which is the shape SwiftPM unpacks; -X keeps Mac metadata out of
+  # the bytes every app will one day verify one checksum against.
+  (cd "$repo/ios/sdk/$(dirname "$binary_path")" && zip -q -X -r "$zip_path" "$(basename "$binary_path")") ||
+    fail "the XCFramework could not be zipped into $zip_path"
+  zip_checksum="$(swift_package compute-checksum "$zip_path")" ||
+    fail "the checksum of $zip_path could not be computed"
+  zip_url="$releases_at/$version/$zip_name"
+  # The bytes, their checksum and their one address are settled here, and no later step can move them:
+  # the package written next can only be written of what stands here.
+  readonly binary_name binary_path zip_name zip_path zip_url zip_checksum
+  say "the release's XCFramework is zipped as $zip_name with the checksum $zip_checksum"
+}
+
+# The distribution package a release writes (D-24): the tree's own ios/sdk exactly as the tagged commit
+# holds it, and one difference a release must make — the binary target's local path, which points into a
+# checkout, becomes the released XCFramework's url and its checksum, which is the only form an app can
+# resolve: SwiftPM takes a package by URL only from a repository root, and ios/sdk is no repository root.
+# It stands in the run's folder as a git tree ready to become ChristopherLinnett/SwiftEffects, whose
+# first commits these very files are the owner's to push at publishing (plan §26, G2).
+writing_the_distribution_package() {
+  local committed files from_package manifest_without_binary products source_read to_package written written_read
+  # The checksum is taken of the bytes again at the moment they are promised to the manifest: a zip that
+  # changed since — by a hand, a step, a failing disk — fails here, rather than a package shipping a
+  # checksum that stands for bytes no run ever read.
+  [ "$(swift_package compute-checksum "$zip_path")" = "$zip_checksum" ] ||
+    fail "$zip_path is no longer the bytes its checksum $zip_checksum was taken of: nothing is written that promises checksums no longer standing for them"
+  distribution_tree="$run/$distribution_repository"
+  mkdir -p "$distribution_tree" || fail "$distribution_tree could not be made to write the package into"
+  # git's own archive writes the tagged commit's tracked files under ios/sdk — every source, manifest
+  # and dotfile it ships — so the package carries the tree's Swift sources with no second list of them
+  # and nothing hand-copied; what this tree holds is precisely what the tag versions. The archive's paths
+  # begin ios/sdk/, and the package's manifest lies at its root (D-24), so two folders are stripped.
+  git -C "$repo" archive "$commit" -- ios/sdk | tar -x --strip-components=2 -C "$distribution_tree" ||
+    fail "the commit $commit could not be written out from its ios/sdk"
+  from_package="$(swift_package dump-package --package-path "$repo/ios/sdk")" ||
+    fail "swift package dump-package could not read $repo/ios/sdk"
+  # The one edit, and only where a release must make one: the path the build joins becomes the url the
+  # release serves and the checksum those bytes answer to. The line is found by the exact declaration
+  # the reader reported — a manifest whose declaration this is not, in no line or in more than one, is
+  # refused rather than half-written.
+  if ! awk -v name="$binary_name" -v old="path: \"$binary_path\"" -v new="url: \"$zip_url\", checksum: \"$zip_checksum\"" '
+    BEGIN { want = ".binaryTarget(name: \"" name "\"" }
+    index($0, want) != 0 && index($0, old) != 0 {
+      if (done++) { bad = 1 }
+      at = index($0, old)
+      print substr($0, 1, at - 1) new substr($0, at + length(old))
+      next
+    }
+    { print }
+    END { exit done == 1 && !bad ? 0 : 1 }
+  ' "$distribution_tree/Package.swift" >"$distribution_tree/Package.swift.new"; then
+    rm -f "$distribution_tree/Package.swift.new"
+    fail "$binary_name's declaration is not the one line the manifest reader read it as: the release rewrites only that line, and writes nothing it cannot find it in"
+  fi
+  mv "$distribution_tree/Package.swift.new" "$distribution_tree/Package.swift" ||
+    fail "the rewritten manifest could not be put in place of the source one"
+  # The tree written is the commit's ios/sdk, file for file and byte for byte, the manifest's one line
+  # aside: git archive answers the repository's export attributes, which can leave a file out or rewrite
+  # one, so what was written is read back against the commit's own tree, through git's blob ids, before
+  # any app is promised it.
+  committed="$(git -C "$repo" ls-tree -r --format='%(objectname) %(path)' "$commit" -- ios/sdk | sed 's#^\([0-9a-f]*\) ios/sdk/#\1 #' | grep -v ' Package.swift$' | sort -k 2)"
+  files="$(cd "$distribution_tree" && find . -type f ! -path ./Package.swift | sed 's#^\./##' | LC_ALL=C sort)"
+  written="$(paste -d ' ' <(cd "$distribution_tree" && printf '%s\n' "$files" | git hash-object --no-filters --stdin-paths) <(printf '%s\n' "$files") | sort -k 2)"
+  [ "$written" = "$committed" ] ||
+    fail "the written package's files are not the ones $commit holds under ios/sdk: $(diff <(printf '%s\n' "$committed") <(printf '%s\n' "$written") | grep '^[<>]' | head -n 3 | tr '\n' ' ')"
+  [ "$(diff <(git -C "$repo" show "$commit:ios/sdk/Package.swift") "$distribution_tree/Package.swift" | grep -c '^[<>]')" = 2 ] ||
+    fail "the written Package.swift differs from the one $commit holds in more than the binary target's line"
+  to_package="$(swift_package dump-package --package-path "$distribution_tree")" ||
+    fail "the written Package.swift is no manifest the release reader can read"
+  # Read back what was written, twice over: the binary target must answer exactly the release's url and
+  # checksum and keep no path, and nothing else the manifest says may differ from the tree's own —
+  # products, targets, dependencies, platforms: all of it crosses from the source with no second list,
+  # and the comparison is what proves it.
+  printf '%s' "$to_package" |
+    jq -e --arg url "$zip_url" --arg sum "$zip_checksum" '
+      [.targets[] | select(.type == "binary")] |
+      length == 1 and (.[0].url == $url) and (.[0].checksum == $sum) and (.[0] | has("path") | not)' >/dev/null ||
+    fail "the written package answers its binary target no release url and checksum: $(basename "$distribution_repository") would resolve nothing to download"
+  manifest_without_binary='del(.packageKind) | .targets = [.targets[] | if .type == "binary" then {name, type} else . end]'
+  source_read="$(printf '%s' "$from_package" | jq -S "$manifest_without_binary")" ||
+    fail "jq could not reduce the source manifest to the shape the release copies"
+  written_read="$(printf '%s' "$to_package" | jq -S "$manifest_without_binary")" ||
+    fail "jq could not reduce the written manifest to the shape the release copies"
+  [ "$source_read" = "$written_read" ] ||
+    fail "the written package differs from $repo/ios/sdk beyond the binary target: it ships the tree's manifest entire, and only what a release must move, moves"
+  products="$(printf '%s' "$to_package" | jq -r '[.products[].name] | join(", ")')"
+  say "the ${distribution_repository##*/} package is written, ios/sdk at $commit file for file: its binary target now reads $zip_url at that checksum, and its products crossed as they stand — $products"
+}
+
 # The tag versions the Swift package's source, the commit whose ios/sdk the package is released from, so
 # that commit must hold the package's manifest before it is tagged; the tag is then read back from git,
 # and must name the commit that was proved.
@@ -452,11 +677,12 @@ tagging_the_release() {
 }
 
 saying_what_was_staged() {
-  say "every artifact this stage makes reads $version: the crates of rust/Cargo.toml, the AARs the proof repository holds, and the tag on the Swift package's source"
+  say "every artifact this stage makes reads $version: the crates of rust/Cargo.toml, the AARs the proof repository holds, the XCFramework zip and the release url the ${distribution_repository##*/} package names it by, and the tag on the Swift package's source"
   if [ "$mode" = --dry-run ]; then
-    say "the rehearsal wrote only its own folder, which goes now with its clone and its tag: nothing of $src was written"
+    say "the rehearsal wrote only its own folder, which goes now with its clone, its tag, its zip and its written package: nothing of $src was written"
   else
     say "the tag $version stands in $src, unpushed: nothing was pushed, no release was made and no package was uploaded, which the owner decides"
+    say "the release stands staged in $staged as the run ends, for its owner to publish from: the ${distribution_repository##*/} tree in ${distribution_tree#"$run/"}, the zip ${zip_name} its release serves at $zip_url, and the proof repository in maven"
   fi
 }
 
@@ -464,9 +690,12 @@ saying_what_was_staged() {
 reading_the_releases
 reading_the_version
 refusing_a_released_version
+settling_where_the_release_stands
 reading_the_changelog
 checking_the_version_against_the_releases
 proving_the_aar_versions
+building_the_xcframework_zip
+writing_the_distribution_package
 tagging_the_release
 saying_what_was_staged
 # The run passes here and ends here, with nothing between: bash 3.2 hands the exit trap a 0 for a
