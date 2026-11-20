@@ -11,9 +11,13 @@
 #   <line> <figure>=<value> <figure>=<value> ...
 #
 # with the figures in the order of the `[[figure]]` tables and each value in decimal with that table's
-# `decimals`, and a script reads the values off it by name.
+# `decimals`, and a script reads the values off it by name. After the figures the line carries every warm preview
+# repeat of the run, which `preview_path_ms` is taken from, as `<repeats_word>=<v>,<v>,...` in the order they ran, each
+# with `repeats_decimals` decimals, so a statistic of them can be read off any run, not only the one the record holds.
 
 line = "craftbridge-baseline"
+repeats_word = "preview_repeats_ms"
+repeats_decimals = 2
 flag_slower_than_percent = 10
 
 # How a release is held to the record, which a phone's own noise decides. Each `flagged` figure, on each platform that
@@ -95,7 +99,14 @@ unheld_on = ["android"]
 # made after the export, which a slower open, set or draw moves by its own cost and the GPU start never hides. On the
 # Xiaomi it is reported and never flagged: across the same 30 runs it took 22.2 to 52.1 ms, and within one run its
 # nine repeats took 19.7 to 37.4 ms while the prime cores' mean clock over them was 1157 MHz of their 2880 (see
-# `first_path_ms`).
+# `first_path_ms`). The fastest of a run's nine repeats is steadier across runs than their median, but far from
+# steady enough to hold: in ten fresh runs of one build (each run's every repeat printed on its line), the fastest
+# repeat took 16.87 to 20.77 ms, 23 % between the fastest run's and the slowest's, against 20.8 to 30.4 ms (46 %) for
+# the runs' medians, where the iPhone's held figures spread under 7 %. The ten ran off the cable on battery at 34.5 to
+# 34.9 C, and none of the conditions that differed between them leaves a group that holds: the seven that read the
+# prime cores' cap at 2438 MHz spread the same 23 % on their own, the three at 2880 MHz, the cap the record's runs
+# read, 9.3 % (18.68 to 20.42 ms), and the four that began with the lock screen showing 10.4 % (18.50 to 20.42 ms).
+# So no statistic of the warm repeats is held on the Xiaomi, and the median stays the figure.
 what = "milliseconds of a preview of the card on a warm engine: open, set Name and Photo, draw"
 
 [[figure]]
@@ -200,7 +211,8 @@ why = "Android holds an app's native memory to no limit of its own: the low-memo
 # as closely. Its three preview figures (`first_preview_ms`, `first_path_ms`, `preview_path_ms`) are recorded and
 # reported but never flagged (`unheld_on`): across 30 fresh runs of one build the first preview took 623.7 to
 # 796.1 ms, the first path 61.8 to 163.6 ms and the preview path 22.2 to 52.1 ms, their time following the prime cores'
-# clock over them (see `first_path_ms`), so a slower release cannot be told from a run whose clock stayed low. Nothing
+# clock over them (see `first_path_ms`), so a slower release cannot be told from a run whose clock stayed low, and the
+# fastest of each run's nine warm repeats spreads 23 % across ten fresh runs (see `preview_path_ms`). Nothing
 # read before a run tells the two apart: the cap (`cpu_cap_mhz`) read 2880 MHz in the fast and slow runs alike. So no
 # record holds the Android side's own part of a preview, its surface and its presenting above all: the iPhone's
 # previews hold the core's open, sets and drawing, which both platforms run, and the Xiaomi's export holds the core's

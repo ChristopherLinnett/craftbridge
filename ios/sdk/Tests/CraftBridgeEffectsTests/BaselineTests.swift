@@ -5,10 +5,13 @@ import CraftBridge
 import Foundation
 import Testing
 
-/// A baseline of four figures, two of which only one platform measures, with `devices` after it.
+/// A baseline of four figures, two of which only one platform measures, with `devices` after it. Its repeats' word
+/// and decimals are not the file's own, so a line that wrote either itself rather than reading them would show it.
 private func baseline(_ devices: String = "") -> String {
     """
     line = "craftbridge-baseline"
+    repeats_word = "repeats_ms"
+    repeats_decimals = 3
     flag_slower_than_percent = 10
     [comparison]
     runs = 5
@@ -79,6 +82,7 @@ private func device(
     @Test func theFileDefinesTheRunningExampleAndItsFiguresInTheOrderTheLinePrintsThem() throws {
         let baseline = try Baseline.current()
         #expect(baseline.line == "craftbridge-baseline")
+        #expect(baseline.repeatsWord == "preview_repeats_ms" && baseline.repeatsDecimals == 2)
         #expect(
             baseline.figures
                 == [
@@ -158,19 +162,34 @@ private func device(
         }
     }
 
-    @Test func aRunPrintsOneLineOfTheFiguresItsPlatformMeasuresByNameInTheDefinedOrder() throws {
+    @Test func aRunPrintsOneLineOfTheFiguresItsPlatformMeasuresByNameInTheDefinedOrderThenEveryWarmRepeat() throws {
         let baseline = try Baseline(toml: baseline())
+        let repeats = [30, 1.25, 20.0004, 22, 21.5, 40, 25, 24, 23]
         #expect(
-            try baseline.line(for: [
-                "thermal_state": 1, "first_preview_ms": 1234.56, "full_export_ms": 6789,
-            ]) == "craftbridge-baseline first_preview_ms=1234.6 full_export_ms=6789.0 thermal_state=1")
+            try baseline.line(
+                for: ["thermal_state": 1, "first_preview_ms": 1234.56, "full_export_ms": 6789], repeats: repeats)
+                == "craftbridge-baseline first_preview_ms=1234.6 full_export_ms=6789.0 thermal_state=1 "
+                + "repeats_ms=30.000,1.250,20.000,22.000,21.500,40.000,25.000,24.000,23.000")
         let missing = CraftError.InvalidParams(
             detail:
                 "the run measured [\"first_preview_ms\"], and the baseline names [\"first_preview_ms\", \"full_export_ms\", \"thermal_state\"]"
         )
-        #expect(throws: missing) { try baseline.line(for: ["first_preview_ms": 1]) }
+        #expect(throws: missing) { try baseline.line(for: ["first_preview_ms": 1], repeats: repeats) }
         #expect(throws: CraftError.self, "a figure another platform measures is no figure of this one") {
-            try baseline.line(for: ["first_preview_ms": 1, "full_export_ms": 1, "thermal_state": 1, "cpu_cap_mhz": 1])
+            try baseline.line(
+                for: ["first_preview_ms": 1, "full_export_ms": 1, "thermal_state": 1, "cpu_cap_mhz": 1],
+                repeats: repeats)
+        }
+        // One repeat fewer and one more than the example makes: the nearest a wrong count comes, which a looser rule
+        // would let through.
+        let run: [String: Double] = ["first_preview_ms": 1, "full_export_ms": 1, "thermal_state": 1]
+        for (made, refused) in [
+            (8, "the run made 8 warm previews, and the running example makes 9"),
+            (10, "the run made 10 warm previews, and the running example makes 9"),
+        ] {
+            #expect(throws: CraftError.InvalidParams(detail: refused)) {
+                try baseline.line(for: run, repeats: Array(repeating: 20, count: made))
+            }
         }
     }
 

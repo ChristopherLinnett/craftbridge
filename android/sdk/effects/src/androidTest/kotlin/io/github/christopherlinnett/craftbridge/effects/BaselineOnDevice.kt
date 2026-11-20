@@ -69,6 +69,10 @@ internal class BaselineExample(
 internal class Baseline(
     /** The word the line starts with. */
     val line: String,
+    /** The word the run's warm preview repeats are said under, after the figures. */
+    val repeatsWord: String,
+    /** The decimals each warm preview repeat is said with. */
+    val repeatsDecimals: Int,
     val example: BaselineExample,
     /** The figures, in the order the line says them. */
     val figures: List<BaselineFigure>,
@@ -76,13 +80,29 @@ internal class Baseline(
     /** The figures a run on Android measures, in the order the line says them. */
     val measured: List<BaselineFigure> get() = figures.filter { PLATFORM in it.platforms }
 
-    /** The line a run says for [values], one for each figure it measures by name and no other, in the order the file gives. */
-    fun line(values: Map<String, Double>): String {
+    /**
+     * The line a run says for [values], one for each figure it measures by name and no other, in the order the file
+     * gives, then every one of the run's warm preview [repeats] in the order they ran.
+     */
+    fun line(
+        values: Map<String, Double>,
+        repeats: List<Double>,
+    ): String {
         require(values.keys == measured.map { it.name }.toSet()) {
             "the run measured ${values.keys.sorted()}, and the baseline names ${measured.map { it.name }}"
         }
-        return (listOf(line) + measured.map { "${it.name}=${"%.${it.decimals}f".format(java.util.Locale.ROOT, values.getValue(it.name))}" })
-            .joinToString(" ")
+        require(repeats.size == example.previewRepeats) {
+            "the run made ${repeats.size} warm previews, and the running example makes ${example.previewRepeats}"
+        }
+
+        fun said(
+            value: Double,
+            decimals: Int,
+        ) = "%.${decimals}f".format(java.util.Locale.ROOT, value)
+        return (
+            listOf(line) + measured.map { "${it.name}=${said(values.getValue(it.name), it.decimals)}" } +
+                "$repeatsWord=${repeats.joinToString(",") { said(it, repeatsDecimals) }}"
+        ).joinToString(" ")
     }
 
     companion object {
@@ -117,6 +137,8 @@ internal class Baseline(
             if (listed.isEmpty()) throw RunnerFailure("the baseline defines no figure")
             return Baseline(
                 text("/line"),
+                text("/repeats_word"),
+                number("/repeats_decimals").toInt(),
                 example,
                 listed.indices.map {
                     val name = text("/figure/$it/name")
@@ -408,10 +430,12 @@ internal val baselineChecks: List<Case> =
                         "cpu_cap_mhz" to 2880.0,
                         "battery_c" to 32.9,
                     ),
+                    listOf(30.0, 1.25, 20.004, 22.0, 21.5, 40.0, 25.0, 24.0, 23.0),
                 ),
                 "craftbridge-baseline first_preview_ms=1234.6 gpu_start_ms=1000.0 first_path_ms=234.6 preview_path_ms=23.4 " +
                     "full_export_ms=6789.0 " +
-                    "peak_memory_bytes=123456789 export_threads=8 cpu_cap_mhz=2880 battery_c=32.9",
+                    "peak_memory_bytes=123456789 export_threads=8 cpu_cap_mhz=2880 battery_c=32.9 " +
+                    "preview_repeats_ms=30.00,1.25,20.00,22.00,21.50,40.00,25.00,24.00,23.00",
                 "the line",
             )
             val dated = runCatching { Baseline.of("recorded = 2026-11-19\n") }.exceptionOrNull()
@@ -442,12 +466,38 @@ internal val baselineChecks: List<Case> =
             ).forEach { (spelt, refusal) ->
                 agreed(runCatching { Baseline.of(spelt) }.exceptionOrNull()?.message, refusal, "a figure spelt otherwise")
             }
-            val lacking = runCatching { baseline.line(mapOf("first_preview_ms" to 1.0)) }.exceptionOrNull()
+            val lacking = runCatching { baseline.line(mapOf("first_preview_ms" to 1.0), emptyList()) }.exceptionOrNull()
             agreed(
                 lacking?.message,
                 "the run measured [first_preview_ms], and the baseline names [first_preview_ms, gpu_start_ms, first_path_ms, " +
                     "preview_path_ms, full_export_ms, peak_memory_bytes, export_threads, cpu_cap_mhz, battery_c]",
                 "a run that lacks a figure",
+            )
+            val figuresOfRun = baseline.measured.associate { it.name to 1.0 }
+            // One repeat fewer and one more than the example makes: the nearest a wrong count comes, which a looser rule
+            // would let through.
+            listOf(
+                8 to "the run made 8 warm previews, and the running example makes 9",
+                10 to "the run made 10 warm previews, and the running example makes 9",
+            ).forEach { (made, refused) ->
+                agreed(
+                    runCatching { baseline.line(figuresOfRun, List(made) { 20.0 }) }.exceptionOrNull()?.message,
+                    refused,
+                    "a run that made a warm preview fewer or more",
+                )
+            }
+            // The file's own word and decimals spelt otherwise, so a line that wrote either itself rather than reading
+            // them would show it.
+            val respelt =
+                Baseline.of(
+                    file
+                        .replaceFirst("repeats_word = \"preview_repeats_ms\"", "repeats_word = \"warm_ms\"")
+                        .replaceFirst("repeats_decimals = 2", "repeats_decimals = 3"),
+                )
+            agreed(
+                respelt.line(figuresOfRun, List(9) { 20.0004 }).substringAfterLast(" "),
+                "warm_ms=" + List(9) { "20.000" }.joinToString(","),
+                "the repeats under the word and with the decimals the file gives",
             )
         },
         Case("baseline: the running example's first preview, full export, peak memory and conditions are said on one line") { context ->
@@ -530,7 +580,7 @@ internal val baselineChecks: List<Case> =
                                 )
                             val costs = baseline.measured.filter { it.flagged }.map { it.name } + "export_threads"
                             require(costs.all { figures.getValue(it) > 0 }) { "a figure is no measurement: $figures" }
-                            baseline.line(figures)
+                            baseline.line(figures, paths)
                         } finally {
                             engine.shutDown()
                             target.close()
