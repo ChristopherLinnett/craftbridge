@@ -91,10 +91,50 @@ pub(crate) fn listed(dir: &Path, args: &[&str]) -> Result<Vec<String>, String> {
     Ok(String::from_utf8_lossy(&output(dir, args)?).split('\0').filter(|path| !path.is_empty()).map(str::to_string).collect())
 }
 
+/// The path git lists `path` by inside `dir`: its components below `dir` joined by `/`, each exactly as
+/// the disk names it. A message's path is no question to put to git: it reads the `\` a Unix name may hold
+/// as a separator and replaces what is not UTF-8, so git would be asked about a file that is not there and
+/// list nothing for it. None when `path` is not inside `dir` or a component is not UTF-8, which no
+/// question in git's listing words can name.
+pub(crate) fn listed_as(dir: &Path, path: &Path) -> Option<String> {
+    let parts: Option<Vec<&str>> = path.strip_prefix(dir).ok()?.components().map(|part| part.as_os_str().to_str()).collect();
+    parts.map(|parts| parts.join("/"))
+}
+
 /// Is `root` the top of a git checkout? A `.git` folder in the main checkout, a `.git` file in a linked
 /// worktree; a scratch tree has neither.
 pub(crate) fn is_checkout(root: &Path) -> bool {
     root.join(".git").exists()
+}
+
+/// The names in `names` of a directory `dir` that hold nothing the repository can: neither a tracked file
+/// nor an untracked one git would add. A name is a path inside `dir` as git lists it (`listed_as`) — a
+/// folder's own name, or a file's whole path at any depth — and it counts as one git can list when a
+/// listing prints it itself, or prints anything under it at a folder boundary (a folder holds what its
+/// files are, and not what a sibling whose name begins with its own holds). Those are no part of the
+/// repository — an editor's settings folder a contributor ignores locally, a tool's cache, the folder a
+/// staged release stands in, a folder whose every file is ignored, and an empty folder, which git cannot
+/// hold — so no rule about what the repository holds applies to them (AGENTS.md §1). A tracked file
+/// always counts, so a file forced past the ignore rules is still the repository's. Outside a git
+/// checkout (a scratch tree), or when git cannot answer, nothing is skipped.
+pub(crate) fn git_ignored(dir: &Path, names: &[String]) -> Vec<String> {
+    if names.is_empty() {
+        // Nothing is asked, so nothing is taken for ignored — and no listing is started to answer
+        // an empty question, which a check's clean run must not pay for.
+        return Vec::new();
+    }
+    let listed = |args: &[&str]| -> Option<Vec<String>> {
+        let mut args = args.to_vec();
+        args.push("--");
+        args.extend(names.iter().map(String::as_str));
+        listed(dir, &args).ok()
+    };
+    let (Some(tracked), Some(addable)) = (listed(&["ls-files", "-z"]), listed(&["ls-files", "-z", "--others", "--exclude-standard"])) else {
+        return Vec::new();
+    };
+    // A listing path belongs to a name when it is the name, or sits under it at a folder boundary.
+    let holds = |paths: &[String], name: &str| paths.iter().any(|path| path == name || path.strip_prefix(name).is_some_and(|under| under.starts_with('/')));
+    names.iter().filter(|name| !holds(&tracked, name) && !holds(&addable, name)).cloned().collect()
 }
 
 /// A bare scratch repository whose `origin` is `url`, holding nothing yet: the upstream cache a test
@@ -194,6 +234,28 @@ mod tests {
         repository.write(&format!("{decomposed}/notes.md"), "x\n");
         let listed = listed(&repository.0, &["ls-files", "-z", "--others", "--exclude-standard"]).unwrap();
         assert_eq!(listed, [format!("{decomposed}/notes.md")]);
+    }
+
+    /// The path a check puts to git is the file's own components below the folder joined by `/`, each
+    /// exactly as the disk names it: a `\` stays inside a name, a name git would quote or escape comes
+    /// whole, and a component that is no text has no listing path at all, so a check asks nothing about
+    /// such a file and refuses it rather than read git's silence for an answer. The last two paths are
+    /// bytes only, never a folder made: an APFS volume answers `Illegal byte sequence` for a name that is
+    /// no text, so nothing but the bytes themselves shows what happens to one.
+    #[cfg(unix)]
+    #[test]
+    fn a_listing_path_names_each_component_as_the_disk_does() {
+        use std::os::unix::ffi::OsStrExt;
+        let tree = Path::new("/tree");
+        let file = |name: &str| tree.join(name).join(".swift-format");
+        let names = ["kept\\here", "trailing\\", "with space", "trail ", "ünïcode/日本", "e\u{301}tude", "quo\"te\nnewline", "[ab]", "*star"];
+        for name in names {
+            assert_eq!(listed_as(tree, &file(name)).as_deref(), Some(format!("{name}/.swift-format").as_str()), "{name:?}");
+        }
+        assert_eq!(listed_as(tree, &tree.join("rust").join("core").join("clippy.toml")).as_deref(), Some("rust/core/clippy.toml"), "a path at any depth");
+        assert_eq!(listed_as(&tree.join("rust"), &file("kept\\here")), None, "a path outside the folder has no listing path in it");
+        let no_text = std::ffi::OsStr::from_bytes(b"not\xffutf8");
+        assert_eq!(listed_as(tree, &tree.join(no_text).join(".swift-format")), None, "a component that is no text has no listing path");
     }
 
     #[test]

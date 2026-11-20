@@ -234,19 +234,42 @@ fn cargo_outside_message(shown: &str) -> String {
 }
 
 /// Run the check over the whole tree: build output and caches are the walker's to skip, as for every
-/// other check; a configuration inside them is a tool's own copy, not the repository's.
+/// other check; a configuration inside them is a tool's own copy, not the repository's. A file that
+/// holds nothing git would add is no part of the repository either (AGENTS.md §1), at whatever depth and
+/// by whichever rule git ignores it — the ignored `release/` folder a staging run leaves its release in, a
+/// tool's cache below a platform folder, a folder a checkout's own `.git/info/exclude` names — so a
+/// configuration there governs no code the repository holds, and no code that governs is read from it.
+/// Git answers that for every file found wanting at once, through the one reader the layout rule asks
+/// too, so a tree with many wants costs git one listing, not one per file; a file forced past the ignore
+/// rules is tracked, and its copy is refused here as ever, and when git cannot answer nothing is taken
+/// for ignored.
 pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
+    // The files found wanting are held, each by the path git lists it by, until git has answered for all
+    // of them at once; a tree with nothing wanting, which is every clean tree, asks git nothing at all.
+    let mut wanting: Vec<(Option<String>, Vec<String>)> = Vec::new();
     let mut errors = Vec::new();
     for file in scan::walk(root, "")? {
         let Some(name) = file.path.file_name().and_then(|name| name.to_str()) else { continue };
         let shown = crate::report::shown(root, &file.path);
-        errors.extend(second_copy(&shown, name, &file.components));
+        let mut found: Vec<String> = second_copy(&shown, name, &file.components).into_iter().collect();
         if file.components.first().is_some_and(|tree| crate::files::CODE_TREES.contains(&tree.as_str())) {
             let bytes = std::fs::read(&file.path).map_err(|error| format!("{shown}: {error}"))?;
             for line in jscpd_markers(&bytes) {
-                errors.push(format!("{shown}:{line}: a jscpd ignore marker hides the code after it from the duplicates stage"));
+                found.push(format!("{shown}:{line}: a jscpd ignore marker hides the code after it from the duplicates stage"));
             }
         }
+        if !found.is_empty() {
+            wanting.push((crate::git::listed_as(root, &file.path), found));
+        }
+    }
+    let paths: Vec<String> = wanting.iter().filter_map(|(path, _)| path.clone()).collect();
+    let ignored = crate::git::git_ignored(root, &paths);
+    for (path, found) in wanting {
+        // A file no listing path can name is one git cannot answer for, so its copy is refused.
+        if path.is_some_and(|path| ignored.contains(&path)) {
+            continue;
+        }
+        errors.extend(found);
     }
     Ok(errors)
 }
@@ -261,6 +284,99 @@ mod tests {
     fn the_repository_holds_one_copy_of_every_configuration() {
         let errors = check(&crate::repo_root()).unwrap();
         assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    /// A staging run of `tools/release.sh` leaves its release in the repository's ignored `release/<version>`,
+    /// and that release is the `ios/sdk` tree — the listed configurations `.swift-format` and `.swiftlint.yml`
+    /// included. Those copies govern no code the repository holds: a name git ignores is no part of the
+    /// repository (AGENTS.md §1), so the gate reads none of it and a release staged does not break the gate.
+    #[test]
+    fn a_configuration_inside_an_ignored_release_folder_is_no_second_copy() {
+        let scratch = crate::scratch::Scratch::new("machinery-release");
+        let git = |args: &[&str]| crate::git::output(&scratch.0, args).unwrap();
+        git(&["init", "-q"]);
+        scratch.write(".gitignore", "/release/\n");
+        scratch.write("ios/sdk/.swift-format", "{{}}\n");
+        scratch.write("ios/sdk/Package.swift", "// swift-tools-version: 6.0\n");
+        scratch.write("release/0.1.0/ChristopherLinnett/SwiftEffects/.swift-format", "{{}}\n");
+        scratch.write("release/0.1.0/ChristopherLinnett/SwiftEffects/.swiftlint.yml", "disable_rules\n");
+        scratch.write("release/0.1.0/maven/core-0.1.0.aar", "\u{0}binary\n");
+        assert!(check(&scratch.0).unwrap().is_empty(), "a staged release is no part of the repository");
+        // A file forced past the ignore rules is the repository's again, and its copy is refused as ever,
+        // while the ignored file beside it stays no part of the repository: the exemption is git's answer
+        // for each file, not the check's forgetting to look.
+        git(&["add", "-f", "release/0.1.0/ChristopherLinnett/SwiftEffects/.swift-format"]);
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].starts_with("release/0.1.0/ChristopherLinnett/SwiftEffects/.swift-format: a second copy of `ios/sdk/.swift-format`"), "{errors:?}");
+    }
+
+    /// What git ignores is no part of the repository at any depth, by whichever rule ignores it: a
+    /// folder the root's `.gitignore` names below the root, a folder whose own `.gitignore` ignores all it
+    /// holds (itself included), and a folder only the checkout's `.git/info/exclude` names. A copy git
+    /// would add is refused wherever it sits: one already tracked by an ordinary add, and one forced past
+    /// the ignore rules, while the ignored file beside it stays no part of the repository.
+    #[test]
+    fn a_copy_git_ignores_at_any_depth_is_no_second_copy_and_one_it_would_add_is() {
+        let scratch = crate::scratch::Scratch::new("machinery-depth");
+        let git = |args: &[&str]| crate::git::output(&scratch.0, args).unwrap();
+        git(&["init", "-q"]);
+        scratch.write(".gitignore", "/ios/sdk/scratch/\n");
+        scratch.write("ios/sdk/.swift-format", "{{}}\n");
+        scratch.write("ios/sdk/scratch/.swift-format", "{{}}\n");
+        scratch.write("ios/sdk/scratch/.swiftlint.yml", "disable_rules\n");
+        scratch.write("rust/cache/.gitignore", "*\n");
+        scratch.write("rust/cache/rustfmt.toml", "edition = \"2024\"\n");
+        scratch.write(".git/info/exclude", "/android/local/\n");
+        scratch.write("android/local/.editorconfig", "root = true\n");
+        scratch.write("ios/sdk/Sources/Probe/.swift-format", "{{}}\n");
+        // Each ignored folder sits beside files git would add, as in a real checkout, so no top-level
+        // folder holds only what git ignores.
+        scratch.write("rust/Cargo.toml", "[workspace]\n");
+        scratch.write("android/sdk/settings.gradle.kts", "// settings\n");
+        // A copy git already tracks through an ordinary add is refused at its depth too.
+        scratch.write("docs/readme.md", "x\n");
+        scratch.write("docs/notes/.clippy.toml", "allow-unwrap-in-tests = true\n");
+        git(&["add", "docs/notes/.clippy.toml"]);
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(errors.iter().any(|error| error.starts_with("ios/sdk/Sources/Probe/.swift-format: a second copy of `ios/sdk/.swift-format`")), "{errors:?}");
+        assert!(errors.iter().any(|error| error.starts_with("docs/notes/.clippy.toml: a second copy of `rust/clippy.toml`")), "{errors:?}");
+        git(&["add", "-f", "ios/sdk/scratch/.swift-format"]);
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 3, "{errors:?}");
+        assert!(errors.iter().any(|error| error.starts_with("ios/sdk/scratch/.swift-format: a second copy of")), "{errors:?}");
+        assert!(!errors.iter().any(|error| error.starts_with("ios/sdk/scratch/.swiftlint.yml")), "{errors:?}");
+    }
+
+    /// When git cannot answer which names it ignores, none is taken for ignored: the copies stand refused
+    /// rather than pass unread.
+    #[test]
+    fn a_git_that_cannot_answer_leaves_every_copy_refused() {
+        let scratch = crate::scratch::Scratch::new("machinery-no-git");
+        scratch.write(".git", "gitdir: /nonexistent/craftbridge-no-such-git-folder\n");
+        scratch.write(".gitignore", "/release/\n");
+        scratch.write("ios/sdk/.swift-format", "{{}}\n");
+        scratch.write("release/0.1.0/ChristopherLinnett/SwiftEffects/.swift-format", "{{}}\n");
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].starts_with("release/0.1.0/ChristopherLinnett/SwiftEffects/.swift-format: a second copy of"), "{errors:?}");
+    }
+
+    /// Git is asked about a file by the path it lists it by, which is no message's path: on a Unix disk a
+    /// `\` is part of a folder's name, so a copy git would add below such a folder is refused, and a copy
+    /// below one whose own `.gitignore` ignores it all stays no part of the repository.
+    #[cfg(unix)]
+    #[test]
+    fn a_copy_below_a_folder_whose_name_holds_a_backslash_is_judged_by_its_own_path() {
+        let scratch = crate::scratch::Scratch::new("machinery-backslash");
+        crate::git::output(&scratch.0, &["init", "-q"]).unwrap();
+        scratch.write("kept\\here/.swift-format", "{{}}\n");
+        scratch.write("dropped\\here/.gitignore", "*\n");
+        scratch.write("dropped\\here/.swift-format", "{{}}\n");
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("a second copy of `ios/sdk/.swift-format`") && errors[0].starts_with("kept"), "{errors:?}");
     }
 
     #[test]

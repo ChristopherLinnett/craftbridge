@@ -17,6 +17,9 @@
 /android/samples/**/local.properties
 /android/samples/**/build/
 
+# Releases a staging run of tools/release.sh keeps, one folder per version, until the owner publishes them.
+/release/
+
 # The plan (plan/.gitignore covers its dependencies and renders): the bundle and the raw device logs stay
 # on the machine that made them.
 /plan/analysis/

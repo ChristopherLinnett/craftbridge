@@ -47,27 +47,6 @@ enum Entry {
 /// Finder opens, whatever the repository asks, and git ignores it.
 pub(crate) const IGNORED_NAMES: &[&str] = &[".DS_Store"];
 
-/// The names in `dir` that hold nothing the repository can: neither a tracked file nor an untracked one
-/// git would add. Those are no part of the repository — an editor's settings folder a contributor
-/// ignores locally, a tool's cache, a folder whose every file is ignored (`.claude/` holding only an
-/// ignored `settings.local.json`), and an empty folder, which git cannot hold — so no rule about what the
-/// repository holds applies to them. A tracked file always counts, so a platform file forced past the
-/// ignore rules is still refused. Outside a git checkout (a scratch tree), or when git cannot answer,
-/// nothing is skipped.
-fn git_ignored(dir: &Path, names: &[String]) -> Vec<String> {
-    let listed = |args: &[&str]| -> Option<Vec<String>> {
-        let mut args = args.to_vec();
-        args.push("--");
-        args.extend(names.iter().map(String::as_str));
-        let paths = crate::git::listed(dir, &args).ok()?;
-        Some(paths.iter().filter_map(|path| path.split('/').next()).filter(|name| !name.is_empty()).map(str::to_string).collect())
-    };
-    let (Some(tracked), Some(addable)) = (listed(&["ls-files", "-z"]), listed(&["ls-files", "-z", "--others", "--exclude-standard"])) else {
-        return Vec::new();
-    };
-    names.iter().filter(|name| !tracked.contains(name) && !addable.contains(name)).cloned().collect()
-}
-
 /// Check one directory against an allowlist, returning one error per unexpected entry and per allowed
 /// name of the wrong kind. `hint` finishes the sentence so the root and the platform folders share this
 /// one function. A directory that cannot be listed is an error, never an empty listing.
@@ -78,7 +57,7 @@ fn entries_violations(root: &Path, dir: &Path, allowed: &[(&str, Entry)], hint: 
         names.push(entry.map_err(|error| format!("{}: {error}", dir.display()))?.file_name().to_string_lossy().into_owned());
     }
     names.sort();
-    let ignored = git_ignored(dir, &names);
+    let ignored = crate::git::git_ignored(dir, &names);
     let prefix = if dir == root { String::new() } else { format!("{}/", crate::report::shown(root, dir)) };
     let mut errors = Vec::new();
     for name in names.iter().filter(|name| !IGNORED_NAMES.contains(&name.as_str()) && !ignored.contains(name)) {
@@ -312,6 +291,21 @@ mod tests {
         scratch.write("swift/notes.md", "x\n");
         let errors = check(&scratch.0).unwrap();
         assert_eq!(errors.len(), 2, "a file git would add makes the folder the repository's: {errors:?}");
+    }
+
+    /// A folder holds what git lists under it at a folder boundary, never what a sibling whose name begins
+    /// with the folder's holds: the ignored `release/` a staging run leaves stays no part of the repository
+    /// beside a `release-notes.md` git would add, which is refused alone.
+    #[test]
+    fn an_ignored_folder_is_not_held_by_a_sibling_whose_name_begins_with_its_own() {
+        let scratch = Scratch::new("layout-prefix");
+        crate::git::output(&scratch.0, &["init", "-q"]).unwrap();
+        scratch.write(".gitignore", "/release/\n");
+        scratch.write("release/0.1.0/notes.md", "x\n");
+        scratch.write("release-notes.md", "x\n");
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].starts_with("release-notes.md is not allowed here"), "{errors:?}");
     }
 
     /// The child half of the test below: run only when the parent starts it with a hook's environment.
