@@ -10,9 +10,16 @@
 //! block that is such a run is code the gate builds, and a block that is not is refused, naming the guide
 //! and the line.
 //!
-//! What a comment holds is no compiled code. A line comment marks its own line, so code commented out line by
-//! line is no longer the run a block quotes, and a block made only of comment lines quotes no code at all and
-//! is refused; swift-format's `NoBlockComments` refuses every Swift block comment the gate reads.
+//! What a build compiles to nothing is no compiled code either, and the gate never guesses at it. A line is
+//! dead when every non-blank character of it sits in a comment, a KDoc, or a string body, or in an `#if`
+//! branch no shipping build compiles. Kotlin answers those of its files with `CompilesToNothing`, a rule of
+//! the build's own detekt rules run by the Android builds themselves; Swift answers its files with
+//! `tools/guide-swift-lines.swift`, which reads them with the pinned Xcode's swift-syntax on every build
+//! `swift_build` makes of the project, under the conditions Xcode resolves for each (AGENTS §10). A block quoted wholly from
+//! dead lines quotes prose dressed as code and is refused; a KDoc quoted beside the code it documents
+//! stands, because the code's lines live. A line comment marks its own line, so code commented out line by
+//! line is no longer the run a block quotes, and a block made only of comment lines quotes no code at all
+//! and is refused; swift-format's `NoBlockComments` refuses every Swift block comment the gate reads.
 //!
 //! The Markdown is read only as far as its code blocks, and every block must say what it holds: a fence of
 //! three or more backquotes or tildes opens one, the next fence of the same mark and at least its length
@@ -24,18 +31,29 @@ use crate::scan;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+/// One file a sample build compiles: its lines, and the lines of it a build compiles to nothing — those
+/// whose every non-blank character sits in a comment, a KDoc, a string body, or an `#if` branch no
+/// shipping build compiles. Kotlin answers those from the gate's own detekt rule over the folders AGP's
+/// variant API lists, Swift from `tools/guide-swift-lines.swift` over the files the projects' build
+/// phases list, each language read by its own parser (AGENTS §10).
+pub(crate) struct Source {
+    pub(crate) path: PathBuf,
+    pub(crate) lines: Vec<String>,
+    pub(crate) dead: std::collections::BTreeSet<usize>,
+}
+
 /// A fenced language whose blocks are code a build compiles: the word its fences name it by, what compiles
-/// it, and where that build's files are listed.
+/// it, and where that build's files and their dead lines are answered.
 struct CodeLanguage {
     fence: &'static str,
     builds: &'static str,
-    sources: fn(&Path) -> Result<Vec<PathBuf>, String>,
+    sources: fn(&Path) -> Result<Vec<Source>, String>,
 }
 
 /// The languages whose every block must be a run of a compiled file.
 const CODE_LANGUAGES: [CodeLanguage; 2] = [
-    CodeLanguage { fence: "swift", builds: "the iOS samples' projects", sources: crate::samples::ios_sources },
-    CodeLanguage { fence: "kotlin", builds: "the Android samples' builds", sources: crate::samples::android_sources },
+    CodeLanguage { fence: "swift", builds: "the iOS samples' projects", sources: crate::samples::swift_guide_sources },
+    CodeLanguage { fence: "kotlin", builds: "the Android samples' builds", sources: crate::samples::android_guide_sources },
 ];
 
 /// The fenced languages that carry guide text — terminal lines, JSON, manifests, diagrams. They are shown as
@@ -130,10 +148,21 @@ fn dedent<S: AsRef<str>>(lines: &[S]) -> Vec<String> {
     lines.iter().map(AsRef::as_ref).map(|line| line.get(common.min(line.len())..).unwrap_or("").trim_end().to_string()).collect()
 }
 
-/// Whether `block`, dedented, is a run of `source`: some lines of it in a row which, moved left together by
-/// their own common indentation, are the block's lines exactly.
-fn quoted_in(block: &[String], source: &[String]) -> bool {
-    !block.is_empty() && source.windows(block.len()).any(|run| dedent(run) == block)
+/// The lines of `block`, dedented, are a run of `source` at each returned start: some lines of it in a row
+/// which, moved left together by their own common indentation, are the block's lines exactly. A run starts
+/// where its first line sits, counted from one; several runs may match, and a quotation that sits in one
+/// file wholly is the same quotation wherever else its lines might line up.
+fn quoted_runs(block: &[String], source: &Source) -> Vec<usize> {
+    if block.is_empty() {
+        return Vec::new();
+    }
+    source.lines.as_slice().windows(block.len()).enumerate().filter(|(_, run)| dedent(run) == block).map(|(start, _)| start + 1).collect()
+}
+
+/// Whether every line of a run from `start` is a line the build compiles to nothing: a block quoted wholly
+/// from such lines quotes no code, only what the compiler never sees.
+fn wholly_dead(block: &[String], source: &Source, start: usize) -> bool {
+    (start..start + block.len()).all(|line| source.dead.contains(&line))
 }
 
 /// Whether every line of `block` that holds anything is a line comment, which both languages mark with `//`.
@@ -158,8 +187,15 @@ pub(crate) fn run(root: &Path) -> ExitCode {
     }
 }
 
-/// Each code language's compiled files, as lines, from the samples of the tree at `root`.
-type Sources = Vec<(&'static str, Vec<Vec<String>>)>;
+/// Each code language's compiled files, each with the lines its build compiles to nothing, from the samples
+/// of the tree at `root`.
+type Sources = Vec<(&'static str, Vec<Source>)>;
+
+/// The refusal when a language's builds compile no source at all: with nothing compiled to match a guide's
+/// blocks against, no block could be proved, and a quiet pass would be the wrong answer.
+fn no_sources(language: &CodeLanguage) -> String {
+    format!("no {} sources found: {} compile none to match {} blocks against", language.fence, language.builds, language.fence)
+}
 
 fn check(root: &Path) -> Result<usize, Vec<String>> {
     let mut guides = Vec::new();
@@ -174,14 +210,9 @@ fn check(root: &Path) -> Result<usize, Vec<String>> {
     for language in &CODE_LANGUAGES {
         let files = (language.sources)(root).map_err(|problem| vec![problem])?;
         if files.is_empty() {
-            return Err(vec![format!("no {} sources found: {} compile none to match {} blocks against", language.fence, language.builds, language.fence)]);
+            return Err(vec![no_sources(language)]);
         }
-        let texts = files
-            .iter()
-            .map(|file| scan::read_text(file).map(|text| text.lines().map(str::to_string).collect()))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|problem| vec![format!("cannot read a {} source: {problem}", language.fence)])?;
-        sources.push((language.fence, texts));
+        sources.push((language.fence, files));
     }
     check_guides(&guides, &sources)
 }
@@ -211,14 +242,37 @@ fn check_guides(guides: &[(PathBuf, String)], sources: &Sources) -> Result<usize
                 problems.push(format!("{}: an empty {name} block teaches nothing", at(block.line)));
             } else if only_comments(&wanted) {
                 problems.push(format!("{}: this {name} block holds only comment lines, which no build compiles", at(block.line)));
-            } else if sources.iter().filter(|(fence, _)| *fence == language.fence).flat_map(|(_, files)| files).any(|source| quoted_in(&wanted, source)) {
-                count += 1;
             } else {
-                problems.push(format!(
-                    "{}: this {name} block is no run of a file {} compile: its lines must appear in order in one such file, each indented against the others as it is there",
-                    at(block.line),
-                    language.builds
-                ));
+                // A file that holds the block as a run over lines the build compiles vouches for it; a file
+                // that holds it only where the build compiles nothing says what the block really quotes.
+                let mut quoted = false;
+                let mut dead_in: Option<&Path> = None;
+                for source in sources.iter().filter(|(fence, _)| *fence == language.fence).flat_map(|(_, files)| files) {
+                    let runs = quoted_runs(&wanted, source);
+                    if runs.is_empty() {
+                        continue;
+                    }
+                    if runs.iter().all(|start| wholly_dead(&wanted, source, *start)) {
+                        dead_in.get_or_insert(source.path.as_path());
+                    } else {
+                        quoted = true;
+                    }
+                }
+                if quoted {
+                    count += 1;
+                } else if let Some(file) = dead_in {
+                    problems.push(format!(
+                        "{}: this {name} block quotes only lines that compile to nothing: all of them lie in a comment, a KDoc, a string, or a branch no shipping build compiles, in {}",
+                        at(block.line),
+                        file.display()
+                    ));
+                } else {
+                    problems.push(format!(
+                        "{}: this {name} block is no run of a file {} compile: its lines must appear in order in one such file, each indented against the others as it is there",
+                        at(block.line),
+                        language.builds
+                    ));
+                }
             }
         }
     }
@@ -230,12 +284,17 @@ mod tests {
     use super::*;
     use crate::scratch::Scratch;
 
-    /// The compiled sources the guides below are checked against: one Swift file and one Kotlin file.
+    /// The compiled sources the guides below are checked against: one Swift file and one Kotlin file,
+    /// each with a line its build compiles to nothing — the comment, and the KDoc, that head them.
     fn sources() -> Sources {
-        let lines = |text: &str| text.lines().map(str::to_string).collect::<Vec<_>>();
+        let source = |path: &str, text: &str, dead: &[usize]| Source {
+            path: PathBuf::from(path),
+            lines: text.lines().map(str::to_string).collect(),
+            dead: dead.iter().copied().collect(),
+        };
         vec![
-            ("swift", vec![lines("// The studio.\nstruct Studio {\n    func start() -> Int {\n        42\n    }\n}\n")]),
-            ("kotlin", vec![lines("/** The studio. */\nfun start(): Int =\n    42\n")]),
+            ("swift", vec![source("App/Studio.swift", "// The studio.\nstruct Studio {\n    func start() -> Int {\n        42\n    }\n}\n", &[1])]),
+            ("kotlin", vec![source("src/main/kotlin/Studio.kt", "/** The studio. */\nfun start(): Int =\n    42\n", &[1])]),
         ]
     }
 
@@ -282,6 +341,58 @@ mod tests {
         assert_eq!(checked("# Guide\n\n```swift\n// The studio.\nstruct Studio {\n```\n"), Ok(1));
     }
 
+    /// One compiled Kotlin file for the tests below: the two-line studio, with whatever lines its build
+    /// compiles to nothing.
+    fn studio(dead: &[usize]) -> Source {
+        Source {
+            path: PathBuf::from("sdk/core/src/main/kotlin/Studio.kt"),
+            lines: vec!["fun start(): Int =".to_string(), "    42".to_string()],
+            dead: dead.iter().copied().collect(),
+        }
+    }
+
+    /// A block quoted wholly from lines a build compiles to nothing quotes prose dressed as code, and is
+    /// refused naming the file the quotation really lies in. Which lines are dead is the language's own
+    /// parser's answer — KDoc, comment, string body, dead branch alike — so the check asks none of the
+    /// kinds itself; the gate's plants cover each kind against the real parsers.
+    #[test]
+    fn a_block_quoted_wholly_from_dead_lines_names_the_file_it_lies_in() {
+        let sources: Sources = vec![("kotlin", vec![studio(&[1])])];
+        assert_eq!(
+            check_guides(&[(PathBuf::from("docs/guide.md"), "# Guide\n\n```kotlin\nfun start(): Int =\n```\n".to_string())], &sources),
+            Err(vec![
+                "docs/guide.md:3: this kotlin block quotes only lines that compile to nothing: all of them lie in a comment, a KDoc, a string, or a branch no shipping build compiles, in sdk/core/src/main/kotlin/Studio.kt"
+                    .to_string()
+            ])
+        );
+    }
+
+    /// One live line in the run is enough: a quotation lies dead only when all of it does.
+    #[test]
+    fn a_block_with_one_live_line_is_no_dead_quotation() {
+        let sources: Sources = vec![("kotlin", vec![studio(&[1])])];
+        assert_eq!(check_guides(&[(PathBuf::from("docs/guide.md"), "# Guide\n\n```kotlin\nfun start(): Int =\n    42\n```\n".to_string())], &sources), Ok(1));
+    }
+
+    /// A KDoc quoted beside the code it documents stands: the comment's own line is dead, the code's are
+    /// not, and the block as a whole quotes code.
+    #[test]
+    fn a_kdoc_quoted_with_the_code_it_documents_passes() {
+        let source = Source {
+            path: PathBuf::from("sdk/core/src/main/kotlin/Studio.kt"),
+            lines: vec!["/** The studio. */".to_string(), "fun start(): Int =".to_string(), "    42".to_string()],
+            dead: [1usize].into(),
+        };
+        let sources: Sources = vec![("kotlin", vec![source])];
+        assert_eq!(
+            check_guides(
+                &[(PathBuf::from("docs/guide.md"), "# Guide\n\n```kotlin\n/** The studio. */\nfun start(): Int =\n    42\n```\n".to_string())],
+                &sources
+            ),
+            Ok(1)
+        );
+    }
+
     #[test]
     fn every_block_the_reading_cannot_take_is_refused_by_its_line() {
         let guide = "# Guide\n\n```swift\n\n```\n\n```swiftt\nx\n```\n\n```\nfunc start() -> Int {\n```\n\nprose\n\n    func start() -> Int {\n\n````swift\nfunc start() -> Int {\n```\n";
@@ -320,9 +431,28 @@ mod tests {
         assert_eq!(check(&root.0), Err(vec!["no guide files found under docs/".to_string()]));
     }
 
-    /// The check reads what the samples' builds compile, through `crate::samples`: a Swift file in a sample's
-    /// folder that its project does not compile is no source a block may quote, and a tree whose samples compile
-    /// no Kotlin is refused rather than passed.
+    /// A tree that lists no samples answers no source — read as nothing, refusing the guide rather than
+    /// passing it — and answering costs no build, because the providers start one only where samples are.
+    #[test]
+    fn a_tree_without_samples_answers_no_sources_and_is_refused() {
+        let root = Scratch::new("guide-samples-no-samples");
+        root.write("docs/guide.md", "# Guide\n");
+        assert!(crate::samples::swift_guide_sources(&root.0).is_ok_and(|sources| sources.is_empty()));
+        assert!(crate::samples::android_guide_sources(&root.0).is_ok_and(|sources| sources.is_empty()));
+        assert_eq!(check(&root.0), Err(vec!["no swift sources found: the iOS samples' projects compile none to match swift blocks against".to_string()]));
+    }
+
+    /// The empty answer names the language and the builds that should have compiled something, for both
+    /// languages alike; the Kotlin one is refused before any build starts, so only its wording can be the pin.
+    #[test]
+    fn an_empty_answer_names_the_language_and_the_builds_that_compiled_nothing() {
+        assert_eq!(no_sources(&CODE_LANGUAGES[0]), "no swift sources found: the iOS samples' projects compile none to match swift blocks against");
+        assert_eq!(no_sources(&CODE_LANGUAGES[1]), "no kotlin sources found: the Android samples' builds compile none to match kotlin blocks against");
+    }
+
+    /// The check reads what the samples compile, through `crate::samples`: a Swift file that only sits
+    /// in a sample's folder, which its project's Sources phase does not list, is compiled by no build and
+    /// is no source a block may quote, while the listed one passes.
     #[test]
     #[cfg_attr(not(target_os = "macos"), ignore = "reads the sample's project through plutil, which only macOS has")]
     fn only_what_the_samples_compile_may_be_quoted() {
@@ -337,13 +467,17 @@ mod tests {
         );
         root.write("ios/samples/App/App/Listed.swift", "func listed() {}\n");
         root.write("ios/samples/App/App/Unlisted.swift", "func unlisted() {}\n");
-        root.write("android/samples/app/settings.gradle.kts", "");
-        root.write("docs/guide.md", "# Guide\n\n```swift\nfunc listed() {}\n```\n\n```swift\nfunc unlisted() {}\n```\n");
-        assert_eq!(check(&root.0), Err(vec!["no kotlin sources found: the Android samples' builds compile none to match kotlin blocks against".to_string()]));
-        root.write("android/samples/app/app/src/main/kotlin/App.kt", "fun listed() {}\n");
-        let guide = root.0.join("docs/guide.md");
         assert_eq!(
-            check(&root.0),
+            crate::samples::project_build(&root.0.join("ios/samples/App/App.xcodeproj")).unwrap().sources,
+            [root.0.join("ios/samples/App/App/Listed.swift")]
+        );
+        let listed = Source { path: root.0.join("ios/samples/App/App/Listed.swift"), lines: vec!["func listed() {}".to_string()], dead: Default::default() };
+        let kotlin = Source { path: PathBuf::from("App.kt"), lines: vec!["fun app() {}".to_string()], dead: Default::default() };
+        let sources: Sources = vec![("swift", vec![listed]), ("kotlin", vec![kotlin])];
+        let guide = root.0.join("docs/guide.md");
+        root.write("docs/guide.md", "# Guide\n\n```swift\nfunc listed() {}\n```\n\n```swift\nfunc unlisted() {}\n```\n");
+        assert_eq!(
+            check_guides(&[(guide.clone(), scan::read_text(&guide).unwrap())], &sources),
             Err(vec![format!(
                 "{}:7: this swift block is no run of a file the iOS samples' projects compile: its lines must appear in order in one such file, each indented against the others as it is there",
                 guide.display()
