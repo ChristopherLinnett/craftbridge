@@ -11,98 +11,17 @@ import CraftBridge
 import CraftBridgeEffects
 import Foundation
 import Testing
-import os
 
 /// The files of the acceptance's export, at the least the engine can draw: the count is what the start
 /// is measured at, so the frames stay the smallest the engine will make a file of.
 private let files: UInt64 = 18_000
 
-/// The seconds every report of this export stands still, through the seam this test owns: the export
-/// waits on every report it takes, so the pause slows the export's own start — the whole suite's slowness
-/// under load, given to this export alone. What the test asserts is what the export does, never how fast
-/// the machine was while it did it.
-private let reportPause: TimeInterval = 0.5
-
-/// An export's progress reports, and the cancel it asks for a second into the export. The cancel comes
-/// from a report, as an app's does: a start that cannot be reached until its first frame is what this
-/// is there to find out, and a cancel held back for another thread to deliver could land in the render
-/// and prove nothing about the start.
-final class StartOfMany: Sendable {
-    /// One report: when it came, and how far the export had come.
-    struct Report: Sendable {
-        let at: Date
-        let done: UInt64
-        let total: UInt64
-    }
-
-    private let started = Date()
-    private let kept = OSAllocatedUnfairLock(initialState: [Report]())
-    private let job = OSAllocatedUnfairLock<ExportJob?>(initialState: nil)
-    private let asked = OSAllocatedUnfairLock<Report?>(initialState: nil)
-    private let readBy = OSAllocatedUnfairLock<Int?>(initialState: nil)
-
-    /// When the export started, as its reports count from it.
-    var start: Date { started }
-
-    /// The first report, or nil when none came.
-    func first() -> Report? { kept.withLock { $0.first } }
-
-    /// The cancel, as seconds since the export started, or nil when no report came in time to ask it.
-    func cancel() -> TimeInterval? { asked.withLock { $0?.at.timeIntervalSince(started) } }
-
-    /// How many frames the report that asked the cancel counted the export as having to draw, or nil when
-    /// none asked it: the listing's reports count none, and the render's count its item's once its first
-    /// frame is drawn.
-    func askedFrom() -> UInt64? { asked.withLock { $0?.total } }
-
-    /// How many reports the export can have made by the one that reads its cancel, or nil when the cancel
-    /// never reached it. The engine reads the cancel as each report returns, so a cancel asked inside a
-    /// report is read by that very report, and one handed in from outside a report by the next.
-    func lastReport() -> Int? { readBy.withLock { $0 } }
-
-    /// How many reports came.
-    func count() -> Int { kept.withLock { $0.count } }
-
-    /// The handler to give the export. Each report ends by standing still for ``reportPause``: the export
-    /// is mid-report until the handler is done, so the pause runs the export's own steps slow, as a
-    /// loaded runner runs them slow, through this test's seam — and what the test reads is the export's
-    /// work, which no such slowness moves. The pause also holds the listing's own beats half a second
-    /// apart at the least, and the acceptance's files make three of the listing's chunks, a beat before
-    /// each, so its third beat comes a second or more after the start on any machine: the cancel a second
-    /// in asks on one of the listing's beats, the third on a fast machine and an earlier one on a slower.
-    var handler: ProgressHandler {
-        { [started, kept, job, asked, readBy] done, total, _ in
-            let now = Date()
-            let report = Report(at: now, done: done, total: total)
-            let count = kept.withLock { kept in
-                kept.append(report)
-                return kept.count
-            }
-            let ask = asked.withLock { asked in
-                guard asked == nil, now.timeIntervalSince(started) >= 1 else { return false }
-                asked = report
-                return true
-            }
-            if ask, let export = job.withLock({ $0 }) {
-                export.cancel()
-                readBy.withLock { $0 = min($0 ?? count, count) }
-            }
-            print("export of \(files) files: \(done) of \(total) at \(now.timeIntervalSince(started)) s")
-            fflush(stdout)
-            Thread.sleep(forTimeInterval: reportPause)
-        }
-    }
-
-    /// Hands the export to the listener, and asks any cancel a report had already called for: the export
-    /// reads that one at its next report.
-    func take(_ export: ExportJob) {
-        job.withLock { $0 = export }
-        guard asked.withLock({ $0 != nil }) else { return }
-        export.cancel()
-        let next = count() + 1
-        readBy.withLock { $0 = min($0 ?? next, next) }
-    }
-}
+/// The seconds into the export from which its reports ask the cancel: the first report at or after them
+/// asks it. The seam's pause holds the listing's own beats a pause apart at the least, and the acceptance's
+/// files make three of the listing's chunks, a beat before each: at the pause as it stands the third beat
+/// comes a second or more after the start on any machine, so the cancel a second in asks on one of the
+/// listing's beats — the third on a fast machine and an earlier one on a slower.
+private let askAfter: TimeInterval = 1
 
 @Suite(.serialized) @MainActor struct ExportStartTests {
     // No trip is asked for: what is measured here is the export's own start, which the app is in the
@@ -123,7 +42,7 @@ final class StartOfMany: Sendable {
         ])
         let into = container.appending(path: "many", directoryHint: .isDirectory)
 
-        let heard = StartOfMany()
+        let heard = CancelFromReport(askingAfter: askAfter, printedAs: "export of \(files) files")
         let export = try await engine.export(
             to: into.appending(path: "frame.png"), format: .png, progress: heard.handler)
         heard.take(export)

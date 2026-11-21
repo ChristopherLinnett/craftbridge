@@ -177,6 +177,135 @@ final class FirstReport: Sendable {
     }
 }
 
+/// The seconds every report of a test's own export stands still, through the seam the tests own: the
+/// export waits on every report it takes, so the pause slows what the export does on the engine's thread,
+/// its start among it — the whole suite's slowness under load, given to one export alone — while a render,
+/// on a thread of its own, runs on and only hears a cancel that much later. What a test asserts is what
+/// the export does, never how fast the machine was while it did it, so the same test proves itself against
+/// an export far slower than this machine makes it by raising this, and against one as quick as this
+/// machine makes it by setting it to zero, never by loading the machine.
+let reportPause: TimeInterval = 0.5
+
+/// The seconds the first report of a ``CancelFromReport`` waits for its test to hand the job over. The
+/// bound is on a hang, never on how long the hand-over takes: the hand-over is the statement after the one
+/// that starts the export, so it is reached only by a test that hands its job over nowhere at all.
+let handedOverWithin: TimeInterval = 60
+
+/// An export's progress reports, and the cancel its test asks from one of them — which is where an export
+/// reads a cancel, since the engine reads the token as each report returns. A cancel handed in from
+/// outside a report reaches the export only at its next one, and a quick export can be finished before
+/// then and answer `Ok`; a cancel asked inside a report is read by that very report, however quick the
+/// export is, and no report follows it. The report that asks is kept, so the test can say how many reports
+/// the export still owed it: none.
+///
+/// The first report waits for ``take(_:)`` to hand the job over, so a test that asks as soon as the export
+/// reports is heard at that very report. Every export makes that first report before it writes a single
+/// file, so a cancel asked there reaches an export however fast this machine would have rendered it.
+final class CancelFromReport: Sendable {
+    /// One report: when it came, and how far the export had come.
+    struct Report: Sendable {
+        let at: Date
+        let done: UInt64
+        let total: UInt64
+    }
+
+    /// The seconds into the export from which a report asks the cancel: the first report at or after them.
+    private let askAfter: TimeInterval
+    /// The seconds every report stands still for: the seam that runs the export slow or quick through the
+    /// test, while everything the test reads stays the export's own work.
+    private let pause: TimeInterval
+    /// What the reports are printed under, so a run's log says which export spoke.
+    private let label: String
+    private let started = Date()
+    private let kept = OSAllocatedUnfairLock(initialState: [Report]())
+    private let job = OSAllocatedUnfairLock<ExportJob?>(initialState: nil)
+    private let asked = OSAllocatedUnfairLock<Report?>(initialState: nil)
+    private let readBy = OSAllocatedUnfairLock<Int?>(initialState: nil)
+    /// Signalled once ``take(_:)`` has handed the job over, which the first report waits for.
+    private let handedOver = DispatchSemaphore(value: 0)
+
+    /// A listener that asks the export to stop at its first report at or after `askAfter` seconds into it
+    /// — at the very first, for the default — stands each report still for `pause` seconds and prints each
+    /// under `label`.
+    init(
+        askingAfter askAfter: TimeInterval = 0, pausing pause: TimeInterval = reportPause,
+        printedAs label: String = "export"
+    ) {
+        self.askAfter = askAfter
+        self.pause = pause
+        self.label = label
+    }
+
+    /// When the export started, as its reports count from it.
+    var start: Date { started }
+
+    /// The first report, or nil when none came.
+    func first() -> Report? { kept.withLock { $0.first } }
+
+    /// The cancel, as seconds since the export started, or nil when no report came to ask it in.
+    func cancel() -> TimeInterval? { asked.withLock { $0?.at.timeIntervalSince(started) } }
+
+    /// How many frames the report that asked the cancel counted the export as having to draw, or nil when
+    /// none asked it: the listing's reports count none, and the render's count its item's once its first
+    /// frame is drawn.
+    func askedFrom() -> UInt64? { asked.withLock { $0?.total } }
+
+    /// How many reports the export can have made by the one that reads its cancel, or nil when the cancel
+    /// never reached it. The engine reads the cancel as each report returns, so a cancel asked inside a
+    /// report is read by that very report, and one handed in from outside a report by the next.
+    func lastReport() -> Int? { readBy.withLock { $0 } }
+
+    /// How many reports came.
+    func count() -> Int { kept.withLock { $0.count } }
+
+    /// The handler to give the export. Each report ends by standing still for the seam's pause: the export
+    /// is mid-report until the handler is done, so the pause runs the export's steps on the engine's thread
+    /// slow, as a loaded runner runs them slow, and what the test reads is the export's work, which no such
+    /// slowness moves.
+    var handler: ProgressHandler {
+        { [started, askAfter, pause, label, kept, job, asked, readBy, handedOver] done, total, _ in
+            let now = Date()
+            let report = Report(at: now, done: done, total: total)
+            let count = kept.withLock { kept in
+                kept.append(report)
+                return kept.count
+            }
+            // The export cannot be stopped before the test has the job to stop it with, and a quick export
+            // could be past this report before the line that starts it has handed the job over. Standing
+            // still here until it has is what makes a cancel asked at the first report one this very report
+            // reads, on any machine, rather than one the export could be done before it ever saw.
+            if count == 1, handedOver.wait(timeout: .now() + handedOverWithin) == .timedOut {
+                Issue.record(
+                    "the export's first report waited \(handedOverWithin) s for its job and none was handed over"
+                )
+            }
+            let ask = asked.withLock { asked in
+                guard asked == nil, now.timeIntervalSince(started) >= askAfter else { return false }
+                asked = report
+                return true
+            }
+            if ask, let export = job.withLock({ $0 }) {
+                export.cancel()
+                readBy.withLock { $0 = min($0 ?? count, count) }
+            }
+            print("\(label): \(done) of \(total) at \(now.timeIntervalSince(started)) s")
+            fflush(stdout)
+            if pause > 0 { Thread.sleep(forTimeInterval: pause) }
+        }
+    }
+
+    /// Hands the export to the listener, and asks any cancel a report had already called for: the export
+    /// reads that one at its next report.
+    func take(_ export: ExportJob) {
+        job.withLock { $0 = export }
+        handedOver.signal()
+        guard asked.withLock({ $0 != nil }) else { return }
+        export.cancel()
+        let next = count() + 1
+        readBy.withLock { $0 = min($0 ?? next, next) }
+    }
+}
+
 /// The system as a test makes it: its own notification centre, which the test posts the app's lifecycle to,
 /// and a background task that is granted, or refused, as the test sets, and recorded either way.
 final class FakeHost: BackgroundHost, Sendable {
