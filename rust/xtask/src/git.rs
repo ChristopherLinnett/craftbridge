@@ -96,7 +96,7 @@ pub(crate) fn listed(dir: &Path, args: &[&str]) -> Result<Vec<String>, String> {
 /// as a separator and replaces what is not UTF-8, so git would be asked about a file that is not there and
 /// list nothing for it. None when `path` is not inside `dir` or a component is not UTF-8, which no
 /// question in git's listing words can name.
-pub(crate) fn listed_as(dir: &Path, path: &Path) -> Option<String> {
+fn listed_as(dir: &Path, path: &Path) -> Option<String> {
     let parts: Option<Vec<&str>> = path.strip_prefix(dir).ok()?.components().map(|part| part.as_os_str().to_str()).collect();
     parts.map(|parts| parts.join("/"))
 }
@@ -107,34 +107,80 @@ pub(crate) fn is_checkout(root: &Path) -> bool {
     root.join(".git").exists()
 }
 
+/// The listing of what the repository holds below a folder, as git answers it: every path its index
+/// tracks, and every untracked one its ignore rules (each `.gitignore`, the checkout's `info/exclude` and
+/// the user's `core.excludesFile`) leave to `git add`, one listing for both. A tracked file a pattern
+/// matches is in it, since git keeps what it tracks; a file git ignores is not (AGENTS.md §1).
+pub(crate) const TRACKED_OR_ADDABLE: &[&str] = &["ls-files", "-z", "--cached", "--others", "--exclude-standard"];
+
+/// What the repository holds below `dir` ([`TRACKED_OR_ADDABLE`]), as paths inside it, or git's own words
+/// when it cannot answer.
+pub(crate) fn tracked_or_addable(dir: &Path) -> Result<Vec<String>, String> {
+    listed(dir, TRACKED_OR_ADDABLE)
+}
+
+/// What an `ls-files` listing holds: every path it lists, and every folder above one of them, so a
+/// folder's name is held exactly when the listing holds some path inside it — a folder holds what its
+/// files are, and not what a sibling whose name begins with its own holds.
+struct Held(std::collections::HashSet<String>);
+
+impl Held {
+    fn of(paths: Vec<String>) -> Held {
+        let mut held = std::collections::HashSet::new();
+        for path in paths {
+            for boundary in path.bytes().enumerate().filter_map(|(at, byte)| (byte == b'/').then_some(at)) {
+                // `get` rather than an index (§3): a `/` byte is a whole-character boundary by itself,
+                // so `get` cuts where an index would too, and refuses instead of panicking if it ever did not.
+                if let Some(ancestor) = path.get(..boundary) {
+                    held.insert(ancestor.to_string());
+                }
+            }
+            held.insert(path);
+        }
+        Held(held)
+    }
+
+    fn holds(&self, name: &str) -> bool {
+        self.0.contains(name)
+    }
+}
+
 /// The names in `names` of a directory `dir` that hold nothing the repository can: neither a tracked file
 /// nor an untracked one git would add. A name is a path inside `dir` as git lists it (`listed_as`) — a
-/// folder's own name, or a file's whole path at any depth — and it counts as one git can list when a
-/// listing prints it itself, or prints anything under it at a folder boundary (a folder holds what its
-/// files are, and not what a sibling whose name begins with its own holds). Those are no part of the
+/// folder's own name, or a file's whole path at any depth — and it counts as one git can list when the
+/// listing prints it itself, or prints anything under it at a folder boundary. Those are no part of the
 /// repository — an editor's settings folder a contributor ignores locally, a tool's cache, the folder a
 /// staged release stands in, a folder whose every file is ignored, and an empty folder, which git cannot
 /// hold — so no rule about what the repository holds applies to them (AGENTS.md §1). A tracked file
-/// always counts, so a file forced past the ignore rules is still the repository's. Outside a git
-/// checkout (a scratch tree), or when git cannot answer, nothing is skipped.
-pub(crate) fn git_ignored(dir: &Path, names: &[String]) -> Vec<String> {
-    if names.is_empty() {
-        // Nothing is asked, so nothing is taken for ignored — and no listing is started to answer
-        // an empty question, which a check's clean run must not pay for.
-        return Vec::new();
+/// always counts, so a file forced past the ignore rules is still the repository's. The question costs one
+/// full listing ([`TRACKED_OR_ADDABLE`]), read whole and answered here: every name git itself printed
+/// matches, however its folder is spelt, without a pathspec having to match a name git may spell its own
+/// way, and with no list of names to pass that a large tree would make longer than a command line holds.
+///
+/// Git is asked only where a checkout stands, at `dir` or above it (`is_checkout`): there a git that
+/// cannot answer is an error in its own words, since a check must not read everything as tracked behind
+/// it. Whether a checkout stands there is the tree's answer, not git's: a git that cannot start, or a
+/// `.git` naming a git folder that is gone, says nothing about where it is. Outside every checkout — a
+/// scratch tree a test builds — there is no git to ask, the folder's own files stand, and nothing is held
+/// back.
+fn git_ignored(dir: &Path, names: &[String]) -> Result<Vec<String>, String> {
+    if names.is_empty() || !dir.ancestors().any(is_checkout) {
+        // Nothing is asked, or there is no git to ask it of, so nothing is taken for ignored — and no
+        // listing is started to answer an empty question, which a check's clean run must not pay for.
+        return Ok(Vec::new());
     }
-    let listed = |args: &[&str]| -> Option<Vec<String>> {
-        let mut args = args.to_vec();
-        args.push("--");
-        args.extend(names.iter().map(String::as_str));
-        listed(dir, &args).ok()
-    };
-    let (Some(tracked), Some(addable)) = (listed(&["ls-files", "-z"]), listed(&["ls-files", "-z", "--others", "--exclude-standard"])) else {
-        return Vec::new();
-    };
-    // A listing path belongs to a name when it is the name, or sits under it at a folder boundary.
-    let holds = |paths: &[String], name: &str| paths.iter().any(|path| path == name || path.strip_prefix(name).is_some_and(|under| under.starts_with('/')));
-    names.iter().filter(|name| !holds(&tracked, name) && !holds(&addable, name)).cloned().collect()
+    let held = Held::of(tracked_or_addable(dir)?);
+    Ok(names.iter().filter(|name| !held.holds(name)).cloned().collect())
+}
+
+/// Those of `found` that are the repository's: each is a path inside `dir` (`path_of`), and every one that
+/// holds nothing git would add is dropped, all of them asked in one question ([`git_ignored`]), each by
+/// its listing path. One no listing path can name — a component that is not text — is no question git can
+/// answer, so it stays, and the rule that reads it refuses it rather than git's silence passing it.
+pub(crate) fn in_repository<T>(dir: &Path, found: Vec<T>, path_of: impl Fn(&T) -> &Path) -> Result<Vec<T>, String> {
+    let asked: Vec<Option<String>> = found.iter().map(|item| listed_as(dir, path_of(item))).collect();
+    let ignored: std::collections::HashSet<String> = git_ignored(dir, &asked.iter().flatten().cloned().collect::<Vec<_>>())?.into_iter().collect();
+    Ok(found.into_iter().zip(asked).filter(|(_, name)| name.as_deref().is_none_or(|name| !ignored.contains(name))).map(|(item, _)| item).collect())
 }
 
 /// A bare scratch repository whose `origin` is `url`, holding nothing yet: the upstream cache a test
@@ -269,5 +315,58 @@ mod tests {
         let scratch = Scratch::new("git-none");
         assert!(!is_checkout(&scratch.0));
         assert!(is_checkout(&crate::repo_root()));
+    }
+
+    /// Git is asked only where a checkout stands, at the folder asked about or above it: a scratch tree with
+    /// none is its own files, and nothing is held back. A checkout whose git cannot answer refuses in git's
+    /// own words, from its top and from a folder inside it: a `.git` naming a git folder that is gone, as a
+    /// linked worktree's does once its repository has moved, and an index that is no index. Reading every
+    /// file as tracked there is what the refusal exists to stop.
+    #[test]
+    fn git_is_asked_only_in_a_checkout_and_one_that_cannot_answer_refuses() {
+        let plain = Scratch::new("git-ignored-scratch");
+        plain.write("planted/.swift-format", "{}\n");
+        assert_eq!(git_ignored(&plain.0, &["planted/.swift-format".to_string()]).unwrap(), Vec::<String>::new(), "a scratch tree asks git nothing");
+        let dangling = Scratch::new("git-ignored-dangling");
+        dangling.write(".git", "gitdir: does-not-exist\n");
+        let unindexed = Scratch::new("git-ignored-unindexed");
+        output(&unindexed.0, &["init", "-q"]).unwrap();
+        unindexed.write(".git/index", "no index here");
+        for broken in [&dangling, &unindexed] {
+            broken.write("planted/.swift-format", "{}\n");
+            for dir in [broken.0.clone(), broken.0.join("planted")] {
+                let error = git_ignored(&dir, &[".swift-format".to_string()]).unwrap_err();
+                assert_eq!(error, said(command(&dir), TRACKED_OR_ADDABLE), "the refusal names git's own failure, asked in {}", dir.display());
+            }
+        }
+    }
+
+    /// The child half of the test below: run only when the parent starts it with no git to start.
+    #[test]
+    #[ignore = "run by a_git_that_cannot_start_refuses_in_a_checkout_and_is_never_started_outside_one, with no git on PATH"]
+    fn child_asks_with_no_git_to_start() {
+        let (Some(checkout), Some(plain)) = (std::env::var_os("XTASK_GIT_CHECKOUT"), std::env::var_os("XTASK_GIT_PLAIN")) else { return };
+        let asked = ["kept.rs".to_string()];
+        let error = git_ignored(Path::new(&checkout), &asked).unwrap_err();
+        assert!(error.starts_with("could not run git: "), "{error}");
+        assert_eq!(git_ignored(Path::new(&plain), &asked).unwrap(), Vec::<String>::new(), "outside a checkout no git is started");
+    }
+
+    /// A git that cannot even start says nothing about where it is, so inside a checkout its silence is a
+    /// refusal like any other failure, and outside one no git is started at all.
+    #[test]
+    fn a_git_that_cannot_start_refuses_in_a_checkout_and_is_never_started_outside_one() {
+        let checkout = Scratch::new("git-ignored-no-git");
+        output(&checkout.0, &["init", "-q"]).unwrap();
+        checkout.write("kept.rs", "// x\n");
+        let plain = Scratch::new("git-ignored-no-git-plain");
+        plain.write("kept.rs", "// x\n");
+        let no_git = Scratch::new("git-ignored-empty-path");
+        craftbridge_process::rerun(
+            "git::tests::child_asks_with_no_git_to_start",
+            &[("PATH", no_git.0.as_os_str()), ("XTASK_GIT_CHECKOUT", checkout.0.as_os_str()), ("XTASK_GIT_PLAIN", plain.0.as_os_str())],
+            "a git that could not start was read as an answer",
+        )
+        .unwrap();
     }
 }

@@ -214,15 +214,21 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
     check_against(root, &outputs)
 }
 
-/// The check, with the generators' output directories (relative to the root) given.
+/// The check, with the generators' output directories (relative to the root) given. The code trees come
+/// through the walk, so they are already only what git would add; the root's own files are asked the same
+/// single question here, so no ignored stray at the root is read either (AGENTS.md §1).
 fn check_against(root: &Path, outputs: &[&str]) -> Result<Vec<String>, String> {
     let mut errors = Vec::new();
+    let mut root_files = Vec::new();
     for entry in std::fs::read_dir(root).map_err(|error| format!("{}: {error}", root.display()))? {
         let path = entry.map_err(|error| format!("{}: {error}", root.display()))?.path();
         let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
         if path.is_file() && name != ".git" && !crate::layout::IGNORED_NAMES.contains(&name.as_str()) {
-            errors.extend(check_head(&head_of(root, &path, false)));
+            root_files.push(path);
         }
+    }
+    for path in crate::git::in_repository(root, root_files, |path| path.as_path())? {
+        errors.extend(check_head(&head_of(root, &path, false)));
     }
     let mut unowned = BTreeSet::new();
     for tree in crate::files::CODE_TREES {
@@ -275,6 +281,21 @@ mod tests {
         );
         // Past the fifth line the header no longer counts as a header.
         assert!(!check_head(&head("x.swift", &["a", "b", "c", "d", "e", &format!("// {MARKER}")], true)).is_empty());
+    }
+
+    /// A stray generated file at the checkout's root that git keeps out of `git add .` is no part of the
+    /// repository, so the marker rule reads only what git would add there too — and one git would add,
+    /// tracked past the ignore rules or not, is refused as ever.
+    #[test]
+    fn a_generated_file_git_ignores_at_the_root_is_read_by_no_rule() {
+        let scratch = Scratch::new("generated-git-ignored");
+        crate::git::output(&scratch.0, &["init", "-q"]).unwrap();
+        scratch.write(".gitignore", "/planted.rs\n");
+        scratch.write("planted.rs", format!("// {MARKER} by nothing.\n"));
+        assert!(check_against(&scratch.0, &[]).unwrap().is_empty(), "a marker git would not add is no part of the repository");
+        crate::git::output(&scratch.0, &["add", "-f", "planted.rs"]).unwrap();
+        let errors = check_against(&scratch.0, &[]).unwrap();
+        assert_eq!(errors, ["planted.rs: generated file outside a generated directory"], "tracked, it is the repository's again");
     }
 
     #[test]
@@ -389,12 +410,16 @@ mod tests {
         }
     }
 
+    /// The root's own files are read, and a linked worktree's `.git` file among them is none of the
+    /// repository's: here a checkout whose git folder stands elsewhere, as a worktree's does.
     #[test]
     fn a_marker_in_a_file_at_the_root_is_read() {
         let scratch = Scratch::new("generated-root");
+        let git_folder = Scratch::new("generated-root-git");
+        crate::git::output(&scratch.0, &["init", "-q", "--separate-git-dir", &git_folder.0.join("git").to_string_lossy()]).unwrap();
         scratch.write("ATTRIBUTION.md", format!("<!-- {MARKER} by a tool -->\n# Attribution\n"));
         scratch.write("README.md", "# CraftBridge\n");
-        scratch.write(".git", "gitdir: elsewhere\n");
+        assert!(scratch.0.join(".git").is_file(), "the checkout's `.git` is a file, as a linked worktree's is");
         assert_eq!(check_against(&scratch.0, &[]).unwrap(), ["ATTRIBUTION.md: generated file outside a generated directory"]);
     }
 

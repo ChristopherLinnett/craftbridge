@@ -232,7 +232,7 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
 /// ignores is outside them all alike (AGENTS.md §1).
 pub(crate) fn repository_files(root: &Path) -> Result<Vec<String>, String> {
     let mut files = if crate::git::is_checkout(root) {
-        crate::git::listed(root, &["ls-files", "-z", "--cached", "--others", "--exclude-standard"])?
+        crate::git::tracked_or_addable(root)?
     } else {
         scan::walk(root, "")?.into_iter().map(|file| file.relative).collect()
     };
