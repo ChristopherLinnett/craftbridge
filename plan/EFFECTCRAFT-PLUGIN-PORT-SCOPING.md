@@ -172,7 +172,7 @@ flowchart LR
 | Rendered-frame fidelity | CPU frames byte-identical to the desktop command line's | conformance corpus |
 | Export fidelity | same frame count and size as the desktop export, and every decoded frame within the D-12 tolerance | conformance corpus |
 | Update effort | an EffectCraft release is taken by `tools/update-upstream.sh` with hand work only in the adaptations it names | §24, each update |
-| Size | measured per release; a growth of more than 10 % over the previous release is flagged in the release notes | release workflow |
+| Size | measured per release; a growth of more than 10 % over the previous release is flagged in the release notes, with both sizes, in both releases' notes. Each artifact's size is recorded in its release's tag, as the tag's message, which the next release reads back: until a release is published its tag is the only place it stands, pushing the tag publishes the sizes with it, and no second list is kept by hand. A first release's notes say there is no previous release, and a previous release whose tag records no readable sizes fails the run before the tag | release workflow |
 | Device performance | first-preview time, export time and peak memory of the running example on each acceptance device, recorded as the baseline in `conformance/effects/baseline.toml`; a release is flagged when the median of ten fresh runs is more than 10 % slower than it and its fastest run is slower than the record's slowest | V5, release workflow |
 
 **Analytics.** CraftBridge collects nothing: no telemetry, no network calls (§29). Every measure above comes from the conformance suite, the acceptance runs and the release workflow.

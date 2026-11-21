@@ -578,7 +578,7 @@ try await card.set(&quot;Photo&quot;, media: photoURL)        // sam.jpg
 </tr>
 <tr>
 <td>Size</td>
-<td>measured per release; a growth of more than 10 % over the previous release is flagged in the release notes</td>
+<td>measured per release; a growth of more than 10 % over the previous release is flagged in the release notes, with both sizes, in both releases&#39; notes. Each artifact&#39;s size is recorded in its release&#39;s tag, as the tag&#39;s message, which the next release reads back: until a release is published its tag is the only place it stands, pushing the tag publishes the sizes with it, and no second list is kept by hand. A first release&#39;s notes say there is no previous release, and a previous release whose tag records no readable sizes fails the run before the tag</td>
 <td>release workflow</td>
 </tr>
 <tr>
