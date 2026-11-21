@@ -386,9 +386,19 @@ func holdingTheHome<T>(_ body: () throws -> T) throws -> T {
     return try body()
 }
 
+/// The seconds every sweep of the home adds to its own work while a test holds it set. A sweep on a busy
+/// runner costs many times what this machine's fastest costs, and a test that waits for a sweep must wait
+/// on the sweep itself, so the test that proves its wait sets this and proves it on a sweep far slower
+/// than the fastest machine would need a deadline for. Zero while no such test is running.
+let sweepPause = OSAllocatedUnfairLock<TimeInterval>(initialState: 0)
+
 /// Removes every run folder of the home that no live run holds. One that will not go now is left for the
 /// next sweep.
 private func sweepTheHome() {
+    // The pause stands under the home lock, where a slow runner holds it for all of the sweep, so a test
+    // waiting on a sweep waits on the slowest one rather than on how fast this machine happens to be.
+    let pause = sweepPause.withLock { $0 }
+    if pause > 0 { Thread.sleep(forTimeInterval: pause) }
     let files = FileManager.default
     let entries = (try? files.contentsOfDirectory(at: runFoldersHome, includingPropertiesForKeys: nil)) ?? []
     for entry in entries where entry.lastPathComponent.hasPrefix(runFolderPrefix) {

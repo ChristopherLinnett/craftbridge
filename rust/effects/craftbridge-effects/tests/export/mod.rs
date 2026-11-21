@@ -495,13 +495,13 @@ const FIRST_REPORT_BY: std::time::Duration = std::time::Duration::from_millis(30
 const STOPPED_BY: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// The acceptance of the issue: an export of thousands of files, cancelled a second after its start,
-/// has already reported — so the cancel had a beat to land on — is answered within a bound of the
-/// cancel, and leaves no file and no folder behind, here as on an iPhone (`ExportStartTests`). A host
-/// can be quick enough to be past the listing in that second, and to report soon after it even if it
-/// reported nothing before, so these are the acceptance's numbers rather than the rules' pins: the
-/// beat before every chunk, the cancel taken there, and a listing that costs the folders rather than
-/// the files are each held by a test of their own, in the runner and in the journal, which fails on
-/// any machine when its rule is broken.
+/// has already reported — so the cancel had a beat to land on — and leaves no file and no folder
+/// behind, here as on an iPhone (`ExportStartTests`), and here it is answered within a bound of the
+/// cancel. A host can be quick enough to be past the listing in that second, and to report soon after
+/// it even if it reported nothing before, so these are the acceptance's numbers rather than the rules'
+/// pins: the beat before every chunk, the cancel taken there, and a listing that costs the folders
+/// rather than the files are each held by a test of their own, in the runner and in the journal, which
+/// fails on any machine when its rule is broken.
 #[test]
 fn an_export_of_many_files_cancelled_a_second_in_reports_at_once_and_leaves_nothing() {
     let scratch = Scratch::new().expect("a scratch folder");
