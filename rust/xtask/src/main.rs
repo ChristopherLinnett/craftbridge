@@ -485,13 +485,14 @@ mod tests {
     /// The hosted jobs' stages, read as each job asks for them (`tools/ci.sh --hosted`, the workflow's only
     /// words for them): the Linux job runs the host tools' clippy and lint library runs and their tests, so
     /// the code only Linux compiles (`cfg(target_os = "linux")`) meets a compiler, the lints and a test
-    /// there; it runs the core's memory tests too, which read no GPU and read the figure the Linux kernel
-    /// answers; the macOS job runs the whole workspace's, which those runs are part of, so Linux alone runs
-    /// those as stages of their own; and the stages that need Xcode, macOS's own tools, the phones' SDKs,
-    /// the iOS Simulator or the host's GPU stay on macOS, the guides' quotations among them, with the
-    /// sample builds that compile what they quote.
+    /// there; it runs the core's own clippy and lint library runs and its memory tests too, which build the
+    /// core for Linux without running the tests that draw, so those lines meet the same lints and the live
+    /// memory test reads the figure the Linux kernel answers; the macOS job runs the whole workspace's,
+    /// which those runs are part of, so Linux alone runs those as stages of their own; and the stages that
+    /// need Xcode, macOS's own tools, the phones' SDKs, the iOS Simulator or the host's GPU stay on macOS,
+    /// the guides' quotations among them, with the sample builds that compile what they quote.
     #[test]
-    fn the_linux_job_runs_the_host_tools_and_the_core_memory_and_macos_keeps_the_rest() {
+    fn the_linux_job_runs_the_host_tools_and_the_core_and_macos_keeps_the_rest() {
         let job = |system: &str| {
             let output = gate_output(Some(system), &["--list", "--hosted"]);
             assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
@@ -499,7 +500,9 @@ mod tests {
         };
         let linux = job("Linux");
         let macos = job("macOS");
-        for (host, whole) in [("rust_host_clippy", "rust_clippy"), ("rust_host_test", "rust_test"), ("rust_core_memory", "rust_test")] {
+        for (host, whole) in
+            [("rust_host_clippy", "rust_clippy"), ("rust_host_test", "rust_test"), ("rust_core_clippy", "rust_clippy"), ("rust_core_memory", "rust_test")]
+        {
             assert!(linux.contains(&host.to_string()), "the Linux job does not run {host}: {linux:?}");
             assert!(!macos.contains(&host.to_string()), "the macOS job runs {host} through {whole}: {macos:?}");
         }
@@ -535,17 +538,52 @@ mod tests {
         assert!(code.iter().all(|line| !line.contains("RUNNER_OS")), "the workflow sets or reads the runner's system, which only the runner may");
     }
 
+    /// What `tools/ci.sh` holds from the stage `from` through the first line of the stage `next`: the text a
+    /// stage's package list must appear whole in, and a clippy stage's linting shape is read from, for the
+    /// tests below.
+    fn gate_stages(from: &str, next: &str) -> String {
+        let gate = std::fs::read_to_string(crate::repo_root().join("tools/ci.sh")).unwrap();
+        let (_, from_body) = gate.split_once(&format!("stage_{from}() {{")).unwrap_or_else(|| panic!("the gate has the {from} stage"));
+        let (body, to_next) = from_body.split_once(&format!("stage_{next}()")).unwrap_or_else(|| panic!("the gate has the {next} stage after {from}"));
+        format!("{body}{}", to_next.lines().next().expect("the next stage ends its line"))
+    }
+
     /// The host tools' clippy, lint library and test runs read one list of packages, `host_tools`, so a tool
     /// added to it is linted and tested by all three, and none of them can quietly keep a list of its own:
-    /// the lines of the two stages name no package, and each of the three runs takes the list.
+    /// the lines of the two stages name no package, the lints are `lint_runs` over the list — clippy's runs
+    /// of what ships and of the tests, then the lint library's, as `rust_clippy` makes them over the whole
+    /// workspace — and the tests take the list too.
     #[test]
     fn the_host_tools_stages_share_one_list_of_packages() {
-        let gate = std::fs::read_to_string(crate::repo_root().join("tools/ci.sh")).unwrap();
-        let (_, from_clippy) = gate.split_once("stage_rust_host_clippy() {").expect("the gate has the host tools' clippy stage");
-        let (clippy, from_test) = from_clippy.split_once("stage_rust_host_test()").expect("the gate has the host tools' test stage after it");
-        let stages = format!("{clippy}{}", from_test.lines().next().expect("the test stage ends its line"));
+        let stages = gate_stages("rust_host_clippy", "rust_host_test");
         assert!(!stages.contains("--package") && !stages.contains("-p "), "a host tools stage names a package of its own:\n{stages}");
-        assert_eq!(stages.matches("\"${host_tools[@]}\"").count(), 3, "clippy, the lint library and the tests each take the list:\n{stages}");
+        assert!(stages.contains("lint_runs \"${host_tools[@]}\""), "the host tools are not linted by every run lint_runs makes:\n{stages}");
+        assert_eq!(stages.matches("\"${host_tools[@]}\"").count(), 2, "the lint runs and the tests each take the list:\n{stages}");
+    }
+
+    /// The core's clippy stage and its memory stage read the crate through one list, `core_packages`, too:
+    /// neither stage names a package; the clippy stage is `lint_runs` over the list, so its clippy reads the
+    /// core's tests, where its Linux-only lines are, as well as what ships, and the lint library what ships;
+    /// and the memory stage takes the list in its run and in its list check, so the crate the stage lints
+    /// and the crate whose memory tests run cannot drift apart, and neither stage can name another crate.
+    #[test]
+    fn the_core_stages_share_one_list_of_packages() {
+        let clippy = gate_stages("rust_core_clippy", "rust_core_memory");
+        assert!(!clippy.contains("--package") && !clippy.contains("-p "), "the core's clippy stage names a package of its own:\n{clippy}");
+        assert!(clippy.contains("lint_runs \"${core_packages[@]}\""), "the core is not linted by every run lint_runs makes:\n{clippy}");
+        assert_eq!(clippy.matches("\"${core_packages[@]}\"").count(), 1, "the lint runs alone take the list:\n{clippy}");
+        let memory = gate_stages("rust_core_memory", "conformance");
+        assert!(!memory.contains("--package") && !memory.contains("-p "), "the core's memory stage names a package of its own:\n{memory}");
+        assert_eq!(memory.matches("\"${core_packages[@]}\"").count(), 2, "the memory run and its list check each take the list:\n{memory}");
+    }
+
+    /// The whole workspace's clippy stage makes its runs through `lint_runs` too, so no run can be dropped
+    /// there either: the macOS-only lines, and the shipping code no Linux or phone run reads, are linted by
+    /// exactly the runs `lint_runs` makes, and a stage that went back to runs of its own is refused here.
+    #[test]
+    fn the_workspace_clippy_stage_lints_through_the_shared_helper() {
+        let stages = gate_stages("rust_clippy", "rust_test");
+        assert!(stages.contains("lint_runs --workspace"), "the whole workspace is not linted by every run lint_runs makes:\n{stages}");
     }
 
     /// The gate holds its hosted split before it reads any name, `--list` too: a stage function `stages` does
