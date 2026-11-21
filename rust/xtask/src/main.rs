@@ -485,12 +485,13 @@ mod tests {
     /// The hosted jobs' stages, read as each job asks for them (`tools/ci.sh --hosted`, the workflow's only
     /// words for them): the Linux job runs the host tools' clippy and lint library runs and their tests, so
     /// the code only Linux compiles (`cfg(target_os = "linux")`) meets a compiler, the lints and a test
-    /// there; the macOS job runs the whole workspace's, which the host tools' are part of, so Linux alone
-    /// runs those as stages of their own; and the stages that need Xcode, macOS's own tools, the phones'
-    /// SDKs, the iOS Simulator or the host's GPU stay on macOS, the guides' quotations among them, with the
+    /// there; it runs the core's memory tests too, which read no GPU and read the figure the Linux kernel
+    /// answers; the macOS job runs the whole workspace's, which those runs are part of, so Linux alone runs
+    /// those as stages of their own; and the stages that need Xcode, macOS's own tools, the phones' SDKs,
+    /// the iOS Simulator or the host's GPU stay on macOS, the guides' quotations among them, with the
     /// sample builds that compile what they quote.
     #[test]
-    fn the_linux_job_lints_and_tests_the_host_tools_and_macos_keeps_the_rest() {
+    fn the_linux_job_runs_the_host_tools_and_the_core_memory_and_macos_keeps_the_rest() {
         let job = |system: &str| {
             let output = gate_output(Some(system), &["--list", "--hosted"]);
             assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
@@ -498,7 +499,7 @@ mod tests {
         };
         let linux = job("Linux");
         let macos = job("macOS");
-        for (host, whole) in [("rust_host_clippy", "rust_clippy"), ("rust_host_test", "rust_test")] {
+        for (host, whole) in [("rust_host_clippy", "rust_clippy"), ("rust_host_test", "rust_test"), ("rust_core_memory", "rust_test")] {
             assert!(linux.contains(&host.to_string()), "the Linux job does not run {host}: {linux:?}");
             assert!(!macos.contains(&host.to_string()), "the macOS job runs {host} through {whole}: {macos:?}");
         }

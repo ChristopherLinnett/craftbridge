@@ -162,6 +162,20 @@ stage_rust_host_clippy() {
   return "$status"
 }
 stage_rust_host_test() { compiling test --locked --message-format=json "${host_tools[@]}"; }
+# The core's memory tests, which read no GPU, so the hosted Linux job runs them while the whole-workspace
+# rust_test, which holds the core's tests that draw, stays on macOS (see left_to_macos). The filter names
+# the memory module: the live test reads the figure the system it runs on answers, and the pure readings
+# and checks run beside it. A filter that names no test passes having run none, so the stage then asks the
+# test binary which tests the filter names, and fails when it names none.
+stage_rust_core_memory() {
+  local filter=platform::memory:: listed
+  compiling test --locked --message-format=json --package craftbridge-core --lib "$filter" || return 1
+  listed="$(craftbridge_cargo test --locked --package craftbridge-core --lib -- --list --format terse "$filter")" || return 1
+  if [ -z "$listed" ]; then
+    echo "ci: rust_core_memory: no test of craftbridge-core is named by $filter, so the stage would run none" >&2
+    return 1
+  fi
+}
 # The desktop conformance corpus against the EffectCraft command line (plan §28). Its own stage, after the
 # Rust tests: it needs the runner built and the tests of the code that compares green first, and the oracle
 # is an EffectCraft build of its own (tools/oracle.sh: minutes cold, a second warm), which the Rust stages
@@ -613,7 +627,7 @@ stage_duplicates() {
 
 # `rules` runs before every cargo stage that compiles the workspace: what it reads needs no build, and a
 # build script runs as soon as cargo compiles its crate.
-stages=(doctor rules rust_fmt rust_clippy rust_host_clippy rust_test rust_host_test conformance rust_mobile rust_deny generated plan_views guide_samples swift_format swift_build swift_test swift_lint android android_samples shell duplicates)
+stages=(doctor rules rust_fmt rust_clippy rust_host_clippy rust_test rust_host_test rust_core_memory conformance rust_mobile rust_deny generated plan_views guide_samples swift_format swift_build swift_test swift_lint android android_samples shell duplicates)
 # The stage groups the decision and plan §15 name: Rust and Swift are each several stages.
 group_rust=(rust_fmt rust_clippy rust_test rust_mobile rust_deny)
 group_swift=(swift_format swift_build swift_test swift_lint)
@@ -622,14 +636,14 @@ group_swift=(swift_format swift_build swift_test swift_lint)
 # the stages that read the same on Linux and need nothing of macOS; the macOS job runs every other stage, so
 # every stage runs in at least one job: a stage added above runs there, and says below why it is left to
 # macOS, or joins the Linux job.
-linux_only=(rust_fmt rust_host_clippy rust_host_test rust_deny plan_views android duplicates)
+linux_only=(rust_fmt rust_host_clippy rust_host_test rust_core_memory rust_deny plan_views android duplicates)
 # Why each stage the Linux job does not run is left to macOS: `<stage>…: <reason>`.
 left_to_macos=(
   "doctor: it checks Xcode, the NDK and the phone targets"
   "rules: they ask SwiftPM through xcrun"
   "generated: it formats the Swift bindings with the Xcode toolchain"
   "rust_clippy: the whole workspace's lints, whose shipping crates are built for iOS and Android and tested on macOS alone: built for Linux, they hold code only those systems call (craftbridge-media's encoder tests, craftbridge-core-ffi's surface), which -D warnings refuses as dead; its host tools' part runs on Linux as rust_host_clippy"
-  "rust_test: the whole workspace's tests, among them the core's that draw on the host's GPU (rust/core/craftbridge-core/src/testing.rs), which a hosted Linux runner lacks; its host tools' part runs on Linux as rust_host_test"
+  "rust_test: the whole workspace's tests, among them the core's that draw on the host's GPU (rust/core/craftbridge-core/src/testing.rs), which a hosted Linux runner lacks; its host tools' part runs on Linux as rust_host_test, and its memory tests, which need no GPU, as rust_core_memory so that they read the figure a Linux kernel answers there"
   "conformance: its steps that ask for the GPU fail where the machine gives none (rust/effects/craftbridge-effects-conformance/src/host.rs), and the oracle they are compared with is an EffectCraft build of its own (tools/oracle.sh)"
   "rust_mobile: the iOS targets need Xcode's SDKs, and the Android targets the NDK r28 tools/env.sh pins, which the macOS image carries and Ubuntu's does not"
   "swift_format swift_build swift_lint: Xcode and SwiftPM"

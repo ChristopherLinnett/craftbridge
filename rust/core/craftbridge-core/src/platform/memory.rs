@@ -69,15 +69,23 @@ fn meminfo_figure(read: std::io::Result<String>) -> Result<u64, String> {
 /// `MemAvailable` from the text of `/proc/meminfo`, in bytes. The kernel writes it in kibibytes under
 /// the unit `kB`; a line in any other unit, with no number or with a number too large for bytes is no
 /// figure rather than a guess, and so is a report that has no such line (a kernel older than 3.14).
+/// A Linux test build notes each figure a read gives under the name of the line it read, as
+/// `sysctl_number` notes a Mac's answers, so the live test can hold its figure to the answers of the very
+/// call that made it; a test that reads a report of its own notes its figure on its own thread, which
+/// the live test never reads.
 #[cfg(any(target_os = "android", target_os = "linux", test))]
 fn parse_meminfo(text: &str) -> Option<u64> {
-    let (_, value) = text.lines().filter_map(|line| line.split_once(':')).find(|(name, _)| name.trim() == "MemAvailable")?;
+    // `_field` is the name of the line read, which only the seam below reads, in a Linux test build.
+    let (_field, value) = text.lines().filter_map(|line| line.split_once(':')).find(|(name, _)| name.trim() == "MemAvailable")?;
     let mut words = value.split_whitespace();
     let number: u64 = words.next()?.parse().ok()?;
     if words.next()? != "kB" || words.next().is_some() {
         return None;
     }
-    number.checked_mul(1024)
+    let figure = number.checked_mul(1024)?;
+    #[cfg(all(test, target_os = "linux"))]
+    KERNEL_ANSWERS.with_borrow_mut(|answers| answers.push((_field.trim().to_string(), figure)));
+    Some(figure)
 }
 
 /// The host's available memory from the kernel's two answers: `level` percent of its `total` bytes. A
@@ -109,12 +117,16 @@ fn sysctl_number(name: &std::ffi::CStr) -> Result<u64, String> {
     Ok(number)
 }
 
-#[cfg(all(test, any(target_os = "macos", all(target_os = "ios", target_env = "sim"))))]
+#[cfg(all(test, any(target_os = "macos", all(target_os = "ios", target_env = "sim"), target_os = "linux")))]
 thread_local! {
-    /// Each number the kernel answered [`sysctl_number`] on this thread, under the name it was asked by,
-    /// in the order asked, so a test holds the figure to the answers of the very call that made it: the
-    /// level follows the machine's memory, which other work takes and gives back between any two reads,
-    /// so no level a test reads again says what that call was answered.
+    /// Each number the kernel answered a read on this thread, under the name it was asked by, in the
+    /// order asked, so a test holds the figure to the answers of the very call that made it:
+    /// `sysctl_number` notes a Mac's two answers under their sysctl names, and a read of the kernel's
+    /// report on Linux notes the figure its line carried under that field's name. The level a Mac is
+    /// answered and the figure a Linux machine reads both follow what other work takes and gives back
+    /// between any two reads, so no value a test reads again around the call says what that call was
+    /// answered. Android reads the same report, but no test there holds its figure to its answers, so
+    /// its builds note nothing.
     static KERNEL_ANSWERS: std::cell::RefCell<Vec<(String, u64)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
@@ -225,6 +237,19 @@ mod tests {
     /// rather than repeating them.
     const HOST_NAMES: [&str; 2] = ["kern.memorystatus_level", "hw.memsize"];
 
+    /// What a live platform reads its figure under, held to the answers its call recorded: the core must
+    /// have been answered exactly `names`, in that order and no others, and the numbers answered come
+    /// back in that order for the platform's own figure. One definition both live tests stand on where
+    /// the platforms agree: a figure made of other answers — an ask of another name, a second read
+    /// around the call, no read at all — is refused by its names before any number is read.
+    fn kernel_asked(answers: &[(String, u64)], names: &[&str]) -> Result<Vec<u64>, String> {
+        let asked: Vec<&str> = answers.iter().map(|(name, _)| name.as_str()).collect();
+        if asked != names {
+            return Err(format!("the core asked the kernel for {asked:?}, not {names:?}"));
+        }
+        Ok(answers.iter().map(|(_, number)| *number).collect())
+    }
+
     /// Whether `figure` is the share the core makes of what the kernel answered it, and if not, why, in
     /// words: `answers` holds each name the core asked for with the number answered, and the `sysctl`
     /// command reads the whole memory as `memory`. The core asked for [`HOST_NAMES`] in their order, was
@@ -232,14 +257,13 @@ mod tests {
     /// is computed, makes of it at the level answered. Only the whole memory is held to a read of the
     /// test's own, since it alone stays put between two reads.
     fn held_to_the_kernels_answers(figure: u64, answers: &[(String, u64)], memory: u64) -> Result<(), String> {
-        let asked: Vec<&str> = answers.iter().map(|(name, _)| name.as_str()).collect();
-        let (true, [(_, level), (_, answered)]) = (asked == HOST_NAMES, answers) else {
-            return Err(format!("the core asked the kernel for {asked:?}, not {HOST_NAMES:?}"));
-        };
-        if *answered != memory {
+        let numbers = kernel_asked(answers, &HOST_NAMES)?;
+        // The names asked were HOST_NAMES' own two, in their order: the level, then the whole memory.
+        let (level, answered) = (numbers[0], numbers[1]);
+        if answered != memory {
             return Err(format!("the kernel answered the core {answered} bytes of memory, where sysctl reads {memory}"));
         }
-        if host_figure(*level, memory) != Ok(figure) {
+        if host_figure(level, memory) != Ok(figure) {
             return Err(format!("{figure} bytes is not {level} percent of {memory} bytes, the level the kernel answered the core"));
         }
         Ok(())
@@ -350,17 +374,92 @@ mod tests {
         }
     }
 
-    /// A Linux machine's figure is its kernel's `MemAvailable`, as the report reads it just before and
-    /// just after.
+    /// The field a Linux machine's figure is read from, as its kernel's report names it. Spelt here
+    /// apart from the core's own, so the check holds which line the core reads rather than repeating
+    /// its spelling — as [`HOST_NAMES`] spells the Mac's two.
+    const MEMINFO_FIELD: &str = "MemAvailable";
+
+    /// What the core read of [`MEMINFO_FIELD`] as `figure` bytes, in the one answer its call records.
+    fn read_mem_available(figure: u64) -> Vec<(String, u64)> {
+        vec![(MEMINFO_FIELD.to_string(), figure)]
+    }
+
+    /// Whether `figure` is the number the core read in the call that made it, and if not, why, in words:
+    /// `answers` holds what the core's read of the kernel's report recorded itself under. The core read
+    /// [`MEMINFO_FIELD`] from [`MEMINFO`] once, and the figure is exactly the bytes that read gave.
+    /// `MemAvailable` moves at kB grain as any other work takes and gives back memory, so no reading of
+    /// the report around the call says what the call was answered, and none enters the check.
+    fn held_to_the_kernels_mem_available(figure: u64, answers: &[(String, u64)]) -> Result<(), String> {
+        // The one name asked means the one number the core read under it.
+        let numbers = kernel_asked(answers, &[MEMINFO_FIELD])?;
+        if numbers[0] != figure {
+            return Err(format!("{figure} bytes is not the {MEMINFO_FIELD} figure of {} bytes the core read from {MEMINFO}", numbers[0]));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn the_mem_available_figure_holds_to_the_number_the_core_read() {
+        // The figure and the call's read are one and the same number, at the kB grain the kernel writes
+        // it: nothing read around the call enters the check, so no move of MemAvailable can fail a
+        // figure that is right.
+        let read = 1_887_920 * 1024;
+        assert_eq!(held_to_the_kernels_mem_available(read, &read_mem_available(read)), Ok(()));
+    }
+
+    #[test]
+    fn a_mem_available_figure_off_by_one_kibibyte_is_refused() {
+        let read = 1_887_920 * 1024;
+        for figure in [read - 1024, read + 1024] {
+            assert_eq!(
+                held_to_the_kernels_mem_available(figure, &read_mem_available(read)),
+                Err(format!("{figure} bytes is not the MemAvailable figure of {read} bytes the core read from /proc/meminfo"))
+            );
+        }
+    }
+
+    #[test]
+    fn a_mem_available_figure_of_another_field_is_refused() {
+        let read = 1_887_920 * 1024;
+        // The report answers one figure per name: a figure carried by any other line of it, at whatever
+        // number, is refused by its names before the figure is read.
+        let other = vec![("MemFree".to_string(), read)];
+        assert_eq!(held_to_the_kernels_mem_available(read, &other), Err("the core asked the kernel for [\"MemFree\"], not [\"MemAvailable\"]".to_string()));
+        let neighbours = vec![("MemAvailable".to_string(), read), ("Buffers".to_string(), 9040 * 1024)];
+        assert_eq!(
+            held_to_the_kernels_mem_available(read, &neighbours),
+            Err("the core asked the kernel for [\"MemAvailable\", \"Buffers\"], not [\"MemAvailable\"]".to_string())
+        );
+    }
+
+    #[test]
+    fn the_core_reads_mem_available_once_in_its_call() {
+        let read = 1_887_920 * 1024;
+        // Once, not not at all and not twice: a second reading of the report is what a band around the
+        // call would compare with, and the figure's own call reads its field no second time.
+        let twice = vec![("MemAvailable".to_string(), read + 1024), ("MemAvailable".to_string(), read)];
+        assert_eq!(
+            held_to_the_kernels_mem_available(read, &twice),
+            Err("the core asked the kernel for [\"MemAvailable\", \"MemAvailable\"], not [\"MemAvailable\"]".to_string())
+        );
+        assert_eq!(held_to_the_kernels_mem_available(read, &[]), Err("the core asked the kernel for [], not [\"MemAvailable\"]".to_string()));
+    }
+
+    /// A Linux machine's figure is the kernel's own: the number its `MemAvailable` line gave the core in
+    /// the very call that made it, noted by the same seam the Mac's test reads its call's answers from.
+    /// That number moves at kB grain as any other work takes and gives back memory, so a reading of the
+    /// report made around the call races the kernel and fails a figure that is right: none enters the
+    /// check.
     #[cfg(target_os = "linux")]
     #[test]
     fn linux_reports_its_kernels_mem_available() {
-        let read = || parse_meminfo(&std::fs::read_to_string(MEMINFO).expect("the report reads")).expect("a MemAvailable figure");
-        let before = read();
         let figure = available_memory().expect("Linux reports its figure");
-        let after = read();
-        eprintln!("available_memory() = {figure}, MemAvailable {before} then {after}");
-        assert!((before.min(after)..=before.max(after)).contains(&figure), "{figure} bytes, against {before} and {after}");
+        // A test runs on a thread of its own, so these are the call's answers and no other's.
+        let answers = KERNEL_ANSWERS.take();
+        eprintln!("available_memory() = {figure}, the report answered {answers:?}");
+        if let Err(why) = held_to_the_kernels_mem_available(figure, &answers) {
+            panic!("{why}");
+        }
     }
 
     /// On a phone, the figure the platform gives is a real, plausible one: more than a page and below
