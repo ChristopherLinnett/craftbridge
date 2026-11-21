@@ -10,8 +10,10 @@
 //! same file (`ios/sdk/Tests/CraftBridgeEffectsTests/Baseline.swift`,
 //! `android/sdk/effects/src/androidTest/kotlin/io/github/christopherlinnett/craftbridge/effects/BaselineOnDevice.kt`);
 //! this is the one reader of the records for what only reports them, which is what a release's notes do
-//! (plan §9, §23, §29). A record a note could not fill is refused here, naming the device and the figure,
-//! rather than printed as nothing.
+//! (plan §9, §23, §29), and of the rule a release's own figures are judged by and the line their runs print
+//! (`crate::release_figures`): the figures' `flagged` and `unheld_on`, the `[comparison]`'s runs, the
+//! allowance and the warm repeats are read here once. A record a note could not fill is refused here, naming
+//! the device and the figure, rather than printed as nothing.
 //!
 //! What the file may hold is the Swift reader's to say: the gate's Swift suite reads the repository's own
 //! file through it (`BaselineTests`), refusing a table or a key it does not read, at the top, in a figure
@@ -37,12 +39,57 @@ const PLATFORMS: [&str; 2] = ["ios", "android"];
 /// is a mistake to refuse rather than a line of digits to carry into a note.
 const MOST_DECIMALS: i64 = 12;
 
-/// One figure: the name its record's table carries, the decimals its value is printed with, and the
-/// platforms that measure it.
-struct Figure {
-    name: String,
-    decimals: usize,
-    platforms: Vec<String>,
+/// One figure: the name its record's table carries, the decimals its value is printed with, the platforms
+/// that measure it, whether a release is held to it (`flagged`) and the platforms whose runs of it are
+/// reported and never flagged (`unheld_on`).
+pub(crate) struct Figure {
+    pub(crate) name: String,
+    pub(crate) decimals: usize,
+    pub(crate) platforms: Vec<String>,
+    pub(crate) flagged: bool,
+    pub(crate) unheld_on: Vec<String>,
+}
+
+/// One record's spread of a figure: the median and the slowest run, which a release is held to, and the
+/// median as a run prints it.
+pub(crate) struct Spread {
+    pub(crate) name: String,
+    pub(crate) median: f64,
+    pub(crate) max: f64,
+    pub(crate) word: String,
+}
+
+/// One acceptance phone's record, as far as a release reads it.
+pub(crate) struct Record {
+    pub(crate) id: String,
+    pub(crate) platform: String,
+    pub(crate) device: String,
+    pub(crate) os: String,
+    pub(crate) recorded: String,
+    pub(crate) runs: i64,
+    pub(crate) spreads: Vec<Spread>,
+}
+
+/// The warm preview repeats a run's line ends with: the word they stand under, the decimals each is printed
+/// with (`repeats_decimals`) and how many a run makes (`[running_example].preview_repeats`).
+pub(crate) struct Repeats {
+    pub(crate) word: String,
+    pub(crate) decimals: usize,
+    pub(crate) count: usize,
+}
+
+/// What `baseline.toml` defines, read once: the line a run prints and the repeats it ends with, the
+/// allowance in percent and the runs a release is compared on (`[comparison]`), the figures in the order a
+/// run prints them, and the record of each phone. The repeats are held as read or as why they cannot be:
+/// only a release's own runs carry them, so only their reader refuses a file for them, and the records'
+/// notes, which print none, leave them to the Swift reader as the module's comment says.
+pub(crate) struct Definition {
+    pub(crate) line: String,
+    pub(crate) repeats: Result<Repeats, String>,
+    pub(crate) allowance: f64,
+    pub(crate) comparison_runs: i64,
+    pub(crate) figures: Vec<Figure>,
+    pub(crate) records: Vec<Record>,
 }
 
 /// The figures the file defines, in the order it defines them: the order a run's line prints them in.
@@ -59,25 +106,41 @@ fn figures(document: &toml::Table) -> Result<Vec<Figure>, String> {
         if figures.iter().any(|figure| figure.name == name) {
             return Err(format!("{BASELINE}: two figures are named `{name}`, so a record would say one and mean the other"));
         }
-        let decimals = whole(table, "decimals", &name)?;
-        if !(0..=MOST_DECIMALS).contains(&decimals) {
-            return Err(format!("{BASELINE}: `{name}` prints {decimals} decimals, outside the 0 to {MOST_DECIMALS} a figure is printed with"));
-        }
+        let decimals = decimals(table, "decimals", &name)?;
         // A figure naming no platform is measured on every platform, which is how the file says "both"; a
         // platform spelt otherwise would leave the figure out of every record read for it.
-        let platforms = match table.get("platforms") {
+        let measured_on = match table.get("platforms") {
             Some(listed) => platforms(listed, &format!("`{name}`'s `platforms`"))?,
             None => PLATFORMS.iter().map(|platform| (*platform).to_string()).collect(),
         };
-        figures.push(Figure { name, decimals: decimals as usize, platforms });
+        let flagged = table
+            .get("flagged")
+            .and_then(toml::Value::as_bool)
+            .ok_or_else(|| format!("{BASELINE}: `{name}` says no `flagged`, whether a release is held to it"))?;
+        let unheld_on = match table.get("unheld_on") {
+            Some(listed) => platforms(listed, &format!("`{name}`'s `unheld_on`"))?,
+            None => Vec::new(),
+        };
+        figures.push(Figure { name, decimals, platforms: measured_on, flagged, unheld_on });
     }
     Ok(figures)
 }
 
-/// One record's spread of a figure: its median printed with the figure's own decimals, which is the word a
-/// run prints for it and the word a note quotes. The record's min, max and every run's value are read too,
-/// because a table holding only a median is a figure someone typed rather than measured.
-fn figure_word(record: &toml::Table, figure: &Figure, runs: i64, id: &str) -> Result<String, String> {
+/// The decimals the values a line names `named` are printed with, a figure's or the warm repeats', held to
+/// what a line can carry.
+fn decimals(table: &toml::Table, key: &str, named: &str) -> Result<usize, String> {
+    let decimals = whole(table, key, named)?;
+    if !(0..=MOST_DECIMALS).contains(&decimals) {
+        return Err(format!("{BASELINE}: `{named}` prints {decimals} decimals, outside the 0 to {MOST_DECIMALS} a figure is printed with"));
+    }
+    Ok(decimals as usize)
+}
+
+/// One record's spread of a figure: its median and its slowest run, which a release's own runs are held
+/// to, and its median printed with the figure's own decimals, which is the word a run prints for it and the
+/// word a note quotes. The record's min and every run's value are read too, because a table holding only a
+/// median is a figure someone typed rather than measured.
+fn spread_of(record: &toml::Table, figure: &Figure, runs: i64, id: &str) -> Result<Spread, String> {
     let spread = record.get(&figure.name).and_then(toml::Value::as_table).ok_or_else(|| {
         format!(
             "{BASELINE}: {id} records no `{}`, the figure the file says its platform measures: the notes can quote no figure that is not there",
@@ -107,16 +170,24 @@ fn figure_word(record: &toml::Table, figure: &Figure, runs: i64, id: &str) -> Re
     if !(low <= median && median <= high) {
         return Err(format!("{BASELINE}: {id}: `{}` says a median of {median} outside its own range {low} to {high}", figure.name));
     }
-    Ok(format!("{}={:.decimals$}", figure.name, median, decimals = figure.decimals))
+    Ok(Spread { name: figure.name.clone(), median, max: high, word: format!("{}={:.decimals$}", figure.name, median, decimals = figure.decimals) })
 }
 
-/// What a release's notes read of the baseline: the allowance a release is held to, then one line per
-/// device record — its id, its platform, what it is, the system it ran, the day it was recorded, the runs
-/// it rests on, and its figures as a run on that phone prints them.
-fn baseline(root: &Path) -> Result<Vec<String>, String> {
+/// The warm repeats a run's line ends with, as the file defines them.
+fn repeats(document: &toml::Table) -> Result<Repeats, String> {
+    let word = text(document, "repeats_word", "the baseline")?;
+    let decimals = decimals(document, "repeats_decimals", &word)?;
+    let count = whole(table(document, "running_example")?, "preview_repeats", "the running example")?;
+    let count = usize::try_from(count).map_err(|_| format!("{BASELINE}: the running example makes {count} warm previews, which no run makes"))?;
+    Ok(Repeats { word, decimals, count })
+}
+
+/// The whole file, read and held to what a release's notes and its own figures read of it.
+pub(crate) fn definition(root: &Path) -> Result<Definition, String> {
     let file = crate::pins::toml_file(root, BASELINE)?;
     let document = file.as_table().ok_or_else(|| format!("{BASELINE}: is no TOML table"))?;
     let line = text(document, "line", "the baseline")?;
+    let repeats = repeats(document);
     let allowance = number(document, "flag_slower_than_percent", "the baseline")?;
     let comparison = table(document, "comparison")?;
     let comparison_runs = whole(comparison, "runs", "the comparison a release is held to")?;
@@ -129,8 +200,7 @@ fn baseline(root: &Path) -> Result<Vec<String>, String> {
     if records.is_empty() {
         return Err(format!("{BASELINE}: records no device, so a release's notes would carry no baseline"));
     }
-    let mut lines = vec![format!("allowance\t{}\t{comparison_runs}", amount(allowance))];
-    let mut seen: Vec<String> = Vec::with_capacity(records.len());
+    let mut read: Vec<Record> = Vec::with_capacity(records.len());
     for (position, entry) in records.iter().enumerate() {
         let named = format!("device {}", position + 1);
         let record = entry.as_table().ok_or_else(|| format!("{BASELINE}: {named} is no table"))?;
@@ -138,10 +208,9 @@ fn baseline(root: &Path) -> Result<Vec<String>, String> {
         // record with none would be quoted under a name the file never gave it, and one spanning a field
         // would move every field after it.
         let id = text(record, "id", &named)?;
-        if seen.contains(&id) {
+        if read.iter().any(|earlier| earlier.id == id) {
             return Err(format!("{BASELINE}: {id}: a second record carries this id, so a note could name either"));
         }
-        seen.push(id.clone());
         let platform = text(record, "platform", &id)?;
         if !PLATFORMS.contains(&platform.as_str()) {
             return Err(format!("{BASELINE}: {id}: the platform `{platform}` is neither ios nor android, so no figure of it can be read"));
@@ -169,11 +238,33 @@ fn baseline(root: &Path) -> Result<Vec<String>, String> {
                 _ => {}
             }
         }
-        let mut words = vec![line.clone()];
+        let mut spreads = Vec::new();
         for figure in figures.iter().filter(|figure| figure.platforms.contains(&platform)) {
-            words.push(figure_word(record, figure, runs, &id)?);
+            spreads.push(spread_of(record, figure, runs, &id)?);
         }
-        lines.push(format!("device\t{id}\t{platform}\t{device}\t{os}\t{recorded}\t{runs}\t{}", words.join(" ")));
+        read.push(Record { id, platform, device, os, recorded, runs, spreads });
+    }
+    Ok(Definition { line, repeats, allowance, comparison_runs, figures, records: read })
+}
+
+/// What a release's notes read of the baseline: the allowance a release is held to, then one line per
+/// device record — its id, its platform, what it is, the system it ran, the day it was recorded, the runs
+/// it rests on, and its figures as a run on that phone prints them.
+fn baseline(root: &Path) -> Result<Vec<String>, String> {
+    let definition = definition(root)?;
+    let mut lines = vec![format!("allowance\t{}\t{}", amount(definition.allowance), definition.comparison_runs)];
+    for record in &definition.records {
+        let words: Vec<&str> = std::iter::once(definition.line.as_str()).chain(record.spreads.iter().map(|spread| spread.word.as_str())).collect();
+        lines.push(format!(
+            "device\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            record.id,
+            record.platform,
+            record.device,
+            record.os,
+            record.recorded,
+            record.runs,
+            words.join(" ")
+        ));
     }
     Ok(lines)
 }
@@ -226,7 +317,7 @@ fn number(table: &toml::Table, key: &str, what: &str) -> Result<f64, String> {
 
 /// A number as the file wrote it: 10 stays 10 and 12.5 stays 12.5, so a note says the allowance the file
 /// gives and no reading of the reader's own.
-fn amount(value: f64) -> String {
+pub(crate) fn amount(value: f64) -> String {
     if value.fract() == 0.0 { format!("{}", value as i64) } else { format!("{value}") }
 }
 
@@ -326,6 +417,29 @@ mod tests {
             let error = read(&RECORD.replace("\"xiaomi-17-pro-max\"", id), "baseline-id-spanning").unwrap_err();
             assert!(error.contains("device 2 has a `id` that is empty or spans a line"), "the id {id}: {error}");
         }
+    }
+
+    #[test]
+    fn a_figure_that_says_whether_a_release_is_held_to_it_and_where_it_is_not_is_read_whole() {
+        let no_flag = RECORD.replace("decimals = 1\nflagged = true\n", "decimals = 1\n");
+        assert!(
+            read(&no_flag, "baseline-no-flagged").unwrap_err().contains("`first_preview_ms` says no `flagged`, whether a release is held to it"),
+            "a figure a release may or may not be held to is refused until the file says which"
+        );
+        let held = RECORD.replace("decimals = 1\nflagged = true\n", "decimals = 1\nflagged = true\nunheld_on = [\"android\"]\n");
+        let definition = {
+            let scratch = scratch(&held, "baseline-unheld");
+            definition(&scratch.0).unwrap()
+        };
+        let first = definition.figures.iter().find(|figure| figure.name == "first_preview_ms").unwrap();
+        assert!(first.flagged && first.unheld_on == ["android"], "the figure's own words reach the rule that reads them");
+        let misspelt = RECORD.replace("decimals = 1\nflagged = true\n", "decimals = 1\nflagged = true\nunheld_on = [\"andriod\"]\n");
+        assert!(
+            read(&misspelt, "baseline-unheld-misspelt")
+                .unwrap_err()
+                .contains("`first_preview_ms`'s `unheld_on` names `andriod`, which is neither ios nor android"),
+            "a platform spelt otherwise would hold a figure it should not"
+        );
     }
 
     #[test]
