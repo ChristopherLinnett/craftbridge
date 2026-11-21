@@ -130,10 +130,30 @@ private let walkFolders = Folders.isolated(walkFoldersName)
         #expect(heard.allSatisfy { $0.done <= $0.total }, "each report is done of total: \(heard)")
         #expect(heard.allSatisfy { $0.total == 0 || $0.total == 180 }, "the export counts §5's 180 frames: \(heard)")
 
-        // Maya can cancel: the export stops, answers `Cancelled` and leaves no half-written movie.
-        let stopping = try await engine.export(card.comp, to: halted, format: .h264)
-        stopping.cancel()
+        // Maya can cancel: a cancel the export reads stops it, answers `Cancelled` and leaves no movie. The
+        // cancel is asked from the export's first progress report, because that is where an export reads a
+        // cancel — the engine reads the token as each report returns — and every export makes its first
+        // report before it writes a single file. So the step holds its rule at its own pace, rather than
+        // racing a cancel handed in from outside against an export that can render this card quicker than
+        // the ask can reach it, and answer `Ok` while the code is right. What says the export stopped where
+        // it read the cancel, rather than answering `Cancelled` after finishing all the same, is that no
+        // report came after the one that read it: the engine deletes every file a cancelled export listed,
+        // however far it got, so the movie being gone says only that nothing was left behind.
+        let halting = CancelFromReport(printedAs: "the halted export")
+        let stopping = try await engine.export(card.comp, to: halted, format: .h264, progress: halting.handler)
+        halting.take(stopping)
         await #expect(throws: CraftError.Cancelled) { try await stopping.result }
+        let readBy = try #require(
+            halting.lastReport(), "the halted export's cancel reached it at none of its \(halting.count()) reports")
+        #expect(
+            halting.count() <= readBy,
+            "the halted export made \(halting.count() - readBy) reports after the one that read its cancel: the cancel did not stop its work"
+        )
+        // The cancel was read at the export's first report, which every export makes before it writes a
+        // file: read at a later one, it could have missed an export that ends before that report, and the
+        // step would be racing again without saying so. The report's place says so on any machine, where
+        // the frames it counted cannot: a render's first reports count none either.
+        #expect(readBy == 1, "the halted export read its cancel at its report \(readBy), not at its first")
         #expect(!FileManager.default.fileExists(atPath: halted.path), "the cancelled export left no movie")
 
         // The property calls answer on a live layer, each the value the last left.
