@@ -435,9 +435,11 @@ craftbridge_cargo() {
 # judged whether it may exist. Every cargo build replaces the binary in its target folder, even one with
 # nothing to rebuild, so each caller names a folder of its own for the binary, which nothing else writes;
 # `build.build-dir` keeps the intermediate artifacts in the shared target folder, where every build
-# finds them.
+# finds them. xtask judges the tree it runs for by the tree its binary was built in, so a script that
+# reads another tree than this checkout — tools/release.sh, the tree it stages or rehearses — names that
+# tree's rust/ as the second argument and builds there.
 craftbridge_xtask_build() {
-  CARGO_BUILD_BUILD_DIR="$CARGO_TARGET_DIR" craftbridge_cargo build --package xtask --locked --quiet --target-dir "$1"
+  CARGO_BUILD_BUILD_DIR="$CARGO_TARGET_DIR" craftbridge_cargo_in "${2:-$CRAFTBRIDGE_ROOT/rust}" build --package xtask --locked --quiet --target-dir "$1"
 }
 
 # The machine-local git cache of official EffectCraft, a bare clone: tools/update-upstream.sh fetches
