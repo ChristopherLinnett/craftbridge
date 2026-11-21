@@ -2,8 +2,10 @@
 //!
 //! Checks must agree about what they are looking at. Two walkers would mean one check seeing a file
 //! another skipped, so the exclusions live here once, and each check only says which extension it wants.
-//! What a language's source means is never decided here: Rust is read through `syn`
-//! (`crate::rust_syntax`), Swift through the compiler's language server and Kotlin through detekt.
+//! What the rules read is decided here too: the walk yields only what git would add, so no rule that
+//! walks a tree reads a file git ignores, and none asks git for itself (AGENTS.md §1). What a language's
+//! source means is never decided here: Rust is read through `syn` (`crate::rust_syntax`), Swift through
+//! the compiler's language server and Kotlin through detekt.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -47,6 +49,7 @@ pub(crate) fn reads_as(dir: &Path, found: &Path, expected: &str) -> bool {
 }
 
 /// One source file found by [`walk`].
+#[derive(Debug)]
 pub(crate) struct FoundFile {
     /// Absolute path on disk.
     pub(crate) path: PathBuf,
@@ -73,6 +76,22 @@ pub(crate) fn is_build_output(dir: &Path) -> bool {
 /// cannot be read is an error, because a rule that cannot see a file must not report it clean. The
 /// extension is compared exactly: `rules: hygiene` refuses every other spelling of a known one (an
 /// `inner.RS` a case-insensitive disk would compile), so no rule needs to guess at folds.
+///
+/// What the walk yields is what git would add: a file that holds nothing git would add is no part of the
+/// repository (AGENTS.md §1), so it is dropped here, where every rule's file list comes from, at any depth
+/// and whichever file made git ignore it, and no rule reads it by walking again. The whole walk is one
+/// question to git, asked at the walk's root (`git::in_repository`), never one per file. In a checkout
+/// whose git cannot answer, or cannot start, the walk fails in git's own words rather than letting every
+/// file read as tracked; a root no checkout holds, such as a scratch tree a test builds, is its own files.
+///
+/// The rules whose subject is what git does not track read ignored files outside this walk, asking git
+/// themselves: `cargo xtask generate` refuses generated output git leaves untracked, ignored ones included
+/// (`generate::uncommitted` lists `ls-files --others` with no ignore rule), and `tools/env.sh` refuses a
+/// leftover Xcode scheme or per-user setting beside a checkout
+/// (`craftbridge_refuse_leftover_xcode_and_swiftpm_settings`, which refuses every file there git does not
+/// track, ignored or not). A file a build compiles that this walk drops is no gap: the stages that ask a
+/// build what it compiles refuse each such file no rule reads (`compiled::judge`, `direction::target_errors`).
+/// A new rule whose subject is untracked state names itself here.
 pub(crate) fn walk(root: &Path, extension: &str) -> Result<Vec<FoundFile>, String> {
     let mut files = Vec::new();
     if !root.is_dir() {
@@ -98,7 +117,8 @@ pub(crate) fn walk(root: &Path, extension: &str) -> Result<Vec<FoundFile>, Strin
         }
     }
     files.sort_by(|left, right| left.relative.cmp(&right.relative));
-    Ok(files)
+    // One question for the whole walk, so git answers a tree per listing rather than per file.
+    crate::git::in_repository(root, files, |file| &file.path)
 }
 
 /// Read a file as UTF-8 text, without the byte-order mark an editor may write first. Every tool the
@@ -180,5 +200,161 @@ mod tests {
         root.write("src/inner.RS", "// x");
         assert_eq!(relative_names(&walk(&root.0, ".rs").unwrap()), ["src/lib.rs"]);
         assert!(!crate::hygiene::spelling_problems("src/inner.RS").is_empty(), "the spelling the walk skips is refused");
+    }
+
+    /// A file git keeps out of `git add .` is in no rule's file list, at any depth, whichever file made
+    /// it ignored: a root pattern, a nested `.gitignore` honouring everything below it, and the
+    /// checkout's own `info/exclude` each drop their file. A tracked file a pattern still matches is
+    /// read — git would not un-add it — and one added past the ignore rules is read again, because git
+    /// would add it now.
+    #[test]
+    fn a_walk_reads_only_what_git_would_add_from_every_ignore_source() {
+        let root = Scratch::new("walker-git");
+        crate::git::output(&root.0, &["init", "-q"]).unwrap();
+        root.write(".gitignore", "/by-root/deep/\ntracked.rs\n");
+        root.write("tracked.rs", "// a pattern matches it, git tracks it regardless\n");
+        crate::git::output(&root.0, &["add", "-f", "tracked.rs"]).unwrap();
+        root.write("by-root/deep/deeper/hidden.rs", "// x");
+        root.write("by-root/kept.rs", "// x");
+        root.write("by-nested/deep/.gitignore", "*\n");
+        root.write("by-nested/deep/hidden.rs", "// x");
+        root.write(".git/info/exclude", "/by-exclude/deep/hidden.rs\n");
+        root.write("by-exclude/deep/hidden.rs", "// x");
+        assert_eq!(relative_names(&walk(&root.0, ".rs").unwrap()), ["by-root/kept.rs", "tracked.rs"]);
+        // A file forced past the ignore rules is one git would add, so every rule reads it again.
+        crate::git::output(&root.0, &["add", "-f", "by-root/deep/deeper/hidden.rs"]).unwrap();
+        assert_eq!(relative_names(&walk(&root.0, ".rs").unwrap()), ["by-root/deep/deeper/hidden.rs", "by-root/kept.rs", "tracked.rs"]);
+    }
+
+    /// The answer holds for a rule walking one tree of a checkout rather than its root: git is asked at
+    /// the walk's own root, and git's ignore files answer alike from any folder it is asked in.
+    #[test]
+    fn a_walk_of_one_tree_from_a_checkout_reads_what_git_would_add_to_it() {
+        let checkout = Scratch::new("walker-git-tree");
+        crate::git::output(&checkout.0, &["init", "-q"]).unwrap();
+        checkout.write(".gitignore", "/ios/cache/\n");
+        checkout.write("ios/sdk/App.swift", "// x");
+        checkout.write("ios/cache/Scratch.swift", "// x");
+        checkout.write("ios/sdk/.gitignore", "Ignored.swift\n");
+        checkout.write("ios/sdk/Ignored.swift", "// x");
+        assert_eq!(relative_names(&walk(&checkout.0.join("ios"), ".swift").unwrap()), ["sdk/App.swift"]);
+    }
+
+    /// A git that cannot list from inside a worktree — here one whose index is no index — fails every
+    /// walk as an error rather than letting the tree read as all tracked: a rule that would read what
+    /// git ignores has no clean answer to report, so the check says so in git's words.
+    #[test]
+    fn a_walk_in_a_checkout_git_cannot_answer_refuses() {
+        let root = Scratch::new("walker-broken-git");
+        crate::git::output(&root.0, &["init", "-q"]).unwrap();
+        root.write("kept.rs", "// x");
+        root.write(".git/index", "no index here");
+        let failure = walk(&root.0, ".rs").unwrap_err();
+        assert_eq!(failure, crate::git::said(crate::git::command(&root.0), crate::git::TRACKED_OR_ADDABLE), "the walk fails in git's own words");
+    }
+
+    /// The child half of the test below: run only when the parent starts it with a git first on `PATH`
+    /// that writes down every start before it runs the real one.
+    #[test]
+    #[ignore = "run by a_walk_asks_git_one_question_however_many_files_and_folders_it_finds, with a counting git on PATH"]
+    fn child_walks_a_checkout_through_a_counting_git() {
+        let (Some(checkout), Some(log)) = (std::env::var_os("XTASK_SCAN_CHECKOUT"), std::env::var_os("XTASK_SCAN_GIT_LOG")) else { return };
+        // Git's repository variables are asked once for the whole process, before its first command; what
+        // is counted is what the walk itself asks.
+        crate::git::local_env_vars();
+        let before = fs::read_to_string(&log).unwrap_or_default().lines().count();
+        let files = walk(Path::new(&checkout), ".rs").unwrap();
+        assert_eq!(relative_names(&files), ["a.rs", "deep/b.rs", "deep/deeper/c.rs", "other/e.rs"]);
+        let started = fs::read_to_string(&log).unwrap();
+        let asked: Vec<&str> = started.lines().skip(before).collect();
+        assert_eq!(asked.len(), 1, "one walk is one question to git: {asked:?}");
+        assert!(asked.iter().all(|line| line.ends_with(&crate::git::TRACKED_OR_ADDABLE.join(" "))), "{asked:?}");
+    }
+
+    /// Each walk asks git once, whatever it finds: never once per file, folder or listing, so a tree of
+    /// any size costs every rule one listing (AGENTS.md §10).
+    #[cfg(unix)]
+    #[test]
+    fn a_walk_asks_git_one_question_however_many_files_and_folders_it_finds() {
+        use std::os::unix::fs::PermissionsExt;
+        let checkout = Scratch::new("walker-counted");
+        crate::git::output(&checkout.0, &["init", "-q"]).unwrap();
+        checkout.write(".gitignore", "/ignored/\n");
+        for file in ["a.rs", "deep/b.rs", "deep/deeper/c.rs", "ignored/d.rs", "other/e.rs"] {
+            checkout.write(file, "// x\n");
+        }
+        let real = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).map(|folder| folder.join("git")).find(|git| git.is_file()).unwrap();
+        let counting = Scratch::new("walker-counting-git");
+        let log = counting.0.join("started.log");
+        counting.write("bin/git", format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nexec '{}' \"$@\"\n", log.display(), real.display()));
+        fs::set_permissions(counting.0.join("bin/git"), fs::Permissions::from_mode(0o755)).unwrap();
+        craftbridge_process::rerun(
+            "scan::tests::child_walks_a_checkout_through_a_counting_git",
+            &[("PATH", counting.0.join("bin").as_os_str()), ("XTASK_SCAN_CHECKOUT", checkout.0.as_os_str()), ("XTASK_SCAN_GIT_LOG", log.as_os_str())],
+            "a walk asked git more than once",
+        )
+        .unwrap();
+    }
+
+    /// What the walk keeps is what git itself would add, shape by shape, held to git's own answer: what
+    /// `git add --all` puts into an index of the test's own, beside what git already tracks. A tracked file
+    /// under an ignored folder or matching a pattern, a `!` that takes a file back and one that cannot
+    /// (its folder is ignored), a folder's own `.gitignore` taking back a root pattern, the user's
+    /// `core.excludesFile`, the checkout's `info/exclude`, a folder that ignores itself, names holding a
+    /// space, glob characters and an accent composed or decomposed, and symbolic links, of which git adds
+    /// the link and never what a linked folder holds.
+    #[cfg(unix)]
+    #[test]
+    fn a_walk_keeps_exactly_what_git_itself_would_add_whatever_the_shape() {
+        let checkout = Scratch::new("walker-shapes");
+        let git = |args: &[&str]| crate::git::output(&checkout.0, args).unwrap();
+        git(&["init", "-q"]);
+        let excludes = Scratch::new("walker-shapes-excludes");
+        excludes.write("ignore", "*.bak\n");
+        git(&["config", "core.excludesFile", &excludes.0.join("ignore").to_string_lossy()]);
+        checkout.write(".gitignore", "/ign/\ntracked.rs\n*.log\n!keep.log\n/dir/\n!/dir/keep.rs\n/dir2/*\n!/dir2/keep.rs\n*.tmp\n");
+        checkout.write(".git/info/exclude", "/infoex/\n");
+        checkout.write("sub/.gitignore", "!*.tmp\n");
+        checkout.write("cache/.gitignore", "*\n");
+        for file in [
+            "ign/tracked.rs",
+            "ign/other.rs",
+            "tracked.rs",
+            "a.log",
+            "keep.log",
+            "dir/keep.rs",
+            "dir2/keep.rs",
+            "dir2/drop.rs",
+            "root.tmp",
+            "sub/kept.tmp",
+            "real/a.rs",
+            "cache/x.rs",
+            "excluded/x.bak",
+            "infoex/x.rs",
+            "with space.rs",
+            "caf\u{e9}.rs",
+            "cafe\u{301}-decomposed.rs",
+            "star*.rs",
+            "br[a].rs",
+        ] {
+            checkout.write(file, "// x\n");
+        }
+        std::os::unix::fs::symlink("real", checkout.0.join("link")).unwrap();
+        std::os::unix::fs::symlink("real/a.rs", checkout.0.join("filelink.rs")).unwrap();
+        git(&["add", "-f", "ign/tracked.rs", "tracked.rs"]);
+        // Git's own answer, written into an index of the test's own so the checkout's stays as it was.
+        let index = Scratch::new("walker-shapes-index");
+        std::fs::copy(checkout.0.join(".git/index"), index.0.join("index")).unwrap();
+        let with_index = |args: &[&str]| {
+            let mut git = crate::git::command(&checkout.0);
+            git.env("GIT_INDEX_FILE", index.0.join("index"));
+            crate::git::run(git, args).unwrap()
+        };
+        with_index(&["add", "--all"]);
+        let added = String::from_utf8(with_index(&["ls-files", "-z"])).unwrap();
+        let mut expected: Vec<&str> = added.split('\0').filter(|path| !path.is_empty() && !checkout.0.join(path).is_dir()).collect();
+        expected.sort_unstable();
+        assert!(expected.contains(&"ign/tracked.rs") && expected.contains(&"keep.log") && !expected.contains(&"ign/other.rs"), "{expected:?}");
+        assert_eq!(relative_names(&walk(&checkout.0, "").unwrap()), expected);
     }
 }

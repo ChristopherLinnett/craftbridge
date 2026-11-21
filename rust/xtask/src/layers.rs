@@ -967,6 +967,29 @@ mod tests {
         assert_eq!(errors, ["rust/misc/stray/Cargo.toml: a Cargo package that is no workspace member: no stage compiles it and no rule reads it"]);
     }
 
+    /// A stray manifest git keeps out of `git add .` is read by no rule: neither one the root's
+    /// `.gitignore` names nor one a folder's own `.gitignore` honours. A manifest git would add is
+    /// refused as the package no stage compiles, and one tracked past the pattern is read again.
+    #[test]
+    fn a_stray_manifest_git_ignores_is_read_by_no_rule() {
+        let scratch = Scratch::new("layers-stray-ignored");
+        crate::git::output(&scratch.0, &["init", "-q"]).unwrap();
+        scratch.write(".gitignore", "/rust/toolcache/\n");
+        scratch.write("rust/Cargo.toml", "[workspace]\n");
+        scratch.write("rust/toolcache/Cargo.toml", "[package]\nname = \"plant\"\n");
+        scratch.write("rust/nested/.gitignore", "*\n");
+        scratch.write("rust/nested/Cargo.toml", "[package]\nname = \"plant\"\n");
+        scratch.write("rust/addable/Cargo.toml", "[package]\nname = \"plant\"\n");
+        assert_eq!(
+            stray_manifests(&scratch.0.join("rust"), &scratch.0, &[]).unwrap(),
+            ["rust/addable/Cargo.toml: a Cargo package that is no workspace member: no stage compiles it and no rule reads it"],
+        );
+        crate::git::output(&scratch.0, &["add", "-f", "rust/nested/Cargo.toml"]).unwrap();
+        let strays = stray_manifests(&scratch.0.join("rust"), &scratch.0, &[]).unwrap();
+        assert_eq!(strays.len(), 2, "tracked, the nested manifest is read again: {strays:?}");
+        assert!(strays.iter().any(|error| error.starts_with("rust/nested/Cargo.toml:")), "{strays:?}");
+    }
+
     /// The gate's lint library is a workspace of its own, and a local package its graph holds — a
     /// workspace crate by path, here — is refused as one in the workspace's graph is.
     #[test]

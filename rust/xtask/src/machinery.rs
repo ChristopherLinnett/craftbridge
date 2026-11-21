@@ -233,43 +233,27 @@ fn cargo_outside_message(shown: &str) -> String {
     )
 }
 
-/// Run the check over the whole tree: build output and caches are the walker's to skip, as for every
-/// other check; a configuration inside them is a tool's own copy, not the repository's. A file that
-/// holds nothing git would add is no part of the repository either (AGENTS.md §1), at whatever depth and
-/// by whichever rule git ignores it — the ignored `release/` folder a staging run leaves its release in, a
-/// tool's cache below a platform folder, a folder a checkout's own `.git/info/exclude` names — so a
+/// Run the check over the whole tree: build output, caches and anything that holds nothing git would
+/// add are the walk's to skip, as for every other check — the ignored `release/` folder a staging run
+/// leaves its release in, a tool's cache below a platform folder, a folder a checkout's own
+/// `.git/info/exclude` names, at whatever depth and by whichever file git ignores it (AGENTS.md §1). A
 /// configuration there governs no code the repository holds, and no code that governs is read from it.
-/// Git answers that for every file found wanting at once, through the one reader the layout rule asks
-/// too, so a tree with many wants costs git one listing, not one per file; a file forced past the ignore
-/// rules is tracked, and its copy is refused here as ever, and when git cannot answer nothing is taken
-/// for ignored.
+/// A file forced past the ignore rules is tracked, and its copy is refused here as ever; a git that
+/// cannot answer from inside a worktree fails the check, which then reads nothing as tracked.
 pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
-    // The files found wanting are held, each by the path git lists it by, until git has answered for all
-    // of them at once; a tree with nothing wanting, which is every clean tree, asks git nothing at all.
-    let mut wanting: Vec<(Option<String>, Vec<String>)> = Vec::new();
     let mut errors = Vec::new();
     for file in scan::walk(root, "")? {
         let Some(name) = file.path.file_name().and_then(|name| name.to_str()) else { continue };
         let shown = crate::report::shown(root, &file.path);
-        let mut found: Vec<String> = second_copy(&shown, name, &file.components).into_iter().collect();
+        if let Some(error) = second_copy(&shown, name, &file.components) {
+            errors.push(error);
+        }
         if file.components.first().is_some_and(|tree| crate::files::CODE_TREES.contains(&tree.as_str())) {
             let bytes = std::fs::read(&file.path).map_err(|error| format!("{shown}: {error}"))?;
             for line in jscpd_markers(&bytes) {
-                found.push(format!("{shown}:{line}: a jscpd ignore marker hides the code after it from the duplicates stage"));
+                errors.push(format!("{shown}:{line}: a jscpd ignore marker hides the code after it from the duplicates stage"));
             }
         }
-        if !found.is_empty() {
-            wanting.push((crate::git::listed_as(root, &file.path), found));
-        }
-    }
-    let paths: Vec<String> = wanting.iter().filter_map(|(path, _)| path.clone()).collect();
-    let ignored = crate::git::git_ignored(root, &paths);
-    for (path, found) in wanting {
-        // A file no listing path can name is one git cannot answer for, so its copy is refused.
-        if path.is_some_and(|path| ignored.contains(&path)) {
-            continue;
-        }
-        errors.extend(found);
     }
     Ok(errors)
 }
@@ -349,18 +333,24 @@ mod tests {
         assert!(!errors.iter().any(|error| error.starts_with("ios/sdk/scratch/.swiftlint.yml")), "{errors:?}");
     }
 
-    /// When git cannot answer which names it ignores, none is taken for ignored: the copies stand refused
-    /// rather than pass unread.
+    /// A checkout whose git cannot say what it ignores — one whose `.git` names a git folder that is gone,
+    /// and one whose index is no index — fails the check in git's own words: reading every copy as tracked
+    /// behind it would refuse the ignored release's copies today, and pass an ignored copy the next rule
+    /// should never have read.
     #[test]
-    fn a_git_that_cannot_answer_leaves_every_copy_refused() {
-        let scratch = crate::scratch::Scratch::new("machinery-no-git");
-        scratch.write(".git", "gitdir: /nonexistent/craftbridge-no-such-git-folder\n");
-        scratch.write(".gitignore", "/release/\n");
-        scratch.write("ios/sdk/.swift-format", "{{}}\n");
-        scratch.write("release/0.1.0/ChristopherLinnett/SwiftEffects/.swift-format", "{{}}\n");
-        let errors = check(&scratch.0).unwrap();
-        assert_eq!(errors.len(), 1, "{errors:?}");
-        assert!(errors[0].starts_with("release/0.1.0/ChristopherLinnett/SwiftEffects/.swift-format: a second copy of"), "{errors:?}");
+    fn a_checkout_whose_git_cannot_answer_fails_the_check() {
+        let dangling = crate::scratch::Scratch::new("machinery-no-git");
+        dangling.write(".git", "gitdir: /nonexistent/craftbridge-no-such-git-folder\n");
+        let unindexed = crate::scratch::Scratch::new("machinery-broken-checkout");
+        crate::git::output(&unindexed.0, &["init", "-q"]).unwrap();
+        unindexed.write(".git/index", "no index here");
+        for broken in [&dangling, &unindexed] {
+            broken.write(".gitignore", "/release/\n");
+            broken.write("ios/sdk/.swift-format", "{{}}\n");
+            broken.write("release/0.1.0/ChristopherLinnett/SwiftEffects/.swift-format", "{{}}\n");
+            let failure = check(&broken.0).unwrap_err();
+            assert_eq!(failure, crate::git::said(crate::git::command(&broken.0), crate::git::TRACKED_OR_ADDABLE), "the failure is git's own words");
+        }
     }
 
     /// Git is asked about a file by the path it lists it by, which is no message's path: on a Unix disk a

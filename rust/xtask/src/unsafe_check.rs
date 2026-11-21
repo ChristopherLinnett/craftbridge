@@ -393,6 +393,27 @@ mod tests {
         assert!(check(&copy.0).unwrap().is_empty());
     }
 
+    /// An `unsafe` the walk reaches but git keeps out of `git add .` is read by no rule, at any depth and
+    /// from whichever ignore source: a root pattern, a folder's own `.gitignore`, and the checkout's own
+    /// `info/exclude`. What git would add is read as ever: a copy tracked past the pattern is refused again.
+    #[test]
+    fn an_ignored_rust_file_holding_unsafe_is_read_by_no_rule() {
+        let copy = rust_tree_copy("planted-unsafe-ignored");
+        crate::git::output(&copy.0, &["init", "-q"]).unwrap();
+        let planted = "unsafe fn read(raw: *const u8) -> u8 {\n    // SAFETY: a planted block, but not in the platform module.\n    *raw\n}\n";
+        copy.write(".gitignore", "/rust/toolcache/\n");
+        copy.write("rust/toolcache/loose.rs", planted);
+        copy.write("rust/core/craftbridge-core/src/toolcache/.gitignore", "*\n");
+        copy.write("rust/core/craftbridge-core/src/toolcache/loose.rs", planted);
+        copy.write(".git/info/exclude", "/rust/planted-loose/\n");
+        copy.write("rust/planted-loose/loose.rs", planted);
+        assert!(check(&copy.0).unwrap().is_empty(), "an unsafe git ignores belongs to no crate anyone must guard");
+        crate::git::output(&copy.0, &["add", "-f", "rust/toolcache/loose.rs"]).unwrap();
+        let errors = check(&copy.0).unwrap();
+        assert_eq!(errors.len(), 1, "tracked, the planted file is read again: {errors:?}");
+        assert!(errors[0].starts_with("rust/toolcache/loose.rs:"), "{errors:?}");
+    }
+
     #[test]
     fn a_planted_block_in_the_platform_module_is_the_permitting_case() {
         let copy = rust_tree_copy("planted-legal");

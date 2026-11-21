@@ -193,7 +193,7 @@ fn rebuild_and_compare(root: &Path, scratch: &Path) -> Result<usize, Vec<String>
     }
     let exporter = no_exporter().map_err(|error| vec![error])?;
     let diagrams = diagrams_folder(&after, &exporter).map_err(|error| vec![error])?;
-    let dated = date_files(&after.join(&diagrams)).map_err(|error| vec![error])?;
+    let dated = date_files(&after, &diagrams, &files).map_err(|error| vec![error])?;
     for (builder, arguments) in BUILDERS {
         node_in(&after, &[&[*builder][..], arguments].concat(), &exporter).map_err(|error| vec![error])?;
     }
@@ -220,15 +220,20 @@ fn diagrams_folder(dir: &Path, exporter: &Path) -> Result<String, String> {
     Ok(folder)
 }
 
-/// Every file under `folder`, dated to `UNWRITTEN`.
-fn date_files(folder: &Path) -> Result<Vec<FoundFile>, String> {
-    let files = crate::scan::walk(folder, "")?;
-    for file in &files {
-        fs::File::open(&file.path)
-            .and_then(|opened| opened.set_modified(UNWRITTEN))
-            .map_err(|error| format!("could not date {}: {error}", file.path.display()))?;
+/// Every file `folder` of the plan copy `dir` holds — the copied list `files` reaching into it — dated to
+/// UNWRITTEN. The list is dated, not a walk of the scratch: the scratch stands in the checkout's ignored
+/// dependencies so the kit can find them from its own folder, and a rule's walk reads only what git would
+/// add, so from there it would read nothing (see `scan`); the copy's own list is what stands there, since
+/// the copy is the scratch's only writer.
+fn date_files(dir: &Path, folder: &str, files: &[String]) -> Result<Vec<FoundFile>, String> {
+    let prefix = format!("{folder}/");
+    let mut dated = Vec::new();
+    for (whole, relative) in files.iter().filter_map(|file| Some((file, file.strip_prefix(&prefix)?))) {
+        let path = dir.join(whole);
+        fs::File::open(&path).and_then(|opened| opened.set_modified(UNWRITTEN)).map_err(|error| format!("could not date {}: {error}", path.display()))?;
+        dated.push(FoundFile { path, relative: relative.to_string(), components: relative.split('/').map(str::to_string).collect() });
     }
-    Ok(files)
+    Ok(dated)
 }
 
 /// The files of the diagrams' folder `diagrams` the rebuild left as `date_files` dated them: built from no

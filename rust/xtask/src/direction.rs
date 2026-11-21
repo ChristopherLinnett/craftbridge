@@ -280,18 +280,25 @@ pub(crate) fn test_sources(targets: &[SwiftTarget]) -> std::collections::BTreeSe
     targets.iter().filter(|target| target.kind == "test").flat_map(|target| target.sources.iter().cloned()).collect()
 }
 
+/// The refusal of `target`'s compiling `source`, a path inside the package, which the walk every check
+/// reads does not yield: the walk drops build output and somebody else's packages, and every file git
+/// ignores, so the source is in one of those and its code reaches the build unread.
+fn unread_source_message(target: &str, source: &str) -> String {
+    format!(
+        "{FILE}: target `{target}` compiles ios/sdk/{source}, which no check reads, since it lies in build output or somebody else's packages or is a file git ignores: a target's sources sit where every check reads them, in the repository"
+    )
+}
+
 /// What SwiftPM builds that no check sees: a file a target compiles that the rules' walk does not read
-/// (one inside build output, which every stage prunes), and a regular target that no product and no test
-/// or executable target uses, which the package scheme the `swift_build` stage builds never compiles.
-/// `read` are the walk's files, relative to the package.
+/// (one inside build output, which every stage prunes, or one git ignores, which is no part of the
+/// repository), and a regular target that no product and no test or executable target uses, which the
+/// package scheme the `swift_build` stage builds never compiles. `read` are the walk's files, relative to
+/// the package.
 pub(crate) fn target_errors(targets: &[SwiftTarget], read: &std::collections::BTreeSet<String>) -> Vec<String> {
     let mut errors = Vec::new();
     for target in targets.iter().filter(|target| target.kind != "binary") {
         for source in target.sources.iter().filter(|source| !read.contains(*source)) {
-            errors.push(format!(
-                "{FILE}: target `{}` compiles ios/sdk/{source}, which lies in build output no check reads: a target's sources sit where every check reads them",
-                target.name
-            ));
+            errors.push(unread_source_message(&target.name, source));
         }
     }
     let mut built: Vec<&str> = targets
@@ -488,9 +495,27 @@ mod tests {
             .collect();
         let errors = target_errors(&targets, &read);
         assert_eq!(errors.len(), 3, "{errors:?}");
-        assert!(errors.iter().any(|e| e.contains("target `B` compiles ios/sdk/Frameworks/B/B.swift, which lies in build output")), "{errors:?}");
+        assert!(errors.contains(&unread_source_message("B", "Frameworks/B/B.swift")), "{errors:?}");
         assert!(errors.iter().any(|e| e.contains("target `B` is in no product")), "{errors:?}");
         assert!(errors.iter().any(|e| e.contains("target `Extras` is in no product")), "{errors:?}");
+    }
+
+    /// A source git ignores is no part of the repository, so the walk every check reads drops it, and a
+    /// target that compiles one builds code no check read: it is refused in words that say so, as a source
+    /// in build output is, and one git would add beside it is read.
+    #[test]
+    fn a_target_compiling_a_file_git_ignores_is_refused() {
+        let scratch = Scratch::new("direction-ignored-source");
+        crate::git::output(&scratch.0, &["init", "-q"]).unwrap();
+        scratch.write(".git/info/exclude", "/ios/sdk/Sources/A/Local.swift\n");
+        scratch.write("ios/sdk/Sources/A/A.swift", "public let a = 1\n");
+        scratch.write("ios/sdk/Sources/A/Local.swift", "let local = 1\n");
+        let described =
+            r#"{"targets": [{"name": "A", "type": "library", "path": "Sources/A", "sources": ["A.swift", "Local.swift"], "product_memberships": ["A"]}]}"#;
+        let targets = swift_targets(&serde_json::from_str(described).unwrap());
+        let errors = resolved_errors(&scratch.0.join("ios/sdk"), &targets).unwrap();
+        assert_eq!(errors, [unread_source_message("A", "Sources/A/Local.swift")]);
+        assert!(errors[0].contains("a file git ignores"), "the words name why no check reads it: {errors:?}");
     }
 
     #[test]

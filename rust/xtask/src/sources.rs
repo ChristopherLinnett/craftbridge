@@ -89,4 +89,33 @@ mod tests {
         let errors = check(&crate::repo_root()).unwrap();
         assert!(errors.is_empty(), "{errors:?}");
     }
+
+    /// Neither a swift-format configuration nor a Lint configuration git keeps out of `git add .` fails
+    /// a rule — neither one a root pattern names, nor one a nested `.gitignore` honours for everything
+    /// below it, nor one the checkout's own `info/exclude` names. What git would add is refused wherever
+    /// it sits: an untracked copy the ignore rules do not touch, and one tracked past them.
+    #[test]
+    fn an_ignored_swift_format_or_lint_configuration_fails_no_rule() {
+        let scratch = crate::scratch::Scratch::new("sources-git-ignored");
+        let git = |args: &[&str]| crate::git::output(&scratch.0, args).unwrap();
+        git(&["init", "-q"]);
+        let off = r#"{"rules": {"NeverForceUnwrap": false, "NeverUseForceTry": true, "NeverUseImplicitlyUnwrappedOptionals": true}}"#;
+        scratch.write(".gitignore", "/ios/sdk/staging/\n");
+        scratch.write("ios/sdk/staging/.swift-format", off);
+        scratch.write("ios/cache/.gitignore", "*\n");
+        scratch.write("ios/cache/.swift-format", off);
+        scratch.write(".git/info/exclude", "/android/local/\n");
+        scratch.write("android/local/lint.xml", "<lint/>\n");
+        assert!(check(&scratch.0).unwrap().is_empty(), "a configuration git ignores governs no code the repository holds");
+        // An untracked copy git would add is read as ever.
+        scratch.write("android/sdk/lint.xml", "<lint/>\n");
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 1, "an addable Lint configuration: {errors:?}");
+        assert!(errors[0].starts_with("android/sdk/lint.xml:"), "{errors:?}");
+        // A tracked copy the ignore rules still match is read, forced past them as it was.
+        git(&["add", "-f", "ios/sdk/staging/.swift-format"]);
+        let errors = check(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 2, "tracked, the swift-format copy is read again: {errors:?}");
+        assert!(errors.iter().any(|error| error.starts_with("ios/sdk/staging/.swift-format: rules.NeverForceUnwrap must be true")), "{errors:?}");
+    }
 }

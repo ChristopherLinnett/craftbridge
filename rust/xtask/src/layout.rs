@@ -49,18 +49,22 @@ pub(crate) const IGNORED_NAMES: &[&str] = &[".DS_Store"];
 
 /// Check one directory against an allowlist, returning one error per unexpected entry and per allowed
 /// name of the wrong kind. `hint` finishes the sentence so the root and the platform folders share this
-/// one function. A directory that cannot be listed is an error, never an empty listing.
+/// one function. A directory that cannot be listed is an error, never an empty listing, and so is a git
+/// that cannot say which of its entries it ignores.
 fn entries_violations(root: &Path, dir: &Path, allowed: &[(&str, Entry)], hint: &str) -> Result<Vec<String>, String> {
     let entries = std::fs::read_dir(dir).map_err(|error| format!("{}: {error}", dir.display()))?;
-    let mut names = Vec::new();
+    let mut found = Vec::new();
     for entry in entries {
-        names.push(entry.map_err(|error| format!("{}: {error}", dir.display()))?.file_name().to_string_lossy().into_owned());
+        found.push(entry.map_err(|error| format!("{}: {error}", dir.display()))?.path());
     }
+    let mut names: Vec<String> = crate::git::in_repository(dir, found, |path| path.as_path())?
+        .iter()
+        .filter_map(|path| path.file_name().map(|name| name.to_string_lossy().into_owned()))
+        .collect();
     names.sort();
-    let ignored = crate::git::git_ignored(dir, &names);
     let prefix = if dir == root { String::new() } else { format!("{}/", crate::report::shown(root, dir)) };
     let mut errors = Vec::new();
-    for name in names.iter().filter(|name| !IGNORED_NAMES.contains(&name.as_str()) && !ignored.contains(name)) {
+    for name in names.iter().filter(|name| !IGNORED_NAMES.contains(&name.as_str())) {
         match allowed.iter().find(|(allowed, _)| allowed == name) {
             None => errors.push(format!("{prefix}{name} is not allowed here: {hint}")),
             Some((_, kind)) => {
@@ -78,9 +82,12 @@ fn entries_violations(root: &Path, dir: &Path, allowed: &[(&str, Entry)], hint: 
 
 /// A `node_modules` folder anywhere in the code trees. Every reader in the gate skips one as somebody
 /// else's packages, and SwiftPM, Gradle and Cargo compile what such a folder holds like any other, so
-/// code inside it would build while no rule, formatter or duplicate check read it.
+/// code inside it would build while no rule, formatter or duplicate check read it. One that holds nothing
+/// git would add is no part of the repository (§1), so the folders found are put to git in one question,
+/// as the walk's files are; what a build compiles from one on this machine alone is the build stages'
+/// own refusal, of a file they compile that no check reads.
 fn hidden_package_folders(root: &Path) -> Result<Vec<String>, String> {
-    let mut errors = Vec::new();
+    let mut found = Vec::new();
     for tree in crate::files::CODE_TREES {
         let mut stack = vec![root.join(tree)];
         while let Some(dir) = stack.pop() {
@@ -91,16 +98,22 @@ fn hidden_package_folders(root: &Path) -> Result<Vec<String>, String> {
                     continue;
                 }
                 if entry.file_name() == "node_modules" {
-                    errors.push(format!(
-                        "{}: a node_modules folder in the code: the platform builds compile what it holds while every rule skips it",
-                        crate::report::shown(root, &path)
-                    ));
+                    found.push(path);
                 } else if entry.file_name() != ".git" {
                     stack.push(path);
                 }
             }
         }
     }
+    let mut errors: Vec<String> = crate::git::in_repository(root, found, |path| path.as_path())?
+        .iter()
+        .map(|path| {
+            format!(
+                "{}: a node_modules folder in the code: the platform builds compile what it holds while every rule skips it",
+                crate::report::shown(root, path)
+            )
+        })
+        .collect();
     errors.sort();
     Ok(errors)
 }
@@ -367,6 +380,31 @@ mod tests {
         // plan/ is the plan kit's, and a tool's checkout under .build is build output: neither is code.
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].starts_with("ios/sdk/Sources/CraftBridge/node_modules: a node_modules folder"), "{errors:?}");
+    }
+
+    /// A `node_modules` folder git ignores holds nothing the repository can, so it is no part of the code
+    /// (§1), at any depth and from each ignore source: a root pattern, a folder's own `.gitignore`, and the
+    /// checkout's `info/exclude`. One whose files git would add is refused, and so is an ignored one once a
+    /// file in it is tracked past the ignore rules.
+    #[test]
+    fn a_node_modules_folder_git_ignores_is_no_part_of_the_code() {
+        let scratch = Scratch::new("node-modules-ignored");
+        let git = |args: &[&str]| crate::git::output(&scratch.0, args).unwrap();
+        git(&["init", "-q"]);
+        scratch.write(".gitignore", "/tools/node_modules/\n");
+        scratch.write("tools/node_modules/kit/index.js", "\n");
+        scratch.write("docs/guide/.gitignore", "node_modules/\n");
+        scratch.write("docs/guide/node_modules/kit/index.js", "\n");
+        scratch.write(".git/info/exclude", "/ios/sdk/Sources/CraftBridge/node_modules/\n");
+        scratch.write("ios/sdk/Sources/CraftBridge/node_modules/Plant.swift", "let x = Int(\"4\")!\n");
+        scratch.write("conformance/effects/node_modules/kit/index.js", "\n");
+        let errors = hidden_package_folders(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].starts_with("conformance/effects/node_modules: a node_modules folder"), "{errors:?}");
+        git(&["add", "-f", "ios/sdk/Sources/CraftBridge/node_modules/Plant.swift"]);
+        let errors = hidden_package_folders(&scratch.0).unwrap();
+        assert_eq!(errors.len(), 2, "tracked, the folder is the repository's again: {errors:?}");
+        assert!(errors.iter().any(|error| error.starts_with("ios/sdk/Sources/CraftBridge/node_modules: a node_modules folder")), "{errors:?}");
     }
 
     #[test]
