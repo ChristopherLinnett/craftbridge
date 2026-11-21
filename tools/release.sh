@@ -65,6 +65,19 @@
 # artifact in both releases' notes with both sizes (plan §9), the first release says it has no previous
 # one, and a previous release whose tag records no readable sizes fails the run before anything is built,
 # so before the tag.
+#
+# A release's own first-preview, export and memory figures are measured by the owner before G2, not by this
+# script: they need the release's own build run ten times on both acceptance phones, which a release run cannot
+# hold (the comment above `figures_file` says why). The owner runs the measuring tests on the commit the release
+# will tag, the Swift `RealAppBaselineTests` through `tools/ios-device-test.sh --swift -- --filter
+# RealAppBaselineTests`, whose line stands in `swift-tests.log` of its CRAFTBRIDGE_DEVICE_LOGS folder, and the
+# Kotlin `BaselineOnDevice` on the Xiaomi through `am instrument -w -e only '^baseline: the running'`, whose line
+# stands in what that prints, and adds each run's output to `release/figures/<version>.txt` with
+# `cargo xtask release-figures add <file> <device id> <commit> <run output>`, which takes the run's one line out
+# of it, holds it to the line `conformance/effects/baseline.toml` defines and writes it under the commit. The notes
+# then set each phone's runs beside its record and flag a figure by that file's own `[comparison]` rule, which
+# `cargo xtask release-figures judge` applies; a release with no such file, one whose file measured another
+# commit, or one whose file holds no run, says in both notes that it was not measured.
 set -euo pipefail
 # Git exports its repository variables (GIT_DIR and the rest) to a hook and to whatever `git rebase --exec`
 # or `git bisect run` starts. Every git command here must act on the repository the run was given.
@@ -890,6 +903,109 @@ growth_section() {
   printf '%s\n' "$growth_lines${growth_lines:+${dropped:+$line_break}}$dropped"
 }
 
+# The release's own first-preview, export and memory figures (plan §9, §29). Measuring them needs the release's
+# own build run on both acceptance phones, one of them reachable only wirelessly and the other behind a lock the
+# machine's other runs take turns on, which no release run can hold for every release: a release run stages from
+# a throwaway clone in minutes and holds the release lock, while a measurement is ten fresh installs a phone,
+# minutes apart, on a phone left quiet. So the owner measures before G2, with the measuring tests the baseline
+# was recorded with (`RealAppBaselineTests` and `BaselineOnDevice`, which print the run's line from
+# `conformance/effects/baseline.toml` and nothing else), and adds each run's line to one file of the repository's
+# ignored release folder, `release/figures/<version>.txt`, under the commit measured, through `cargo xtask
+# release-figures add`; the run reads that file back through `cargo xtask release-figures judge`, which judges it
+# by the baseline's own `[comparison]` rule, so this script holds neither the measuring, the file's format nor
+# the rule, and only says the verdict. A release with no such file says so in its notes, as does one whose file
+# measured another commit or holds no run.
+figures_file=""
+figures_flagged=0 figures_unjudged=0 figures_text="" figures_said="" figure_line=""
+# One figure's line, as the notes say it: what the runs' median and fastest were against the record's, and what
+# the rule made of it. It sets `figure_line` and counts the flag in this shell, so a flag is never lost to a
+# subshell.
+saying_a_figure() {
+  local id name median fastest record slowest percent verdict said
+  IFS="$field_break" read -r _ id name median fastest record slowest percent verdict <<<"$1"
+  case "$verdict" in
+  flagged)
+    figures_flagged=$((figures_flagged + 1))
+    figures_said="${figures_said:+$figures_said$line_break}\`$id\`'s \`$name\` is flagged: $percent % over the record's median, $median against $record"
+    said="flagged: more than $allowance % above the record's median, and the fastest run is slower than the record's slowest"
+    ;;
+  within) said="within the allowance, or the fastest run inside the record's range" ;;
+  unheld) said="reported and never flagged on this phone (the record says why)" ;;
+  uncompared)
+    figures_unjudged=$((figures_unjudged + 1))
+    said="reported and not compared: fewer than $allowance_runs runs"
+    ;;
+  reported) said="reported: no release is held to it" ;;
+  *) fail "the release-figures command for $repo printed a verdict no release note reads: $1" ;;
+  esac
+  figure_line="$(printf -- "  - \`%s\`: median %s (fastest %s) against the record's median %s (slowest %s), %s %%: %s" "$name" "$median" "$fastest" "$record" "$slowest" "$percent" "$said")"
+}
+# What the notes say of the release's own figures, in both releases' notes alike. The commit the file measured
+# must be the one the release tags, or the figures are another build's.
+release_figures_section() {
+  local measured entry kind fields id platform runs lines="" phones_measured=0
+  figures_flagged=0 figures_unjudged=0 figures_said=""
+  # Read from the repository the run was given, never its rehearsal's clone, which holds no ignored file; the
+  # version is known only once the steps before the notes have read it.
+  figures_file="$src/$release_folder/figures/$version.txt"
+  if [ ! -f "$figures_file" ]; then
+    figures_text="This release was not measured: its own first-preview, export and memory figures were not run on the acceptance phones, so none is reported and none is flagged against the records above."
+    figures_said="the release was not measured: no figures stand in ${figures_file#"$src/"}, so none is reported and none is flagged"
+    return 0
+  fi
+  measured="$(cd "$repo" && env -u CRAFTBRIDGE_ROOT "$checks_tool" release-figures judge "$figures_file" "$commit")" ||
+    fail "the figures measured for $version could not be read from $figures_file"
+  [ -n "$measured" ] || fail "the release-figures command for $repo ended on 0 and printed nothing"
+  while IFS= read -r entry; do
+    IFS="$field_break" read -r kind fields <<<"$entry"
+    case "$kind" in
+    another)
+      figures_said="the release was not measured: the figures in ${figures_file#"$src/"} were measured at the commit $fields, not at $commit, so none is reported and none is flagged"
+      figures_text="This release was not measured: the figures offered for it were measured at the commit \`$fields\`, not at this release's commit \`$commit\`, so none is reported and none is flagged against the records above."
+      return 0
+      ;;
+    device)
+      IFS="$field_break" read -r id platform runs <<<"$fields"
+      if [ "$runs" = 0 ]; then
+        figures_unjudged=$((figures_unjudged + 1))
+        lines="${lines:+$lines$line_break}- \`$id\` (${platform}): not measured, so none of its figures is reported or flagged"
+      else
+        phones_measured=$((phones_measured + 1))
+        lines="${lines:+$lines$line_break}- \`$id\` (${platform}): $runs fresh runs of this release"
+      fi
+      ;;
+    figure)
+      saying_a_figure "$entry"
+      lines="$lines$line_break$figure_line"
+      ;;
+    *) fail "the release-figures command for $repo printed a line no release note reads: $entry" ;;
+    esac
+  done <<<"$measured"
+  # A file of no run measured nothing, so it reads as no file does; it can only have been written by hand.
+  if [ "$phones_measured" = 0 ]; then
+    figures_text="This release was not measured: the file of its figures holds no run of it, so none is reported and none is flagged against the records above."
+    figures_said="the release was not measured: ${figures_file#"$src/"} holds no run of it, so none is reported and none is flagged"
+    return 0
+  fi
+  # What was not compared leads, so a release measured in part never reads as one that passed whole.
+  if [ "$figures_unjudged" = 0 ]; then
+    figures_text="Measured on the acceptance phones with the running example's own tests."
+  else
+    figures_text="Part of the release was not compared, so these figures are no pass: a phone that was not measured, or a figure of fewer than $allowance_runs runs, as listed below."
+  fi
+  if [ "$figures_flagged" != 0 ]; then
+    figures_text="$figures_text Flagged: $figures_flagged figure(s) are slower than the records above allow."
+  elif [ "$figures_unjudged" = 0 ]; then
+    figures_text="$figures_text No figure is flagged against the records above."
+  else
+    figures_text="$figures_text No figure that was compared is flagged against the records above."
+  fi
+  if [ "$figures_unjudged" != 0 ]; then
+    figures_said="${figures_said:+$figures_said$line_break}part of the release was not compared: a phone was not measured, or a figure rests on fewer than $allowance_runs runs"
+  fi
+  figures_text="$figures_text$line_break${line_break}Each phone's median and fastest run of this release, beside the record's median and slowest run:$line_break${line_break}$lines"
+}
+
 # One release's notes: the one reading of what the release ships, said for whichever release the file
 # stands for. The title and the lead differ; the reading is shared bytes, so no size, figure or row can say
 # one thing in one release's notes and another in the other's. The notes are what the owner publishes the
@@ -954,6 +1070,7 @@ writing_the_release_notes() {
     artifacts="${artifacts:+$artifacts$line_break}$row"
   done <<<"$release_artifacts"
   growth="$(growth_section)"
+  release_figures_section
   notes_body="$(
     printf 'Every artifact here reads %s.\n\n' "$version"
     printf '## What ships, and how large each is\n\n'
@@ -966,6 +1083,7 @@ writing_the_release_notes() {
     printf '\n## What the acceptance phones recorded\n\n'
     printf "The running example as \`conformance/effects/baseline.toml\` defines it, one bullet per phone: what the phone is and ran, and its record's figures as a run on it prints them, each at the decimals the file gives it. A release is held to these records as that file says: each figure it marks \`flagged\` is flagged, on every platform its \`unheld_on\` does not name, when the median of at least %s fresh runs of the release is more than %s%% above the record's median and the fastest of those runs is slower than the record's slowest.\n\n" "$allowance_runs" "$allowance"
     printf '%s\n' "$records"
+    printf '\n## This release'"'"'s own figures\n\n%s\n' "$figures_text"
     printf '\n## What changed\n\n%s\n' "$unreleased"
   )"
   mkdir -p "$notes_folder" || fail "$notes_folder could not be made to write the releases' notes in"
@@ -979,6 +1097,11 @@ writing_the_release_notes() {
   while IFS= read -r said; do
     [ -z "$said" ] || say "$said"
   done <<<"$growth"
+  # So is what it says of the release's own figures: a measured release's flags, or that it was not measured. A
+  # release measured and found within says nothing here, as a release that grew nothing says nothing of growth.
+  while IFS= read -r said; do
+    [ -z "$said" ] || say "$said"
+  done <<<"$figures_said"
 }
 
 # The checks were borrowed, not shipped: the build of them is no part of a release, so it goes from the run's

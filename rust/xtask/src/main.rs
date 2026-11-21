@@ -4,7 +4,8 @@
 //! `cargo xtask compiled`, and the lint library's run under its lock, `cargo xtask dylint …`; the file
 //! lists its stages read, `cargo xtask files <kind>`; the pins the doctor and the gate read,
 //! `cargo xtask pins`, the per-device record of each acceptance phone a release's notes read,
-//! `cargo xtask baseline`, the Swift package's builds `cargo xtask swift-builds`, and the one of those the
+//! `cargo xtask baseline`, and a release's own measured runs, added to their file and judged by it,
+//! `cargo xtask release-figures add|judge …`; the Swift package's builds `cargo xtask swift-builds`, and the one of those the
 //! Swift Testing suite runs on, `cargo xtask swift-suite`, and the iPhone simulator it runs on, shared
 //! with every other run on the machine, `cargo xtask simulator -- <program>…`; the package's library products,
 //! which an app's own extension links too, `cargo xtask swift-products`, and the samples' Xcode projects,
@@ -59,6 +60,7 @@ mod pin;
 mod pins;
 mod plan_views;
 mod plist;
+mod release_figures;
 mod release_lock;
 mod report;
 mod rust_syntax;
@@ -262,6 +264,8 @@ fn dispatch(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
         ["swift-api", folders @ ..] => swift_api::run(&root, folders),
         ["pins"] => pins::run(&root),
         ["baseline"] => baseline::run(&root),
+        ["release-figures", "add", file, device, commit, output] => release_figures::run_add(&root, file, device, commit, output),
+        ["release-figures", "judge", file, commit] => release_figures::run_judge(&root, file, commit),
         ["elf-alignment", readelf, libraries @ ..] => elf_alignment::run(readelf, libraries),
         ["swift-builds"] => pins::builds(&root),
         ["swift-suite"] => pins::suite(&root),
@@ -305,6 +309,12 @@ fn usage() {
     );
     eprintln!("       cargo xtask pins");
     eprintln!("       cargo xtask baseline   (what each acceptance phone recorded of the running example, as a release's notes read it)");
+    eprintln!(
+        "       cargo xtask release-figures add <file> <device id> <commit> <run output>   (the one line a measuring test printed in a run's output, added to the file of the runs the owner measured of a release at that commit)"
+    );
+    eprintln!(
+        "       cargo xtask release-figures judge <file> <commit>   (that file's runs, judged by baseline.toml's own rule: flagged, within, unheld, uncompared or reported)"
+    );
     eprintln!("       cargo xtask elf-alignment <llvm-readelf> <library>...   (every library aligned to 16 KB pages)");
     eprintln!("       cargo xtask swift-builds   (every build the Swift package ships: a configuration, a destination and its architectures per line)");
     eprintln!("       cargo xtask swift-suite   (the build the Swift Testing suite runs on, read from that same table)");

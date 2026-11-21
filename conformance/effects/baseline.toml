@@ -1,8 +1,13 @@
 # The per-device baseline of the running example (plan §5): how long its first preview and its full export take
 # on each acceptance phone, and the most memory the process holds over the run. The release script reads the
-# `[[device]]` records below to report a release's figures beside them and to flag each `flagged` figure more than
-# `flag_slower_than_percent` above its baseline, on every platform but those its `unheld_on` names (plan §9, §29); the
-# plan points here and keeps no second copy.
+# `[[device]]` records below, and the figures the owner measured of a release on the two phones before G2, to report
+# the release's figures beside them and to flag each `flagged` figure more than `flag_slower_than_percent` above its
+# baseline, on every platform but those its `unheld_on` names (plan §9, §29); the plan points here and keeps no second
+# copy. The release's figures are no part of this file: they are the lines the measuring tests print, one run to a
+# line, which `cargo xtask release-figures add` writes into the ignored `release/figures/<version>.txt` of the
+# repository under the commit measured, each led by the record's `id`, and which `cargo xtask release-figures judge`
+# judges by the rule below for `tools/release.sh` to quote in both notes. A release with no such file, one measured
+# at another commit, or one whose file holds no run, is said not to have been measured.
 #
 # This one file is read by the Swift real-app test (`ios/sdk/Tests`, RealAppBaselineTests) and the Kotlin
 # instrumented check (`android/sdk/effects/src/androidTest`, BaselineOnDevice), so what they measure, the name
