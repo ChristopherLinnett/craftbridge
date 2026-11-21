@@ -57,6 +57,14 @@
 # the run's folder is named once, and the run's last line names them. Every step takes the version from
 # `version`, which one step reads once and no step can change, so a release runs this one script start
 # to finish and no step moves for their coming.
+#
+# A release's sizes are recorded in its tag, as the tag's message, which the next release reads back:
+# nothing is published yet, so no release stands anywhere but in the repository's tags, and the tag is
+# what the owner pushes to publish the release, so the sizes travel with it and are kept nowhere else by
+# hand. A release more than 10 % larger in any artifact than the newest release before it flags that
+# artifact in both releases' notes with both sizes (plan §9), the first release says it has no previous
+# one, and a previous release whose tag records no readable sizes fails the run before anything is built,
+# so before the tag.
 set -euo pipefail
 # Git exports its repository variables (GIT_DIR and the rest) to a hook and to whatever `git rebase --exec`
 # or `git bisect run` starts. Every git command here must act on the repository the run was given.
@@ -311,7 +319,10 @@ fi
 readonly run repo commit mode
 
 # Each version's three numbers, or failure: a release tag is exactly X.Y.Z, and no other spelling is a
-# version — no leading zeros either, which make `08` one number that tools read two ways.
+# version — no leading zeros either, which make `08` one number that tools read two ways, and no number of
+# more than 18 digits, which bash's whole numbers can neither compare nor count on from: such a tag would be
+# the newest release when git lists it first and passed over when it does not, so which release came last
+# would turn on the order a setting of git's lists the tags in.
 X1="" X2="" X3=""
 split_version() {
   if [[ $1 =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
@@ -321,6 +332,7 @@ split_version() {
       0 | [1-9]*) ;;
       *) return 1 ;;
       esac
+      [ "${#part}" -le 18 ] || return 1
     done
     X1="${BASH_REMATCH[1]}" X2="${BASH_REMATCH[2]}" X3="${BASH_REMATCH[3]}"
     return 0
@@ -473,6 +485,33 @@ checking_the_version_against_the_releases() {
     ;;
   esac
   say "$version stands after the release $released"
+}
+
+# The release before this one, read before anything is built: what each of its artifacts weighed, as its
+# tag's message records it (recording_a_size). A release's tag is the only place a release stands until
+# it is published, and the owner publishes it by pushing that tag, so the sizes ride along with it and no
+# second list of them is kept. A previous release whose tag cannot answer sizes — a tag with no message,
+# which `git tag --list` would answer with the commit's own, a message that is not a record of sizes, a
+# line the record's rule refuses (adding_a_size) — fails the run here, since a release that quietly
+# compared against nothing would flag nothing, which is what a release with no growth looks like.
+previous_version="" previous_sizes=""
+reading_the_previous_sizes() {
+  local message first rest key bytes
+  [ "$has_release" = 1 ] || return 0
+  previous_version="$newest_major.$newest_minor.$newest_patch"
+  [ "$(git -C "$repo" cat-file -t "refs/tags/$previous_version" 2>/dev/null)" = tag ] ||
+    fail "the previous release $previous_version is a tag with no message, so it records no sizes: a release's sizes are the message of its tag, which the next release reads back"
+  message="$(git -C "$repo" tag --list --format='%(contents)' "$previous_version")" ||
+    fail "git could not read the message of the previous release's tag $previous_version"
+  first="${message%%"$line_break"*}"
+  [ "$first" = "$sizes_header" ] ||
+    fail "the message of the previous release's tag $previous_version is no record of sizes: it begins \"$first\", not \"$sizes_header\""
+  [ "$message" != "$first" ] || fail "the previous release $previous_version records no size: its message holds the header and no artifact"
+  rest="${message#*"$line_break"}"
+  while IFS="$field_break" read -r key bytes; do
+    adding_a_size previous_sizes "the previous release $previous_version records" "$key" "$bytes"
+  done <<<"$rest"
+  say "the previous release $previous_version records the sizes of its artifacts: each artifact is held to growing no more than ${growth_allowance} % over them"
 }
 
 # The checks tool, built once into the run's folder and read by every step that needs a figure or a pin a
@@ -754,6 +793,103 @@ writing_the_distribution_package() {
   say "the ${distribution_repository##*/} package is written, ios/sdk at $commit file for file: its binary target now reads $zip_url at that checksum, and its products crossed as they stand — $products"
 }
 
+# What a release records of its sizes, and how a growth is judged: the one definition, which the reader
+# above, the notes and the tag all go through. The record is a header line, then one line an artifact, its
+# name with the release's version taken out — the names of the AARs and the zip carry the version, so the
+# name itself would never meet the next release's — and its bytes, a tab apart. The allowance is plan §9's.
+sizes_header="CraftBridge artifact sizes in bytes: one artifact a line, its name with the release's version taken out, a tab, its size"
+growth_allowance=10
+# The most digits a size may have. A growth is weighed in bash's 64-bit whole numbers, which wrap past
+# 9223372036854775807 with no error, and the notes print a size through awk, whose numbers hold whole
+# numbers exactly only below 2^53, so a longer size would be compared, or said, as some other number;
+# fifteen digits, under a petabyte, keep every product the comparison makes and every size awk prints
+# inside both.
+size_digits=15
+artifact_key() {
+  printf '%s' "${1//"$version"/VERSION}"
+}
+# The size a record holds for an artifact's key, or nothing: the one lookup in a record, which the refusal
+# of a name twice, the comparison and the names a release no longer ships all make. It matches the key as
+# the text it is, so no character of a name is read as a pattern or an escape.
+size_recorded() {
+  local record="$line_break$1$line_break"
+  case "$record" in
+  *"$line_break$2$field_break"*)
+    record="${record#*"$line_break$2$field_break"}"
+    printf '%s' "${record%%"$line_break"*}"
+    ;;
+  esac
+}
+# One line added to a record, the variable named first, under the record's one rule: a name, a size that is
+# a whole number of bytes above zero with no more digits than a growth is weighed in, and no name twice. The
+# record a release writes and the one it reads back both grow only here, so a release never writes a line
+# the next one would refuse. The second argument says whose record it is, for the refusal's words.
+adding_a_size() {
+  local record whose key bytes current
+  record="$1" whose="$2" key="$3" bytes="$4"
+  case "$bytes" in
+  "" | 0* | *[!0-9]*)
+    fail "$whose \"$key\" at \"$bytes\" bytes: a size is a whole number of bytes above zero"
+    ;;
+  esac
+  [ "${#bytes}" -le "$size_digits" ] ||
+    fail "$whose \"$key\" at $bytes bytes: a size has at most $size_digits digits, the most a growth is weighed in"
+  case "$key" in
+  *[![:space:]]*) ;;
+  *) fail "$whose a size with no artifact name" ;;
+  esac
+  current="${!record}"
+  [ -z "$(size_recorded "$current" "$key")" ] || fail "$whose \"$key\" twice: each artifact has one size"
+  printf -v "$record" '%s' "${current:+$current$line_break}$key$field_break$bytes"
+}
+# The record this release makes, written only here: one line for each artifact weighed.
+sizes_now=""
+recording_a_size() {
+  adding_a_size sizes_now "this release, each artifact's name with its version taken out, records" "$(artifact_key "$1")" "$2"
+}
+# A size as the notes say it, every time they say one.
+size_in_words() {
+  awk -v bytes="$1" 'BEGIN { printf "%d bytes (%.1f MiB)", bytes, bytes / 1048576 }'
+}
+# One artifact against the same one of the previous release: a line of what it grew by when it grew more
+# than the allowance, strictly, held in whole numbers so no rounding decides a release's flag, or a line
+# saying the previous release has no size of it to compare. Both sizes have passed the record's rule
+# (adding_a_size) by now, this one's recorded before it is compared.
+growth_lines="" growth_flagged=0
+comparing_with_the_previous() {
+  local name before
+  name="$1"
+  [ -n "$previous_version" ] || return 0
+  before="$(size_recorded "$previous_sizes" "$(artifact_key "$name")")"
+  if [ -z "$before" ]; then
+    growth_lines="${growth_lines:+$growth_lines$line_break}- \`$name\` has no size recorded in $previous_version, so it is not compared"
+    return 0
+  fi
+  if [ "$(($2 * 100))" -gt "$((before * (100 + growth_allowance)))" ]; then
+    growth_flagged=$((growth_flagged + 1))
+    growth_lines="${growth_lines:+$growth_lines$line_break}- \`$name\` grew $(awk -v before="$before" -v now="$2" 'BEGIN { printf "%.1f", (now - before) * 100 / before }') % over $previous_version: $(size_in_words "$before") in $previous_version, $(size_in_words "$2") in $version"
+  fi
+}
+# The notes' own section on growth, said in both releases' notes alike.
+growth_section() {
+  local key dropped=""
+  if [ -z "$previous_version" ]; then
+    printf 'This is the first release: there is no previous release to compare any artifact'"'"'s size with.\n'
+    return 0
+  fi
+  while IFS="$field_break" read -r key _; do
+    [ -n "$(size_recorded "$sizes_now" "$key")" ] ||
+      dropped="${dropped:+$dropped$line_break}- $previous_version recorded \`$key\`, which this release does not ship"
+  done <<<"$previous_sizes"
+  if [ "$growth_flagged" = 0 ]; then
+    printf 'No artifact grew more than %s %% over the previous release, %s.\n' "$growth_allowance" "$previous_version"
+  else
+    printf 'Flagged: %s artifact(s) grew more than %s %% over the previous release, %s.\n' "$growth_flagged" "$growth_allowance" "$previous_version"
+  fi
+  [ -z "$growth_lines$dropped" ] || printf '\n'
+  printf '%s\n' "$growth_lines${growth_lines:+${dropped:+$line_break}}$dropped"
+}
+
 # One release's notes: the one reading of what the release ships, said for whichever release the file
 # stands for. The title and the lead differ; the reading is shared bytes, so no size, figure or row can say
 # one thing in one release's notes and another in the other's. The notes are what the owner publishes the
@@ -781,7 +917,7 @@ notes_craftbridge="$notes_folder/craftbridge.md"
 notes_distribution="$notes_folder/${distribution_repository##*/}.md"
 notes_body=""
 writing_the_release_notes() {
-  local baseline entry kind fields allowance allowance_runs records artifacts runs id platform phone system recorded line row name path asked bytes mib
+  local baseline entry kind fields allowance allowance_runs records artifacts runs id platform phone system recorded line row name path asked bytes growth said
   the_checks_are_built
   baseline="$(cd "$repo" && env -u CRAFTBRIDGE_ROOT "$checks_tool" baseline)" ||
     fail "the baseline the release's notes quote could not be read from $repo"
@@ -812,15 +948,20 @@ writing_the_release_notes() {
     bytes="$(find "$path" -type f -exec cat {} + | wc -c | tr -d '[:space:]')" ||
       fail "$path could not be weighed for the release's notes"
     [ -n "$bytes" ] || fail "$path could not be weighed for the release's notes"
-    mib="$(awk -v bytes="$bytes" 'BEGIN { printf "%.1f", bytes / 1048576 }')"
-    row="$(printf -- "| \`%s\` | %s bytes (%s MiB) | %s |" "$name" "$bytes" "$mib" "$asked")"
+    recording_a_size "$name" "$bytes"
+    comparing_with_the_previous "$name" "$bytes"
+    row="$(printf -- "| \`%s\` | %s | %s |" "$name" "$(size_in_words "$bytes")" "$asked")"
     artifacts="${artifacts:+$artifacts$line_break}$row"
   done <<<"$release_artifacts"
+  growth="$(growth_section)"
   notes_body="$(
     printf 'Every artifact here reads %s.\n\n' "$version"
     printf '## What ships, and how large each is\n\n'
     printf '| Artifact | Size | Where it is asked for |\n| --- | --- | --- |\n'
     printf '%s\n' "$artifacts"
+    printf '\n## Growth since the previous release\n\n'
+    printf '%s\n' "$growth"
+    printf "\nEach size above is recorded in the message of CraftBridge's tag \`%s\`, which the next release reads back to flag its own growth.\n" "$version"
     printf "\nThe zip is served at %s; the checksum SwiftPM verifies on it is \`%s\`.\n" "$zip_url" "$zip_checksum"
     printf '\n## What the acceptance phones recorded\n\n'
     printf "The running example as \`conformance/effects/baseline.toml\` defines it, one bullet per phone: what the phone is and ran, and its record's figures as a run on it prints them, each at the decimals the file gives it. A release is held to these records as that file says: each figure it marks \`flagged\` is flagged, on every platform its \`unheld_on\` does not name, when the median of at least %s fresh runs of the release is more than %s%% above the record's median and the fastest of those runs is slower than the record's slowest.\n\n" "$allowance_runs" "$allowance"
@@ -833,6 +974,11 @@ writing_the_release_notes() {
   a_note_in "$notes_distribution" "${distribution_repository##*/} $version" \
     "This release carries the Swift package written from CraftBridge's ios/sdk, and the zip its binary target downloads, at the address and with the checksum below."
   say "the notes of the two releases are written in ${notes_folder#"$run/"}: ${notes_craftbridge#"$run/"} and ${notes_distribution#"$run/"}, each artifact weighed, the baseline of both phones read, and CHANGELOG.md's $changelog_rows rows quoted"
+  # What the notes say of growth the run says too, in the notes' own words: a rehearsal's notes go with its
+  # folder, so its own lines are all it leaves to read a flag in.
+  while IFS= read -r said; do
+    [ -z "$said" ] || say "$said"
+  done <<<"$growth"
 }
 
 # The checks were borrowed, not shipped: the build of them is no part of a release, so it goes from the run's
@@ -858,7 +1004,17 @@ tagging_the_release() {
   # git refuses a tag that already stands, and a tag this run could not make is no tag of its own, even on
   # its commit: the run holds the repository's release lock whole, so a tag standing here was made beside
   # it — by a hand, or left by a run killed outright — and is no tag of this run's to take back.
-  git -C "$repo" tag "$version" "$commit" || {
+  # An annotated tag, whose message is the record of this release's sizes (recording_a_size): the next
+  # release reads it back, and pushing the tag publishes it with the release. Its tagger is the script's
+  # own fixed one, given in the variables git takes a tagger from before any setting, since the push makes
+  # it public: a `committer.name` or `committer.email` of the owner's outranks `user.name` and `user.email`,
+  # and a `GIT_COMMITTER_*` variable outranks both, so either would put the owner's own name on the tag. It
+  # is never signed, like the rehearsal's commit: the run asks nothing of the owner's configuration,
+  # and a signing key would stop it for a passphrase. Its message is kept verbatim, because git's own
+  # cleanup drops every line that begins with the comment character, which a setting can make any letter:
+  # the record's header and the zip's name both begin with a C.
+  GIT_COMMITTER_NAME="CraftBridge release" GIT_COMMITTER_EMAIL="release@invalid" \
+    git -C "$repo" -c tag.gpgSign=false tag -a --cleanup=verbatim -m "$sizes_header$line_break$sizes_now" "$version" "$commit" || {
     tag_made=""
     fail "git could not tag $commit $version"
   }
@@ -884,6 +1040,7 @@ refusing_a_released_version
 settling_where_the_release_stands
 reading_the_changelog
 checking_the_version_against_the_releases
+reading_the_previous_sizes
 proving_the_aar_versions
 staging_the_release_aars
 building_the_xcframework_zip
