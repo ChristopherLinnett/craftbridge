@@ -481,27 +481,63 @@ fn a_cancelled_export_answers_cancelled_and_leaves_no_output() {
 const MANY_FILES: u32 = 18_000;
 
 /// How long after its start an export of [`MANY_FILES`] files is cancelled: the wait an app that has
-/// just asked for an export gives it before taking it back. The bound on the answer, from that stop,
-/// is [`STOPPED_BY`].
+/// just asked for an export gives it before taking it back. It is the acceptance's own behaviour, not
+/// a bound the code is held to: [`REPORT_PAUSE`] holds the listing's beats open past it however quick
+/// the host is, so the cancel falls in the export's start on any machine.
 const CANCEL_AFTER: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// The bound on the first progress report, from the export's start: the export reports before the
-/// journal looks at a single file, so a stop has a beat to land on from the moment the app asked, not
-/// once the listing of its thousands of files happens to be finished.
-const FIRST_REPORT_BY: std::time::Duration = std::time::Duration::from_millis(300);
+/// The pause every report of this export stands still for, through the seam this test owns: the export
+/// is mid-report until its listener has returned — the engine reads the cancel, and the listing moves
+/// on to the next chunk, only after that — so the pause slows the export's own steps the way a loaded
+/// runner slows them, this export alone and without loading the machine. It is the app's own wait,
+/// [`CANCEL_AFTER`], so the listing's second beat comes at least that long after its first, however
+/// quick the host: the cancel is asked on the first beat or the second, never a later one. The
+/// acceptance's files make three of the journal's chunks, a beat before each, so a chunk is still to
+/// be listed when the cancel lands, on any machine, and a listing that went on past the cancel would
+/// report again. What the test reads is what the export did, which no such slowness moves.
+const REPORT_PAUSE: std::time::Duration = CANCEL_AFTER;
 
-/// The bound on the answer, from the cancel: what the stop has to wind down a render and take back
-/// what the call had listed, none of which an export stopped in its listing has to do.
-const STOPPED_BY: std::time::Duration = std::time::Duration::from_secs(3);
+/// The one bound that stays: how long the wait for the export's answer may take, from its start, before
+/// the wait itself is failed by name. An export stopped in its listing answers within seconds on any
+/// runner, and so does every fault this test exists for — one that reports on despite a cancel, or
+/// finishes despite it; none of them takes the ten minutes this allows, even slowed many times over
+/// through [`REPORT_PAUSE`]. What passes this is an export that would sit the whole suite out in
+/// silence, and this turns that into a failing test that names the wait. A ceiling on hangs, never a
+/// bound on speed, and set far above any loaded runner's time.
+const ANSWER_WITHIN: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// What the acceptance's export heard: every report it made, and the one that asked the cancel.
+#[derive(Default)]
+struct StartOfMany {
+    /// Every report in the order it came: `(done, total)`, as the export counted itself.
+    reports: Vec<(u64, u64)>,
+    /// The report that asked the cancel, or none until a report a second into the export asks it.
+    /// The engine reads the token as each report returns, so a cancel asked inside a report is read by
+    /// that very report: none may follow [`Asked::read_by`].
+    asked: Option<Asked>,
+}
+
+/// The report that asked the cancel: how many frames it counted the export as having to draw — the
+/// listing's reports count none, and the render's count its item's frames once its first is drawn —
+/// and how many reports the export could have made by the one that reads the cancel.
+struct Asked {
+    total: u64,
+    read_by: usize,
+}
 
 /// The acceptance of the issue: an export of thousands of files, cancelled a second after its start,
-/// has already reported — so the cancel had a beat to land on — and leaves no file and no folder
-/// behind, here as on an iPhone (`ExportStartTests`), and here it is answered within a bound of the
-/// cancel. A host can be quick enough to be past the listing in that second, and to report soon after
-/// it even if it reported nothing before, so these are the acceptance's numbers rather than the rules'
-/// pins: the beat before every chunk, the cancel taken there, and a listing that costs the folders
-/// rather than the files are each held by a test of their own, in the runner and in the journal, which
-/// fails on any machine when its rule is broken.
+/// has already reported — so the cancel had a beat to land on — and stops there, leaving no file and no
+/// folder behind, here as on an iPhone (`ExportStartTests`). Nothing is bound to how fast the machine
+/// was: a loaded runner spends wall-clock seconds however it likes, and a test bound on them fails on
+/// the runner, not on the code. What is held is what the export did — that it spoke before its render
+/// counted a frame, that the cancel was asked in a report that counted no frames to draw, as the
+/// listing's do, that no report followed the one that read the cancel, and that the container is
+/// exactly what it was — and what timing the test keeps belongs to [`REPORT_PAUSE`], the seam this test
+/// owns, while [`ANSWER_WITHIN`] bounds only the wait that must end. A render's first reports, before
+/// its first frame is drawn, count none either, so the reports alone cannot tell a listing that kept
+/// its beat from one that was silent and slow: the beat before every chunk, the cancel taken there, and
+/// a listing that costs the folders rather than the files are each held by a test of their own, in the
+/// runner and in the journal, which fail on any machine when their rule is broken.
 #[test]
 fn an_export_of_many_files_cancelled_a_second_in_reports_at_once_and_leaves_nothing() {
     let scratch = Scratch::new().expect("a scratch folder");
@@ -516,36 +552,109 @@ fn an_export_of_many_files_cancelled_a_second_in_reports_at_once_and_leaves_noth
 
     let token = CancelToken::new();
     let cancel = token.clone();
+    let nudge = token.clone();
     let started = std::time::Instant::now();
-    let (first, stop) = (Arc::new(Mutex::new(None)), Arc::new(Mutex::new(None)));
-    let (heard, answered) = (first.clone(), stop.clone());
-    let answer = engine.request_with_progress(
-        "export",
-        request,
-        move |_, _, _| {
-            let since = started.elapsed();
-            if let Ok(mut moment) = heard.lock()
-                && moment.is_none()
-            {
-                *moment = Some(since);
-            }
-            // The cancel comes once, a second in, on the beat of whatever report is then being heard.
-            if since >= CANCEL_AFTER && answered.lock().map(|stop| stop.is_none()).unwrap_or(false) {
-                if let Ok(mut moment) = answered.lock() {
-                    *moment = Some(since);
+    let heard = Arc::new(Mutex::new(StartOfMany::default()));
+    let into_export = heard.clone();
+    let (answers, answer_wait) = std::sync::mpsc::channel();
+    // The export's answer is waited on with a bound, because a wait that must end must end by name and
+    // not by the suite being stopped from outside. The test may hold nothing whose end waits for the
+    // export's: a thread is joined only once it has returned, and an engine is closed — dropped too, as
+    // a failing test drops it — only once its export has ended. So the engine goes, with the call, to a
+    // thread the test never joins, and comes back with the answer: an export that never answers keeps
+    // that thread and that engine, and the test still ends, naming the wait.
+    std::thread::spawn(move || {
+        let answer = engine.request_with_progress(
+            "export",
+            request,
+            move |done, total, _| {
+                let asked_now = {
+                    let mut into_export = into_export.lock().expect("the hearing is open");
+                    into_export.reports.push((done, total));
+                    if into_export.asked.is_none() && started.elapsed() >= CANCEL_AFTER {
+                        into_export.asked = Some(Asked { total, read_by: into_export.reports.len() });
+                        true
+                    } else {
+                        false
+                    }
+                };
+                // The cancel comes from a report, as an app's does from its progress bar: the engine
+                // reads the token as this report returns, so this report is the one that reads the
+                // cancel, and no report may follow it.
+                if asked_now {
+                    cancel.cancel();
                 }
-                cancel.cancel();
+                // The seam: the export stands here, mid-report, as a loaded runner stands still
+                // everywhere at once.
+                std::thread::sleep(REPORT_PAUSE);
+            },
+            &token,
+        );
+        let _ = answers.send((answer, engine));
+    });
+    let (answer, engine) = match answer_wait.recv_timeout(ANSWER_WITHIN) {
+        Ok(answered) => answered,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            // Ask the stop on the way out: an export that still reads its token takes it, and its
+            // thread then closes the engine rather than leave it running into a removed container.
+            nudge.cancel();
+            panic!(
+                "the export of {MANY_FILES} files did not answer within {ANSWER_WITHIN:?} of its start: a wait that must end did not, so the export never stopped"
+            )
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            panic!("the export of {MANY_FILES} files was never answered: the thread that asked for it ended without its answer")
+        }
+    };
+
+    let heard = heard.lock().expect("the hearing is open");
+    let mut missed = Vec::new();
+    // The export spoke before its render counted a frame. A render's own first reports, before its
+    // first frame is drawn, count nothing too, so this alone is no proof of speaking from the start:
+    // the report that asked the cancel, below, catches a start that let the render count frames
+    // before any cancel could land.
+    match heard.reports.first() {
+        None => missed.push(
+            "the export reported nothing at all before it answered: an export that reports nothing cannot be cancelled until its first frame".to_string(),
+        ),
+        Some(&(done, total)) if done != 0 || total != 0 => {
+            missed.push(format!("the export's first report came from the render, {done} of {total} frames counted: it did not report at once"))
+        }
+        Some(_) => {}
+    }
+    if answer != Err(CraftError::Cancelled) {
+        missed.push(format!("a cancel a second into an export of {MANY_FILES} files ends it: the export answered {answer:?}"));
+    }
+    match &heard.asked {
+        None => missed.push(format!("no report came {CANCEL_AFTER:?} after the export's start, so nothing asked the cancel while the export ran")),
+        Some(asked) => {
+            if asked.total != 0 {
+                missed.push(format!(
+                    "the cancel was asked in a report of the render, counting {} frames to draw: the export's start could not be reached by a cancel then",
+                    asked.total
+                ));
             }
-        },
-        &token,
-    );
-    let first = first.lock().expect("the first report's moment").expect("an export reports, or nothing could cancel it");
-    assert!(first <= FIRST_REPORT_BY, "the first progress report came {first:?} after the export's start, over the bound of {FIRST_REPORT_BY:?}");
-    assert_eq!(answer, Err(CraftError::Cancelled), "a cancel a second into an export of {MANY_FILES} files ends it");
-    let stopped_at = stop.lock().expect("the stop's moment").expect("the cancel was asked, so its moment was noted");
-    let ended = started.elapsed();
-    assert!(ended - stopped_at <= STOPPED_BY, "the export was answered {:?} after the cancel, over the bound of {STOPPED_BY:?}", ended - stopped_at);
-    assert_eq!(contents_in(&scratch).expect("the container reads"), before, "an export cancelled in its start leaves no file and no folder behind");
+            if heard.reports.len() > asked.read_by {
+                missed.push(format!(
+                    "the export made {} reports after the one that read its cancel: the cancel did not stop its work",
+                    heard.reports.len() - asked.read_by
+                ));
+            }
+        }
+    }
+    drop(heard);
+    match contents_in(&scratch) {
+        Ok(after) if after != before => missed.push(format!(
+            "an export cancelled in its start leaves no file and no folder behind: the container now holds {} files and {} folders where it held {} and {}",
+            after.0.len(),
+            after.1.len(),
+            before.0.len(),
+            before.1.len()
+        )),
+        Err(why) => missed.push(format!("the container could not be read back: {why}")),
+        _ => {}
+    }
+    assert!(missed.is_empty(), "the export of {MANY_FILES} files cancelled {CANCEL_AFTER:?} in: {missed:#?}");
     engine.close().expect("the engine closes");
 }
 
