@@ -95,9 +95,10 @@ const APPLE_SLICES: &[&Slice; 3] = &[
     },
 ];
 
-/// One pinned file, read and parsed: the one way this repository opens the two files above. A leading
-/// byte-order mark is no part of the TOML, as rustup reads it.
-fn toml_file(root: &Path, file: &str) -> Result<toml::Value, String> {
+/// One TOML file of the repository, read and parsed: the one way this repository opens the two files above,
+/// and the baseline a release's notes read (`crate::baseline`). A leading byte-order mark is no part of the
+/// TOML, as rustup reads it.
+pub(crate) fn toml_file(root: &Path, file: &str) -> Result<toml::Value, String> {
     let source = crate::scan::read_text(&root.join(file))?;
     toml::from_str::<toml::Value>(&source).map_err(|error| format!("{file}: is not valid TOML: {error}"))
 }

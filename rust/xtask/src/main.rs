@@ -3,7 +3,8 @@
 //! `tools/ci.sh` hands over from the stages it runs, `cargo xtask skipped-tasks <gradle log>`,
 //! `cargo xtask compiled`, and the lint library's run under its lock, `cargo xtask dylint …`; the file
 //! lists its stages read, `cargo xtask files <kind>`; the pins the doctor and the gate read,
-//! `cargo xtask pins`, the Swift package's builds `cargo xtask swift-builds`, and the one of those the
+//! `cargo xtask pins`, the per-device record of each acceptance phone a release's notes read,
+//! `cargo xtask baseline`, the Swift package's builds `cargo xtask swift-builds`, and the one of those the
 //! Swift Testing suite runs on, `cargo xtask swift-suite`, and the iPhone simulator it runs on, shared
 //! with every other run on the machine, `cargo xtask simulator -- <program>…`; the package's library products,
 //! which an app's own extension links too, `cargo xtask swift-products`, and the samples' Xcode projects,
@@ -26,6 +27,7 @@
 
 mod adaptations;
 mod attributes;
+mod baseline;
 mod bindings;
 mod boundary_surface;
 mod buildfiles;
@@ -259,6 +261,7 @@ fn dispatch(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
         ["swift-lint"] => swift_lint::run(&root),
         ["swift-api", folders @ ..] => swift_api::run(&root, folders),
         ["pins"] => pins::run(&root),
+        ["baseline"] => baseline::run(&root),
         ["elf-alignment", readelf, libraries @ ..] => elf_alignment::run(readelf, libraries),
         ["swift-builds"] => pins::builds(&root),
         ["swift-suite"] => pins::suite(&root),
@@ -301,6 +304,7 @@ fn usage() {
         "       cargo xtask swift-api <symbol graph folder>...   (one folder for each Swift build: no hand-written public member named like a generated one of its type)"
     );
     eprintln!("       cargo xtask pins");
+    eprintln!("       cargo xtask baseline   (what each acceptance phone recorded of the running example, as a release's notes read it)");
     eprintln!("       cargo xtask elf-alignment <llvm-readelf> <library>...   (every library aligned to 16 KB pages)");
     eprintln!("       cargo xtask swift-builds   (every build the Swift package ships: a configuration, a destination and its architectures per line)");
     eprintln!("       cargo xtask swift-suite   (the build the Swift Testing suite runs on, read from that same table)");

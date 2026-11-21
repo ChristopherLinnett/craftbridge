@@ -10,8 +10,9 @@
 #   tools/release.sh --stage          the owner's run: stage the release in the repository itself, at its
 #                                     fetched main's tip, which tags that commit X.Y.Z there, unpushed,
 #                                     and keeps what it staged — the proof repository, the XCFramework
-#                                     zip, the distribution package — in the repository's ignored
-#                                     release/X.Y.Z, for its owner to publish from.
+#                                     zip, the distribution package, the release's AARs and the notes of
+#                                     both releases — in the repository's ignored release/X.Y.Z, for its
+#                                     owner to publish from.
 #                                     A run names one of the two, so no run tags a repository it was not
 #                                     told to. The run holds the machine's release lock on the repository
 #                                     for its whole life: a release stages one version of one tree once,
@@ -49,10 +50,13 @@
 # repository, or writes only the run's own folder and the build folders git ignores, and a run that does
 # not pass removes the tag it made, so a run that fails, or is stopped, at any step leaves no tag. The
 # release's artifacts stand in that list now: the XCFramework zip with the checksum SwiftPM will verify,
-# and the Swift distribution package written from ios/sdk, which is what an app resolves (D-24). The
-# release notes, and the copies of the AARs they ship with, join that list before the tag. Every step
-# takes the version from `version`, which one step reads once and no step can change, so a release runs
-# this one script start to finish and no step moves for their coming.
+# and the Swift distribution package written from ios/sdk, which is what an app resolves (D-24); beside
+# them the two release AARs, taken out of the proof repository the run already holds rather than built
+# again, and the notes of the two releases, which say what ships and how large each thing is, what the
+# acceptance phones recorded, and the release's own rows from CHANGELOG.md. Where each of them stands in
+# the run's folder is named once, and the run's last line names them. Every step takes the version from
+# `version`, which one step reads once and no step can change, so a release runs this one script start
+# to finish and no step moves for their coming.
 set -euo pipefail
 # Git exports its repository variables (GIT_DIR and the rest) to a hook and to whatever `git rebase --exec`
 # or `git bisect run` starts. Every git command here must act on the repository the run was given.
@@ -169,7 +173,8 @@ fi
 commit="$(git -C "$src" rev-parse -q --verify 'HEAD^{commit}')" || fail "$src has no commit to release"
 
 # Everything a run makes stands in one folder of its own — a rehearsal's clone, the build folders and the
-# proof Maven repository, the XCFramework zip with the written distribution package — which ends as its
+# proof Maven repository, the XCFramework zip with the written distribution package, the release's AARs
+# and the notes of both releases — which ends as its
 # mode promises: a rehearsal's folder goes however the run ends, since nothing a rehearsal writes stands
 # to be kept, while a staging run's folder is the release it staged, and a passed staging run's moves into
 # the repository's own ignored release folder, `release/<version>`, named at the end, for its owner to
@@ -372,13 +377,23 @@ refusing_a_released_version() {
 # there is a release staged before — published or not — and this run refuses rather than mix the two.
 # Named once and fixed, since the clean-up reads it to know what a failed run must not leave behind.
 release_folder="release"
+# Where the folders of the run's artifacts stand, named once here for every later step and for the run's
+# last line. The run's folder is what a staging run keeps, so these names are the release's shape: the
+# proof repository Gradle publishes into, CraftBridge's own release folder — the AARs this release ships,
+# beside the distribution tree — and the two releases' notes beside those. The zip takes its name from the
+# framework the package's manifest declares, so it is named once where that is read
+# (building_the_xcframework_zip), and the distribution tree once for the repository it becomes
+# (writing_the_distribution_package).
+proof_repository="$run/maven"
+craftbridge_release="$run/craftbridge"
+notes_folder="$run/notes"
 settling_where_the_release_stands() {
   if [ "$mode" = --stage ]; then
     staged="$repo/$release_folder/$version"
     [ ! -e "$staged" ] ||
       fail "$staged stands already: a version stages once, so publish or move that release before staging $version again"
   fi
-  readonly staged
+  readonly staged proof_repository craftbridge_release notes_folder
 }
 
 # The headings the rows of [Unreleased] stand under, each spelt here once: AGENTS.md §11's own heading
@@ -460,26 +475,36 @@ checking_the_version_against_the_releases() {
   say "$version stands after the release $released"
 }
 
+# The checks tool, built once into the run's folder and read by every step that needs a figure or a pin a
+# shell cannot read by text: the pins Gradle runs on, and the per-device baseline a release's notes quote.
+# It is no part of a release, so the step before the tag removes the build (removing_the_checks_build), and
+# no step ever stages it.
+checks_build="$run/xtask"
+checks_tool=""
+the_checks_are_built() {
+  if [ -n "$checks_tool" ]; then
+    return 0
+  fi
+  # Built in the tree being released, which xtask judges the tree it runs for by.
+  craftbridge_xtask_build "$checks_build" "$repo/rust" ||
+    fail "the checks could not build to read what the release reads through them"
+  checks_tool="$checks_build/debug/xtask"
+}
+
 # The AARs prove their own version: the publish tasks take the `craftbridge.version` property and refuse
 # every publish without it, the proof repository stands inside the run's folder beside no repository
 # anyone else reads, and what reaches it is read back. Gradle runs on the catalog's JDK, which the pins
 # hand to JAVA_HOME.
 proving_the_aar_versions() {
-  local xtask_bin modules module published_name dir read_version pins
-  CARGO_BUILD_BUILD_DIR="$CARGO_TARGET_DIR" craftbridge_cargo_in "$repo/rust" build \
-    --package xtask --locked --quiet --target-dir "$run/xtask" ||
-    fail "the checks could not build to read the pins Gradle runs on"
-  xtask_bin="$run/xtask/debug/xtask"
+  local modules module published_name dir read_version pins
+  the_checks_are_built
   # The pins belong to the tree being released, and xtask judges the tree it runs for by where its
   # binary was built, so the pins are read from inside that tree rather than this checkout's.
   # The read is captured whole, not streamed: a pins command that fails writes no pins, and only its
   # own exit status says so — through a process substitution the status would vanish, and env.sh would
   # report a pin missing from a file that holds it, pointing the reader at the wrong file.
-  pins="$(cd "$repo" && env -u CRAFTBRIDGE_ROOT "$xtask_bin" pins)" ||
+  pins="$(cd "$repo" && env -u CRAFTBRIDGE_ROOT "$checks_tool" pins)" ||
     fail "the pins Gradle runs on could not be read from $repo"
-  # The tool was built only to read the pins, and goes now: the run's folder is the release a staging
-  # run keeps, and a build of the checks is no part of it.
-  rm -rf "$run/xtask"
   # xtask refuses a pin its files lack before it prints any, so a pins command that ends on 0 has printed
   # every pin, and lines env.sh's reader cannot read are that command's fault, which env.sh would lay on a
   # file that holds the pin. So its one reader judges the lines apart first, and the release says why.
@@ -491,21 +516,90 @@ proving_the_aar_versions() {
     cd "$repo/android/sdk" &&
       ./gradlew --no-daemon --warning-mode=fail --console=plain \
         publishReleasePublicationToLocalProofRepository \
-        "-Pcraftbridge.version=$version" "-Pcraftbridge.localRepo=$run/maven"
+        "-Pcraftbridge.version=$version" "-Pcraftbridge.localRepo=$proof_repository"
   ) || fail "the AARs could not publish at $version"
-  [ -d "$run/maven" ] || fail "nothing reached the proof repository: no publication published"
-  modules="$(find "$run/maven" -name '*.module' -type f | sort)"
+  [ -d "$proof_repository" ] || fail "nothing reached the proof repository: no publication published"
+  modules="$(find "$proof_repository" -name '*.module' -type f | sort)"
   [ -n "$modules" ] || fail "nothing reached the proof repository: no Gradle module metadata was published"
   while IFS= read -r module; do
-    read_version="$(jq -r '.component.version' "$module")" || fail "jq could not read ${module#"$run/maven/"}"
+    read_version="$(jq -r '.component.version' "$module")" || fail "jq could not read ${module#"$proof_repository/"}"
     published_name="$(basename "$module" .module)"
     dir="$(dirname "$module")"
     [ -f "$dir/$published_name.aar" ] ||
-      fail "${dir#"$run/maven/"} holds no ${published_name}.aar: the publication shipped no AAR to version"
+      fail "${dir#"$proof_repository/"} holds no ${published_name}.aar: the publication shipped no AAR to version"
     [ "$read_version" = "$version" ] ||
-      fail "${module#"$run/maven/"} reads version $read_version, not the release's $version"
-    say "the proof repository's ${module#"$run/maven/"} reads version $read_version, with its AAR beside it"
+      fail "${module#"$proof_repository/"} reads version $read_version, not the release's $version"
+    say "the proof repository's ${module#"$proof_repository/"} reads version $read_version, with its AAR beside it"
   done <<<"$modules"
+}
+
+# One line per artifact this release ships, as its notes read them: its name, where it stands in the run's
+# folder, and where an app asks for it — the Maven coordinate for an AAR, the release address the bytes are
+# served at for the zip, the repository and its version for the Swift package. Both releases' notes are
+# written from this one list, so nothing a note says about what ships is said in two places, and every step
+# that makes an artifact names it here, so nothing ships that the list does not hold.
+# bash 3.2 writes no tab inside double quotes, and no line break inside the ${x:+…} that grows a list:
+# these two names are what the lists are built with and read with, this one and the lines the checks print
+# for the notes, so no step spells a separator itself.
+line_break=$'\n'
+field_break=$'\t'
+release_artifacts=""
+naming_an_artifact() {
+  local field
+  # A field holding a separator would be read back as another field or another artifact, so a note would
+  # name what no app can ask for: whatever names the artifact — a manifest, Gradle's metadata, the run's
+  # folder — is refused here, for every artifact alike, rather than split when the notes read it. A field
+  # of nothing is refused too: the tab that reads fields back is blank to `read`, which drops an empty
+  # field and shifts the ones after it, so a path would be read as the address.
+  for field in "$@"; do
+    case "$field" in
+    *"$field_break"* | *"$line_break"*)
+      fail "the release's $1 is named with a tab or a line break in \"$field\": the list of what ships holds one artifact a line, its fields a tab apart"
+      ;;
+    *[![:space:]]*) ;;
+    *)
+      fail "the release's $1 is named with an empty field: the list of what ships holds a name, a place and an address for each artifact"
+      ;;
+    esac
+  done
+  release_artifacts="${release_artifacts:+$release_artifacts$line_break}$1$field_break$2$field_break$3"
+}
+
+# CraftBridge's own release, standing beside the distribution tree: the AARs of the version, taken out of
+# the proof repository the run already holds rather than built again. A second build would ship bytes the
+# run never proved, and the release would say of one artifact what another's bytes were, so each AAR is
+# copied and the copy read back against the bytes it was taken of. Where an app asks for an AAR is what
+# Gradle's own module metadata beside it says, the file the step before read its version from, and never a
+# reading of the folders it stands in. Every AAR there is taken through these gates, so one with no
+# metadata, a coordinate of which a part is empty or holds the colon that joins them, published at another
+# version, or not named for its coordinate is refused rather than carried
+# under this release's name — an app gets the file its coordinate names it by — and so is a second AAR of
+# a name already staged, which would take the first one's place and be listed twice.
+staging_the_release_aars() {
+  local aars aar name metadata coordinate module
+  aars="$(find "$proof_repository" -name '*.aar' -type f | sort)"
+  [ -n "$aars" ] || fail "nothing reached the proof repository: the release has no AAR to stage"
+  mkdir -p "$craftbridge_release" || fail "$craftbridge_release could not be made to stage the release's AARs in"
+  while IFS= read -r aar; do
+    name="$(basename "$aar")"
+    metadata="${aar%.aar}.module"
+    [ -f "$metadata" ] ||
+      fail "${aar#"$proof_repository/"} stands beside no ${metadata##*/}: no metadata says where an app asks for it"
+    coordinate="$(jq -er '.component | [.group, .module, .version] | select(all(type == "string" and length > 0 and (contains(":") | not))) | join(":")' "$metadata")" ||
+      fail "${metadata#"$proof_repository/"} names no group, module and version to ask for $name at"
+    [ "${coordinate##*:}" = "$version" ] ||
+      fail "${aar#"$proof_repository/"} is published at $coordinate, not at the release's $version: a release ships the AARs at its own version and no other"
+    module="${coordinate#*:}"
+    module="${module%:*}"
+    [ "$name" = "$module-$version.aar" ] ||
+      fail "${aar#"$proof_repository/"} is not named for $coordinate: an app downloads the AAR its coordinate names it by"
+    [ ! -e "$craftbridge_release/$name" ] ||
+      fail "${aar#"$proof_repository/"} is a second $name: staged beside the first, it would take that one's place"
+    cp "$aar" "$craftbridge_release/$name" || fail "${name} could not be copied into ${craftbridge_release#"$run/"}"
+    cmp -s "$aar" "$craftbridge_release/$name" || fail "$name is not the copy it was taken of"
+    naming_an_artifact "$name" "$craftbridge_release/$name" "$coordinate"
+    say "the release's $name stands in ${craftbridge_release#"$run/"}: the bytes the proof repository holds, as an app asks for them at $coordinate"
+  done <<<"$aars"
 }
 
 # The run's own temporary folder, for the tools that leave theirs behind: SwiftPM's commands, the
@@ -524,13 +618,15 @@ swift_package() {
 # here once so the folder it stands in, the address of its release and the words that send its owner to
 # it all say it alike.
 distribution_repository="ChristopherLinnett/SwiftEffects"
+# Where an app adds the package from, at the version's tag.
+distribution_url="https://github.com/$distribution_repository"
 # Where the zip a package names is served: the GitHub release standing on the distribution repository's
 # own tag of the version, as the distribution repositories the plan follows serve theirs
 # (evidence/07-repository-conventions.md Finding 2). The package and the bytes it promises then live,
 # version and stay together, and an app needs no repository but the one it resolves. Naming the place is
 # all a staging run does with it: the release itself is opened by the owner, who publishes nothing less
 # (plan §26, G2).
-releases_at="https://github.com/$distribution_repository/releases/download"
+releases_at="$distribution_url/releases/download"
 
 # The XCFramework the package's binary target stands for, zipped for the release with the checksum SwiftPM
 # will verify on it. The builder is the tree's own tools/build-xcframework.sh — the gate's and the
@@ -575,6 +671,7 @@ building_the_xcframework_zip() {
   # The bytes, their checksum and their one address are settled here, and no later step can move them:
   # the package written next can only be written of what stands here.
   readonly binary_name binary_path zip_name zip_path zip_url zip_checksum
+  naming_an_artifact "$zip_name" "$zip_path" "$zip_url"
   say "the release's XCFramework is zipped as $zip_name with the checksum $zip_checksum"
 }
 
@@ -653,7 +750,97 @@ writing_the_distribution_package() {
   [ "$source_read" = "$written_read" ] ||
     fail "the written package differs from $repo/ios/sdk beyond the binary target: it ships the tree's manifest entire, and only what a release must move, moves"
   products="$(printf '%s' "$to_package" | jq -r '[.products[].name] | join(", ")')"
+  naming_an_artifact "${distribution_repository##*/}" "$distribution_tree" "$distribution_url at $version"
   say "the ${distribution_repository##*/} package is written, ios/sdk at $commit file for file: its binary target now reads $zip_url at that checksum, and its products crossed as they stand — $products"
+}
+
+# One release's notes: the one reading of what the release ships, said for whichever release the file
+# stands for. The title and the lead differ; the reading is shared bytes, so no size, figure or row can say
+# one thing in one release's notes and another in the other's. The notes are what the owner publishes the
+# release with, so they say what the release is, and nothing of where it was staged.
+a_note_in() {
+  local file title carries
+  file="$1" title="$2" carries="$3"
+  {
+    printf '# %s\n\n' "$title"
+    printf '%s\n\n' "$carries"
+    printf "Built by \`tools/release.sh\` from CraftBridge's commit \`%s\`, which its tag \`%s\` names.\n\n" "$commit" "$version"
+    printf '%s\n' "$notes_body"
+  } >"$file" || fail "$file could not be written"
+}
+
+# The notes of the two releases, from one reading of what the release ships: every artifact and the bytes it
+# stands at as the notes are written, the record of each acceptance phone, the release's own rows from
+# CHANGELOG.md, and the zip's address with the checksum SwiftPM verifies on it. Nothing is measured twice or
+# said twice: the sizes are the bytes already staged, the baseline comes through the checks' one reader of
+# that file for what reports it (`cargo xtask baseline`), and the rows are those the changelog step read —
+# so a note can say nothing the run did not prove, and a figure no reader can read stops the run rather than
+# reaching a release. Both notes carry that one reading; what differs is the release each stands for and
+# what that release carries (plan §9, §23, §29).
+notes_craftbridge="$notes_folder/craftbridge.md"
+notes_distribution="$notes_folder/${distribution_repository##*/}.md"
+notes_body=""
+writing_the_release_notes() {
+  local baseline entry kind fields allowance allowance_runs records artifacts runs id platform phone system recorded line row name path asked bytes mib
+  the_checks_are_built
+  baseline="$(cd "$repo" && env -u CRAFTBRIDGE_ROOT "$checks_tool" baseline)" ||
+    fail "the baseline the release's notes quote could not be read from $repo"
+  [ -n "$baseline" ] || fail "the baseline command for $repo ended on 0 and printed nothing"
+  # Each line is read by its first field, in the shell and whole: a line of a kind no note reads is refused,
+  # never passed over.
+  allowance="" allowance_runs="" records=""
+  while IFS= read -r entry; do
+    IFS="$field_break" read -r kind fields <<<"$entry"
+    case "$kind" in
+    allowance)
+      IFS="$field_break" read -r allowance allowance_runs <<<"$fields"
+      ;;
+    device)
+      IFS="$field_break" read -r id platform phone system recorded runs line <<<"$fields"
+      records="${records:+$records$line_break}$(printf -- "- \`%s\` (%s) — %s, %s, %s fresh runs recorded %s\n  \`%s\`" "$id" "$platform" "$phone" "$system" "$runs" "$recorded" "$line")"
+      ;;
+    *)
+      fail "the baseline command for $repo printed a line no release note reads: $entry"
+      ;;
+    esac
+  done <<<"$baseline"
+  [ -n "$allowance" ] || fail "the baseline command for $repo printed no allowance to hold a release to"
+  [ -n "$records" ] || fail "the baseline command for $repo printed no device record for the notes to quote"
+  artifacts=""
+  while IFS="$field_break" read -r name path asked; do
+    # The bytes of every file the artifact is: the file itself, or each file of a tree.
+    bytes="$(find "$path" -type f -exec cat {} + | wc -c | tr -d '[:space:]')" ||
+      fail "$path could not be weighed for the release's notes"
+    [ -n "$bytes" ] || fail "$path could not be weighed for the release's notes"
+    mib="$(awk -v bytes="$bytes" 'BEGIN { printf "%.1f", bytes / 1048576 }')"
+    row="$(printf -- "| \`%s\` | %s bytes (%s MiB) | %s |" "$name" "$bytes" "$mib" "$asked")"
+    artifacts="${artifacts:+$artifacts$line_break}$row"
+  done <<<"$release_artifacts"
+  notes_body="$(
+    printf 'Every artifact here reads %s.\n\n' "$version"
+    printf '## What ships, and how large each is\n\n'
+    printf '| Artifact | Size | Where it is asked for |\n| --- | --- | --- |\n'
+    printf '%s\n' "$artifacts"
+    printf "\nThe zip is served at %s; the checksum SwiftPM verifies on it is \`%s\`.\n" "$zip_url" "$zip_checksum"
+    printf '\n## What the acceptance phones recorded\n\n'
+    printf "The running example as \`conformance/effects/baseline.toml\` defines it, one bullet per phone: what the phone is and ran, and its record's figures as a run on it prints them, each at the decimals the file gives it. A release is held to these records as that file says: each figure it marks \`flagged\` is flagged, on every platform its \`unheld_on\` does not name, when the median of at least %s fresh runs of the release is more than %s%% above the record's median and the fastest of those runs is slower than the record's slowest.\n\n" "$allowance_runs" "$allowance"
+    printf '%s\n' "$records"
+    printf '\n## What changed\n\n%s\n' "$unreleased"
+  )"
+  mkdir -p "$notes_folder" || fail "$notes_folder could not be made to write the releases' notes in"
+  a_note_in "$notes_craftbridge" "CraftBridge $version" \
+    "This release carries CraftBridge's Android libraries, the AARs below, each at the coordinate it is asked for."
+  a_note_in "$notes_distribution" "${distribution_repository##*/} $version" \
+    "This release carries the Swift package written from CraftBridge's ios/sdk, and the zip its binary target downloads, at the address and with the checksum below."
+  say "the notes of the two releases are written in ${notes_folder#"$run/"}: ${notes_craftbridge#"$run/"} and ${notes_distribution#"$run/"}, each artifact weighed, the baseline of both phones read, and CHANGELOG.md's $changelog_rows rows quoted"
+}
+
+# The checks were borrowed, not shipped: the build of them is no part of a release, so it goes from the run's
+# folder before the release stands still. What a staging run keeps is the release, and no build of the
+# checks — which stand there only because something had to ask the tree a question a shell cannot ask by text.
+removing_the_checks_build() {
+  rm -rf "$checks_build"
+  checks_tool=""
 }
 
 # The tag versions the Swift package's source, the commit whose ios/sdk the package is released from, so
@@ -681,12 +868,12 @@ tagging_the_release() {
 }
 
 saying_what_was_staged() {
-  say "every artifact this stage makes reads $version: the crates of rust/Cargo.toml, the AARs the proof repository holds, the XCFramework zip and the release url the ${distribution_repository##*/} package names it by, and the tag on the Swift package's source"
+  say "every artifact this stage makes reads $version: the crates of rust/Cargo.toml, the AARs the proof repository holds and stand in ${craftbridge_release#"$run/"}, the XCFramework zip and the release url the ${distribution_repository##*/} package names it by, the notes of the two releases, and the tag on the Swift package's source"
   if [ "$mode" = --dry-run ]; then
-    say "the rehearsal wrote only its own folder, which goes now with its clone, its tag, its zip and its written package: nothing of $src was written"
+    say "the rehearsal wrote only its own folder, which goes now with its clone, its tag, its zip, its written package, its staged AARs and its notes: nothing of $src was written"
   else
     say "the tag $version stands in $src, unpushed: nothing was pushed, no release was made and no package was uploaded, which the owner decides"
-    say "the release stands staged in $staged as the run ends, for its owner to publish from: the ${distribution_repository##*/} tree in ${distribution_tree#"$run/"}, the zip ${zip_name} its release serves at $zip_url, and the proof repository in maven"
+    say "the release stands staged in $staged as the run ends, for its owner to publish from: the ${distribution_repository##*/} tree in ${distribution_tree#"$run/"}, the zip ${zip_name} its release serves at $zip_url, the release's AARs in ${craftbridge_release#"$run/"}, the notes of the two releases in ${notes_craftbridge#"$run/"} and ${notes_distribution#"$run/"}, and the proof repository in ${proof_repository#"$run/"}"
   fi
 }
 
@@ -698,8 +885,11 @@ settling_where_the_release_stands
 reading_the_changelog
 checking_the_version_against_the_releases
 proving_the_aar_versions
+staging_the_release_aars
 building_the_xcframework_zip
 writing_the_distribution_package
+writing_the_release_notes
+removing_the_checks_build
 tagging_the_release
 saying_what_was_staged
 # The run passes here and ends here, with nothing between: bash 3.2 hands the exit trap a 0 for a
