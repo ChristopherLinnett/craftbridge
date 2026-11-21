@@ -131,8 +131,8 @@ shipping=(--lib --bins --examples --all-features --locked --message-format=json)
 # The levels the tests are linted at, on the host and on every phone target: `"${tests_lints[@]}"`.
 tests_lints=(-D warnings -A clippy::disallowed_methods -A clippy::disallowed_macros)
 # Clippy's two runs over a selection of packages through one cargo runner: `clippy_runs compiling
-# --workspace` for the workspace, `clippy_runs in_library --workspace` for the lint library, and
-# `clippy_runs compiling "${host_tools[@]}"` for the host tools.
+# <selection>` for the workspace's packages, through `lint_runs`, and `clippy_runs in_library --workspace`
+# for the lint library.
 clippy_runs() {
   local run="$1" status=0
   shift
@@ -140,10 +140,20 @@ clippy_runs() {
   "$run" clippy "$@" --tests --benches --all-features --locked --message-format=json -- "${tests_lints[@]}" || status=1
   return "$status"
 }
+# Every lint the workspace's code meets on the host, over a selection of its packages: clippy's two runs, of
+# what ships and of the tests, then the lint library's run over what ships, each run even after one fails:
+# `lint_runs --workspace` on macOS, and `lint_runs "${host_tools[@]}"` and `lint_runs "${core_packages[@]}"`
+# on Linux, so a stage that lints part of the workspace cannot drop or narrow a run the whole-workspace
+# stage makes.
+lint_runs() {
+  local status=0
+  clippy_runs compiling "$@" || status=1
+  lint_library "$@" "${shipping[@]}" || status=1
+  return "$status"
+}
 stage_rust_clippy() {
   local status=0
-  clippy_runs compiling --workspace || status=1
-  lint_library --workspace "${shipping[@]}" || status=1
+  lint_runs --workspace || status=1
   clippy_runs in_library --workspace || status=1
   lint_library --manifest-path "$CRAFTBRIDGE_LINT_LIBRARY/Cargo.toml" --workspace "${shipping[@]}" || status=1
   return "$status"
@@ -152,16 +162,25 @@ stage_rust_test() { compiling test --workspace --locked --message-format=json; }
 # The host tools whose code reads the host they run on: craftbridge-process (the process group's liveness,
 # read from `/proc` on Linux and from `pgrep` elsewhere), the conformance runner and xtask. Their clippy and
 # lint library runs and their tests are the part of `rust_clippy` and `rust_test` that holds on Linux too,
-# where nothing the workspace ships is built, so the hosted Linux job lints and tests the code only Linux
-# compiles (`cfg(target_os = "linux")`); the macOS job takes them through the two whole-workspace stages.
+# where the whole-workspace stages cannot run (their reasons below), so the hosted Linux job lints and tests
+# the code only Linux compiles (`cfg(target_os = "linux")`): the host tools here, and the core's Linux-only
+# lines in the stage below; the macOS job takes the host tools through the two whole-workspace stages.
 host_tools=(--package craftbridge-process --package craftbridge-effects-conformance --package xtask)
-stage_rust_host_clippy() {
-  local status=0
-  clippy_runs compiling "${host_tools[@]}" || status=1
-  lint_library "${host_tools[@]}" "${shipping[@]}" || status=1
-  return "$status"
-}
+stage_rust_host_clippy() { lint_runs "${host_tools[@]}"; }
 stage_rust_host_test() { compiling test --locked --message-format=json "${host_tools[@]}"; }
+# The core on Linux's own target, in the Linux job, at every other target's level: craftbridge-core builds
+# whole for Linux — its GPU-drawing tests compile there and fail only for want of a GPU when run — so it is
+# linted whole there, all targets including tests. rust_clippy runs on macOS, where the core's
+# `cfg(target_os = "linux")` lines fold away, rust_mobile lints the phones' targets, and rust_host_clippy
+# reads the core only as the library the host tools link, so this is the one stage whose clippy reads the
+# core's Linux-only test lines (the memory seam and its live test today); its lint library run reads only
+# what ships, as everywhere, and holds the core's Linux build to the library in the core's own name rather
+# than through a host tool's dependency on it. Clippy compiles without running, so the drawing tests meet
+# the lints while the GPU rust_test needs stays on macOS, and it reads a whole compilation unit, so a fault
+# on a Linux-only line can only be named by linting the crate that holds it. Its own stage, not a widening
+# of rust_host_clippy: that stage is the host tools, held to one package list, and the core is no host tool.
+core_packages=(--package craftbridge-core)
+stage_rust_core_clippy() { lint_runs "${core_packages[@]}"; }
 # The core's memory tests, which read no GPU, so the hosted Linux job runs them while the whole-workspace
 # rust_test, which holds the core's tests that draw, stays on macOS (see left_to_macos). The filter names
 # the memory module: the live test reads the figure the system it runs on answers, and the pure readings
@@ -169,8 +188,8 @@ stage_rust_host_test() { compiling test --locked --message-format=json "${host_t
 # test binary which tests the filter names, and fails when it names none.
 stage_rust_core_memory() {
   local filter=platform::memory:: listed
-  compiling test --locked --message-format=json --package craftbridge-core --lib "$filter" || return 1
-  listed="$(craftbridge_cargo test --locked --package craftbridge-core --lib -- --list --format terse "$filter")" || return 1
+  compiling test --locked --message-format=json "${core_packages[@]}" --lib "$filter" || return 1
+  listed="$(craftbridge_cargo test --locked "${core_packages[@]}" --lib -- --list --format terse "$filter")" || return 1
   if [ -z "$listed" ]; then
     echo "ci: rust_core_memory: no test of craftbridge-core is named by $filter, so the stage would run none" >&2
     return 1
@@ -627,7 +646,7 @@ stage_duplicates() {
 
 # `rules` runs before every cargo stage that compiles the workspace: what it reads needs no build, and a
 # build script runs as soon as cargo compiles its crate.
-stages=(doctor rules rust_fmt rust_clippy rust_host_clippy rust_test rust_host_test rust_core_memory conformance rust_mobile rust_deny generated plan_views guide_samples swift_format swift_build swift_test swift_lint android android_samples shell duplicates)
+stages=(doctor rules rust_fmt rust_clippy rust_host_clippy rust_test rust_host_test rust_core_clippy rust_core_memory conformance rust_mobile rust_deny generated plan_views guide_samples swift_format swift_build swift_test swift_lint android android_samples shell duplicates)
 # The stage groups the decision and plan §15 name: Rust and Swift are each several stages.
 group_rust=(rust_fmt rust_clippy rust_test rust_mobile rust_deny)
 group_swift=(swift_format swift_build swift_test swift_lint)
@@ -636,13 +655,13 @@ group_swift=(swift_format swift_build swift_test swift_lint)
 # the stages that read the same on Linux and need nothing of macOS; the macOS job runs every other stage, so
 # every stage runs in at least one job: a stage added above runs there, and says below why it is left to
 # macOS, or joins the Linux job.
-linux_only=(rust_fmt rust_host_clippy rust_host_test rust_core_memory rust_deny plan_views android duplicates)
+linux_only=(rust_fmt rust_host_clippy rust_host_test rust_core_clippy rust_core_memory rust_deny plan_views android duplicates)
 # Why each stage the Linux job does not run is left to macOS: `<stage>…: <reason>`.
 left_to_macos=(
   "doctor: it checks Xcode, the NDK and the phone targets"
   "rules: they ask SwiftPM through xcrun"
   "generated: it formats the Swift bindings with the Xcode toolchain"
-  "rust_clippy: the whole workspace's lints, whose shipping crates are built for iOS and Android and tested on macOS alone: built for Linux, they hold code only those systems call (craftbridge-media's encoder tests, craftbridge-core-ffi's surface), which -D warnings refuses as dead; its host tools' part runs on Linux as rust_host_clippy"
+  "rust_clippy: the whole workspace's lints, whose shipping crates are built for iOS and Android and tested on macOS alone: built for Linux, they hold code only those systems call (craftbridge-media's encoder tests, craftbridge-core-ffi's surface), which -D warnings refuses as dead; its host tools' part runs on Linux as rust_host_clippy, and its craftbridge-core part, which builds whole there, as rust_core_clippy"
   "rust_test: the whole workspace's tests, among them the core's that draw on the host's GPU (rust/core/craftbridge-core/src/testing.rs), which a hosted Linux runner lacks; its host tools' part runs on Linux as rust_host_test, and its memory tests, which need no GPU, as rust_core_memory so that they read the figure a Linux kernel answers there"
   "conformance: its steps that ask for the GPU fail where the machine gives none (rust/effects/craftbridge-effects-conformance/src/host.rs), and the oracle they are compared with is an EffectCraft build of its own (tools/oracle.sh)"
   "rust_mobile: the iOS targets need Xcode's SDKs, and the Android targets the NDK r28 tools/env.sh pins, which the macOS image carries and Ubuntu's does not"
