@@ -9,6 +9,13 @@ import os
 /// This suite's own run folders.
 private let probeFolders = "runfolders"
 
+/// How long a run waits for its sweep to make its folder once the home is free: there only so that a
+/// sweep that never ends fails the test, naming what it waited for, rather than holding the whole run
+/// until the hosted job's own limit, hours later, with no word of why. Ten minutes is twenty times the
+/// 30 s a slow hosted runner once overran, and far more again than the seconds a whole run of the suite
+/// waits on a developer's Mac, so no load fails it: it bounds a hang, never the sweep's speed.
+private let sweepEndsWithin: TimeInterval = 600
+
 /// Whether `folder` is there.
 private func exists(_ folder: URL) -> Bool {
     FileManager.default.fileExists(atPath: folder.path(percentEncoded: false))
@@ -59,6 +66,12 @@ private struct Thrown: Error {}
         #expect(flock(home, LOCK_EX) == 0)
         let making = try unheld("making")
         defer { try? FileManager.default.removeItem(at: making) }
+        // This run's sweep, once it has the home, costs this pause on top of its work — many times its
+        // natural time, as a loaded runner's is, yet still short enough that a sweep that skipped the
+        // home would finish inside the first wait below and be caught. The wait once the home is free is
+        // proven on that slowed sweep.
+        sweepPause.withLock { $0 = 0.6 }
+        defer { sweepPause.withLock { $0 = 0 } }
         let made = DispatchSemaphore(value: 0)
         DispatchQueue.global().async {
             _ = runFolder(probeFolders)
@@ -72,8 +85,19 @@ private struct Thrown: Error {}
         #expect(try lockedAtOnce(other, making))
         release(home)
         holdsTheHome = false
+        // Wait for the folder itself: with the home free the making needs its sweep's pause, the sweeps
+        // queued ahead of it and its own work, however long a loaded machine takes over them, and only a
+        // sweep that never ends meets the bound. The wait happens only when the early one timed out: a
+        // first wait that came back in time already took the one signal, and a second would wait out the
+        // bound for nothing; a making that failed records its own issue.
         if early == .timedOut {
-            #expect(made.wait(timeout: .now() + 30) == .success, "this run made no folder once the home was free")
+            let waiting = Date()
+            let ended = made.wait(timeout: .now() + sweepEndsWithin)
+            print("this run waited \(Date().timeIntervalSince(waiting)) s for its paused sweep once the home was free")
+            fflush(stdout)
+            #expect(
+                ended == .success,
+                "this run's sweep made no folder in the \(sweepEndsWithin) s after the home was free: it never ended")
         }
         #expect(exists(making), "this run swept a folder another run held")
     }
