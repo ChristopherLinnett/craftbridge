@@ -25,14 +25,25 @@
 //! record's median and the fastest of them is slower than the record's slowest run. Every other figure is
 //! reported beside the record's, a figure on an `unheld_on` platform included.
 //!
+//! Only the runs made in the record's conditions are compared: a run that reads a figure the file marks as a
+//! condition outside what the record's conditions ask (`crate::baseline::Required`) was made in other
+//! conditions than the record, so it is counted, named and left out of every figure, and a phone whose runs
+//! in the conditions are fewer than the comparison asks for has its figures reported and never judged. A
+//! run always carries every figure its platform measures, so no run lacks a condition to be read as meeting it.
+//! The writer adds such a run too, so the file holds every run measured, and counts toward the comparison only
+//! the runs the judge compares, naming each condition the run it added missed.
+//!
 //! The judge prints one `device` line for each phone of the record, `device<TAB>id<TAB>platform<TAB>runs
-//! measured`, then one `figure` line for each figure the phone's runs carry, `figure<TAB>id<TAB>name<TAB>
-//! median<TAB>fastest<TAB>record's median<TAB>record's slowest<TAB>percent<TAB>verdict` (the percent is
-//! `n/a` over a record of nothing), the verdict one of `flagged`, `within`, `unheld` (reported on a platform
-//! that is never flagged), `uncompared` (fewer runs than the comparison asks for) and `reported` (a figure no
-//! release is held to). A file measured at another commit prints the one line `another<TAB>commit`.
+//! measured<TAB>runs in the record's conditions`, then one `outside` line for each condition some run read
+//! outside, `outside<TAB>id<TAB>figure<TAB>runs outside<TAB>what the condition asks`, then one `figure` line
+//! for each figure the phone's runs in the conditions carry, `figure<TAB>id<TAB>name<TAB>median<TAB>fastest<TAB>
+//! record's median<TAB>record's slowest<TAB>percent<TAB>verdict` (the percent is `n/a` over a record of nothing),
+//! the verdict one of `flagged`, `within`, `unheld` (reported on a platform that is never flagged), `uncompared`
+//! (fewer runs than the comparison asks for) and `reported` (a figure no release is held to). A phone with no
+//! run in the conditions has no `figure` line. A file measured at another commit prints the one line
+//! `another<TAB>commit`.
 
-use crate::baseline::{Definition, Figure, Record, Repeats};
+use crate::baseline::{Definition, Figure, Record, Repeats, Required, half_units};
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -60,6 +71,45 @@ fn median(values: &[f64]) -> Option<f64> {
 struct Run<'a> {
     record: &'a Record,
     values: Vec<(&'a Figure, f64)>,
+}
+
+impl<'a> Run<'a> {
+    /// Whether the run read `required`'s figure inside the condition. A run always carries every figure of its
+    /// platform (`run_of` reads its line whole), so a figure it lacks reads as outside.
+    fn met(&self, required: &Required) -> bool {
+        self.values.iter().find(|(figure, _)| figure.name == required.figure).is_some_and(|(_, value)| required.met_by(*value))
+    }
+
+    /// The conditions of the run's record it read outside: a run with none was made as the record was, and only
+    /// such a run is compared, by the judge and in the count the writer gives.
+    fn missed(&self) -> impl Iterator<Item = &'a Required> + '_ {
+        self.record.conditions.iter().filter(|required| !self.met(required))
+    }
+}
+
+/// What the file holds of one device once a run is added: its runs, those of them made in the record's
+/// conditions, which are all a comparison counts, and each condition the added run read outside.
+#[derive(Debug)]
+struct Held {
+    runs: usize,
+    compared: usize,
+    missed: Vec<String>,
+}
+
+impl Held {
+    /// What the writer says of the device `id`'s runs of `commit`, against the `comparison_runs` a comparison
+    /// rests on: a run made outside the record's conditions is added, so the file holds every run measured, and
+    /// is said apart, so the owner knows at once that it will not be compared.
+    fn said(&self, id: &str, commit: &str, comparison_runs: i64) -> String {
+        let (runs, compared) = (self.runs, self.compared);
+        let said =
+            format!("{id} holds {runs} run(s) of {commit}, {compared} of them made in the record's conditions, of the {comparison_runs} a comparison rests on");
+        if self.missed.is_empty() {
+            said
+        } else {
+            format!("{said}; the run added was made outside them ({}), so it is left out of the comparison", self.missed.join(", "))
+        }
+    }
 }
 
 /// A value as a measuring test prints it, `decimals` places in decimal and a minus its only sign, and
@@ -142,17 +192,6 @@ fn measurement<'d, 's>(definition: &'d Definition, source: &'s str) -> Result<(&
     Ok((measured, runs))
 }
 
-/// A value in half units of its figure's last decimal, or nothing for one that is not a whole number of
-/// them. A run prints each value with its figure's decimals and a median is one run's value or the mean of
-/// two, the record's as a release's, so every value the rule weighs is a whole number of half units: the
-/// rule is weighed in those whole numbers, so no rounding of a fraction decides a figure at the allowance's
-/// very edge. Past 2^53 a float holds no whole number exactly, so a value that large is none either.
-fn half_units(value: f64, decimals: usize) -> Option<i128> {
-    let scaled = value * 2.0 * 10f64.powi(i32::try_from(decimals).ok()?);
-    let whole = scaled.round();
-    ((scaled - whole).abs() < 1e-6 && whole.abs() < 9_007_199_254_740_992.0).then_some(whole as i128)
-}
-
 /// A value in half units, printed exactly: with its figure's decimals, and one more where it is a half, so a
 /// median at the allowance and one a decimal past it never read alike in a note.
 fn said(half_units: i128, decimals: usize) -> String {
@@ -223,12 +262,22 @@ fn judge(definition: &Definition, source: &str, commit: &str) -> Result<Vec<Stri
     let mut judged = Vec::new();
     for record in &definition.records {
         let held: Vec<&Run> = runs.iter().filter(|run| std::ptr::eq(run.record, record)).collect();
-        judged.push(format!("device\t{}\t{}\t{}", record.id, record.platform, held.len()));
-        if held.is_empty() {
+        // A run made in other conditions than the record's says nothing of the release, so it is counted and
+        // named and then left out of every figure.
+        let compared: Vec<&Run> = held.iter().copied().filter(|run| run.missed().next().is_none()).collect();
+        judged.push(format!("device\t{}\t{}\t{}\t{}", record.id, record.platform, held.len(), compared.len()));
+        for required in &record.conditions {
+            let outside = held.iter().filter(|run| !run.met(required)).count();
+            if outside != 0 {
+                judged.push(format!("outside\t{}\t{}\t{outside}\t{}", record.id, required.figure, required.asks()));
+            }
+        }
+        if compared.is_empty() {
             continue;
         }
         for figure in definition.figures.iter().filter(|figure| figure.platforms.contains(&record.platform)) {
-            let values: Vec<f64> = held.iter().flat_map(|run| run.values.iter().filter(|(of, _)| std::ptr::eq(*of, figure)).map(|(_, value)| *value)).collect();
+            let values: Vec<f64> =
+                compared.iter().flat_map(|run| run.values.iter().filter(|(of, _)| std::ptr::eq(*of, figure)).map(|(_, value)| *value)).collect();
             judged.push(figure_line(definition, record, figure, &values)?);
         }
     }
@@ -248,8 +297,8 @@ fn printed_line<'a>(definition: &Definition, output: &'a str) -> Result<&'a str,
 }
 
 /// The measurement `existing` holds (none when there is no file yet), with `line`, which a run printed on the
-/// device `id` at `commit`, added under it, read back whole; and the runs of `id` it then holds.
-fn added(definition: &Definition, existing: Option<&str>, id: &str, commit: &str, line: &str) -> Result<(String, usize), String> {
+/// device `id` at `commit`, added under it, read back whole; and what it then holds of `id`.
+fn added(definition: &Definition, existing: Option<&str>, id: &str, commit: &str, line: &str) -> Result<(String, Held), String> {
     if !full_commit(commit) {
         return Err(format!("`{commit}` is no full commit: a measurement names the 40 hex digits of the commit the release tags"));
     }
@@ -269,8 +318,12 @@ fn added(definition: &Definition, existing: Option<&str>, id: &str, commit: &str
         text.push('\n');
     }
     text.push_str(&format!("{id} {line}\n"));
-    let of_device = measurement(definition, &text)?.1.iter().filter(|run| run.record.id == id).count();
-    Ok((text, of_device))
+    let (_, runs) = measurement(definition, &text)?;
+    let of_device: Vec<&Run> = runs.iter().filter(|run| run.record.id == id).collect();
+    // The run added is the file's last line, so the device's last run.
+    let missed = of_device.last().map(|run| run.missed().map(Required::says).collect()).unwrap_or_default();
+    let compared = of_device.iter().filter(|run| run.missed().next().is_none()).count();
+    Ok((text, Held { runs: of_device.len(), compared, missed }))
 }
 
 /// `cargo xtask release-figures judge <file> <commit>`.
@@ -289,12 +342,12 @@ pub(crate) fn run_add(root: &Path, file: &str, id: &str, commit: &str, output: &
         let line = printed_line(&definition, &printed).map_err(|reason| format!("{output}: {reason}"))?;
         let path = Path::new(file);
         let existing = if path.exists() { Some(crate::scan::read_text(path)?) } else { None };
-        let (text, runs) = added(&definition, existing.as_deref(), id, commit, line).map_err(|reason| format!("{file}: {reason}"))?;
+        let (text, held) = added(&definition, existing.as_deref(), id, commit, line).map_err(|reason| format!("{file}: {reason}"))?;
         if let Some(folder) = path.parent().filter(|folder| !folder.as_os_str().is_empty()) {
             std::fs::create_dir_all(folder).map_err(|error| format!("could not create {}: {error}", folder.display()))?;
         }
         std::fs::write(path, text).map_err(|error| format!("{file}: {error}"))?;
-        Ok(vec![format!("{file}: {id} holds {runs} run(s) of {commit}, of the {} a comparison rests on", definition.comparison_runs)])
+        Ok(vec![format!("{file}: {}", held.said(id, commit, definition.comparison_runs))])
     });
     crate::report::print_lines(said, "release-figures add")
 }
@@ -306,20 +359,28 @@ mod tests {
     const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 
     /// Two phones and the shapes of figure the rule tells apart: held on both, held on the iPhone alone, never
-    /// held (`thermal_state`); three runs a comparison, two warm repeats a run. The iPhone's first path is
+    /// held (`export_threads`) and the conditions (`thermal_state` at most 1 on the iPhone, `cpu_cap_mhz` the
+    /// record's and `battery_c` at most 33.0 on the Xiaomi); three runs a comparison, two warm repeats a run. The iPhone's first path is
     /// recorded at a median of 123.5, whose allowance, 135.85, is a median of two runs.
     const BASELINE: &str = "line = \"craftbridge-baseline\"\nrepeats_word = \"preview_repeats_ms\"\nrepeats_decimals = 2\nflag_slower_than_percent = 10\n[comparison]\nruns = 3\n\
 [running_example]\npreview_repeats = 2\n\
 [[figure]]\nname = \"full_export_ms\"\ndecimals = 1\nflagged = true\n\
 [[figure]]\nname = \"first_path_ms\"\ndecimals = 1\nflagged = true\nunheld_on = [\"android\"]\n\
-[[figure]]\nname = \"thermal_state\"\ndecimals = 0\nflagged = false\nplatforms = [\"ios\"]\n\
+[[figure]]\nname = \"export_threads\"\ndecimals = 0\nflagged = false\n\
+[[figure]]\nname = \"thermal_state\"\ndecimals = 0\nflagged = false\nplatforms = [\"ios\"]\ncondition = \"at_most\"\ncondition_bound = 1\n\
+[[figure]]\nname = \"cpu_cap_mhz\"\ndecimals = 0\nflagged = false\nplatforms = [\"android\"]\ncondition = \"record\"\n\
+[[figure]]\nname = \"battery_c\"\ndecimals = 1\nflagged = false\nplatforms = [\"android\"]\ncondition = \"at_most\"\ncondition_bound = 33.0\n\
 [[device]]\nid = \"iphone\"\nplatform = \"ios\"\ndevice = \"iPhone\"\nos = \"iOS\"\nrecorded = \"2026-11-19\"\nruns = 3\n\
 [device.full_export_ms]\nmedian = 2800\nmin = 2790\nmax = 2850\nvalues = [2790, 2800, 2850]\n\
 [device.first_path_ms]\nmedian = 123.5\nmin = 121.3\nmax = 127.2\nvalues = [121.3, 123.5, 127.2]\n\
+[device.export_threads]\nmedian = 6\nmin = 6\nmax = 6\nvalues = [6, 6, 6]\n\
 [device.thermal_state]\nmedian = 0\nmin = 0\nmax = 0\nvalues = [0, 0, 0]\n\
 [[device]]\nid = \"xiaomi\"\nplatform = \"android\"\ndevice = \"Xiaomi\"\nos = \"Android\"\nrecorded = \"2026-11-20\"\nruns = 3\n\
 [device.full_export_ms]\nmedian = 1750\nmin = 1740\nmax = 1760\nvalues = [1740, 1750, 1760]\n\
-[device.first_path_ms]\nmedian = 60\nmin = 59\nmax = 131\nvalues = [59, 60, 131]\n";
+[device.first_path_ms]\nmedian = 60\nmin = 59\nmax = 131\nvalues = [59, 60, 131]\n\
+[device.export_threads]\nmedian = 8\nmin = 8\nmax = 8\nvalues = [8, 8, 8]\n\
+[device.cpu_cap_mhz]\nmedian = 2880\nmin = 2880\nmax = 2880\nvalues = [2880, 2880, 2880]\n\
+[device.battery_c]\nmedian = 31.2\nmin = 30.9\nmax = 31.2\nvalues = [30.9, 31.2, 31.2]\n";
 
     fn definition_of(baseline: &str) -> Definition {
         let scratch = crate::scratch::Scratch::new("release-figures");
@@ -333,11 +394,23 @@ mod tests {
 
     /// The `run`th run of the iPhone, as it prints it: every run's own warm repeats tell it from every other.
     fn iphone(run: usize, export: &str, path: &str) -> String {
-        format!("iphone craftbridge-baseline full_export_ms={export} first_path_ms={path} thermal_state=0 preview_repeats_ms=17.{:02},17.60\n", 10 + run)
+        format!(
+            "iphone craftbridge-baseline full_export_ms={export} first_path_ms={path} export_threads=6 thermal_state=0 preview_repeats_ms=17.{:02},17.60\n",
+            10 + run
+        )
     }
 
+    /// The `run`th run of the Xiaomi, at the cap and the battery temperature the record's runs read.
     fn xiaomi(run: usize, export: &str, path: &str) -> String {
-        format!("xiaomi craftbridge-baseline full_export_ms={export} first_path_ms={path} preview_repeats_ms=20.{:02},20.10\n", 10 + run)
+        xiaomi_in(run, export, path, "2880", "31.2")
+    }
+
+    /// The same, at the cap `cap` MHz and the battery's `battery` degrees.
+    fn xiaomi_in(run: usize, export: &str, path: &str, cap: &str, battery: &str) -> String {
+        format!(
+            "xiaomi craftbridge-baseline full_export_ms={export} first_path_ms={path} export_threads=8 cpu_cap_mhz={cap} battery_c={battery} preview_repeats_ms=20.{:02},20.10\n",
+            10 + run
+        )
     }
 
     /// A file of `commit` holding one iPhone run for each of `iphone_exports` and one Xiaomi run for each of
@@ -368,13 +441,17 @@ mod tests {
         assert_eq!(
             lines,
             [
-                "device\tiphone\tios\t3",
+                "device\tiphone\tios\t3\t3",
                 "figure\tiphone\tfull_export_ms\t2800.0\t2790.0\t2800.0\t2850.0\t+0.0\twithin",
                 "figure\tiphone\tfirst_path_ms\t123.5\t123.5\t123.5\t127.2\t+0.0\twithin",
+                "figure\tiphone\texport_threads\t6\t6\t6\t6\t+0.0\treported",
                 "figure\tiphone\tthermal_state\t0\t0\t0\t0\t+0.0\treported",
-                "device\txiaomi\tandroid\t3",
+                "device\txiaomi\tandroid\t3\t3",
                 "figure\txiaomi\tfull_export_ms\t1750.0\t1740.0\t1750.0\t1760.0\t+0.0\twithin",
                 "figure\txiaomi\tfirst_path_ms\t400.0\t400.0\t60.0\t131.0\t+566.7\tunheld",
+                "figure\txiaomi\texport_threads\t8\t8\t8\t8\t+0.0\treported",
+                "figure\txiaomi\tcpu_cap_mhz\t2880\t2880\t2880\t2880\t+0.0\treported",
+                "figure\txiaomi\tbattery_c\t31.2\t31.2\t31.2\t31.2\t+0.0\treported",
             ],
             "every figure beside the record's; a figure on an unheld platform reports and never flags, however far it is"
         );
@@ -392,8 +469,8 @@ mod tests {
 
     #[test]
     fn a_figure_no_release_is_held_to_is_reported_however_far_it_moves() {
-        let lines = judged(&file(COMMIT, &["2800.0"; 3], &["1750.0"; 3]).replace("thermal_state=0", "thermal_state=3")).unwrap();
-        assert!(lines.contains(&"figure\tiphone\tthermal_state\t3\t3\t0\t0\tn/a\treported".to_string()), "{lines:?}");
+        let lines = judged(&file(COMMIT, &["2800.0"; 3], &["1750.0"; 3]).replace("export_threads=6", "export_threads=9")).unwrap();
+        assert!(lines.contains(&"figure\tiphone\texport_threads\t9\t9\t6\t6\t+50.0\treported".to_string()), "{lines:?}");
     }
 
     #[test]
@@ -457,7 +534,7 @@ mod tests {
         // The test's comparison asks for three runs: two are reported and not compared, three and four are.
         for (runs, judged_as) in [(2, UNCOMPARED), (3, FLAGGED), (4, FLAGGED)] {
             let lines = judged(&file(COMMIT, &vec!["3500.0"; runs], &["1750.0"; 3])).unwrap();
-            assert_eq!(lines.first().map(String::as_str), Some(format!("device\tiphone\tios\t{runs}").as_str()));
+            assert_eq!(lines.first().map(String::as_str), Some(format!("device\tiphone\tios\t{runs}\t{runs}").as_str()));
             assert_eq!(verdict(&lines, "iphone", "full_export_ms"), Some(judged_as), "{runs} runs: {lines:?}");
             // A figure no release is held to, and one on an unheld platform, read the same however few runs stand.
             assert_eq!(verdict(&lines, "iphone", "thermal_state"), Some(REPORTED), "{lines:?}");
@@ -469,9 +546,9 @@ mod tests {
     #[test]
     fn a_phone_with_no_run_is_listed_as_measured_on_none() {
         let lines = judged(&file(COMMIT, &["3500.0"; 3], &[])).unwrap();
-        assert!(lines.contains(&"device\txiaomi\tandroid\t0".to_string()), "{lines:?}");
+        assert!(lines.contains(&"device\txiaomi\tandroid\t0\t0".to_string()), "{lines:?}");
         assert!(!lines.iter().any(|line| line.starts_with("figure\txiaomi")), "{lines:?}");
-        assert_eq!(judged(&format!("commit {COMMIT}\n")).unwrap(), ["device\tiphone\tios\t0", "device\txiaomi\tandroid\t0"], "a file of no run");
+        assert_eq!(judged(&format!("commit {COMMIT}\n")).unwrap(), ["device\tiphone\tios\t0\t0", "device\txiaomi\tandroid\t0\t0"], "a file of no run");
     }
 
     #[test]
@@ -484,6 +561,72 @@ mod tests {
     fn a_change_too_small_to_print_is_no_change_either_way() {
         let lines = judged(&file(COMMIT, &["2799.9"; 3], &["1750.0"; 3])).unwrap();
         assert!(lines.contains(&"figure\tiphone\tfull_export_ms\t2799.9\t2799.9\t2800.0\t2850.0\t+0.0\twithin".to_string()), "{lines:?}");
+    }
+
+    #[test]
+    fn runs_made_in_other_conditions_than_the_records_are_counted_named_and_left_out() {
+        let mut text = file(COMMIT, &["2800.0"; 3], &[]);
+        // Three runs in the record's conditions, then one at a cap under the record's, one at a cap over it, one on a
+        // hot battery and one outside both, whose export times would flag the release if they were compared.
+        for (run, (cap, battery)) in
+            [("2880", "31.2"), ("2880", "33.0"), ("2880", "30.9"), ("2438", "31.2"), ("2881", "31.2"), ("2880", "33.1"), ("2112", "35.0")]
+                .into_iter()
+                .enumerate()
+        {
+            let export = if run < 3 { "1750.0" } else { "9000.0" };
+            text.push_str(&xiaomi_in(run, export, "400.0", cap, battery));
+        }
+        let lines = judged(&text).unwrap();
+        assert!(lines.contains(&"device\txiaomi\tandroid\t7\t3".to_string()), "the runs at 2438, 2881, 33.1 and 2112/35.0 are left out: {lines:?}");
+        assert!(lines.contains(&"outside\txiaomi\tcpu_cap_mhz\t3\texactly 2880".to_string()), "a cap under the record's or over it: {lines:?}");
+        assert!(lines.contains(&"outside\txiaomi\tbattery_c\t2\tat most 33.0".to_string()), "a battery past 33.0, which 33.0 itself is not: {lines:?}");
+        assert_eq!(lines.iter().filter(|line| line.starts_with("outside\t")).count(), 2, "{lines:?}");
+        assert!(lines.contains(&"figure\txiaomi\tfull_export_ms\t1750.0\t1750.0\t1750.0\t1760.0\t+0.0\twithin".to_string()), "{lines:?}");
+        assert_eq!(verdict(&lines, "xiaomi", "full_export_ms"), Some(WITHIN), "runs left out never reach a median: {lines:?}");
+    }
+
+    /// A file of iPhone runs whose exports are slow enough to be flagged, one at each thermal state of `states`.
+    fn slow_iphone_at(states: &[&str]) -> String {
+        let mut text = format!("commit {COMMIT}\n");
+        for (run, thermal) in states.iter().enumerate() {
+            text.push_str(&iphone(run, "3500.0", "123.5").replace("thermal_state=0", &format!("thermal_state={thermal}")));
+        }
+        text
+    }
+
+    #[test]
+    fn a_serious_thermal_state_is_left_out_and_a_fair_one_is_compared() {
+        let lines = judged(&slow_iphone_at(&["0", "1", "1", "2", "3"])).unwrap();
+        assert_eq!(lines.first().map(String::as_str), Some("device\tiphone\tios\t5\t3"), "{lines:?}");
+        assert!(lines.contains(&"outside\tiphone\tthermal_state\t2\tat most 1".to_string()), "{lines:?}");
+        assert_eq!(verdict(&lines, "iphone", "full_export_ms"), Some(FLAGGED), "three runs in the record's conditions are compared: {lines:?}");
+    }
+
+    #[test]
+    fn too_few_runs_in_the_records_conditions_are_reported_and_never_compared() {
+        // Two runs in the record's conditions and three outside them: five runs, of which fewer than the three a
+        // comparison asks for were made as the record was, so the figures are reported and not judged.
+        let lines = judged(&slow_iphone_at(&["0", "0", "2", "2", "3"])).unwrap();
+        assert_eq!(lines.first().map(String::as_str), Some("device\tiphone\tios\t5\t2"), "{lines:?}");
+        assert_eq!(verdict(&lines, "iphone", "full_export_ms"), Some(UNCOMPARED), "{lines:?}");
+        // No run in the record's conditions leaves no figure to report at all.
+        let none = judged(&file(COMMIT, &["3500.0"; 3], &[]).replace("thermal_state=0", "thermal_state=2")).unwrap();
+        assert_eq!(none[..2], ["device\tiphone\tios\t3\t0", "outside\tiphone\tthermal_state\t3\tat most 1"], "{none:?}");
+        assert!(!none.iter().any(|line| line.starts_with("figure\tiphone")), "{none:?}");
+    }
+
+    #[test]
+    fn a_run_that_lacks_a_condition_figure_is_refused_and_never_read_as_in_the_conditions() {
+        let good = file(COMMIT, &["2800.0"; 3], &["1750.0"; 3]);
+        for (from, refusal) in [
+            (" cpu_cap_mhz=2880", "carries `battery_c=31.2` where `cpu_cap_mhz=<v>` stands next"),
+            (" battery_c=31.2", "carries `preview_repeats_ms=20.10,20.10` where `battery_c=<v>` stands next"),
+            (" thermal_state=0", "carries `preview_repeats_ms=17.10,17.60` where `thermal_state=<v>` stands next"),
+        ] {
+            assert!(good.contains(from), "{from}");
+            let error = judged(&good.replacen(from, "", 1)).unwrap_err();
+            assert!(error.contains(refusal), "`{from}` left out is refused as {refusal:?}: {error}");
+        }
     }
 
     #[test]
@@ -609,22 +752,49 @@ mod tests {
         format!("test theRunningExample ... started\r\n{line}\r\r\ntest theRunningExample ... ok\r\n")
     }
 
+    /// What a Xiaomi run's runner printed around its line, the run made at the cap `cap` MHz and the battery's
+    /// `battery` degrees.
+    fn xiaomi_output(run: usize, cap: &str, battery: &str) -> String {
+        format!("PASS  baseline: the running example\n{}OK (1 checks)\n", xiaomi_in(run, "1750.0", "400.0", cap, battery).strip_prefix("xiaomi ").unwrap())
+    }
+
     #[test]
     fn a_run_added_from_its_runners_output_is_read_back_by_the_judge() {
         let definition = definition();
-        let (first, runs) = added(&definition, None, "iphone", COMMIT, printed_line(&definition, &iphone_output(0, "3136.0")).unwrap()).unwrap();
+        let (first, held) = added(&definition, None, "iphone", COMMIT, printed_line(&definition, &iphone_output(0, "3136.0")).unwrap()).unwrap();
         assert_eq!(first, format!("commit {COMMIT}\n{}", iphone(0, "3136.0", "123.5")), "a new file starts at its commit");
-        assert_eq!(runs, 1);
+        assert_eq!((held.runs, held.compared), (1, 1));
         let mut text = first;
         for run in 1..3 {
             (text, _) = added(&definition, Some(&text), "iphone", COMMIT, printed_line(&definition, &iphone_output(run, "3136.0")).unwrap()).unwrap();
         }
-        let xiaomi_output = format!("PASS  baseline: the running example\n{}OK (1 checks)\n", xiaomi(0, "1750.0", "400.0").strip_prefix("xiaomi ").unwrap());
-        let (text, runs) = added(&definition, Some(text.trim_end()), "xiaomi", COMMIT, printed_line(&definition, &xiaomi_output).unwrap()).unwrap();
-        assert_eq!(runs, 1, "the runs of the device added, not of the file");
+        let (text, held) =
+            added(&definition, Some(text.trim_end()), "xiaomi", COMMIT, printed_line(&definition, &xiaomi_output(0, "2880", "31.2")).unwrap()).unwrap();
+        assert_eq!(held.runs, 1, "the runs of the device added, not of the file");
         let lines = judge(&definition, &text, COMMIT).unwrap();
-        assert!(lines.contains(&"device\tiphone\tios\t3".to_string()) && lines.contains(&"device\txiaomi\tandroid\t1".to_string()), "{lines:?}");
+        assert!(lines.contains(&"device\tiphone\tios\t3\t3".to_string()) && lines.contains(&"device\txiaomi\tandroid\t1\t1".to_string()), "{lines:?}");
         assert_eq!(verdict(&lines, "iphone", "full_export_ms"), Some(FLAGGED), "{lines:?}");
+    }
+
+    #[test]
+    fn a_run_added_outside_the_records_conditions_is_kept_and_never_counted_toward_the_comparison() {
+        let definition = definition();
+        let (text, held) = added(&definition, None, "xiaomi", COMMIT, printed_line(&definition, &xiaomi_output(0, "2880", "33.0")).unwrap()).unwrap();
+        assert_eq!(
+            held.said("xiaomi", COMMIT, definition.comparison_runs),
+            format!("xiaomi holds 1 run(s) of {COMMIT}, 1 of them made in the record's conditions, of the 3 a comparison rests on")
+        );
+        let (text, held) = added(&definition, Some(&text), "xiaomi", COMMIT, printed_line(&definition, &xiaomi_output(1, "2438", "35.0")).unwrap()).unwrap();
+        assert_eq!(
+            held.said("xiaomi", COMMIT, definition.comparison_runs),
+            format!(
+                "xiaomi holds 2 run(s) of {COMMIT}, 1 of them made in the record's conditions, of the 3 a comparison rests on; the run added was made outside them (cpu_cap_mhz exactly 2880, battery_c at most 33.0), so it is left out of the comparison"
+            ),
+            "a throttled run is kept, and counts for nothing a comparison rests on"
+        );
+        let (text, held) = added(&definition, Some(&text), "xiaomi", COMMIT, printed_line(&definition, &xiaomi_output(2, "2880", "31.2")).unwrap()).unwrap();
+        assert_eq!((held.runs, held.compared, held.missed.len()), (3, 2, 0), "a run in the conditions after one outside them");
+        assert!(judge(&definition, &text, COMMIT).unwrap().contains(&"device\txiaomi\tandroid\t3\t2".to_string()), "the judge counts as the writer did");
     }
 
     #[test]

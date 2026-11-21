@@ -38,12 +38,24 @@ private const val PLATFORM = "android"
 private val PLATFORMS = listOf("ios", "android")
 
 /** The keys of a figure's table. */
-private val FIGURE_WORDS = setOf("name", "decimals", "flagged", "platforms", "unheld_on", "what")
+private val FIGURE_WORDS = setOf("name", "decimals", "flagged", "platforms", "unheld_on", "condition", "condition_bound", "what")
+
+/** What a figure that is a run's condition asks of a run for a release to be compared on it. */
+internal sealed class BaselineCondition {
+    /** The run reads the value the record's own runs read. */
+    data object Record : BaselineCondition()
+
+    /** The run reads no more than [bound], which the file states once for every record. */
+    data class AtMost(
+        val bound: Double,
+    ) : BaselineCondition()
+}
 
 /**
  * One figure of the line: its name, the decimals its value is said with, whether a release whose figure is more
  * than the baseline's allowance above it is flagged, which a run's condition is not, the platforms that
- * measure it, and those among them whose runs are reported but never flagged for their own noise.
+ * measure it, those among them whose runs are reported but never flagged for their own noise, and, for a figure
+ * that is a condition, what it asks of a run.
  */
 internal class BaselineFigure(
     val name: String,
@@ -51,6 +63,7 @@ internal class BaselineFigure(
     val flagged: Boolean,
     val platforms: List<String>,
     val unheldOn: List<String>,
+    val condition: BaselineCondition?,
 )
 
 /** The running example of plan §5, which every run builds, previews and exports. */
@@ -108,6 +121,48 @@ internal class Baseline(
     companion object {
         /** The baseline in the test APK's assets. */
         fun of(context: Context): Baseline = of(assetText(context, BASELINE_ASSET))
+
+        /**
+         * What the figure at [pointer] says of being a run's condition: `condition = "record"` asks a run to read what
+         * the record's runs read, `condition = "at_most"` with a `condition_bound` asks it to read no more than the
+         * bound, and a figure with neither is a cost or a plain report. A condition is never a cost, which `flagged`
+         * says of the costs.
+         */
+        private fun condition(
+            document: JSONValue,
+            pointer: String,
+            name: String,
+            flagged: Boolean,
+        ): BaselineCondition? {
+            val kind = document.valueAt("$pointer/condition")
+            val bound = document.valueAt("$pointer/condition_bound")
+            if (kind == null) {
+                if (bound != null) throw RunnerFailure("the figure `$name` holds a `condition_bound` and no `condition`")
+                return null
+            }
+            if (flagged) throw RunnerFailure("the figure `$name` is a condition and flagged, which only a cost is")
+            val word = (kind as? JSONValue.Text)?.value
+            return when (word) {
+                "record" -> {
+                    if (bound != null) {
+                        throw RunnerFailure("the figure `$name` is `record` and holds a `condition_bound`, which it has no use for")
+                    }
+                    BaselineCondition.Record
+                }
+
+                "at_most" -> {
+                    BaselineCondition.AtMost(
+                        (bound as? JSONValue.Number)?.value
+                            ?: throw RunnerFailure("the figure `$name` is `at_most` and names no number `condition_bound`"),
+                    )
+                }
+
+                else -> {
+                    val said = word?.let { "`$it`" } ?: "not text"
+                    throw RunnerFailure("the figure `$name`'s `condition` is $said, which is neither record nor at_most")
+                }
+            }
+        }
 
         /** The baseline [text] holds. */
         fun of(text: String): Baseline {
@@ -184,7 +239,14 @@ internal class Baseline(
                     if (unheld.isNotEmpty() && unheld.containsAll(measuring)) {
                         throw RunnerFailure("the figure `$name` is unheld everywhere it is measured, which `flagged = false` says")
                     }
-                    BaselineFigure(name, number("/figure/$it/decimals").toInt(), flagged, measuring, unheld)
+                    BaselineFigure(
+                        name,
+                        number("/figure/$it/decimals").toInt(),
+                        flagged,
+                        measuring,
+                        unheld,
+                        condition(document, "/figure/$it", name, flagged),
+                    )
                 },
             )
         }
@@ -385,18 +447,18 @@ internal val baselineChecks: List<Case> =
             val baseline = Baseline.of(context)
             agreed(baseline.line, "craftbridge-baseline", "the word the line starts with")
             agreed(
-                baseline.figures.map { listOf(it.name, it.decimals, it.flagged, it.platforms, it.unheldOn) },
+                baseline.figures.map { listOf(it.name, it.decimals, it.flagged, it.platforms, it.unheldOn, it.condition) },
                 listOf(
-                    listOf("first_preview_ms", 1, true, listOf("ios", "android"), listOf("android")),
-                    listOf("gpu_start_ms", 1, false, listOf("ios", "android"), emptyList<String>()),
-                    listOf("first_path_ms", 1, true, listOf("ios", "android"), listOf("android")),
-                    listOf("preview_path_ms", 1, true, listOf("ios", "android"), listOf("android")),
-                    listOf("full_export_ms", 1, true, listOf("ios", "android"), emptyList<String>()),
-                    listOf("peak_memory_bytes", 0, true, listOf("ios", "android"), emptyList<String>()),
-                    listOf("export_threads", 0, false, listOf("ios", "android"), emptyList<String>()),
-                    listOf("thermal_state", 0, false, listOf("ios"), emptyList<String>()),
-                    listOf("cpu_cap_mhz", 0, false, listOf("android"), emptyList<String>()),
-                    listOf("battery_c", 1, false, listOf("android"), emptyList<String>()),
+                    listOf("first_preview_ms", 1, true, listOf("ios", "android"), listOf("android"), null),
+                    listOf("gpu_start_ms", 1, false, listOf("ios", "android"), emptyList<String>(), null),
+                    listOf("first_path_ms", 1, true, listOf("ios", "android"), listOf("android"), null),
+                    listOf("preview_path_ms", 1, true, listOf("ios", "android"), listOf("android"), null),
+                    listOf("full_export_ms", 1, true, listOf("ios", "android"), emptyList<String>(), null),
+                    listOf("peak_memory_bytes", 0, true, listOf("ios", "android"), emptyList<String>(), null),
+                    listOf("export_threads", 0, false, listOf("ios", "android"), emptyList<String>(), null),
+                    listOf("thermal_state", 0, false, listOf("ios"), emptyList<String>(), BaselineCondition.AtMost(1.0)),
+                    listOf("cpu_cap_mhz", 0, false, listOf("android"), emptyList<String>(), BaselineCondition.Record),
+                    listOf("battery_c", 1, false, listOf("android"), emptyList<String>(), BaselineCondition.AtMost(33.0)),
                 ),
                 "the figures",
             )
@@ -449,6 +511,8 @@ internal val baselineChecks: List<Case> =
             val file = assetText(context, BASELINE_ASSET)
             val unheld = "unheld_on = [\"android\"]"
             val iosOnly = "platforms = [\"ios\"]"
+            val atMost = "$iosOnly\ncondition = \"at_most\""
+            val recorded = "platforms = [\"android\"]\ncondition = \"record\""
             listOf(
                 file.replaceFirst(unheld, "unheld_on = [\"ios\", \"android\"]") to
                     "the figure `first_preview_ms` is unheld everywhere it is measured, which `flagged = false` says",
@@ -463,6 +527,18 @@ internal val baselineChecks: List<Case> =
                 file.replaceFirst(iosOnly, "$iosOnly\nunheld_on = [\"ios\"]") to
                     "the figure `thermal_state` is unheld on a platform and never flagged",
                 file.replaceFirst(iosOnly, "platforms = \"ios\"") to "the figure `thermal_state`'s `platforms` is not a list of platforms",
+                file.replaceFirst("$atMost\ncondition_bound = 1\n", "$atMost\n") to
+                    "the figure `thermal_state` is `at_most` and names no number `condition_bound`",
+                file.replaceFirst("$atMost\ncondition_bound = 1", "$iosOnly\ncondition_bound = 1") to
+                    "the figure `thermal_state` holds a `condition_bound` and no `condition`",
+                file.replaceFirst(atMost, "$iosOnly\ncondition = \"atmost\"") to
+                    "the figure `thermal_state`'s `condition` is `atmost`, which is neither record nor at_most",
+                file.replaceFirst(atMost, "$iosOnly\ncondition = 1") to
+                    "the figure `thermal_state`'s `condition` is not text, which is neither record nor at_most",
+                file.replaceFirst(recorded, "$recorded\ncondition_bound = 2880") to
+                    "the figure `cpu_cap_mhz` is `record` and holds a `condition_bound`, which it has no use for",
+                file.replaceFirst("flagged = false\nplatforms = [\"ios\"]", "flagged = true\nplatforms = [\"ios\"]") to
+                    "the figure `thermal_state` is a condition and flagged, which only a cost is",
             ).forEach { (spelt, refusal) ->
                 agreed(runCatching { Baseline.of(spelt) }.exceptionOrNull()?.message, refusal, "a figure spelt otherwise")
             }

@@ -8,6 +8,13 @@ import Foundation
 
 /// What a run measures and prints, as `baseline.toml` defines it.
 struct Baseline {
+    /// What a figure that is a run's condition asks of the run: that it read the value the record's own runs read,
+    /// or no more than a bound the file states once for every record.
+    enum Condition: Equatable {
+        case record
+        case atMost(Double)
+    }
+
     /// One figure of the line: its name, the decimals its value is printed with, whether a release whose figure is
     /// more than ``flagSlowerThanPercent`` above the baseline's is flagged, which a run's condition is not, and
     /// the platforms that measure it.
@@ -19,6 +26,8 @@ struct Baseline {
         /// The platforms whose runs are recorded and reported for this figure but never flagged, because their
         /// own noise is wider than the allowance (`baseline.toml` says why).
         var unheldOn: [String] = []
+        /// What a run must read of this figure for a release to be compared on it, when the figure is a condition.
+        var condition: Condition?
 
         /// Whether a release's figure on `platform` is flagged when it is more than the allowance above the record's.
         func isHeld(on platform: String) -> Bool {
@@ -114,7 +123,8 @@ struct Baseline {
                 decimals: Int(try Baseline.number(table["decimals"], "decimals")),
                 flagged: flagged,
                 platforms: platforms,
-                unheldOn: unheld)
+                unheldOn: unheld,
+                condition: try Baseline.condition(of: table, named: name, flagged: flagged))
         }
         if case .array(let held)? = document["device"] { devices = held } else { devices = [] }
     }
@@ -185,6 +195,12 @@ struct Baseline {
             for figure in measured {
                 problems += Baseline.spreadProblems(of: figure, in: record[figure.name], runs: runs, record: id)
             }
+            // A record that names no condition would compare a release on every run, the throttled ones too.
+            if Baseline.platforms.contains(platform) && !measured.contains(where: { $0.condition != nil }) {
+                problems.append(
+                    "\(id): no figure of \(platform) is a condition, "
+                        + "so a release's runs made in other conditions would be compared with it")
+            }
         }
         return problems
     }
@@ -217,6 +233,20 @@ struct Baseline {
             problems.append(
                 "\(id): `\(figure.name)` says median, min and max \(held), and its values give \(derived)")
         }
+        // A record is compared under the condition its own runs were made in, so a run of it outside the condition,
+        // or runs of it that read two values of what a release must match, leave nothing to compare a release with.
+        switch figure.condition {
+        case .record where ends.0 != ends.1:
+            problems.append(
+                "\(id): `\(figure.name)` ran from \(ends.0) to \(ends.1), "
+                    + "and a record's runs read one value of it, which a release is compared on")
+        case .atMost(let bound) where ends.1 > bound:
+            problems.append(
+                "\(id): `\(figure.name)` ran from \(ends.0) to \(ends.1), "
+                    + "outside its own condition (at most \(bound))")
+        default:
+            break
+        }
         return problems
     }
 
@@ -235,7 +265,49 @@ struct Baseline {
     /// The words of a record besides its figures: what it was measured on, how, and what the phone was doing.
     static let recordWords = ["id", "platform", "device", "os", "build", "conditions", "recorded", "runs"]
     /// The keys of a figure's table.
-    static let figureWords = ["name", "decimals", "flagged", "platforms", "unheld_on", "what"]
+    static let figureWords = [
+        "name", "decimals", "flagged", "platforms", "unheld_on", "condition", "condition_bound", "what",
+    ]
+
+    /// What a figure says of being a run's condition: `condition = "record"` asks a run to read what the record's runs
+    /// read, `condition = "at_most"` with a `condition_bound` asks it to read no more than the bound, and a figure with
+    /// neither is a cost or a plain report. A condition is never a cost, which `flagged` says of the costs.
+    private static func condition(of table: [String: JSONValue], named name: String, flagged: Bool) throws
+        -> Condition?
+    {
+        guard let kind = table["condition"] else {
+            if table["condition_bound"] != nil {
+                throw CraftError.InvalidParams(
+                    detail: "the figure `\(name)` holds a `condition_bound` and no `condition`")
+            }
+            return nil
+        }
+        if flagged {
+            throw CraftError.InvalidParams(
+                detail: "the figure `\(name)` is a condition and flagged, which only a cost is")
+        }
+        let bound = table["condition_bound"]
+        switch kind {
+        case .string("record"):
+            if bound != nil {
+                throw CraftError.InvalidParams(
+                    detail: "the figure `\(name)` is `record` and holds a `condition_bound`, which it has no use for")
+            }
+            return .record
+        case .string("at_most"):
+            guard case .number(let limit)? = bound else {
+                throw CraftError.InvalidParams(
+                    detail: "the figure `\(name)` is `at_most` and names no number `condition_bound`")
+            }
+            return .atMost(limit)
+        case .string(let other):
+            throw CraftError.InvalidParams(
+                detail: "the figure `\(name)`'s `condition` is `\(other)`, which is neither record nor at_most")
+        default:
+            throw CraftError.InvalidParams(
+                detail: "the figure `\(name)`'s `condition` is not text, which is neither record nor at_most")
+        }
+    }
 
     /// The platforms a figure's `key` lists, nil when the figure has no such key. A platform spelt otherwise would
     /// leave the figure out of every run's line and every record unseen, or flag it where it is to be reported only.
