@@ -38,11 +38,14 @@ private func baseline(_ devices: String = "") -> String {
     decimals = 0
     flagged = false
     platforms = ["ios"]
+    condition = "at_most"
+    condition_bound = 1
     [[figure]]
     name = "cpu_cap_mhz"
     decimals = 0
     flagged = false
     platforms = ["android"]
+    condition = "record"
     \(devices)
     """
 }
@@ -58,7 +61,7 @@ private func device(
     let conditions =
         platform == "ios"
         ? "[device.thermal_state]\nmedian = 0.0\nmin = 0.0\nmax = 0.0\nvalues = [0.0, 0.0, 0.0, 0.0, 0.0]\n"
-        : "[device.cpu_cap_mhz]\n\(spread)\n"
+        : "[device.cpu_cap_mhz]\nmedian = 2880.0\nmin = 2880.0\nmax = 2880.0\nvalues = [2880.0, 2880.0, 2880.0, 2880.0, 2880.0]\n"
     return """
         [[device]]
         id = "\(id)"
@@ -93,11 +96,15 @@ private func device(
                     .init(name: "full_export_ms", decimals: 1, flagged: true),
                     .init(name: "peak_memory_bytes", decimals: 0, flagged: true),
                     .init(name: "export_threads", decimals: 0, flagged: false),
-                    .init(name: "thermal_state", decimals: 0, flagged: false, platforms: ["ios"]),
-                    .init(name: "cpu_cap_mhz", decimals: 0, flagged: false, platforms: ["android"]),
-                    .init(name: "battery_c", decimals: 1, flagged: false, platforms: ["android"]),
+                    .init(
+                        name: "thermal_state", decimals: 0, flagged: false, platforms: ["ios"], condition: .atMost(1)),
+                    .init(
+                        name: "cpu_cap_mhz", decimals: 0, flagged: false, platforms: ["android"], condition: .record),
+                    .init(
+                        name: "battery_c", decimals: 1, flagged: false, platforms: ["android"],
+                        condition: .atMost(33)),
                 ],
-            "the costs a release is flagged on, the GPU start that most of the first preview is, and the conditions")
+            "the costs a release is flagged on, the GPU start, and the conditions, each with what it asks of a run")
         #expect(baseline.flagSlowerThanPercent == 10)
         #expect(baseline.comparisonRuns == 10)
         #expect(
@@ -162,6 +169,50 @@ private func device(
         }
     }
 
+    @Test func aConditionIsTheRecordsOwnValueOrABoundTheFileStatesOnce() throws {
+        func spelt(_ text: String, for listed: String = "condition = \"at_most\"\ncondition_bound = 1") -> String {
+            baseline().replacingOccurrences(of: listed, with: text)
+        }
+        let figures = try Baseline(toml: baseline()).figures
+        #expect(figures.first { $0.name == "thermal_state" }?.condition == .atMost(1), "no serious thermal state")
+        #expect(figures.first { $0.name == "cpu_cap_mhz" }?.condition == .record, "the cap the record's runs read")
+        #expect(figures.first { $0.name == "full_export_ms" }?.condition == nil, "a cost is no condition")
+        let refusals: [(String, String)] = [
+            (
+                spelt("condition = \"at_most\""),
+                "the figure `thermal_state` is `at_most` and names no number `condition_bound`"
+            ),
+            (
+                spelt("condition = \"at_most\"\ncondition_bound = \"1\""),
+                "the figure `thermal_state` is `at_most` and names no number `condition_bound`"
+            ),
+            (
+                spelt("condition_bound = 1"),
+                "the figure `thermal_state` holds a `condition_bound` and no `condition`"
+            ),
+            (
+                spelt("condition = \"atmost\"\ncondition_bound = 1"),
+                "the figure `thermal_state`'s `condition` is `atmost`, which is neither record nor at_most"
+            ),
+            (
+                spelt("condition = 1\ncondition_bound = 1"),
+                "the figure `thermal_state`'s `condition` is not text, which is neither record nor at_most"
+            ),
+            (
+                spelt("condition = \"record\"\ncondition_bound = 2880", for: "condition = \"record\""),
+                "the figure `cpu_cap_mhz` is `record` and holds a `condition_bound`, which it has no use for"
+            ),
+            (
+                baseline().replacingOccurrences(
+                    of: "flagged = false\nplatforms = [\"ios\"]", with: "flagged = true\nplatforms = [\"ios\"]"),
+                "the figure `thermal_state` is a condition and flagged, which only a cost is"
+            ),
+        ]
+        for (text, refusal) in refusals {
+            #expect(throws: CraftError.InvalidParams(detail: refusal)) { try Baseline(toml: text) }
+        }
+    }
+
     @Test func aRunPrintsOneLineOfTheFiguresItsPlatformMeasuresByNameInTheDefinedOrderThenEveryWarmRepeat() throws {
         let baseline = try Baseline(toml: baseline())
         let repeats = [30, 1.25, 20.0004, 22, 21.5, 40, 25, 24, 23]
@@ -211,6 +262,36 @@ private func device(
         #expect(
             try Baseline(toml: baseline(device(spread: alike))).recordProblems() == [],
             "runs that all measured alike have one figure for their median and both ends")
+    }
+
+    @Test func aRecordNamesAConditionAndIsMadeInIt() throws {
+        func problems(_ devices: String) throws -> [String] { try Baseline(toml: baseline(devices)).recordProblems() }
+        let none = baseline(device()).replacingOccurrences(
+            of: "condition = \"at_most\"\ncondition_bound = 1\n", with: "")
+        #expect(
+            try Baseline(toml: none).recordProblems() == [
+                "phone: no figure of ios is a condition, so a release's runs made in other conditions would be compared with it"
+            ], "a record of a platform with no condition would compare a release's throttled runs too")
+        let hot = "median = 0.0\nmin = 0.0\nmax = 2.0\nvalues = [0.0, 0.0, 0.0, 0.0, 2.0]"
+        #expect(
+            try problems(
+                device().replacingOccurrences(
+                    of: "median = 0.0\nmin = 0.0\nmax = 0.0\nvalues = [0.0, 0.0, 0.0, 0.0, 0.0]", with: hot))
+                == ["phone: `thermal_state` ran from 0.0 to 2.0, outside its own condition (at most 1.0)"],
+            "a record made at a serious thermal state breaks the rule a release is held to")
+        let fair = "median = 0.0\nmin = 0.0\nmax = 1.0\nvalues = [0.0, 0.0, 0.0, 0.0, 1.0]"
+        #expect(
+            try problems(
+                device().replacingOccurrences(
+                    of: "median = 0.0\nmin = 0.0\nmax = 0.0\nvalues = [0.0, 0.0, 0.0, 0.0, 0.0]", with: fair)) == [],
+            "a run at the bound meets it")
+        let capped = device(id: "xiaomi", platform: "android").replacingOccurrences(
+            of: "median = 2880.0\nmin = 2880.0\nmax = 2880.0\nvalues = [2880.0, 2880.0, 2880.0, 2880.0, 2880.0]",
+            with: "median = 2880.0\nmin = 2438.0\nmax = 2880.0\nvalues = [2880.0, 2880.0, 2880.0, 2438.0, 2880.0]")
+        #expect(
+            try problems(capped) == [
+                "xiaomi: `cpu_cap_mhz` ran from 2438.0 to 2880.0, and a record's runs read one value of it, which a release is compared on"
+            ], "a record made across two caps names no cap a release must match")
     }
 
     @Test func eachWayARecordCanBeIncompleteIsNamed() throws {

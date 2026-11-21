@@ -28,14 +28,22 @@ flag_slower_than_percent = 10
 # How a release is held to the record, which a phone's own noise decides. Each `flagged` figure, on each platform that
 # measures it and its `unheld_on` does not name, is measured as the record was, in at least `runs` fresh installs of
 # the release, each a process of its own on a quiet phone, under the
-# conditions the record names and its condition figures show run by run, and it is flagged when the median of those
-# runs is more than `flag_slower_than_percent` above the record's median and the fastest of them is slower than the
+# conditions the record names, and it is flagged when the median of those runs is more than `flag_slower_than_percent` above the record's median and the fastest of them is slower than the
 # record's slowest run. One run is never compared, and a median alone is not either: the iPhone's export takes about
 # 2.83 s in some fresh processes and about 3.15 s in others, with the same thermal state, pool and GPU, and a whole
 # quiet series can fall in either, one run at a time under the shared lock (three series of one build at EffectCraft
 # 10376058 had medians 2.83, 2.99 and 3.16 s, 11.5 % apart), so the median moves past the 10 % with no change of the
 # build, while a slower build moves every run, its fastest past the record's slowest. A record rests on at least this
 # many runs.
+#
+# The conditions are the `[[figure]]` tables that carry a `condition`, which each run's own line shows run by run: a
+# figure with `condition = "record"` asks a run to read what the record's runs read of it (a record's runs all read one
+# value of it, and the record holds it), and one with `condition = "at_most"` asks a run to read no more than its
+# `condition_bound`, a bound the file states once for every record. A run that reads outside any condition of its
+# phone's record is made in other conditions than the record, so it is counted and named in the notes and left out of
+# every figure's comparison, and the release is said to be compared in part; a record whose platform has no condition
+# is refused, since it would compare a release's throttled runs too. A condition is never a cost, so it is never
+# `flagged`.
 [comparison]
 runs = 10
 
@@ -146,9 +154,11 @@ name = "thermal_state"
 decimals = 0
 flagged = false
 platforms = ["ios"]
+condition = "at_most"
+condition_bound = 1
 # `ProcessInfo.thermalState` as the system's own raw value (0 nominal, 1 fair, 2 serious, 3 critical), the higher of
 # its reading before the engine starts and after the export: the phone slows itself as it heats, so a run at serious
-# or critical is not one a release is compared on.
+# or critical is not one a release is compared on, which is the bound of 1.
 what = "the system's thermal state, 0 nominal to 3 critical, the higher of before the run and after its export"
 
 [[figure]]
@@ -156,11 +166,13 @@ name = "cpu_cap_mhz"
 decimals = 0
 flagged = false
 platforms = ["android"]
+condition = "record"
 # The `scaling_max_freq` of the fastest cores (those whose `cpuinfo_max_freq` is the highest), in MHz, read before the
 # engine starts. The Xiaomi caps its own cores by charge, battery and temperature, its two prime cores furthest: 2880
 # of their 4608 MHz on a cool battery, 2438 or lower as it warms, below the 2746 it leaves its six others, so the
 # highest cap of any core would read the slower cores' then. Under 2438 its first preview ran about a third longer and
-# its export 5 % longer, which `thermal status` never shows.
+# its export 5 % longer, which `thermal status` never shows. A release is compared only on the runs that read the cap
+# the record's runs read, 2880 for the Xiaomi's.
 what = "the frequency cap of the fastest cores, in MHz, before the run"
 
 [[figure]]
@@ -168,8 +180,11 @@ name = "battery_c"
 decimals = 1
 flagged = false
 platforms = ["android"]
+condition = "at_most"
+condition_bound = 33.0
 # The battery's temperature in degrees Celsius, as the platform's battery broadcast gives it, read before the
-# engine starts: the phone's own cap follows it, and a run on a hot battery is not one a release is compared on.
+# engine starts: the phone's own cap follows it, and a run on a hot battery is not one a release is compared on. The
+# bound is the one the record's own series was made under, its battery at or under 33.0 C before every run.
 what = "the battery's temperature in degrees Celsius before the run"
 
 # What each platform's peak memory is, and why it is the figure to read there.

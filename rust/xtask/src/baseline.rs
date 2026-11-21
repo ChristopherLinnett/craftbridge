@@ -1,7 +1,7 @@
 //! The per-device baseline: `cargo xtask baseline` prints what `conformance/effects/baseline.toml` records
 //! for each acceptance phone, as a release's notes read it — one `allowance` line, then one `device` line
-//! per record, each field a tab away from the next and the last the record's figures as a run's line
-//! prints them.
+//! per record, each field a tab away from the next, the last but one the record's figures as a run's line
+//! prints them and the last the conditions a release's runs are compared with it under.
 //!
 //! The file is read with the `toml` crate, as every TOML of this repository is (`crate::pins::toml_file`),
 //! and no script reads it by text itself: which figures there are, the decimals each is printed with, and
@@ -11,8 +11,8 @@
 //! `android/sdk/effects/src/androidTest/kotlin/io/github/christopherlinnett/craftbridge/effects/BaselineOnDevice.kt`);
 //! this is the one reader of the records for what only reports them, which is what a release's notes do
 //! (plan §9, §23, §29), and of the rule a release's own figures are judged by and the line their runs print
-//! (`crate::release_figures`): the figures' `flagged` and `unheld_on`, the `[comparison]`'s runs, the
-//! allowance and the warm repeats are read here once. A record a note could not fill is refused here, naming
+//! (`crate::release_figures`): the figures' `flagged`, `unheld_on` and condition, the `[comparison]`'s runs, the
+//! allowance and the warm repeats are read here once, each record's conditions among them. A record a note could not fill is refused here, naming
 //! the device and the figure, rather than printed as nothing.
 //!
 //! What the file may hold is the Swift reader's to say: the gate's Swift suite reads the repository's own
@@ -39,22 +39,92 @@ const PLATFORMS: [&str; 2] = ["ios", "android"];
 /// is a mistake to refuse rather than a line of digits to carry into a note.
 const MOST_DECIMALS: i64 = 12;
 
+/// What a figure that is a run's condition asks of it, as the file writes it: the value the record's own runs
+/// read (`record`), or a bound the file states once for every record (`at_most`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum Condition {
+    Record,
+    AtMost(f64),
+}
+
 /// One figure: the name its record's table carries, the decimals its value is printed with, the platforms
-/// that measure it, whether a release is held to it (`flagged`) and the platforms whose runs of it are
-/// reported and never flagged (`unheld_on`).
+/// that measure it, whether a release is held to it (`flagged`), the platforms whose runs of it are
+/// reported and never flagged (`unheld_on`) and, for a figure that is a condition, what the condition asks.
 pub(crate) struct Figure {
     pub(crate) name: String,
     pub(crate) decimals: usize,
     pub(crate) platforms: Vec<String>,
     pub(crate) flagged: bool,
     pub(crate) unheld_on: Vec<String>,
+    pub(crate) condition: Option<Condition>,
 }
 
-/// One record's spread of a figure: the median and the slowest run, which a release is held to, and the
-/// median as a run prints it.
+/// A condition as one record holds it: the value its runs read, or the bound every record has.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum Rule {
+    Exactly(f64),
+    AtMost(f64),
+}
+
+/// One condition of a record: the figure that shows it run by run, the decimals that figure prints, and what
+/// a run's value of it must be for the run to be compared with the record.
+pub(crate) struct Required {
+    pub(crate) figure: String,
+    pub(crate) decimals: usize,
+    pub(crate) rule: Rule,
+}
+
+impl Required {
+    /// Whether a run that read `value` of the figure was made in the condition. Both sides are weighed as
+    /// whole half units of the figure's last decimal, so no rounding of a fraction decides a run at the bound.
+    pub(crate) fn met_by(&self, value: f64) -> bool {
+        let (Some(read), Some(asked)) = (half_units(value, self.decimals), half_units(self.bound(), self.decimals)) else {
+            return false;
+        };
+        match self.rule {
+            Rule::Exactly(_) => read == asked,
+            Rule::AtMost(_) => read <= asked,
+        }
+    }
+
+    fn bound(&self) -> f64 {
+        match self.rule {
+            Rule::Exactly(value) | Rule::AtMost(value) => value,
+        }
+    }
+
+    /// The rule in the words a note prints after the figure's name: `exactly 2880`, `at most 33.0`.
+    pub(crate) fn asks(&self) -> String {
+        let value = format!("{:.decimals$}", self.bound(), decimals = self.decimals);
+        match self.rule {
+            Rule::Exactly(_) => format!("exactly {value}"),
+            Rule::AtMost(_) => format!("at most {value}"),
+        }
+    }
+
+    /// The condition with its figure: `cpu_cap_mhz exactly 2880`, `battery_c at most 33.0`.
+    pub(crate) fn says(&self) -> String {
+        format!("{} {}", self.figure, self.asks())
+    }
+}
+
+/// A value in half units of its figure's last decimal, or nothing for one that is not a whole number of
+/// them. A run prints each value with its figure's decimals and a median is one run's value or the mean of
+/// two, the record's as a release's, so every value the rule weighs is a whole number of half units: the
+/// rule is weighed in those whole numbers, so no rounding of a fraction decides a figure at the allowance's
+/// very edge. Past 2^53 a float holds no whole number exactly, so a value that large is none either.
+pub(crate) fn half_units(value: f64, decimals: usize) -> Option<i128> {
+    let scaled = value * 2.0 * 10f64.powi(i32::try_from(decimals).ok()?);
+    let whole = scaled.round();
+    ((scaled - whole).abs() < 1e-6 && whole.abs() < 9_007_199_254_740_992.0).then_some(whole as i128)
+}
+
+/// One record's spread of a figure: the median, the fastest and the slowest run, which a release is held to,
+/// and the median as a run prints it.
 pub(crate) struct Spread {
     pub(crate) name: String,
     pub(crate) median: f64,
+    pub(crate) min: f64,
     pub(crate) max: f64,
     pub(crate) word: String,
 }
@@ -68,6 +138,8 @@ pub(crate) struct Record {
     pub(crate) recorded: String,
     pub(crate) runs: i64,
     pub(crate) spreads: Vec<Spread>,
+    /// What a release's run must read of each condition to be compared with this record.
+    pub(crate) conditions: Vec<Required>,
 }
 
 /// The warm preview repeats a run's line ends with: the word they stand under, the decimals each is printed
@@ -121,9 +193,67 @@ fn figures(document: &toml::Table) -> Result<Vec<Figure>, String> {
             Some(listed) => platforms(listed, &format!("`{name}`'s `unheld_on`"))?,
             None => Vec::new(),
         };
-        figures.push(Figure { name, decimals, platforms: measured_on, flagged, unheld_on });
+        let condition = condition_of(table, &name, flagged, decimals)?;
+        figures.push(Figure { name, decimals, platforms: measured_on, flagged, unheld_on, condition });
     }
     Ok(figures)
+}
+
+/// What a figure says of being a run's condition: `condition = "record"` asks a run to read what the record's
+/// runs read, `condition = "at_most"` with a `condition_bound` asks it to read no more than the bound, and a
+/// figure with neither is a cost or a plain report. A condition is never a cost, which `flagged` says of
+/// the figures a release is held to.
+fn condition_of(table: &toml::Table, name: &str, flagged: bool, decimals: usize) -> Result<Option<Condition>, String> {
+    let bound = table.get("condition_bound");
+    let Some(kind) = table.get("condition") else {
+        return match bound {
+            Some(_) => Err(format!("{BASELINE}: the figure `{name}` holds a `condition_bound` and no `condition`")),
+            None => Ok(None),
+        };
+    };
+    if flagged {
+        return Err(format!("{BASELINE}: the figure `{name}` is a condition and flagged, which only a cost is"));
+    }
+    match (kind.as_str(), bound) {
+        (Some("record"), None) => Ok(Some(Condition::Record)),
+        (Some("record"), Some(_)) => Err(format!("{BASELINE}: the figure `{name}` is `record` and holds a `condition_bound`, which it has no use for")),
+        (Some("at_most"), _) => {
+            let bound = number(table, "condition_bound", name)
+                .map_err(|_| format!("{BASELINE}: the figure `{name}` is `at_most` and names no number `condition_bound`"))?;
+            // The bound is weighed against one run's value, a whole number of the figure's last decimal: a half of
+            // one is a median's, which a note would print rounded to a bound the rule does not apply.
+            if half_units(bound, decimals).is_none_or(|units| units % 2 != 0) {
+                return Err(format!("{BASELINE}: the figure `{name}`'s `condition_bound` {bound} has more decimals than its {decimals}, which no run prints"));
+            }
+            Ok(Some(Condition::AtMost(bound)))
+        }
+        (other, _) => Err(format!(
+            "{BASELINE}: the figure `{name}`'s `condition` is {}, which is neither record nor at_most",
+            other.map_or_else(|| "not text".to_string(), |word| format!("`{word}`"))
+        )),
+    }
+}
+
+/// What a record's runs of a condition figure say of the condition: for `record` the one value they all read,
+/// for `at_most` the bound, which every one of them must meet.
+fn required_of(figure: &Figure, condition: Condition, spread: &Spread, id: &str) -> Result<Required, String> {
+    let rule = match condition {
+        Condition::Record => {
+            if half_units(spread.min, figure.decimals) != half_units(spread.max, figure.decimals) {
+                return Err(format!(
+                    "{BASELINE}: {id}: `{}` ran from {} to {}, and a record's runs read one value of it, which a release is compared on",
+                    figure.name, spread.min, spread.max
+                ));
+            }
+            Rule::Exactly(spread.median)
+        }
+        Condition::AtMost(bound) => Rule::AtMost(bound),
+    };
+    let required = Required { figure: figure.name.clone(), decimals: figure.decimals, rule };
+    if !required.met_by(spread.min) || !required.met_by(spread.max) {
+        return Err(format!("{BASELINE}: {id}: `{}` ran from {} to {}, outside its own condition ({})", figure.name, spread.min, spread.max, required.asks()));
+    }
+    Ok(required)
 }
 
 /// The decimals the values a line names `named` are printed with, a figure's or the warm repeats', held to
@@ -157,12 +287,7 @@ fn spread_of(record: &toml::Table, figure: &Figure, runs: i64, id: &str) -> Resu
         .ok_or_else(|| format!("{BASELINE}: {id}: `{}` holds no values, so its median is no measurement", figure.name))?;
     let held: Vec<f64> = values
         .iter()
-        .map(|value| {
-            value
-                .as_float()
-                .or_else(|| value.as_integer().map(|whole| whole as f64))
-                .ok_or_else(|| format!("{BASELINE}: {id}: `{}` holds a value that is no number: {value}", figure.name))
-        })
+        .map(|value| as_number(value).ok_or_else(|| format!("{BASELINE}: {id}: `{}` holds a value that is no number: {value}", figure.name)))
         .collect::<Result<_, _>>()?;
     if held.len() != runs as usize {
         return Err(format!("{BASELINE}: {id}: `{}` holds {} values for {runs} runs", figure.name, held.len()));
@@ -170,7 +295,7 @@ fn spread_of(record: &toml::Table, figure: &Figure, runs: i64, id: &str) -> Resu
     if !(low <= median && median <= high) {
         return Err(format!("{BASELINE}: {id}: `{}` says a median of {median} outside its own range {low} to {high}", figure.name));
     }
-    Ok(Spread { name: figure.name.clone(), median, max: high, word: format!("{}={:.decimals$}", figure.name, median, decimals = figure.decimals) })
+    Ok(Spread { name: figure.name.clone(), median, min: low, max: high, word: format!("{}={:.decimals$}", figure.name, median, decimals = figure.decimals) })
 }
 
 /// The warm repeats a run's line ends with, as the file defines them.
@@ -242,28 +367,41 @@ pub(crate) fn definition(root: &Path) -> Result<Definition, String> {
         for figure in figures.iter().filter(|figure| figure.platforms.contains(&platform)) {
             spreads.push(spread_of(record, figure, runs, &id)?);
         }
-        read.push(Record { id, platform, device, os, recorded, runs, spreads });
+        // A record that names no condition would compare a release on every run, the throttled ones too.
+        let mut conditions = Vec::new();
+        for figure in figures.iter().filter(|figure| figure.platforms.contains(&platform)) {
+            let (Some(condition), Some(spread)) = (figure.condition, spreads.iter().find(|spread| spread.name == figure.name)) else { continue };
+            conditions.push(required_of(figure, condition, spread, &id)?);
+        }
+        if conditions.is_empty() {
+            return Err(format!(
+                "{BASELINE}: {id}: no figure of {platform} is a condition, so a release's runs made in other conditions would be compared with it"
+            ));
+        }
+        read.push(Record { id, platform, device, os, recorded, runs, spreads, conditions });
     }
     Ok(Definition { line, repeats, allowance, comparison_runs, figures, records: read })
 }
 
 /// What a release's notes read of the baseline: the allowance a release is held to, then one line per
 /// device record — its id, its platform, what it is, the system it ran, the day it was recorded, the runs
-/// it rests on, and its figures as a run on that phone prints them.
+/// it rests on, its figures as a run on that phone prints them, and the conditions a release's runs are
+/// compared with it under.
 fn baseline(root: &Path) -> Result<Vec<String>, String> {
     let definition = definition(root)?;
     let mut lines = vec![format!("allowance\t{}\t{}", amount(definition.allowance), definition.comparison_runs)];
     for record in &definition.records {
         let words: Vec<&str> = std::iter::once(definition.line.as_str()).chain(record.spreads.iter().map(|spread| spread.word.as_str())).collect();
         lines.push(format!(
-            "device\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "device\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             record.id,
             record.platform,
             record.device,
             record.os,
             record.recorded,
             record.runs,
-            words.join(" ")
+            words.join(" "),
+            record.conditions.iter().map(Required::says).collect::<Vec<_>>().join(", ")
         ));
     }
     Ok(lines)
@@ -309,10 +447,13 @@ fn whole(table: &toml::Table, key: &str, what: &str) -> Result<i64, String> {
 /// One measured number: TOML writes a whole median (`peak_memory_bytes`) as an integer and a spreading one
 /// as a float, and both are the figure.
 fn number(table: &toml::Table, key: &str, what: &str) -> Result<f64, String> {
-    table
-        .get(key)
-        .and_then(|value| value.as_float().or_else(|| value.as_integer().map(|whole| whole as f64)))
-        .ok_or_else(|| format!("{BASELINE}: {what} has no number `{key}`"))
+    table.get(key).and_then(as_number).ok_or_else(|| format!("{BASELINE}: {what} has no number `{key}`"))
+}
+
+/// A measured number wherever the file writes one, a key's or one of a spread's values: the one read of an
+/// integer or a float, so no reader of a figure takes a number the others refuse.
+fn as_number(value: &toml::Value) -> Option<f64> {
+    value.as_float().or_else(|| value.as_integer().map(|whole| whole as f64))
 }
 
 /// A number as the file wrote it: 10 stays 10 and 12.5 stays 12.5, so a note says the allowance the file
@@ -331,7 +472,7 @@ mod tests {
     use super::*;
 
     /// Two figures, one of them measured on iOS alone, and a record of each platform, three runs each.
-    const RECORD: &str = "line = \"craftbridge-baseline\"\nflag_slower_than_percent = 10\n[comparison]\nruns = 3\n[[figure]]\nname = \"first_preview_ms\"\ndecimals = 1\nflagged = true\n[[figure]]\nname = \"thermal_state\"\ndecimals = 0\nflagged = false\nplatforms = [\"ios\"]\n[[device]]\nid = \"iphone-12-pro\"\nplatform = \"ios\"\ndevice = \"iPhone 12 Pro (iPhone13,3)\"\nos = \"iOS 26.6.1\"\nrecorded = \"2026-11-19\"\nruns = 3\n[device.first_preview_ms]\nmedian = 3894.05\nmin = 3792.7\nmax = 3967.8\nvalues = [3967.8, 3894.6, 3792.7]\n[device.thermal_state]\nmedian = 0\nmin = 0\nmax = 0\nvalues = [0, 0, 0]\n[[device]]\nid = \"xiaomi-17-pro-max\"\nplatform = \"android\"\ndevice = \"Xiaomi 17 Pro Max (2509FPN0BC)\"\nos = \"Android 17 (API 37)\"\nrecorded = \"2026-11-20\"\nruns = 3\n[device.first_preview_ms]\nmedian = 1200\nmin = 1100\nmax = 1300\nvalues = [1300, 1200, 1100]\n";
+    const RECORD: &str = "line = \"craftbridge-baseline\"\nflag_slower_than_percent = 10\n[comparison]\nruns = 3\n[[figure]]\nname = \"first_preview_ms\"\ndecimals = 1\nflagged = true\n[[figure]]\nname = \"thermal_state\"\ndecimals = 0\nflagged = false\nplatforms = [\"ios\"]\ncondition = \"at_most\"\ncondition_bound = 1\n[[figure]]\nname = \"cpu_cap_mhz\"\ndecimals = 0\nflagged = false\nplatforms = [\"android\"]\ncondition = \"record\"\n[[device]]\nid = \"iphone-12-pro\"\nplatform = \"ios\"\ndevice = \"iPhone 12 Pro (iPhone13,3)\"\nos = \"iOS 26.6.1\"\nrecorded = \"2026-11-19\"\nruns = 3\n[device.first_preview_ms]\nmedian = 3894.05\nmin = 3792.7\nmax = 3967.8\nvalues = [3967.8, 3894.6, 3792.7]\n[device.thermal_state]\nmedian = 0\nmin = 0\nmax = 0\nvalues = [0, 0, 0]\n[[device]]\nid = \"xiaomi-17-pro-max\"\nplatform = \"android\"\ndevice = \"Xiaomi 17 Pro Max (2509FPN0BC)\"\nos = \"Android 17 (API 37)\"\nrecorded = \"2026-11-20\"\nruns = 3\n[device.first_preview_ms]\nmedian = 1200\nmin = 1100\nmax = 1300\nvalues = [1300, 1200, 1100]\n[device.cpu_cap_mhz]\nmedian = 2880\nmin = 2880\nmax = 2880\nvalues = [2880, 2880, 2880]\n";
 
     fn scratch(body: &str, tag: &str) -> crate::scratch::Scratch {
         let scratch = crate::scratch::Scratch::new(tag);
@@ -347,8 +488,8 @@ mod tests {
     /// The lines `RECORD` reads as.
     const READ: [&str; 3] = [
         "allowance\t10\t3",
-        "device\tiphone-12-pro\tios\tiPhone 12 Pro (iPhone13,3)\tiOS 26.6.1\t2026-11-19\t3\tcraftbridge-baseline first_preview_ms=3894.1 thermal_state=0",
-        "device\txiaomi-17-pro-max\tandroid\tXiaomi 17 Pro Max (2509FPN0BC)\tAndroid 17 (API 37)\t2026-11-20\t3\tcraftbridge-baseline first_preview_ms=1200.0",
+        "device\tiphone-12-pro\tios\tiPhone 12 Pro (iPhone13,3)\tiOS 26.6.1\t2026-11-19\t3\tcraftbridge-baseline first_preview_ms=3894.1 thermal_state=0\tthermal_state at most 1",
+        "device\txiaomi-17-pro-max\tandroid\tXiaomi 17 Pro Max (2509FPN0BC)\tAndroid 17 (API 37)\t2026-11-20\t3\tcraftbridge-baseline first_preview_ms=1200.0 cpu_cap_mhz=2880\tcpu_cap_mhz exactly 2880",
     ];
 
     #[test]
@@ -357,8 +498,8 @@ mod tests {
             read(RECORD, "baseline-record").unwrap(),
             [
                 "allowance\t10\t3",
-                "device\tiphone-12-pro\tios\tiPhone 12 Pro (iPhone13,3)\tiOS 26.6.1\t2026-11-19\t3\tcraftbridge-baseline first_preview_ms=3894.1 thermal_state=0",
-                "device\txiaomi-17-pro-max\tandroid\tXiaomi 17 Pro Max (2509FPN0BC)\tAndroid 17 (API 37)\t2026-11-20\t3\tcraftbridge-baseline first_preview_ms=1200.0",
+                "device\tiphone-12-pro\tios\tiPhone 12 Pro (iPhone13,3)\tiOS 26.6.1\t2026-11-19\t3\tcraftbridge-baseline first_preview_ms=3894.1 thermal_state=0\tthermal_state at most 1",
+                "device\txiaomi-17-pro-max\tandroid\tXiaomi 17 Pro Max (2509FPN0BC)\tAndroid 17 (API 37)\t2026-11-20\t3\tcraftbridge-baseline first_preview_ms=1200.0 cpu_cap_mhz=2880\tcpu_cap_mhz exactly 2880",
             ],
             "one line per record, each figure at its own decimals — the Xiaomi's whole median takes the decimal its figure asks for — and no figure a platform does not measure"
         );
@@ -372,8 +513,120 @@ mod tests {
         assert!(allowance.starts_with("allowance\t"), "{allowance}");
         assert!(!devices.is_empty(), "the repository's record holds no phone");
         for device in devices {
-            assert!(device.starts_with("device\t") && device.split('\t').count() == 8, "a device line of eight fields: {device}");
+            assert!(device.starts_with("device\t") && device.split('\t').count() == 9, "a device line of nine fields: {device}");
         }
+    }
+
+    #[test]
+    fn the_repositorys_own_record_names_a_condition_for_each_phone() {
+        let definition = definition(&crate::repo_root()).unwrap();
+        let said =
+            |id: &str| definition.records.iter().find(|record| record.id == id).map(|record| record.conditions.iter().map(Required::says).collect::<Vec<_>>());
+        assert_eq!(said("iphone-12-pro"), Some(vec!["thermal_state at most 1".to_string()]), "no serious thermal state");
+        assert_eq!(
+            said("xiaomi-17-pro-max"),
+            Some(vec!["cpu_cap_mhz exactly 2880".to_string(), "battery_c at most 33.0".to_string()]),
+            "the cap the record's runs read, and a battery that is not hot"
+        );
+    }
+
+    /// The keys that make a figure a condition, spelt as the file spells them, and the refusal each way of
+    /// writing them wrongly is given.
+    #[test]
+    fn a_condition_spelt_or_bounded_wrongly_is_refused() {
+        let iphone = "condition = \"at_most\"\ncondition_bound = 1\n";
+        let android = "condition = \"record\"\n";
+        for (from, to, refusal) in [
+            (iphone, "condition = \"at_most\"\n", "the figure `thermal_state` is `at_most` and names no number `condition_bound`"),
+            (iphone, "condition = \"at_most\"\ncondition_bound = \"1\"\n", "the figure `thermal_state` is `at_most` and names no number `condition_bound`"),
+            (iphone, "condition_bound = 1\n", "the figure `thermal_state` holds a `condition_bound` and no `condition`"),
+            (
+                iphone,
+                "condition = \"atmost\"\ncondition_bound = 1\n",
+                "the figure `thermal_state`'s `condition` is `atmost`, which is neither record nor at_most",
+            ),
+            (iphone, "condition = 1\ncondition_bound = 1\n", "the figure `thermal_state`'s `condition` is not text, which is neither record nor at_most"),
+            (iphone, "condition = \"at_most\"\ncondition_bound = 1.25\n", "the figure `thermal_state`'s `condition_bound` 1.25 has more decimals than its 0"),
+            // A half of the last decimal is a median's, never a value one run prints, so it is no bound either.
+            (iphone, "condition = \"at_most\"\ncondition_bound = 1.5\n", "the figure `thermal_state`'s `condition_bound` 1.5 has more decimals than its 0"),
+            (
+                android,
+                "condition = \"record\"\ncondition_bound = 2880\n",
+                "the figure `cpu_cap_mhz` is `record` and holds a `condition_bound`, which it has no use for",
+            ),
+            (android, "condition = \"Record\"\n", "the figure `cpu_cap_mhz`'s `condition` is `Record`, which is neither record nor at_most"),
+        ] {
+            assert_eq!(RECORD.matches(from).count(), 1, "{from}");
+            let error = read(&RECORD.replace(from, to), "baseline-condition-spelt").unwrap_err();
+            assert!(error.contains(refusal), "`{to}` is refused as {refusal:?}: {error}");
+        }
+        let flagged = RECORD.replace("flagged = false\nplatforms = [\"ios\"]", "flagged = true\nplatforms = [\"ios\"]");
+        assert!(
+            read(&flagged, "baseline-condition-flagged").unwrap_err().contains("the figure `thermal_state` is a condition and flagged, which only a cost is"),
+            "a condition is never a cost a release is flagged on"
+        );
+        assert!(
+            read(&RECORD.replace("condition_bound = 1\n", "condition_bound = 1.0\n"), "baseline-condition-float").is_ok(),
+            "a bound written as a float is the same bound"
+        );
+    }
+
+    /// A bound is a whole number of the figure's last decimal, written as an integer or as a float.
+    #[test]
+    fn a_bound_is_read_as_a_whole_number_of_the_figures_decimals() {
+        let battery = RECORD.replace("name = \"cpu_cap_mhz\"\ndecimals = 0", "name = \"battery_c\"\ndecimals = 1");
+        let battery = battery
+            .replace("condition = \"record\"\n", "condition = \"at_most\"\ncondition_bound = 33\n")
+            .replace("[device.cpu_cap_mhz]", "[device.battery_c]");
+        let battery = battery.replace(
+            "median = 2880\nmin = 2880\nmax = 2880\nvalues = [2880, 2880, 2880]",
+            "median = 31.2\nmin = 30.9\nmax = 31.2\nvalues = [30.9, 31.2, 31.2]",
+        );
+        for (bound, said) in [("33", "33.0"), ("33.0", "33.0"), ("34.5", "34.5")] {
+            let lines = read(&battery.replace("condition_bound = 33\n", &format!("condition_bound = {bound}\n")), "baseline-bound-read").unwrap();
+            assert!(lines.iter().any(|line| line.ends_with(&format!("battery_c at most {said}"))), "{bound}: {lines:?}");
+        }
+        for bound in ["33.05", "33.25", "-0.05"] {
+            let error = read(&battery.replace("condition_bound = 33\n", &format!("condition_bound = {bound}\n")), "baseline-bound-refused").unwrap_err();
+            assert!(error.contains("`condition_bound`") && error.contains("has more decimals than its 1"), "{bound}: {error}");
+        }
+        let thermal = RECORD.replace("condition_bound = 1\n", "condition_bound = -1\n");
+        assert!(read(&thermal, "baseline-bound-negative").unwrap_err().contains("outside its own condition"), "a negative bound the record's own runs break");
+    }
+
+    #[test]
+    fn a_record_that_names_no_condition_or_breaks_its_own_is_refused() {
+        // A platform none of whose figures is a condition would compare a release's throttled runs too.
+        let none = RECORD.replace("condition = \"record\"\n", "");
+        assert!(
+            read(&none, "baseline-no-condition")
+                .unwrap_err()
+                .contains("xiaomi-17-pro-max: no figure of android is a condition, so a release's runs made in other conditions"),
+            "a record with no condition is refused"
+        );
+        let ios_none = RECORD.replace("condition = \"at_most\"\ncondition_bound = 1\n", "");
+        assert!(read(&ios_none, "baseline-no-condition-ios").unwrap_err().contains("iphone-12-pro: no figure of ios is a condition"));
+        // A record's runs that read different values of a `record` condition leave nothing to compare a release with.
+        let spread = RECORD.replace(
+            "median = 2880\nmin = 2880\nmax = 2880\nvalues = [2880, 2880, 2880]",
+            "median = 2880\nmin = 2438\nmax = 2880\nvalues = [2880, 2438, 2880]",
+        );
+        assert!(
+            read(&spread, "baseline-condition-spread")
+                .unwrap_err()
+                .contains("xiaomi-17-pro-max: `cpu_cap_mhz` ran from 2438 to 2880, and a record's runs read one value of it"),
+            "a record made across two caps names no cap"
+        );
+        // A record whose own runs break an `at_most` is a record made outside the condition it is compared under.
+        let hot = RECORD.replace("median = 0\nmin = 0\nmax = 0\nvalues = [0, 0, 0]", "median = 0\nmin = 0\nmax = 2\nvalues = [0, 0, 2]");
+        assert!(
+            read(&hot, "baseline-condition-record-hot")
+                .unwrap_err()
+                .contains("iphone-12-pro: `thermal_state` ran from 0 to 2, outside its own condition (at most 1)"),
+            "a record made at a serious thermal state breaks the rule it holds a release to"
+        );
+        // The record that meets its conditions at the bound is the record the rule is for.
+        assert!(read(&RECORD.replace("max = 0\nvalues = [0, 0, 0]", "max = 1\nvalues = [0, 0, 1]"), "baseline-condition-at-bound").is_ok());
     }
 
     #[test]

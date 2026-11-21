@@ -75,9 +75,10 @@
 # stands in what that prints, and adds each run's output to `release/figures/<version>.txt` with
 # `cargo xtask release-figures add <file> <device id> <commit> <run output>`, which takes the run's one line out
 # of it, holds it to the line `conformance/effects/baseline.toml` defines and writes it under the commit. The notes
-# then set each phone's runs beside its record and flag a figure by that file's own `[comparison]` rule, which
-# `cargo xtask release-figures judge` applies; a release with no such file, one whose file measured another
-# commit, or one whose file holds no run, says in both notes that it was not measured.
+# then set each phone's runs beside its record, only the runs made in the record's conditions, and flag a figure by
+# that file's own `[comparison]` rule, which `cargo xtask release-figures judge` applies; a release with no such
+# file, one whose file measured another commit, or one whose file holds no run, says in both notes that it was not
+# measured, and one whose runs were made in other conditions than the record's says part of it was not compared.
 set -euo pipefail
 # Git exports its repository variables (GIT_DIR and the rest) to a hook and to whatever `git rebase --exec`
 # or `git bisect run` starts. Every git command here must act on the repository the run was given.
@@ -916,7 +917,7 @@ growth_section() {
 # the rule, and only says the verdict. A release with no such file says so in its notes, as does one whose file
 # measured another commit or holds no run.
 figures_file=""
-figures_flagged=0 figures_unjudged=0 figures_text="" figures_said="" figure_line=""
+figures_flagged=0 figures_unjudged=0 figures_left_out=0 figures_text="" figures_said="" figure_line=""
 # One figure's line, as the notes say it: what the runs' median and fastest were against the record's, and what
 # the rule made of it. It sets `figure_line` and counts the flag in this shell, so a flag is never lost to a
 # subshell.
@@ -933,7 +934,7 @@ saying_a_figure() {
   unheld) said="reported and never flagged on this phone (the record says why)" ;;
   uncompared)
     figures_unjudged=$((figures_unjudged + 1))
-    said="reported and not compared: fewer than $allowance_runs runs"
+    said="reported and not compared: fewer than $allowance_runs runs in the record's conditions"
     ;;
   reported) said="reported: no release is held to it" ;;
   *) fail "the release-figures command for $repo printed a verdict no release note reads: $1" ;;
@@ -943,8 +944,8 @@ saying_a_figure() {
 # What the notes say of the release's own figures, in both releases' notes alike. The commit the file measured
 # must be the one the release tags, or the figures are another build's.
 release_figures_section() {
-  local measured entry kind fields id platform runs lines="" phones_measured=0
-  figures_flagged=0 figures_unjudged=0 figures_said=""
+  local measured entry kind fields id platform runs compared figure left_out asked lines="" phones_measured=0
+  figures_flagged=0 figures_unjudged=0 figures_left_out=0 figures_said=""
   # Read from the repository the run was given, never its rehearsal's clone, which holds no ignored file; the
   # version is known only once the steps before the notes have read it.
   figures_file="$src/$release_folder/figures/$version.txt"
@@ -965,14 +966,24 @@ release_figures_section() {
       return 0
       ;;
     device)
-      IFS="$field_break" read -r id platform runs <<<"$fields"
+      IFS="$field_break" read -r id platform runs compared <<<"$fields"
+      # A run that failed two conditions is one run left out, so the count is of the runs, not of the conditions.
+      figures_left_out=$((figures_left_out + runs - compared))
       if [ "$runs" = 0 ]; then
         figures_unjudged=$((figures_unjudged + 1))
         lines="${lines:+$lines$line_break}- \`$id\` (${platform}): not measured, so none of its figures is reported or flagged"
+      elif [ "$compared" = 0 ]; then
+        phones_measured=$((phones_measured + 1))
+        figures_unjudged=$((figures_unjudged + 1))
+        lines="${lines:+$lines$line_break}- \`$id\` (${platform}): $runs fresh runs of this release, none made in the record's conditions, so none of its figures is reported or flagged"
       else
         phones_measured=$((phones_measured + 1))
-        lines="${lines:+$lines$line_break}- \`$id\` (${platform}): $runs fresh runs of this release"
+        lines="${lines:+$lines$line_break}- \`$id\` (${platform}): $runs fresh runs of this release, $compared of them made in the record's conditions and compared"
       fi
+      ;;
+    outside)
+      IFS="$field_break" read -r id figure left_out asked <<<"$fields"
+      lines="$lines$line_break  - $left_out run(s) left out of the comparison: \`$figure\` did not meet the record's condition ($asked)"
       ;;
     figure)
       saying_a_figure "$entry"
@@ -988,20 +999,24 @@ release_figures_section() {
     return 0
   fi
   # What was not compared leads, so a release measured in part never reads as one that passed whole.
-  if [ "$figures_unjudged" = 0 ]; then
-    figures_text="Measured on the acceptance phones with the running example's own tests."
+  if [ "$figures_unjudged" != 0 ]; then
+    figures_text="Part of the release was not compared, so these figures are no pass: a phone that was not measured, or a figure of fewer than $allowance_runs runs made in the record's conditions, as listed below."
+  elif [ "$figures_left_out" != 0 ]; then
+    figures_text="Part of the release was not compared: $figures_left_out run(s) were made in other conditions than the record's and are left out, as listed below; every figure rests on at least $allowance_runs runs made in the record's conditions."
   else
-    figures_text="Part of the release was not compared, so these figures are no pass: a phone that was not measured, or a figure of fewer than $allowance_runs runs, as listed below."
+    figures_text="Measured on the acceptance phones with the running example's own tests."
   fi
   if [ "$figures_flagged" != 0 ]; then
     figures_text="$figures_text Flagged: $figures_flagged figure(s) are slower than the records above allow."
-  elif [ "$figures_unjudged" = 0 ]; then
+  elif [ "$figures_unjudged" = 0 ] && [ "$figures_left_out" = 0 ]; then
     figures_text="$figures_text No figure is flagged against the records above."
   else
     figures_text="$figures_text No figure that was compared is flagged against the records above."
   fi
   if [ "$figures_unjudged" != 0 ]; then
-    figures_said="${figures_said:+$figures_said$line_break}part of the release was not compared: a phone was not measured, or a figure rests on fewer than $allowance_runs runs"
+    figures_said="${figures_said:+$figures_said$line_break}part of the release was not compared: a phone was not measured, or a figure rests on fewer than $allowance_runs runs made in the record's conditions"
+  elif [ "$figures_left_out" != 0 ]; then
+    figures_said="${figures_said:+$figures_said$line_break}part of the release was not compared: $figures_left_out run(s) were made in other conditions than the record's and are left out"
   fi
   figures_text="$figures_text$line_break${line_break}Each phone's median and fastest run of this release, beside the record's median and slowest run:$line_break${line_break}$lines"
 }
@@ -1048,8 +1063,8 @@ writing_the_release_notes() {
       IFS="$field_break" read -r allowance allowance_runs <<<"$fields"
       ;;
     device)
-      IFS="$field_break" read -r id platform phone system recorded runs line <<<"$fields"
-      records="${records:+$records$line_break}$(printf -- "- \`%s\` (%s) — %s, %s, %s fresh runs recorded %s\n  \`%s\`" "$id" "$platform" "$phone" "$system" "$runs" "$recorded" "$line")"
+      IFS="$field_break" read -r id platform phone system recorded runs line asked <<<"$fields"
+      records="${records:+$records$line_break}$(printf -- "- \`%s\` (%s) — %s, %s, %s fresh runs recorded %s\n  \`%s\`\n  a release is compared on the runs made in these conditions: %s" "$id" "$platform" "$phone" "$system" "$runs" "$recorded" "$line" "$asked")"
       ;;
     *)
       fail "the baseline command for $repo printed a line no release note reads: $entry"
@@ -1081,7 +1096,7 @@ writing_the_release_notes() {
     printf "\nEach size above is recorded in the message of CraftBridge's tag \`%s\`, which the next release reads back to flag its own growth.\n" "$version"
     printf "\nThe zip is served at %s; the checksum SwiftPM verifies on it is \`%s\`.\n" "$zip_url" "$zip_checksum"
     printf '\n## What the acceptance phones recorded\n\n'
-    printf "The running example as \`conformance/effects/baseline.toml\` defines it, one bullet per phone: what the phone is and ran, and its record's figures as a run on it prints them, each at the decimals the file gives it. A release is held to these records as that file says: each figure it marks \`flagged\` is flagged, on every platform its \`unheld_on\` does not name, when the median of at least %s fresh runs of the release is more than %s%% above the record's median and the fastest of those runs is slower than the record's slowest.\n\n" "$allowance_runs" "$allowance"
+    printf "The running example as \`conformance/effects/baseline.toml\` defines it, one bullet per phone: what the phone is and ran, and its record's figures as a run on it prints them, each at the decimals the file gives it. A release is held to these records as that file says: each figure it marks \`flagged\` is flagged, on every platform its \`unheld_on\` does not name, when the median of at least %s fresh runs of the release, made in the conditions listed under the phone, is more than %s%% above the record's median and the fastest of those runs is slower than the record's slowest.\n\n" "$allowance_runs" "$allowance"
     printf '%s\n' "$records"
     printf '\n## This release'"'"'s own figures\n\n%s\n' "$figures_text"
     printf '\n## What changed\n\n%s\n' "$unreleased"

@@ -313,7 +313,7 @@ fn usage() {
         "       cargo xtask release-figures add <file> <device id> <commit> <run output>   (the one line a measuring test printed in a run's output, added to the file of the runs the owner measured of a release at that commit)"
     );
     eprintln!(
-        "       cargo xtask release-figures judge <file> <commit>   (that file's runs, judged by baseline.toml's own rule: flagged, within, unheld, uncompared or reported)"
+        "       cargo xtask release-figures judge <file> <commit>   (that file's runs made in the record's conditions, judged by baseline.toml's own rule: flagged, within, unheld, uncompared or reported)"
     );
     eprintln!("       cargo xtask elf-alignment <llvm-readelf> <library>...   (every library aligned to 16 KB pages)");
     eprintln!("       cargo xtask swift-builds   (every build the Swift package ships: a configuration, a destination and its architectures per line)");
