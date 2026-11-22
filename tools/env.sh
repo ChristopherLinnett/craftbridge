@@ -574,9 +574,45 @@ craftbridge_android_env() {
 # compile C for the phone the phone's compiler.
 # cargo-ndk runs as a cargo command through the guarded cargo, as every other does.
 craftbridge_android_target_env() {
-  local exports
+  local exports line name value value_unreadable u U
+  u="${1//-/_}"
+  U="$(printf '%s' "$u" | tr '[:lower:]' '[:upper:]')"
   exports="$(craftbridge_cargo ndk-env -t "$1")" || return 1
-  eval "$exports"
+  # The answer is imported as data, never run as commands: an `eval` of it would run whatever the tool ever
+  # prints, and this script's pipes — read under `pipefail` by every script that sources it — could answer by
+  # timing to a reader no reading of this file can name. Each line is read whole instead, as exactly
+  # `export NAME="value"`: every name cargo-ndk names for this target is allowed, with a value holding no
+  # quote, backslash or expansion, whose text is then the value the shell would have read; any other name,
+  # value or line fails the import loudly rather than running or half-importing it.
+  while IFS= read -r line; do
+    case "$line" in
+    '' | '#'*) continue ;;
+    esac
+    name="${line#export }"
+    name="${name%%=*}"
+    value="${line#"export $name=\""}"
+    value="${value%\"}"
+    if [ -z "$name" ] || [ "$line" != "export $name=\"$value\"" ]; then
+      echo "$(basename "$0" .sh): cargo ndk-env printed a line that is no plain export: $line" >&2
+      return 1
+    fi
+    value_unreadable=no
+    case "$value" in
+    *'"'* | *"'"* | *\\* | *'$'* | *'`'*) value_unreadable=yes ;;
+    esac
+    case "$name:$value_unreadable" in
+    "AR_$u:no" | "BINDGEN_EXTRA_CLANG_ARGS_$u:no" | "CC_$u:no" | "CFLAGS_$u:no" | "CXX_$u:no" | "CXXFLAGS_$u:no" | "RANLIB_$u:no" | "CARGO_TARGET_${U}_AR:no" | "CARGO_TARGET_${U}_LINKER:no" | "CARGO_TARGET_${U}_RUNNER:no" | "CLANG_PATH:no" | "CARGO_NDK_SYSROOT_LIBS_PATH:no" | "CARGO_NDK_SYSROOT_PATH:no" | "CARGO_NDK_SYSROOT_TARGET:no") ;;
+    *:yes)
+      echo "$(basename "$0" .sh): cargo ndk-env gave $1 a value for $name holding quotes, a backslash or an expansion this reader cannot import: refusing to import it" >&2
+      return 1
+      ;;
+    *)
+      echo "$(basename "$0" .sh): cargo ndk-env named $name, which it has never named for $1: refusing to import it" >&2
+      return 1
+      ;;
+    esac
+    export "$name=$value"
+  done <<<"$exports"
 }
 # A test run on a device or an emulator, `craftbridge_android_test <triple> <cargo test arguments…>`:
 # cargo-ndk links each test binary with the NDK, and its runner pushes it to the device adb names
