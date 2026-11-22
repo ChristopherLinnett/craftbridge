@@ -1,5 +1,6 @@
 //! The pins: `cargo xtask pins` prints what `rust/rust-toolchain.toml` and the Gradle version catalog
-//! name — the toolchain's targets and the catalog's Android pins — as `key=value` lines, and
+//! name — the toolchain's targets, which of them are Android's, and the catalog's Android pins — as
+//! `key=value` lines, and
 //! `cargo xtask swift-builds` prints the Swift package's shipping builds — a configuration and an
 //! `xcodebuild` destination, and the architectures to build it for, for every Apple slice the toolchain
 //! file names — as `configuration<TAB>destination<TAB>architectures` lines, and `cargo xtask swift-suite`
@@ -146,6 +147,42 @@ pub(crate) fn apple_slices(root: &Path) -> Result<Vec<&'static Slice>, String> {
         .collect()
 }
 
+/// One Android target and the ABI its library is packaged under: `cargo ndk -o <jni folder>` writes the
+/// library it builds for a target into the folder of that name, and an AAR's `jni/` and an installed app's
+/// hold one folder per ABI, which is the name Android's loader looks in. A package that carries a library
+/// in no such folder carries it nowhere an app can load it from.
+const ANDROID_ABIS: &[(&str, &str); 2] = &[("aarch64-linux-android", "arm64-v8a"), ("x86_64-linux-android", "x86_64")];
+
+/// Whether a target of the toolchain file is one the Android library is built for: a triple ending
+/// `-linux-android`, and no triple spelt another way, `armv7-linux-androideabi` among them. The one rule:
+/// `cargo xtask pins` prints the targets it passes as `android-target` lines, from which `tools/env.sh`
+/// hands `tools/build-android.sh` what `cargo ndk` builds the library for and the gate's `rust_mobile`
+/// stage the targets it lints with the NDK, and [`android_abis`] reads the ABIs a published AAR must hold
+/// with it, so what is built for and what is required of are never told apart two ways.
+fn is_android_target(target: &str) -> bool {
+    target.ends_with("-linux-android")
+}
+
+/// The ABIs the SDK's native library ships for: the toolchain file's Android targets
+/// ([`is_android_target`]), each with its row of [`ANDROID_ABIS`], in the file's order. A toolchain that
+/// names an Android target this table has no row for stops the checks that read it rather than pass over
+/// it, as an Apple slice with no row stops the Swift checks: a library built for such a target would be
+/// packaged under a name no rule asks for, which is the release that ships an app no engine.
+pub(crate) fn android_abis(root: &Path) -> Result<Vec<&'static str>, String> {
+    let targets: Vec<String> = toolchain_targets(root)?.into_iter().filter(|target| is_android_target(target)).collect();
+    if targets.is_empty() {
+        return Err(format!("{TOOLCHAIN}: lists no Android target, so the library an Android app links is built for no ABI it could load"));
+    }
+    targets
+        .iter()
+        .map(|target| {
+            ANDROID_ABIS.iter().find(|(built, _)| built == target).map(|(_, abi)| *abi).ok_or_else(|| {
+                format!("{TOOLCHAIN}: the native library is built for `{target}`, an Android target no packaging rule has a row for (rust/xtask/src/pins.rs)")
+            })
+        })
+        .collect()
+}
+
 /// The version catalog, parsed, or `None` when the repository has no Android build to read yet.
 pub(crate) fn catalog(root: &Path) -> Result<Option<toml::Value>, String> {
     match root.join(CATALOG).try_exists() {
@@ -167,11 +204,17 @@ fn catalog_pin(versions: &toml::value::Table, key: &str) -> Result<String, Strin
 }
 
 /// The pins as `key=value` lines: one `rust-target` for every target the toolchain file names, then one
-/// line for every catalog pin. Scripts read these lines as data; the parsing of the files stays here.
+/// `android-target` for each of those that is an Android target ([`is_android_target`]), then one line for
+/// every catalog pin. Scripts read these lines as data; the parsing of the files, and which target runs on
+/// Android, stay here.
 fn pins(root: &Path) -> Result<Vec<String>, String> {
     let mut lines = Vec::new();
-    for target in toolchain_targets(root)? {
+    let targets = toolchain_targets(root)?;
+    for target in &targets {
         lines.push(format!("rust-target={target}"));
+    }
+    for target in targets.iter().filter(|target| is_android_target(target)) {
+        lines.push(format!("android-target={target}"));
     }
     let versions = toml_file(root, CATALOG)?
         .get("versions")
@@ -346,6 +389,8 @@ mod tests {
                 "rust-target=aarch64-apple-ios-sim",
                 "rust-target=aarch64-linux-android",
                 "rust-target=x86_64-linux-android",
+                "android-target=aarch64-linux-android",
+                "android-target=x86_64-linux-android",
                 "android-compileSdk=37",
                 "android-minSdk=29",
                 "android-buildTools=37.0.0",
@@ -381,6 +426,39 @@ mod tests {
     fn targets_written_as_a_string_are_refused_as_rustup_refuses_them() {
         let scratch = scratch_with("[toolchain]\ntargets = 'aarch64-apple-ios, aarch64-apple-ios-sim'\n", CATALOG_BASIC, "pins-comma");
         assert!(toolchain_targets(&scratch.0).is_err_and(|error| error.contains("not a list of strings")), "rustup reads no string form");
+    }
+
+    #[test]
+    fn every_android_target_the_toolchain_names_gives_its_abi_in_the_files_order() {
+        let canonical = scratch_with(TOOLCHAIN_BASIC, CATALOG_BASIC, "abis-canonical");
+        assert_eq!(android_abis(&canonical.0).unwrap(), ["arm64-v8a", "x86_64"], "the two ABIs the library is packaged under, in the file's order");
+        // One target dropped, its ABI goes with it; a second of one architecture is its own ABI.
+        let arm_only = scratch_with("[toolchain]\ntargets = [\"aarch64-linux-android\"]\n", CATALOG_BASIC, "abis-arm-only");
+        assert_eq!(android_abis(&arm_only.0).unwrap(), ["arm64-v8a"]);
+        let all =
+            scratch_with("[toolchain]\ntargets = [\"x86_64-linux-android\", \"aarch64-linux-android\", \"aarch64-apple-ios\"]\n", CATALOG_BASIC, "abis-order");
+        assert_eq!(android_abis(&all.0).unwrap(), ["x86_64", "arm64-v8a"], "an Apple target names no ABI, and the file's order stands");
+        // A triple spelt another way is no Android target, to the pins the builder reads as to the ABIs a
+        // published AAR is required to hold: both are told by the one rule.
+        let other_spelling =
+            scratch_with("[toolchain]\ntargets = [\"aarch64-linux-android\", \"armv7-linux-androideabi\"]\n", CATALOG_BASIC, "abis-other-spelling");
+        assert_eq!(android_abis(&other_spelling.0).unwrap(), ["arm64-v8a"], "the one spelling of an Android target, and no other");
+        let built_for: Vec<String> = pins(&other_spelling.0).unwrap().into_iter().filter(|line| line.starts_with("android-target=")).collect();
+        assert_eq!(built_for, ["android-target=aarch64-linux-android"], "the builder is handed the same Android targets the AAR is held to");
+    }
+
+    #[test]
+    fn an_android_target_no_packaging_rule_has_a_row_for_stops_the_reader() {
+        let no_android = scratch_with("[toolchain]\ntargets = [\"aarch64-apple-ios\"]\n", CATALOG_BASIC, "abis-no-android");
+        assert!(android_abis(&no_android.0).unwrap_err().contains("no Android target"), "a build with nothing to package is refused, not passed");
+        let unknown = scratch_with(&TOOLCHAIN_BASIC.replace("aarch64-linux-android", "i686-linux-android"), CATALOG_BASIC, "abis-unknown");
+        assert_eq!(
+            android_abis(&unknown.0).unwrap_err(),
+            format!(
+                "{TOOLCHAIN}: the native library is built for `i686-linux-android`, an Android target no packaging rule has a row for (rust/xtask/src/pins.rs)"
+            ),
+            "a target added to the file without its row is named, not silently unbuilt-and-unpacked"
+        );
     }
 
     #[test]

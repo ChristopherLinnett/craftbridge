@@ -66,10 +66,11 @@ craftbridge_remove_on_exit() {
 # every pin the command must name is required here, so no check can pass having read nothing.
 craftbridge_load_pins() {
   local line
-  CRAFTBRIDGE_RUST_TARGETS=""
+  CRAFTBRIDGE_RUST_TARGETS="" CRAFTBRIDGE_ANDROID_TARGETS=""
   while IFS= read -r line; do
     case "$line" in
       rust-target=*) CRAFTBRIDGE_RUST_TARGETS="$CRAFTBRIDGE_RUST_TARGETS ${line#rust-target=}" ;;
+      android-target=*) CRAFTBRIDGE_ANDROID_TARGETS="$CRAFTBRIDGE_ANDROID_TARGETS ${line#android-target=}" ;;
       android-compileSdk=*) CRAFTBRIDGE_ANDROID_API="${line#android-compileSdk=}" ;;
       android-minSdk=*) CRAFTBRIDGE_ANDROID_MIN_SDK="${line#android-minSdk=}" ;;
       android-buildTools=*) CRAFTBRIDGE_ANDROID_BUILD_TOOLS="${line#android-buildTools=}" ;;
@@ -82,7 +83,7 @@ craftbridge_load_pins() {
   craftbridge_require "android-minSdk" "$CRAFTBRIDGE_ANDROID_MIN_SDK" "$catalog"
   craftbridge_require "android-buildTools" "$CRAFTBRIDGE_ANDROID_BUILD_TOOLS" "$catalog"
   craftbridge_require "jdk" "$CRAFTBRIDGE_JDK_MAJOR" "$catalog"
-  export CRAFTBRIDGE_RUST_TARGETS CRAFTBRIDGE_ANDROID_API CRAFTBRIDGE_ANDROID_MIN_SDK CRAFTBRIDGE_ANDROID_BUILD_TOOLS CRAFTBRIDGE_JDK_MAJOR
+  export CRAFTBRIDGE_RUST_TARGETS CRAFTBRIDGE_ANDROID_TARGETS CRAFTBRIDGE_ANDROID_API CRAFTBRIDGE_ANDROID_MIN_SDK CRAFTBRIDGE_ANDROID_BUILD_TOOLS CRAFTBRIDGE_JDK_MAJOR
   craftbridge_setup_java
 }
 
@@ -450,6 +451,24 @@ craftbridge_xtask_build() {
   CARGO_BUILD_BUILD_DIR="$CARGO_TARGET_DIR" craftbridge_cargo_in "${2:-$CRAFTBRIDGE_ROOT/rust}" build --package xtask --locked --quiet --target-dir "$1"
 }
 
+# The one option of the native library's builders, tools/build-xcframework.sh and tools/build-android.sh:
+# a bare run regenerates the committed bindings through `cargo xtask generate` before it is done, and
+# `--keep-bindings` builds and leaves them as they stand. The gate passes it, since its `generated` stage
+# must find a hand edit to the bindings, which a regeneration would write over before the stage looked;
+# and so does tools/release.sh, since the bindings are part of the tree the release tags, which a release
+# that regenerated them would be editing. `regenerate="$(craftbridge_regenerates_bindings "$@")"` answers
+# yes or no, or says the builder's usage and ends 64, read the one way by both.
+craftbridge_regenerates_bindings() {
+  case "$*" in
+    "") echo yes ;;
+    --keep-bindings) echo no ;;
+    *)
+      echo "usage: tools/$(basename "$0") [--keep-bindings]" >&2
+      return 64
+      ;;
+  esac
+}
+
 # The machine-local git cache of official EffectCraft, a bare clone: tools/update-upstream.sh fetches
 # official main into it, and the upstream rule only reads it. Outside the repository on purpose — a
 # fetch cache is not a source, and no build reads it.
@@ -514,15 +533,15 @@ craftbridge_ndk_home() {
   [ -n "$ndk" ] && printf '%s\n' "$ndk"
 }
 
-# Whether a Rust target runs on Android, and the toolchain file's targets that do, one per line.
+# Whether a Rust target runs on Android, and the toolchain file's targets that do, one per line: those the
+# pins name Android targets, which `cargo xtask pins` decides by the one rule the check of a published AAR
+# reads its ABIs with (rust/xtask/src/pins.rs), so no script tells an Android target by its spelling.
 craftbridge_is_android_target() {
-  case "$1" in *-linux-android) return 0 ;; *) return 1 ;; esac
+  case " $CRAFTBRIDGE_ANDROID_TARGETS " in *" $1 "*) return 0 ;; *) return 1 ;; esac
 }
 craftbridge_android_targets() {
   local target
-  for target in $CRAFTBRIDGE_RUST_TARGETS; do
-    if craftbridge_is_android_target "$target"; then printf '%s\n' "$target"; fi
-  done
+  for target in $CRAFTBRIDGE_ANDROID_TARGETS; do printf '%s\n' "$target"; done
 }
 
 # What building for an Android target takes, written once for every run that compiles or runs one: the

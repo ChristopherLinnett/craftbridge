@@ -599,17 +599,53 @@ fn sdk_library_of(table: &[Entry]) -> Result<&'static str, String> {
 }
 
 /// The library [`sdk_library_of`] gives, as the `key=value` lines `cargo xtask sdk-library` prints for a
-/// build script to read as data: `package`, the package Cargo builds, and `library`, the name of its library,
-/// which the file every build of it writes carries. A script that named either itself would say a second
-/// time which crate is the distribution library.
+/// build script to read as data: `package`, the package Cargo builds, and `android-file`, the file each
+/// Android build of it writes ([`android_file`]). A script that named either itself would say a second time
+/// which crate is the distribution library, or what the file the AAR check requires is called.
 fn sdk_library_lines(table: &[Entry]) -> Result<Vec<String>, String> {
     let package = sdk_library_of(table)?;
-    Ok(vec![format!("package={package}"), format!("library={}", library_name(package))])
+    Ok(vec![format!("package={package}"), format!("android-file={}", android_file(package))])
 }
 
 /// `cargo xtask sdk-library`: the distribution library the SDK ships, for `tools/build-android.sh`.
 pub(crate) fn run_sdk_library() -> std::process::ExitCode {
     crate::report::print_lines(sdk_library_lines(ENTRIES), "sdk-library")
+}
+
+/// The Android module that packages [`sdk_library`]: the app whose plugin the library is, since the module
+/// that carries an app's engine into an app is the one named for that app (plan §23). It is read from the
+/// row, not written down again beside it: an app added or renamed moves its module and its library together.
+/// A combined distribution crate ships several apps in one library, and which module carries that one is a
+/// decision of its own, so a row naming one answers nothing here and says so rather than guess.
+pub(crate) fn sdk_module() -> Result<&'static str, String> {
+    sdk_module_of(ENTRIES)
+}
+
+/// [`sdk_module`], read from the rows of `table`: the app noun of the row [`sdk_library_of`] gives.
+fn sdk_module_of(table: &[Entry]) -> Result<&'static str, String> {
+    let name = sdk_library_of(table)?;
+    match table.iter().find(|row| row.name == name).map(|row| row.kind.app()) {
+        Some(Some(noun)) => Ok(noun),
+        Some(None) => Err(format!(
+            "{TABLE}: the SDK ships {name}, no single app's own library: which module packages a combined distribution crate is a decision of its own"
+        )),
+        None => Err(format!("{TABLE}: {name} is the library the SDK ships, and no row of the table is called that")),
+    }
+}
+
+/// The name of the file an Android build of the package `package` writes, and is packaged under: Cargo
+/// names a `cdylib` `lib<library>.so` after its library ([`library_name`]), and `cargo ndk` copies that file
+/// into every ABI's folder under the same name (`crate::pins::android_abis`). The builder and the check that
+/// reads what it built both take it from here — `tools/build-android.sh` from the `android-file` line
+/// `cargo xtask sdk-library` prints ([`sdk_library_lines`]), the check through [`android_library_file`] —
+/// since the name of the file is what the one keeps and the other looks for.
+fn android_file(package: &str) -> String {
+    format!("lib{}.so", library_name(package))
+}
+
+/// [`android_file`] of [`sdk_library`]: the file the AAR of [`sdk_module`] must hold under every ABI.
+pub(crate) fn android_library_file() -> Result<String, String> {
+    Ok(android_file(sdk_library()?))
 }
 
 /// A table row whose folder is not on disk, or whose crate no workspace package is any more, so a crate
@@ -1372,14 +1408,17 @@ mod tests {
         assert!(table_errors(&unknown_app).iter().any(|e| e.contains("not a Craft app")), "{:?}", table_errors(&unknown_app));
     }
 
-    /// A build script reads the SDK's library as two lines: its package and its library's name, which
-    /// follow the table, and the table's own refusal when it gives none.
+    /// A build script reads the SDK's library as two lines: its package and the file each Android build of
+    /// it writes, which follow the table, and the table's own refusal when it gives none.
     #[test]
-    fn a_build_script_reads_the_sdk_s_library_as_its_package_and_its_library_s_name() {
-        assert_eq!(sdk_library_lines(ENTRIES), Ok(vec!["package=craftbridge-effects-ffi".to_string(), "library=craftbridge_effects_ffi".to_string()]));
+    fn a_build_script_reads_the_sdk_s_library_as_its_package_and_its_android_file() {
+        assert_eq!(
+            sdk_library_lines(ENTRIES),
+            Ok(vec!["package=craftbridge-effects-ffi".to_string(), "android-file=libcraftbridge_effects_ffi.so".to_string()])
+        );
         assert_eq!(
             sdk_library_lines(&with_rows(&[FILM, FILM_FFI, ALL])),
-            Ok(vec!["package=craftbridge-all-ffi".to_string(), "library=craftbridge_all_ffi".to_string()])
+            Ok(vec!["package=craftbridge-all-ffi".to_string(), "android-file=libcraftbridge_all_ffi.so".to_string()])
         );
         assert_eq!(
             sdk_library_lines(&with_rows(&[FILM, FILM_FFI])),
@@ -1414,6 +1453,41 @@ mod tests {
             sdk_library_of(&[*entry("craftbridge-core").unwrap(), *entry("xtask").unwrap(), ALL]),
             Err("rust/xtask/src/layers.rs: the table has no app plugin, so the SDK has no native library to ship".to_string())
         );
+    }
+
+    /// The script that reads those lines takes the one option the XCFramework's builder takes, through
+    /// the one reading of it in `tools/env.sh`, and refuses every other word with its own usage.
+    #[test]
+    fn the_android_build_script_misused_exits_64_with_its_usage() {
+        crate::assert_script_refuses(
+            "build-android.sh",
+            &[&["--bogus"], &["--keep-bindings", "again"], &["--keep-bindings "]],
+            "usage: tools/build-android.sh [--keep-bindings]",
+        );
+    }
+
+    /// The module that packages the library is the app the library is its own, as the row says, and a
+    /// combined distribution crate refuses to let a packaging rule guess a module for a library that
+    /// belongs to no single app.
+    #[test]
+    fn the_module_that_packages_the_library_is_the_app_its_row_names() {
+        assert_eq!(sdk_module(), Ok("effects"), "the effects plugin's own library is packaged by the effects module");
+        assert_eq!(
+            sdk_module_of(&with_rows(&[FILM, FILM_FFI, ALL])),
+            Err("rust/xtask/src/layers.rs: the SDK ships craftbridge-all-ffi, no single app's own library: which module packages a combined distribution crate is a decision of its own".to_string())
+        );
+        assert_eq!(
+            sdk_module_of(&with_rows(&[FILM, FILM_FFI])),
+            Err("rust/xtask/src/layers.rs: the table has the effects and film plugins and no combined distribution crate, the one native library the SDK ships them all in".to_string()),
+            "no library to package, so no module to package it in either"
+        );
+    }
+
+    /// The file an Android build writes is the library as Cargo names a shared one: `lib` before, `.so`
+    /// after, which is the name the AAR's `jni/` folders and an installed app's hold it under.
+    #[test]
+    fn the_android_file_names_the_library_as_cargo_names_a_shared_library() {
+        assert_eq!(android_library_file(), Ok("libcraftbridge_effects_ffi.so".to_string()));
     }
 
     /// A combined distribution crate is `craftbridge-<bundle>-ffi`, at the top of `rust/`, and names no

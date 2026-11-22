@@ -15,8 +15,9 @@
 //! `cargo xtask swift-api <graphs>…`; the XCFramework `tools/build-xcframework.sh` builds,
 //! `cargo xtask xcframework`; and for `tools/build-android.sh`, the native library the SDK ships,
 //! `cargo xtask sdk-library`, and the 16 KB alignment it hands over, `cargo xtask elf-alignment
-//! <llvm-readelf> <library>…`; and what no shell linter reads but the `shell` stage must refuse,
-//! `cargo xtask early-pipes`.
+//! <llvm-readelf> <library>…`, and the read of a published AAR that the release and the publish task run
+//! both, `cargo xtask aar-native-libraries <jar> <module> <aar>`; and what no shell linter reads but the
+//! `shell` stage must refuse, `cargo xtask early-pipes`.
 //!
 //! The rules in `AGENTS.md` that no compiler, formatter or linter already enforces are checked here,
 //! behind one command, so a change cannot merge with one broken. Each check lives in its own module: a
@@ -26,6 +27,7 @@
 //! Checks run even when an earlier one fails: one run reports everything that is broken, because a
 //! half-fixed change still gates.
 
+mod aar_native_libraries;
 mod adaptations;
 mod attributes;
 mod baseline;
@@ -267,6 +269,7 @@ fn dispatch(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
         ["release-figures", "add", file, device, commit, output] => release_figures::run_add(&root, file, device, commit, output),
         ["release-figures", "judge", file, commit] => release_figures::run_judge(&root, file, commit),
         ["elf-alignment", readelf, libraries @ ..] => elf_alignment::run(readelf, libraries),
+        ["aar-native-libraries", jar, module, aar] => aar_native_libraries::run(&root, jar, module, aar),
         ["swift-builds"] => pins::builds(&root),
         ["swift-suite"] => pins::suite(&root),
         ["swift-products"] => pins::products(&root),
@@ -316,6 +319,9 @@ fn usage() {
         "       cargo xtask release-figures judge <file> <commit>   (that file's runs made in the record's conditions, judged by baseline.toml's own rule: flagged, within, unheld, uncompared or reported)"
     );
     eprintln!("       cargo xtask elf-alignment <llvm-readelf> <library>...   (every library aligned to 16 KB pages)");
+    eprintln!(
+        "       cargo xtask aar-native-libraries <jar> <module> <aar>   (the AAR of the module that packages the SDK's native library holds it under every Android ABI the toolchain names)"
+    );
     eprintln!("       cargo xtask swift-builds   (every build the Swift package ships: a configuration, a destination and its architectures per line)");
     eprintln!("       cargo xtask swift-suite   (the build the Swift Testing suite runs on, read from that same table)");
     eprintln!("       cargo xtask swift-products   (the Swift package's library products, as its manifest lists them: what an app's extension links)");
@@ -732,6 +738,35 @@ mod tests {
             (Some(1), false, false, "bash: craftbridge_remove_on_exit names the cleanup untidy, which is no function".to_string()),
             "a cleanup that names no function is refused"
         );
+    }
+
+    /// The one reading of the builders' shared option, `craftbridge_regenerates_bindings` in
+    /// `tools/env.sh`, answers `yes` when bare — a build regenerates the committed bindings, which is how
+    /// a generation overwrites a hand edit the `generated` stage then finds — and `no` for `--keep-bindings`
+    /// and for nothing else, which is how a release leaves the bindings it tags as they stand. The usage
+    /// exit is the scripts' own, pinned where they are run; the yes and the no are pinned here because they
+    /// are what a builder consumes, and a reading that mixed the two words up would otherwise leave every
+    /// builder and the release passing while editing a tree it meant to leave whole.
+    #[test]
+    fn the_keep_bindings_reader_answers_yes_bare_and_no_only_for_the_option() {
+        let env = crate::repo_root().join("tools/env.sh");
+        let ask = |args: &[&str]| {
+            let output = std::process::Command::new("bash")
+                .arg("-c")
+                .arg("set -euo pipefail\nsource \"$1\"\nregenerate=\"$(craftbridge_regenerates_bindings \"${@:2}\")\" || exit $?\nprintf '%s\\n' \"$regenerate\"\n")
+                .arg("bash")
+                .arg(&env)
+                .args(args)
+                .output()
+                .unwrap();
+            (output.status.code(), String::from_utf8_lossy(&output.stdout).trim().to_string(), String::from_utf8_lossy(&output.stderr).trim().to_string())
+        };
+        assert_eq!(ask(&[]), (Some(0), "yes".to_string(), String::new()), "bare asks for the bindings to be regenerated");
+        assert_eq!(ask(&["--keep-bindings"]), (Some(0), "no".to_string(), String::new()), "the option alone is the only call that keeps them");
+        for misused in [&["--bogus"][..], &["--keep-bindings", "again"], &["--keep-bindings "]] {
+            let (code, said, _) = ask(misused);
+            assert_eq!(code, Some(64), "{misused:?} is refused with the usage status: {code:?} {said:?}");
+        }
     }
 
     /// Every bash this machine can run the gate's scripts with: the one `bash` names on the search

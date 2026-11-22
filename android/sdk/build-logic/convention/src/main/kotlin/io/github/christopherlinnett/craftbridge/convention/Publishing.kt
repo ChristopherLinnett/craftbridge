@@ -37,7 +37,7 @@ private const val PROJECT_URL = "https://github.com/ChristopherLinnett/craftbrid
 
 /** The one variant §23 publishes: the build apps link. One variant keeps the artifacts the two AARs they
  * are, rather than four. */
-private const val PUBLISHED_VARIANT = "release"
+internal const val PUBLISHED_VARIANT = "release"
 
 /** The POM property that names the ABIs an artifact's native libraries are built for, for the consuming
  * app to keep among its filters. */
