@@ -403,6 +403,14 @@ unset CARGO_BUILD_TARGET
 # Both out of the environment, from this one definition; a script that sets either is refused by that rule,
 # because under it the rule cannot tell what the script's greps read.
 unset GREP_OPTIONS POSIXLY_CORRECT
+# The options every bash the gate starts below inherits. A shell started above this one may have exported
+# SHELLOPTS, which hands this environment's own options, pipefail among them, to every bash started below —
+# whose early-quit pipes then answer 141 by timing under settings no script's words carry, exactly the hand
+# `cargo xtask early-pipes` refuses at an export. `export -n` keeps SHELLOPTS in this shell and takes the
+# export attribute off, so nothing below is handed it; it succeeds although bash keeps the variable readonly
+# and whether or not anything above exported it (measured in bash 3.2), and the rule reads the take-back as
+# such, not as an export. A bash below reads its options again from its own words, as every script here.
+export -n SHELLOPTS
 
 # Every cargo command the scripts run, and never while the repository root holds a Cargo configuration.
 # Cargo merges a .cargo/config.toml from every folder above the one it runs in, so one at the root would
