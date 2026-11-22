@@ -17,8 +17,12 @@
 //! command a pipe feeds is a reader, the last one and any in the middle alike, since a middle reader that
 //! quits kills its writer just the same. A reader is judged by the program its command word names, the
 //! last path part of a word written out (`/usr/bin/head`) or of the literal tail of one that is not
-//! (`"$dir/bin/xtask"`), through `env`, `builtin`, `command`, `exec`, `nice` and `nohup`, which run the word after
-//! them:
+//! (`"$dir/bin/xtask"`), through `env`, `builtin`, `command`, `exec`, `nice`, `nohup`, `timeout` and
+//! `sudo`, each of which runs a command its own words pick out — `timeout` the command after its duration —
+//! and through a function whose body runs a command with its call's words (`"$@"`, `"$1"`), which runs
+//! whatever its call site words. `xargs` runs its utility too, but reads the pipe itself, every word of
+//! it, and hands the utility none of it, so it is the reader, and one told with `-E` to stop at a word of
+//! its input is refused:
 //!
 //! - a `grep`, `egrep` or `fgrep` whose words stop it reading its input before the end: by quitting at a
 //!   match (`-q`, `-m`, `-l`, and GNU's `-L`, whose answer for standard input one matching line settles), by
@@ -70,8 +74,10 @@
 //! - an `awk`, `gawk`, `mawk` or `nawk`, whatever its program: whether it reaches an `exit` or a
 //!   `nextfile` before its input ends is awk's to say, and no tool the gate runs reads awk's syntax, so an
 //!   awk is handed its input whole another way (a here-string or a file) rather than read as text here;
-//! - an `eval`, by the first command of the script its words spell, which is what reads the pipe, and a
-//!   wrapper that runs no command at all (`command -v`), which reads none of it;
+//! - an `eval`, by the first command of the script its words spell, which is what reads the pipe — and an
+//!   `eval` whose words are not all written out is refused whole, since what it runs stands nowhere the
+//!   reading reaches; a wrapper that runs no command at all (`command -v`), which reads none of it, and a
+//!   `timeout` left with no command of its own to run;
 //! - a child shell — `bash`, `sh`, `dash`, `ksh` or `zsh`, named or through a wrapper — by the program its
 //!   own words give it: a `-c` string, the first word past every option wherever the `-c` stands, is read
 //!   through shfmt's tree exactly as an `eval`'s is and its first command is the reader, its options are
@@ -109,13 +115,31 @@
 //! options between them come off, as the one reading of every wrapper's options reads them, before the word
 //! that stands — past `--`, while `-v` and `-V` print a name and run nothing, and bash reads an option its
 //! stand-in has not got, `builtin -p` among them, as naming no command that runs. An `eval` runs the script
-//! its words spell, so that script is read through shfmt's tree as this one's own commands, at the `eval`'s
-//! line: `eval 'true; set -o pipefail'` turns `pipefail` on as bash does, an `eval` of a `source` sources,
-//! and its pipes and variables count as the script's. An `eval` whose words are not all written out could
-//! spell `set -o pipefail` itself, so its shell is read under `pipefail`, the reading's safe way, which is
-//! how `tools/env.sh`'s `eval "$exports"` of `cargo ndk-env`'s output is read, in a shell under it already;
-//! what does show of such an `eval` is read as far as it goes, so `eval "set -o $option"` is refused as the
-//! `set` it shows. Last, a script under `pipefail` that exports `SHELLOPTS` is refused at the export: every
+//! its words spell, so a script whose words are all written out is read through shfmt's tree as this one's
+//! own commands, at the `eval`'s line: `eval 'true; set -o pipefail'` turns `pipefail` on as bash does, an
+//! `eval` of a `source` sources, and its pipes and variables count as the script's. An `eval` whose words
+//! are not all written out could spell anything — `set -o pipefail`, a `source`, a reader that quits before
+//! its input ends — and no part of what it runs stands where this reading can reach, so every such `eval` is
+//! refused at its own line rather than read as far as it goes; a script that hands an expansion to `eval`
+//! writes the variable's commands out instead, or runs them directly. A function whose body runs a command
+//! with its call's words — `"$@"`, `"$1"` and the other numbered words, or a variable its statement list
+//! gives one of them, behind the `shift`s the body counts before it — runs a command no part of the body names ([`Runner`]): it is read at each call site of
+//! that name, in every script sharing the shell that defines it, through each command of the body that
+//! takes the call's words, with those words written into it — `run grep -q pat` is that grep,
+//! `run bash -c '…'` that child shell, and a body's `timeout 5 "$@"` the same behind its `timeout`; a
+//! call site whose words cannot be read (one whose word at a command's head is not written out, or a body
+//! that moves its words in a way this reading cannot count or starts a command with them in a shape it
+//! cannot point at) is refused like any command it cannot name, and so is a command a script's or a `-c`
+//! program's own top level starts with its own arguments, which no call names. `env`'s `-S` option ([`env_spliced`]) holds
+//! words of `env`'s own inside its one value word, split by `env` itself into its options, its
+//! assignments and its command, as if written in the value's place: the value is split as shfmt reads the
+//! words of a command and `env` is read again with them, so the `bash -o pipefail -c` inside
+//! `env -S 'bash -o pipefail -c "…"'` or `env -S '-u X bash -o pipefail -c "…"'` answers at its own line
+//! like one written out (measured 141 on macOS's `env` and on GNU's alike); a value this reading cannot
+//! split whole — one not written out, one holding a backslash, which the two `env`s split differently
+//! (measured: macOS's reads `\ ` as a plain space where GNU's ends with `invalid sequence`), or one shfmt
+//! reads as no plain run of words — is refused.
+//! Last, a script under `pipefail` that exports `SHELLOPTS` is refused at the export: every
 //! bash started below it, at any depth and by any command, inherits the running shell's own options,
 //! measured in bash 3.2 and 5.2, and answers 141 by timing at its own early-quit pipes, unseen by any
 //! reading of this script. The same hand crossing from one shell into the next in a command's own words is
@@ -146,7 +170,7 @@ const GREP_UNFOLLOWED: &str = "a pipe feeds a grep with an option that macOS's g
 const GREP_FILE: &str = "a pipe feeds a grep given a file to read, or a word after its pattern that is not written out and could name one: the grep reads that file and never the pipe, whose writer dies of SIGPIPE, so the pipe answers with the file's verdict or with 141 where the file is not there, and never with what the pipe holds: give the pattern with `-e`, name no file, or `-` for the pipe itself";
 const GREP_NOTHING: &str = "a pipe feeds a grep left with nothing to search for, no word left to be its pattern, an option given no value, or a context or count written as no number the grep can read: the grep ends at once and reads none of the pipe, whose writer dies of SIGPIPE, so the pipe answers with the grep's error and not with anything the pipe holds: name the pattern, and a value every option that takes one can read";
 const GREP_ENV: &str = "a pipe feeds a grep in a script whose shell sets GREP_OPTIONS or POSIXLY_CORRECT, however its `source`s run: either variable changes what the grep reads as its options from what its words say, so this reading of them holds for nothing: macOS's grep takes option words out of GREP_OPTIONS, and POSIXLY_CORRECT makes either grep read a word after the pattern as a file: unset it, as tools/env.sh does for every script this rule reads";
-const NAMED_UNSEEN: &str = "a pipe feeds a command named by an expansion, through an escape, or past a wrapper option this reading does not follow — one that takes the command in its value, or one that macOS's wrapper or GNU's has not got — which this reading cannot tell from a reader that quits before its input ends: name its program as a plain word, after options both platforms' wrappers read";
+const NAMED_UNSEEN: &str = "a pipe feeds a command named by an expansion, through an escape, or past a wrapper option this reading does not follow — one that takes the command in its value, one that macOS's wrapper or GNU's has not got, or one that ends the wrapper's own reading of its input early, as `xargs -E` does — which this reading cannot tell from a reader that quits before its input ends: name its program as a plain word, after options both platforms' wrappers read";
 const COMPOUND_READER: &str = "a pipe feeds a compound command, which this reading cannot tell from a reader that quits before its input ends: hand it the writer's output with `< <( … )`, or capture the output first";
 const SET_UNSEEN: &str = "a `set` or `shopt` with an option that is not written out, so this reading cannot tell whether it turns pipefail on or off";
 const SOURCE_UNSEEN: &str = "a `source` or `.` whose file is named by an expansion with no file name written at its end, so this reading cannot tell which script it brings under pipefail";
@@ -158,15 +182,22 @@ const SED_UNLABELED: &str = "a pipe feeds a sed whose scripts branch with `b` or
 const READ_SHAPE: &str = "a pipe feeds the `read` builtin, which takes one line and leaves the writer's rest unread: under pipefail the writer dying of SIGPIPE makes the pipe answer 141 where the reader's answer belongs, so the verdict is timing; capture the writer's whole output and let the shell read it from a here-string or a file";
 const MAPFILE_SHAPE: &str = "a pipe feeds a mapfile or readarray told with `-n` how many lines to copy, leaving the writer's rest unread, or told with `-u` to read another descriptor and not the pipe, or given an option this reading cannot see whole, which could be `-n` itself: under pipefail the writer dying of SIGPIPE makes the pipe answer 141 where the reader's answer belongs, so the verdict is timing; capture the writer's whole output and hand it to mapfile as a here-string";
 const SHELLOPTS_EXPORTED: &str = "a script that runs under pipefail exports SHELLOPTS, which hands the running shell's own options, pipefail among them, to every bash started below it — by name, by a script's `#!` line, as the `sh` macOS runs, or by any program the script starts — whose own pipes then answer 141 by timing where a reader quits early, unseen by any reading of this script: do not export SHELLOPTS";
-const CHILD_UNREAD: &str = "a child shell (`bash`, `sh`, `dash`, `ksh` or `zsh`) was given a program this reading cannot read whole: no `-c` program at all, one held in a word that is not written out, one shfmt cannot parse, an option this reading does not know or one held in a word whose first letter is not written out, a program read from a stream — no program or file at all, which leaves the shell its standard input or a here-document, or `/dev/stdin` — a script file named by an expansion while the child runs with `pipefail` on, or a word naming one that stands behind a wrapper option this reading cannot follow, which may have eaten the word before it and named no command at all — such a shell runs words no reading of this script reaches, and at a pipe's end the shell with no program of its own reads the pipe itself, so its early-quit pipes answer 141 by timing unseen: write the `-c` program and every option out whole where shfmt can parse them, name the script file the shell runs with a plain word, and let no child stand behind an option only one platform's wrapper reads";
+const CHILD_UNREAD: &str = "a child shell (`bash`, `sh`, `dash`, `ksh` or `zsh`) was given a program this reading cannot read whole: no `-c` program at all, one held in a word that is not written out, one shfmt cannot parse, an option this reading does not know or one held in a word whose first letter is not written out, a program read from a stream — no program or file at all, which leaves the shell its standard input or a here-document, or `/dev/stdin` — a script file named by an expansion while the child runs with `pipefail` on, a word naming one that stands behind a wrapper option this reading cannot follow, which may have eaten the word before it and named no command at all, or one whose words `xargs -I` or `-J` fills in from its input — such a shell runs words no reading of this script reaches, and at a pipe's end the shell with no program of its own reads the pipe itself, so its early-quit pipes answer 141 by timing unseen: write the `-c` program and every option out whole where shfmt can parse them, name the script file the shell runs with a plain word, and let no child stand behind an option only one platform's wrapper reads";
 const CHILD_SHELLOPTS: &str = "a command is handed a SHELLOPTS assignment in the environment given it, which starts the shell it runs with the options named there, pipefail among them, unseen by any reading of this script or of the script that shell runs: hand no command a SHELLOPTS assignment; let each script turn on its own options, and take back an inherited export with `export -n SHELLOPTS`, which tools/env.sh does for every script this rule reads";
 const EVAL_UNREAD: &str = "an `eval` whose text shfmt cannot parse, so this reading cannot tell what it runs: whether it turns pipefail on, sources a script, or feeds or reads a pipe that quits early";
-const WRAPPER_RUNS_NOTHING: &str = "a pipe feeds a wrapper that runs no command and reads none of the pipe — `command -v` or `-V`, a `builtin` or `command` given an option it has not got, `env -0`, which runs a command on neither platform, `env --help` or `--version`, or a wrapper left with no command after its options — or a child shell reading `-n` or `-D`, which parses what it is given and runs none of it: its writer dies of SIGPIPE, so the pipe answers with what that prints or its error, by timing, and never with what the pipe holds: name the command to run, or let the child shell run its program";
+const EVAL_OPAQUE: &str = "an `eval` whose words are not all written out, so this reading cannot tell what it runs: it could turn `pipefail` on, source a script, or start a reader that quits before its input ends, and no reading of a script that cannot be read whole can answer for any pipe: write out the commands it runs where shfmt can read them, or run them directly";
+const RUNNER_UNREAD: &str = "a command runs through a function whose body runs a command with the call's own words (`\"$@\"` or `\"$1\"`), and this reading cannot tell which command the call runs: the word the call puts at a command's head is not written out, the body moves its words in a way this reading cannot count (a `shift` given a word that is no plain count of words, one standing where a loop or a condition could run it twice, or a `set` handing the shell new words), the body starts a command with the call's words in a shape this reading cannot point at (`$@` unquoted, `$*`, `${@}`, `\"${@:2}\"`), the function reaches itself deeper than this reading follows, or a script or a `-c` program starts a command with its own arguments, which no call in it names, so what reads the pipe, and under what options it starts its children, stands nowhere on the line: call such a function with its command written out as a plain word, start the body's command with `\"$@\"` or `\"$1\"` quoted, and keep each of the body's `shift`s standing on its own at the body's top level, bare or given its count in digits";
+const ENV_SPLIT_UNREAD: &str = "`env` splits the value of its `-S` option into words of its own — its options, its assignments and the command it runs — and this reading cannot read that value whole: it is held in a word that is not written out, it holds a backslash, which macOS's `env` and GNU's split differently (macOS's reads `\\ ` as a plain space where GNU's ends with `invalid sequence`, measured), or shfmt reads it as no plain run of words — a quote left open, or a `;`, a `|`, a `&` or a redirection, which `env` splits as plain parts of a word: write the `-S` value out whole, without backslashes, as the plain words `env` will read";
+const WRAPPER_RUNS_NOTHING: &str = "a pipe feeds a wrapper that runs no command and reads none of the pipe — `command -v` or `-V`, a `builtin` or `command` given an option it has not got, `env -0`, which runs a command on neither platform, `env --help` or `--version`, a `timeout` left with no duration or no command after it, or a wrapper left with no command after its options — or a child shell reading `-n` or `-D`, which parses what it is given and runs none of it, or a function running its call's own words (`\"$@\"` or `\"$1\"`) called with none of its own: its writer dies of SIGPIPE, so the pipe answers with what that prints or its error, by timing, and never with what the pipe holds: name the command to run, or let the child shell run its program";
 
 /// The programs that run the program their words name after their own options. `builtin` runs one of the
 /// shell's own builtins and `command` a builtin or a program, each passing over a function of that name, so
-/// each stands in for the command that follows its options exactly as `env` and `exec` do.
-const WRAPPERS: &[&str] = &["env", "builtin", "command", "exec", "nice", "nohup"];
+/// each stands in for the command that follows its options exactly as `env` and `exec` do. `xargs` runs its
+/// utility (defaulting to `echo`) on the words each line or argument of its input spells, handing it no
+/// standard input of the pipe's, `timeout` the command after its duration word, and `sudo` the command after
+/// its options and any `VAR=value` assignments — each starting that command under its own change of place,
+/// user, clock or argument list, while which command it is stands in the same place the others stand theirs.
+const WRAPPERS: &[&str] = &["env", "builtin", "command", "exec", "nice", "nohup", "xargs", "timeout", "sudo"];
 
 /// The word an expansion inside an `eval`'s words stands as in the text shfmt parses: one parameter
 /// expansion, which every reading here takes for a word not written out.
@@ -267,10 +298,9 @@ fn parse(name: &str, text: &str) -> Result<Value, String> {
 /// stage's run and the tests both come through here, so the rule is read in exactly one place.
 fn check(scripts: &[Script]) -> (Vec<String>, usize) {
     let mut problems = Vec::new();
-    let mut settings = Vec::new();
     let mut told = Vec::new();
-    for script in scripts {
-        let (reading, unseen) = settings_of(&script.tree);
+    let (settings, unseen, runners) = shells_of(scripts);
+    for (script, unseen) in scripts.iter().zip(unseen) {
         let mut here = Vec::new();
         for line in unseen {
             let problem = format!("early-pipes: {}:{line}", script.name);
@@ -278,11 +308,11 @@ fn check(scripts: &[Script]) -> (Vec<String>, usize) {
             here.push(problem);
         }
         told.push(here);
-        settings.push(reading);
     }
     let under = stands_in(scripts, &settings, settings.iter().map(|reading| reading.pipefail).collect());
     let grep_env = stands_in(scripts, &settings, settings.iter().map(|reading| reading.grep_env).collect());
-    for ((script, reading), ((on, grep_env), seen)) in scripts.iter().zip(&settings).zip(under.iter().zip(&grep_env).zip(&told)) {
+    for ((((script, reading), runners), (on, grep_env)), seen) in scripts.iter().zip(&settings).zip(runners.iter()).zip(under.iter().zip(&grep_env)).zip(&told)
+    {
         if !on {
             continue;
         }
@@ -298,7 +328,7 @@ fn check(scripts: &[Script]) -> (Vec<String>, usize) {
             let mut piped = Vec::new();
             pipelines(tree, text, &mut piped);
             for stage in piped.iter().flat_map(|stages| stages.iter().skip(1)) {
-                if let Some(verdict) = judge(stage, *grep_env, 0) {
+                if let Some(verdict) = judge(stage, *grep_env, 0, runners) {
                     let line = at.unwrap_or_else(|| line_of(stage));
                     found.push((line, format!("early-pipes: {}:{line}: {verdict}", script.name)));
                 }
@@ -312,6 +342,39 @@ fn check(scripts: &[Script]) -> (Vec<String>, usize) {
         problems.extend(found.into_iter().map(|(_, problem)| problem));
     }
     (problems, under.iter().filter(|on| **on).count())
+}
+
+/// Each script's settings, its refusals (as [`settings_of`] gives them) and the runners its calls reach. A
+/// function one script defines is called by name from every script running in its shell — a script and
+/// the libraries it sources, a library and every script sourcing it, as [`stands_in`] reads a shell — so
+/// `tools/env.sh`'s functions answer for the calls of every script that sources it: each script's calls
+/// are read through the runners of all of those, and which scripts share a shell is read again from what
+/// those runners reveal they source, until no shell widens.
+fn shells_of(scripts: &[Script]) -> (Vec<Settings>, Vec<Vec<String>>, Vec<Runners>) {
+    let own: Vec<Runners> = scripts.iter().map(|script| Runners::of(&script.tree)).collect();
+    let mut runners = own.clone();
+    let mut rounds = 0;
+    loop {
+        let (settings, unseen): (Vec<Settings>, Vec<Vec<String>>) =
+            scripts.iter().zip(&runners).map(|(script, runners)| settings_of(&script.tree, runners)).unzip();
+        let shared: Vec<Runners> = (0..scripts.len())
+            .map(|this| {
+                let shell = stands_in(scripts, &settings, (0..scripts.len()).map(|other| other == this).collect());
+                let mut joined = Runners::default();
+                for (theirs, _) in own.iter().zip(&shell).filter(|(_, in_shell)| **in_shell) {
+                    joined.join(theirs);
+                }
+                joined
+            })
+            .collect();
+        // Each round can only widen a shell, by a `source` a runner newly read reveals, so the rounds end
+        // within one more than there are scripts.
+        rounds += 1;
+        if shared == runners || rounds > scripts.len() {
+            return (settings, unseen, runners);
+        }
+        runners = shared;
+    }
 }
 
 /// What a script's own commands say of `pipefail`: whether any of them turns it on, the names of the scripts
@@ -332,7 +395,7 @@ struct Settings {
 }
 
 /// A script's settings, and a line (`<line>: <why>`) for each command that decides them but cannot be read.
-fn settings_of(tree: &Value) -> (Settings, Vec<String>) {
+fn settings_of(tree: &Value, runners: &Runners) -> (Settings, Vec<String>) {
     let mut settings = Settings {
         pipefail: false,
         sources: Vec::new(),
@@ -341,12 +404,22 @@ fn settings_of(tree: &Value) -> (Settings, Vec<String>) {
         evals: Vec::new(),
     };
     let mut unseen = Vec::new();
+    let mut own_words = Vec::new();
+    own_words_run(tree, &mut own_words);
+    settings.pipefail |= !own_words.is_empty();
     for call in calls_in_order(tree) {
+        if own_words.contains(&line_of(call)) && matches!(command_place(&words_of(call)), Place::Call(_) | Place::Odd) {
+            unseen.push(format!("{}: {RUNNER_UNREAD}", line_of(call)));
+        }
         if handed_shellopts(call) {
             unseen.push(format!("{}: {CHILD_SHELLOPTS}", line_of(call)));
         }
-        settings_reading(&words_of(call), &mut settings, &mut unseen, line_of(call), 0, false);
+        settings_reading(&words_of(call), &mut settings, &mut unseen, line_of(call), 0, false, runners);
     }
+    // One command refused twice at its line — a hand both its own words and the words `env -S` splits
+    // out of them spell — is one problem, told once.
+    let mut seen = std::collections::BTreeSet::new();
+    unseen.retain(|problem| seen.insert(problem.clone()));
     (settings, unseen)
 }
 
@@ -365,26 +438,477 @@ fn words_of(call: &Value) -> Vec<&Value> {
     call.get("Args").and_then(Value::as_array).map(|args| args.iter().collect()).unwrap_or_default()
 }
 
+/// A function whose body runs a command with the words of its call — `"$@"`, or `"$1"` and the other
+/// numbered words, behind the `shift`s that move them — runs, at each call, a command no word of the body
+/// names. Such a function is read at each call site of its name, through every command of its body that
+/// takes the call's words, as if that command stood at the call with those words written into it:
+/// `f() { "$@"; }` called as `f grep -q x` runs that grep, `f() { timeout 5 "$@"; }` runs it behind its
+/// `timeout`, and `f() { "$1" -q "$2"; }` called as `f grep x` runs `grep -q x` (each measured 141 at the
+/// call's early-quit pipe). A variable the body's own statement list gives one of those words stands for it
+/// (`local run="$1"; shift; "$run" "$@"`, as `tools/ci.sh`'s `clippy_runs` runs its cargo runner, also
+/// measured 141). Each such command keeps how many of the call's words the body has shifted off
+/// before it runs, counted in the order the body runs its statements: a `shift` after the command, or in a
+/// subshell of its own, moves nothing the command sees (measured 141 with `"$@"; shift` and with
+/// `(shift); "$@"`). A body this reading cannot count shifts in — a `shift` given a word that is no plain
+/// count, one standing where a loop or a condition could run it any number of times, or a `set` handing the
+/// shell new positional words — could put any of the call's words in the place of a command it starts
+/// with them, and a body that starts a command with the call's words in a shape this reading cannot follow
+/// (`$@` unquoted, which splits each word again, `$*`, `${@}`, `"${@:2}"`) puts there no word of the call
+/// it can point at: [`Runner::unreadable`] stands for either, and every call is refused as any command this
+/// reading cannot name is. A body whose shifts cannot be counted, and which hands the call's words to its
+/// commands only as their arguments, is read where it stands, as any other body is.
+#[derive(Clone, Default, PartialEq)]
+struct Runner {
+    commands: Vec<RunnerCommand>,
+    unreadable: bool,
+}
+
+/// One command of a [`Runner`]'s body that takes the call's words: its words as the body writes them, how
+/// many of the call's leading words the body shifts off before it runs, and which of its words stands at
+/// its command place holding the call's words, where one does.
+#[derive(Clone, PartialEq)]
+struct RunnerCommand {
+    words: Vec<Value>,
+    skip: usize,
+    place: Option<usize>,
+}
+
+impl RunnerCommand {
+    /// The call words one positional word hands the command: past the shifted ones, every word for `"$@"`
+    /// and the Nth for `"$N"`, or none where the call has no such word.
+    fn handed<'c, 'a>(&self, positional: Positional, call: &'c [&'a Value]) -> &'c [&'a Value] {
+        let past = call.get(self.skip..).unwrap_or_default();
+        match positional {
+            Positional::All => past,
+            Positional::Nth(n) => n.checked_sub(1).and_then(|at| past.get(at..n)).unwrap_or_default(),
+            Positional::Word(at) => call.get(at..at.saturating_add(1)).unwrap_or_default(),
+        }
+    }
+
+    /// The command's words as one call runs them, each positional word standing for what it hands on.
+    fn at_call<'a>(&'a self, call: &[&'a Value]) -> Vec<&'a Value> {
+        let mut words = Vec::new();
+        for word in &self.words {
+            match quoted_positional(word) {
+                Some(positional) => words.extend_from_slice(self.handed(positional, call)),
+                None => words.push(word),
+            }
+        }
+        words
+    }
+
+    /// Whether the call puts a word at this command's command place that names no program.
+    fn names_no_program(&self, call: &[&Value]) -> bool {
+        let word = self.place.and_then(|place| self.words.get(place)).and_then(quoted_positional);
+        word.and_then(|positional| self.handed(positional, call).first().copied()).is_some_and(|word| program(word).is_none())
+    }
+}
+
+/// The functions a shell can call by name that run their call's own words ([`Runner`]): those one syntax
+/// tree defines — a script's, or the text an `eval` or a child shell's `-c` runs — and, through
+/// [`Runners::join`], those of every script that runs in the same shell. A call of a name no map holds is no
+/// runner: it reads as any other command does.
+#[derive(Clone, Default, PartialEq)]
+struct Runners(std::collections::BTreeMap<String, Runner>);
+
+impl Runners {
+    fn of(tree: &Value) -> Runners {
+        let mut runners = Runners::default();
+        decls_in(tree, &mut runners);
+        runners
+    }
+
+    /// These runners plus the ones a tree defines: text run inside this shell — an `eval`'s, a child's —
+    /// calls its own functions and those of the shell it runs in alike; a tree that defines none changes
+    /// nothing.
+    fn merged(&self, tree: &Value) -> Runners {
+        let mut runners = self.clone();
+        decls_in(tree, &mut runners);
+        runners
+    }
+
+    /// These runners plus another script's, where the two run in one shell: a script calls every function
+    /// the scripts it sources define, and a sourced library every function of the scripts sourcing it.
+    fn join(&mut self, other: &Runners) {
+        for (name, runner) in &other.0 {
+            self.add(name, runner);
+        }
+    }
+
+    /// A definition of a runner by this name. Which of two definitions of one name a call runs is the one
+    /// that stood last when it ran, which is flow no syntax tree answers, so the call is read through every
+    /// definition it could run.
+    fn add(&mut self, name: &str, runner: &Runner) {
+        let held = self.0.entry(name.to_string()).or_default();
+        held.unreadable |= runner.unreadable;
+        for command in &runner.commands {
+            if !held.commands.contains(command) {
+                held.commands.push(command.clone());
+            }
+        }
+    }
+
+    fn get(&self, name: &str) -> Option<&Runner> {
+        self.0.get(name)
+    }
+
+    /// These runners less one name: `command`, `exec` and every other wrapper pass over a function of the
+    /// name they run (measured: `head() { "$@"; }; listed | command head -n 1` runs the real `head` at 141).
+    fn without(&self, name: Option<&str>) -> Runners {
+        let mut runners = self.clone();
+        if let Some(name) = name {
+            runners.0.remove(name);
+        }
+        runners
+    }
+}
+
+/// The runner a command word calls: bash looks a function up by the word's whole text, so only a word
+/// written out whole can name one, and `"$run/debug/xtask"`, whose tail [`program`] reads, is a file and no
+/// call of a function named `xtask`.
+fn function_of<'a>(word: &Value, runners: &'a Runners) -> Option<&'a Runner> {
+    literal(word).and_then(|name| runners.get(&name))
+}
+
+/// Every function declaration of a tree, at whatever depth it stands, read into `into` by name: a body
+/// that runs a command with its call's words becomes a [`Runner`], and a body that runs none is no runner
+/// at all, its calls reading as ordinary commands of that name.
+fn decls_in(value: &Value, into: &mut Runners) {
+    if let Some(fields) = value.as_object() {
+        if fields.get("Type").and_then(Value::as_str) == Some("FuncDecl")
+            && let Some(name) = fields.get("Name").and_then(|name| name.get("Value")).and_then(Value::as_str)
+            && let Some(body) = fields.get("Body")
+            && let Some(runner) = runner_of(body)
+        {
+            into.add(name, &runner);
+        }
+        for (_, child) in fields.iter() {
+            decls_in(child, into);
+        }
+    } else if let Some(items) = value.as_array() {
+        for item in items {
+            decls_in(item, into);
+        }
+    }
+}
+
+/// What one function body says of its calls, or `None` when no command of it takes the call's words.
+fn runner_of(body: &Value) -> Option<Runner> {
+    let mut reading = BodyReading { countable: true, ..BodyReading::default() };
+    body_statement(body, &mut 0, &mut reading);
+    let headed_uncounted = !reading.countable && reading.commands.iter().any(|command| command.place.is_some());
+    let unreadable = reading.odd || headed_uncounted;
+    let countable = reading.countable;
+    let commands: Vec<RunnerCommand> = reading.commands.into_iter().filter(|command| countable || command.place.is_some()).collect();
+    (unreadable || !commands.is_empty()).then_some(Runner { commands, unreadable })
+}
+
+/// What a walk through one body has found: each command that takes the call's words; whether every
+/// `shift` and `set` it met moved the words by a count it can read; and whether a command place holds the
+/// call's words in a shape it cannot follow; and which of the call's words each variable holds, by its
+/// place among all of them, where a plain assignment of the statement list gave it one.
+#[derive(Default)]
+struct BodyReading {
+    commands: Vec<RunnerCommand>,
+    held: std::collections::BTreeMap<String, usize>,
+    countable: bool,
+    odd: bool,
+}
+
+/// One statement of a body, in the order the body runs it, with the shifts counted so far: a plain
+/// `shift` among a statement list moves the words for every statement after it, a block's statements run
+/// in the body's own shell and a subshell's in a copy of it, whose shifts end with it. Everything inside
+/// any other statement runs where a loop, a condition or a list decides how often, so a `shift` there is
+/// no count this reading can read.
+fn body_statement(statement: &Value, count: &mut usize, reading: &mut BodyReading) {
+    let cmd = statement.get("Cmd").unwrap_or(statement);
+    match cmd.get("Type").and_then(Value::as_str) {
+        Some("Block") => {
+            for inner in cmd.get("Stmts").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default() {
+                body_statement(inner, count, reading);
+            }
+        }
+        Some("Subshell") => {
+            let mut own = *count;
+            let held = reading.held.clone();
+            for inner in cmd.get("Stmts").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default() {
+                body_statement(inner, &mut own, reading);
+            }
+            reading.held = held;
+        }
+        _ => match plain_shift(cmd) {
+            Some(shifted) => *count = count.saturating_add(shifted),
+            None => {
+                match plain_assignments(cmd) {
+                    Some(assignments) => {
+                        for assignment in assignments {
+                            let Some(name) = assignment.get("Name").and_then(|name| name.get("Value")).and_then(Value::as_str) else { continue };
+                            match assignment.get("Value").and_then(assigned_word) {
+                                Some(nth) => reading.held.insert(name.to_string(), count.saturating_add(nth.saturating_sub(1))),
+                                None => reading.held.remove(name),
+                            };
+                        }
+                    }
+                    None => forget_assigned(statement, &mut reading.held),
+                }
+                body_commands(statement, *count, reading);
+            }
+        },
+    }
+}
+
+/// The assignments a statement makes and nothing else, each run once where the statement stands: a
+/// `local` or other declaration, or a command of assignments alone. One standing before a command's name
+/// holds only for that command, so it is none of these.
+fn plain_assignments(cmd: &Value) -> Option<Vec<&Value>> {
+    let held = |key: &str| cmd.get(key).and_then(Value::as_array).map(|items| items.iter().filter(|item| item.get("Name").is_some()).collect());
+    match cmd.get("Type").and_then(Value::as_str) {
+        Some("DeclClause") => held("Args"),
+        Some("CallExpr") if words_of(cmd).is_empty() => held("Assigns"),
+        _ => None,
+    }
+}
+
+/// Which of the call's words an assignment's value is: `"$N"` or `$N`, which an assignment hands on whole
+/// either way.
+fn assigned_word(value: &Value) -> Option<usize> {
+    let parameter = match value.get("Parts").and_then(Value::as_array)?.as_slice() {
+        [part] if part.get("Type").and_then(Value::as_str) == Some("ParamExp") => part,
+        [part] if part.get("Type").and_then(Value::as_str) == Some("DblQuoted") => match part.get("Parts").and_then(Value::as_array)?.as_slice() {
+            [inner] => inner,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    if parameter.get("Type").and_then(Value::as_str) != Some("ParamExp") || parameter.get("Short").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    parameter.get("Param").and_then(|param| param.get("Value")).and_then(Value::as_str)?.parse::<usize>().ok().filter(|n| *n > 0)
+}
+
+/// Every variable a statement that is no plain assignment could set, a loop's or a condition's among them,
+/// which then holds no word this reading can point at.
+fn forget_assigned(value: &Value, held: &mut std::collections::BTreeMap<String, usize>) {
+    if let Some(fields) = value.as_object() {
+        if let Some(name) = fields.get("Name").and_then(|name| name.get("Value")).and_then(Value::as_str) {
+            held.remove(name);
+        }
+        for child in fields.values() {
+            forget_assigned(child, held);
+        }
+    } else if let Some(items) = value.as_array() {
+        for item in items {
+            forget_assigned(item, held);
+        }
+    }
+}
+
+/// How many words a plain `shift` moves: a `shift` alone moves one, and one given a count in digits that
+/// count; any other `shift`, and any other command, answers `None`.
+fn plain_shift(call: &Value) -> Option<usize> {
+    let words = words_of(call);
+    if words.first().and_then(|word| literal(word)).as_deref() != Some("shift") {
+        return None;
+    }
+    match words.as_slice() {
+        [_] => Some(1),
+        [_, count] => literal(count).and_then(|text| text.parse::<usize>().ok()).filter(|count| *count > 0),
+        _ => None,
+    }
+}
+
+/// Every command a statement holds, at whatever depth, read with the shifts counted before the statement:
+/// a `shift`, or a `set` handing the shell positional words, found here makes the count unreadable; a
+/// command that takes the call's words is kept. A nested function is its own body, which [`decls_in`]
+/// reads in its place.
+fn body_commands(value: &Value, count: usize, reading: &mut BodyReading) {
+    if let Some(fields) = value.as_object() {
+        match fields.get("Type").and_then(Value::as_str) {
+            Some("FuncDecl") => return,
+            Some("CallExpr") => {
+                let written_words = words_of(value);
+                let named = written_words.first().and_then(|word| literal(word));
+                let stored: Vec<Value> = written_words.iter().map(|word| held_word(word, &reading.held).unwrap_or_else(|| (*word).clone())).collect();
+                let words: Vec<&Value> = stored.iter().collect();
+                let sets_words =
+                    named.as_deref() == Some("set") && written_words.get(1..).is_some_and(|rest| pipefail_from(rest, false).is_none_or(|set| set.operands));
+                if named.as_deref() == Some("shift") || sets_words {
+                    reading.countable = false;
+                }
+                let place = match command_place(&words) {
+                    Place::Call(at) => Some(at),
+                    Place::Odd => {
+                        reading.odd = true;
+                        None
+                    }
+                    Place::Own => None,
+                };
+                if place.is_some() || words.iter().any(|word| quoted_positional(word).is_some()) {
+                    reading.commands.push(RunnerCommand { words: stored, skip: count, place });
+                }
+            }
+            _ => {}
+        }
+        for (_, child) in fields.iter() {
+            body_commands(child, count, reading);
+        }
+    } else if let Some(items) = value.as_array() {
+        for item in items {
+            body_commands(item, count, reading);
+        }
+    }
+}
+
+/// What stands at a command's command place — its first word, or past each wrapper's options the word
+/// the one wrapper reading takes for the command it runs ([`past_wrapper_options`]).
+enum Place {
+    /// The call's words, as [`quoted_positional`] reads them, in the word at this index.
+    Call(usize),
+    /// The call's words in a shape this reading cannot point at ([`odd_positional`]).
+    Odd,
+    /// A word of the body's own, written out or not.
+    Own,
+}
+
+fn command_place(words: &[&Value]) -> Place {
+    // The call's words stand as one written word each while the wrapper reading walks the options, so the
+    // place it comes to is the place the call's words take, whatever they will spell there.
+    let call = written("\u{0}");
+    let marked: Vec<&Value> = words.iter().map(|word| if quoted_positional(word).is_some() || odd_positional(word) { &call } else { *word }).collect();
+    let mut at = 0;
+    loop {
+        let Some(word) = marked.get(at) else { return Place::Own };
+        if std::ptr::eq(*word, &call) {
+            return if words.get(at).is_some_and(|word| quoted_positional(word).is_some()) { Place::Call(at) } else { Place::Odd };
+        }
+        let Some(name) = program(word).filter(|name| WRAPPERS.contains(&name.as_str())) else { return Place::Own };
+        match past_wrapper_options(&name, marked.get(at + 1..).unwrap_or_default(), 0) {
+            Program::At(next) | Program::BehindHand(next) => at += 1 + next,
+            Program::Nothing | Program::Hidden | Program::Split(_) | Program::SplitUnread => return Place::Own,
+        }
+    }
+}
+
+/// The lines where a tree's own top level, outside every function, starts a command with its own words:
+/// a script's arguments, or those after a `-c` program, which no call in the tree names, so what runs
+/// there stands nowhere this reading reaches (measured: a script whose `"$@"` is handed `set -o pipefail`
+/// puts its next `grep -q` pipe at 141).
+fn own_words_run(node: &Value, lines: &mut Vec<u64>) {
+    if let Some(fields) = node.as_object() {
+        match fields.get("Type").and_then(Value::as_str) {
+            Some("FuncDecl") => return,
+            Some("CallExpr") if matches!(command_place(&words_of(node)), Place::Call(_) | Place::Odd) => lines.push(line_of(node)),
+            _ => {}
+        }
+        for value in fields.values() {
+            own_words_run(value, lines);
+        }
+    } else if let Some(items) = node.as_array() {
+        for item in items {
+            own_words_run(item, lines);
+        }
+    }
+}
+
+/// Which of the call's words a whole word hands the command, where this reading can point at them:
+/// `"$@"`, every word, and `"$N"`, the Nth past the shifted ones, each quoted, so the shell hands each call
+/// word on whole; and a variable holding one, by its place among all the call's words ([`held_word`]).
+#[derive(Clone, Copy)]
+enum Positional {
+    All,
+    Nth(usize),
+    Word(usize),
+}
+
+/// The key of the word that stands in a stored body command for a variable holding the call's word at this
+/// place, and of the one for such a variable in a shape this reading cannot point at. shfmt writes neither.
+const CALL_WORD: &str = "CallWord";
+const ODD_CALL_WORD: &str = "OddCallWord";
+
+fn quoted_positional(word: &Value) -> Option<Positional> {
+    if let Some(at) = word.get(CALL_WORD).and_then(Value::as_u64) {
+        return usize::try_from(at).ok().map(Positional::Word);
+    }
+    match quoted_parameter(word)? {
+        "@" => Some(Positional::All),
+        digits => digits.parse::<usize>().ok().filter(|n| *n > 0).map(Positional::Nth),
+    }
+}
+
+/// The parameter a word expands, where the whole word is one short expansion in double quotes.
+fn quoted_parameter(word: &Value) -> Option<&str> {
+    let [part] = word.get("Parts").and_then(Value::as_array)?.as_slice() else { return None };
+    if part.get("Type").and_then(Value::as_str) != Some("DblQuoted") {
+        return None;
+    }
+    let [inner] = part.get("Parts").and_then(Value::as_array)?.as_slice() else { return None };
+    if inner.get("Type").and_then(Value::as_str) != Some("ParamExp") || inner.get("Short").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    inner.get("Param").and_then(|param| param.get("Value")).and_then(Value::as_str)
+}
+
+/// What stands in a stored body command for a word expanding a variable that holds one of the call's words.
+fn held_word(word: &Value, held: &std::collections::BTreeMap<String, usize>) -> Option<Value> {
+    if let Some(at) = quoted_parameter(word).and_then(|name| held.get(name)) {
+        return Some(Value::Object(serde_json::Map::from_iter([(CALL_WORD.to_string(), Value::from(*at))])));
+    }
+    expands_at_head(word, &|name| held.contains_key(name)).then(|| Value::Object(serde_json::Map::from_iter([(ODD_CALL_WORD.to_string(), Value::Bool(true))])))
+}
+
+/// Whether a word draws a command's name from the call's words in a shape [`quoted_positional`] does not
+/// read, wherever the expansion stands at the word's head: `$@` or `$1` unquoted, which split each word
+/// again, `$*` and `"$*"`, which join them, and every braced, sliced or otherwise changed form (`${@}`,
+/// `${1}`, `"${@:2}"`). A short `$1` heading a longer word (`"$1/bin/java"`) names its program by the
+/// word's written tail, which this reading reads as it reads any expansion's.
+fn odd_positional(word: &Value) -> bool {
+    word.get(ODD_CALL_WORD).is_some()
+        || (quoted_positional(word).is_none()
+            && expands_at_head(word, &|name| name == "@" || name == "*" || (name.bytes().all(|byte| byte.is_ascii_digit()) && name != "0")))
+}
+
+/// Whether a word's head expands a parameter of these names in any shape but a short one heading a longer
+/// word, whose written tail names its program.
+fn expands_at_head(word: &Value, names: &dyn Fn(&str) -> bool) -> bool {
+    let Some(parts) = word.get("Parts").and_then(Value::as_array) else { return false };
+    let whole = parts.len() == 1;
+    let head = match parts.first() {
+        Some(part) if part.get("Type").and_then(Value::as_str) == Some("DblQuoted") => {
+            let inner = part.get("Parts").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+            inner.first().map(|first| (first, whole && inner.len() == 1))
+        }
+        Some(part) => Some((part, whole)),
+        None => None,
+    };
+    head.is_some_and(|(part, whole)| {
+        part.get("Type").and_then(Value::as_str) == Some("ParamExp")
+            && part.get("Excl").and_then(Value::as_bool) != Some(true)
+            && part.get("Param").and_then(|param| param.get("Value")).and_then(Value::as_str).is_some_and(names)
+            && (whole || part.get("Short").and_then(Value::as_bool) != Some(true))
+    })
+}
+
 /// One command's words read against the script's settings: whether it turns `pipefail` on and what it
-/// `source`s — and, for a wrapper, an `eval` and a child shell, of the words those hand on too: what
-/// `builtin set -o pipefail`, `command set -o pipefail`, `eval 'set -o pipefail'` and
+/// `source`s — and, for a wrapper, a runner function, an `eval` and a child shell, of the words those hand
+/// on too: what `builtin set -o pipefail`, `command set -o pipefail`, `eval 'set -o pipefail'` and
 /// `env bash -o pipefail -c '…'` turn on, and what `builtin source` and `command .` source, is read through
 /// this one definition rather than a second one that knows those spellings. `depth` counts the `eval`s and
-/// child programs this command stands inside.
-fn settings_reading(words: &[&Value], settings: &mut Settings, unseen: &mut Vec<String>, line: u64, depth: usize, handed: bool) {
+/// child programs this command stands inside, and `runners` names the functions whose calls are read at
+/// their call sites ([`Runners`]).
+fn settings_reading(words: &[&Value], settings: &mut Settings, unseen: &mut Vec<String>, line: u64, depth: usize, handed: bool, runners: &Runners) {
     let Some((first, rest)) = words.split_first() else { return };
     match program(first).as_deref() {
         // One `set` or `shopt` turning `pipefail` on is enough for the whole script: no other command
         // turns it back off for the reading, since which pipes run while it is on is flow the tree does
         // not answer, and reading only up to the last one would pass the very pipe this rule is for.
         Some("set") => match pipefail_from(rest, false) {
-            Some(Some(true)) => settings.pipefail = true,
-            Some(Some(false)) | Some(None) => {}
+            Some(SetWords { pipefail: Some(true), .. }) => settings.pipefail = true,
+            Some(_) => {}
             None => unseen.push(format!("{line}: {SET_UNSEEN}")),
         },
         Some("shopt") => match pipefail_from(rest, true) {
-            Some(Some(true)) => settings.pipefail = true,
-            Some(Some(false)) | Some(None) => {}
+            Some(SetWords { pipefail: Some(true), .. }) => settings.pipefail = true,
+            Some(_) => {}
             None => unseen.push(format!("{line}: {SET_UNSEEN}")),
         },
         Some("source" | ".") => match rest.first() {
@@ -397,6 +921,26 @@ fn settings_reading(words: &[&Value], settings: &mut Settings, unseen: &mut Vec<
             },
             None => unseen.push(format!("{line}: {SOURCE_UNSEEN}")),
         },
+        // A function running its call's own words runs, at this call, each command of its body that takes
+        // them ([`Runner`]), read through this same definition as if it stood here with the call's words
+        // written into it. A body whose words this reading cannot follow, and a call whose word at a
+        // command's head is not written out, run whatever they run in this very shell — a `set` turning
+        // the setting on among it, with no word on the line to show it — so the script is read under
+        // `pipefail`, the safe way, and the call is refused as a command this reading cannot name; so is a
+        // function that reaches itself again past the depth every reading here stops at.
+        Some(_) if function_of(first, runners).is_some() => {
+            if let Some(runner) = function_of(first, runners) {
+                let call = words.get(1..).unwrap_or_default();
+                if runner.unreadable || depth >= EVAL_DEPTH || runner.commands.iter().any(|command| command.names_no_program(call)) {
+                    settings.pipefail = true;
+                    unseen.push(format!("{line}: {RUNNER_UNREAD}"));
+                } else {
+                    for command in &runner.commands {
+                        settings_reading(&command.at_call(call), settings, unseen, line, depth + 1, handed, runners);
+                    }
+                }
+            }
+        }
         // The word after a wrapper's options runs in its place, so it is read through the same definition,
         // past the options as the one reading of every wrapper's options reads them; a wrapper that runs no
         // command (`command -v`) runs no setting either. `builtin` and `command` run the shell's own
@@ -406,6 +950,26 @@ fn settings_reading(words: &[&Value], settings: &mut Settings, unseen: &mut Vec<
         // 141 at the string's `grep -q` pipe).
         Some(wrapper) if WRAPPERS.contains(&wrapper) => {
             let past = past_wrapper_options(wrapper, rest, 0);
+            // What `env`'s `-S` splits out stands among `env`'s own words in the value's place
+            // ([`env_spliced`]), so `env` is read again with them, through this same definition, exactly as
+            // the pipe's reader is read there, a `SHELLOPTS` hand among them refused as one written out is;
+            // a value it cannot split whole is refused at the line. Each splice spends one `-S` on a value
+            // shorter than the word that held it, so a `-S` inside a `-S` value ends the reading in time.
+            match &past {
+                Program::Split(spliced) => {
+                    let read: Vec<&Value> = std::iter::once(*first).chain(spliced).collect();
+                    if hands_variable(&read, SHELLOPTS_EXPORT) {
+                        unseen.push(format!("{line}: {CHILD_SHELLOPTS}"));
+                    }
+                    settings_reading(&read, settings, unseen, line, depth + 1, handed, runners);
+                    return;
+                }
+                Program::SplitUnread => {
+                    unseen.push(format!("{line}: {ENV_SPLIT_UNREAD}"));
+                    return;
+                }
+                _ => {}
+            }
             // An option this reading cannot follow may have eaten the word that names the command, and a
             // child shell standing behind it runs its `-c` program unseen, behind every wrapper alike: GNU's
             // `env` reads every abbreviation of its long options as the option each abbreviates, eating a
@@ -426,7 +990,7 @@ fn settings_reading(words: &[&Value], settings: &mut Settings, unseen: &mut Vec<
                 let named = runs.first().and_then(|word| program(word));
                 let starts = |name: &String| CHILD_SHELLS.contains(&name.as_str()) || WRAPPERS.contains(&name.as_str());
                 if matches!(wrapper, "builtin" | "command") || named.as_ref().is_some_and(starts) {
-                    settings_reading(runs, settings, unseen, line, depth, handed);
+                    settings_reading(runs, settings, unseen, line, depth, handed, &runners.without(named.as_deref()));
                 } else if handed {
                     // A program started behind a hand this reading cannot spell runs whatever that hand named,
                     // `SHELLOPTS=pipefail` among it: `env "$setup" tools/other.sh` puts the script's own
@@ -438,17 +1002,19 @@ fn settings_reading(words: &[&Value], settings: &mut Settings, unseen: &mut Vec<
             }
         }
         // `eval` runs the script its words spell, so that script is read as this one's own commands: its
-        // settings, its variables and its pipes, at the `eval`'s line. One whose words are not all written
-        // out could spell anything, `set -o pipefail` among it, so its shell is read under `pipefail`, the
-        // reading's safe way, and what does show — `eval "set -o $option"`, `eval "source $library"` — is
-        // read as far as it goes, so a `set` or `source` it shows unread is refused as one written out would
-        // be. `tools/env.sh` runs `eval "$exports"` on `cargo ndk-env`'s output in a shell every script that
-        // sources it runs under `pipefail` already.
+        // settings, its variables and its pipes, at the `eval`'s line. Words that are not all written out
+        // spell no script this reading can read: what runs in this very shell could turn `pipefail` on,
+        // source a script, or start a reader that quits before its input ends, and no reading of a script
+        // that cannot be read whole answers for any pipe in it — so the script is read under `pipefail`,
+        // the reading's safe way, and the `eval` is refused at its own line rather than read as far as it
+        // goes; what a half-read `eval "set -o $option"` or `eval "source $library"` would have shown
+        // belongs to a script nobody can see, and a refusal is the only answer that cannot miss a pipe.
         Some("eval") => match evaluated(rest, line, depth) {
-            Ok(eval) => {
-                settings.pipefail |= eval.holes;
-                fold_script(eval, settings, unseen, depth);
+            Ok(eval) if eval.holes => {
+                settings.pipefail = true;
+                unseen.push(format!("{line}: {EVAL_OPAQUE}"));
             }
+            Ok(eval) => fold_script(eval, settings, unseen, depth, runners),
             Err(_) => unseen.push(format!("{line}: {EVAL_UNREAD}")),
         },
         // A child shell runs its `-c` program or the file it names in a shell of its own: the program reads
@@ -470,7 +1036,7 @@ fn settings_reading(words: &[&Value], settings: &mut Settings, unseen: &mut Vec<
             let child_pipefail = child_pipefail || handed;
             settings.pipefail |= child_pipefail;
             match child {
-                Child::Program(program) => fold_script(program, settings, unseen, depth),
+                Child::Program(program) => fold_script(program, settings, unseen, depth, runners),
                 Child::File(Some(name)) if child_pipefail => settings.sources.push(name),
                 Child::File(None) if child_pipefail => unseen.push(format!("{line}: {CHILD_UNREAD}")),
                 Child::File(_) | Child::Parses => {}
@@ -530,17 +1096,26 @@ fn spell(word: &Value, hole: &str, read: fn(&Value) -> Option<String>, text: &mu
 /// Fold the script a command runs — an `eval`'s text, a child shell's `-c` program — into the script
 /// running it: its variables, its settings and its pipes, read as the running script's own at the line the
 /// command stands on, through this same walk one level deeper.
-fn fold_script(program: Evaluated, settings: &mut Settings, unseen: &mut Vec<String>, depth: usize) {
+fn fold_script(program: Evaluated, settings: &mut Settings, unseen: &mut Vec<String>, depth: usize, runners: &Runners) {
     let line = program.line;
+    // The folded script calls the functions of the shell it runs in and its own alike, so both trees'
+    // runners answer for its calls.
+    let runners = runners.merged(&program.tree);
     settings.grep_env |= !vars_set(&program.tree, GREP_ENV_VARS).is_empty();
     if !vars_set(&program.tree, SHELLOPTS_EXPORT).is_empty() {
         settings.shellopts.push(line);
+    }
+    let mut own_words = Vec::new();
+    own_words_run(&program.tree, &mut own_words);
+    if !own_words.is_empty() {
+        settings.pipefail = true;
+        unseen.push(format!("{line}: {RUNNER_UNREAD}"));
     }
     for call in calls_in_order(&program.tree) {
         if handed_shellopts(call) {
             unseen.push(format!("{line}: {CHILD_SHELLOPTS}"));
         }
-        settings_reading(&words_of(call), settings, unseen, line, depth + 1, false);
+        settings_reading(&words_of(call), settings, unseen, line, depth + 1, false, &runners);
     }
     settings.evals.push(program);
 }
@@ -596,7 +1171,8 @@ fn child_program(args: &[&Value], line: u64, depth: usize) -> (Child, bool) {
         // it makes `bash "-$flag" -o pipefail '…'` run the string under `pipefail`, and with `flag=-o` it
         // makes `bash "$flag" pipefail -c '…'` do the same (measured 141 in bash 3.2, in macOS's `sh` and in
         // `zsh`), and each word after it could be one more option this reading never sees. Only a word whose
-        // first letter is written out and is no `-` says the child's options ended there.
+        // first letter is written out and is no `-` says the child's options ended there — or one whose
+        // written tail past its last `/` names the file outright, which no option could be ([`spells_operand`]).
         let Some(text) = literal(word) else {
             if spells_operand(word) {
                 break;
@@ -639,7 +1215,7 @@ fn child_program(args: &[&Value], line: u64, depth: usize) -> (Child, bool) {
     // on, so an option that could turn the child on turns on the script and its file alike.
     let pipefail = match pipefail_from(args.get(..index.min(args.len())).unwrap_or_default(), false) {
         None => true,
-        Some(decided) => decided == Some(true),
+        Some(set) => set.pipefail == Some(true),
     };
     let program_word = args.get(index);
     let child = if parses {
@@ -669,7 +1245,42 @@ fn child_program(args: &[&Value], line: u64, depth: usize) -> (Child, bool) {
 /// word, or the program, among the words after.
 fn spells_operand(word: &Value) -> bool {
     let mut text = String::new();
-    !spell(word, EVAL_HOLE, program_part_text, &mut text) && matches!(text.chars().next(), Some(first) if first != '-')
+    (!spell(word, EVAL_HOLE, program_part_text, &mut text) && matches!(text.chars().next(), Some(first) if first != '-')) || tail_written_after_slash(word)
+}
+
+/// Whether a word's tail, past its last written `/`, is written out and not empty — an expansion naming a
+/// script by a written folder and name, as `"$repo/tools/build-xcframework.sh"` spells. Such a word is
+/// the child's operand and no option it could have been: a word whose tail past the last slash is written
+/// can spell no option either shell reads — a cluster can reach no option before the slash, and the slash
+/// and what it written after it are no option name (`bash "-o/tools/build.sh"`, `bash "-c/tools/build.sh"`
+/// and `bash "--x/foo/bar"` each answer with a usage error and run nothing, measured) — so the expansion
+/// ahead of the written tail fills in the name's front, which [`program`] already reads by its tail, and
+/// can neither stand for `-c` nor hide `-o pipefail` among words that are none of the child's options.
+fn tail_written_after_slash(word: &Value) -> bool {
+    fn tail(parts: &[Value], after: &mut usize) -> bool {
+        for part in parts.iter().rev() {
+            match part.get("Type").and_then(Value::as_str) {
+                Some("Lit") => {
+                    let text = part.get("Value").and_then(Value::as_str).unwrap_or_default();
+                    for ch in text.chars().rev() {
+                        if ch == '/' && *after > 0 {
+                            return true;
+                        }
+                        // A slash at the word's end names no file of its own: what follows the slash, not
+                        // the slash, must be the written name.
+                        *after += 1;
+                    }
+                }
+                Some("DblQuoted") | Some("SglQuoted") => {
+                    let inner: Vec<Value> = part.get("Parts").and_then(Value::as_array).cloned().unwrap_or_default();
+                    return tail(&inner, after);
+                }
+                _ => return false,
+            }
+        }
+        false
+    }
+    word.get("Parts").and_then(Value::as_array).is_some_and(|parts| tail(parts, &mut 0))
 }
 
 /// Whether a command is handed a `SHELLOPTS` assignment in the environment it runs with: one given to a
@@ -709,10 +1320,20 @@ fn long_option(text: &str) -> Option<(&str, Option<&str>)> {
     Some(long.split_once('=').map_or((long, None), |(name, value)| (name, Some(value))))
 }
 
-/// What one `set` (or, with `shopt`, one `shopt`) does to `pipefail`: `Some(Some(on))` when it turns it on
-/// or off, `Some(None)` when it leaves it alone, and `None` when a word that could decide is not written out.
-fn pipefail_from(words: &[&Value], shopt: bool) -> Option<Option<bool>> {
+/// What one `set`'s words say (or, with `shopt`, one `shopt`'s): whether they turn `pipefail` on or off.
+struct SetWords {
+    /// `Some(on)` when the words turn `pipefail` on or off, `None` when they leave it alone.
+    pipefail: Option<bool>,
+    /// Whether a `set` hands the shell new positional words: after `--` or `-`, or any word that is no
+    /// option nor the name an `o` takes, as bash's `set` reads them (`set -- a b`, `set a b`).
+    operands: bool,
+}
+
+/// What one `set` (or, with `shopt`, one `shopt`) does ([`SetWords`]), or `None` when a word that could
+/// decide is not written out.
+fn pipefail_from(words: &[&Value], shopt: bool) -> Option<SetWords> {
     let mut decided = None;
+    let mut operands = false;
     let mut names_option = false;
     let mut turn = None;
     let mut index = 0;
@@ -720,12 +1341,14 @@ fn pipefail_from(words: &[&Value], shopt: bool) -> Option<Option<bool>> {
         let text = literal(word)?;
         index += 1;
         if text == "--" || text == "-" {
+            operands = !shopt;
             break;
         }
         let Some(sign) = text.chars().next().filter(|c| *c == '-' || *c == '+') else {
             if names_option && text == "pipefail" {
                 decided = turn;
             }
+            operands |= !shopt;
             continue;
         };
         let flags = text.get(1..).unwrap_or_default();
@@ -751,7 +1374,7 @@ fn pipefail_from(words: &[&Value], shopt: bool) -> Option<Option<bool>> {
             }
         }
     }
-    Some(decided)
+    Some(SetWords { pipefail: decided, operands })
 }
 
 /// The lines where a script sets one of the given variables, in a command's own assignment or in an
@@ -961,19 +1584,68 @@ fn calls_in<'a>(node: &'a Value, calls: &mut Vec<&'a Value>) {
 /// What a pipe's reader is, when it is one the rule refuses: the stage's verdict, or `None` for a reader
 /// that reads its input whole. A grep that runs with one of [`GREP_ENV_VARS`] set ([`stands_in`]) is
 /// refused whole, by the name of the variable rather than of an option, since no reading of its words holds
-/// under it. `depth` counts the `eval`s the stage stands inside.
-fn judge(stage: &Value, grep_env: bool, depth: usize) -> Option<&'static str> {
+/// under it. `depth` counts the `eval`s the stage stands inside, and `runners` the functions the reading can
+/// resolve a call of ([`Runners`]).
+fn judge(stage: &Value, grep_env: bool, depth: usize, runners: &Runners) -> Option<&'static str> {
     let Some(cmd) = stage.get("Cmd").filter(|cmd| cmd.get("Type").and_then(Value::as_str) == Some("CallExpr")) else {
         return Some(COMPOUND_READER);
     };
-    let words = words_of(cmd);
+    judge_words(&words_of(cmd), grep_env, depth, runners)
+}
+
+/// The reader a command's words give the pipe, from any word of them on: the command word's program, past
+/// any wrapper's options, past a runner function's name to the words of its call, through the words
+/// [`env_spliced`] finds inside an `env -S` value — each of those handings reading on through this same
+/// definition one level deeper, so one refusal answers the command however it was handed on.
+fn judge_words(words: &[&Value], grep_env: bool, depth: usize, runners: &Runners) -> Option<&'static str> {
+    // The words of the script or body this stands in at the command place: which command that is, no
+    // word here names, and the settings reading refuses a script's own at this same line.
+    if matches!(command_place(words), Place::Call(_) | Place::Odd) {
+        return Some(RUNNER_UNREAD);
+    }
     let mut index = 0;
     loop {
         let word = words.get(index)?;
         let Some(name) = program(word) else { return Some(NAMED_UNSEEN) };
+        // Only the word a command starts with can call a function: a wrapper passes over one.
+        let called = (index == 0).then(|| function_of(word, runners)).flatten();
         index += 1;
+        // A function running its call's own words runs each command of its body that takes them, every one
+        // reading the function's standard input, the pipe: each is judged as the reader, as if it stood at
+        // the call with the call's words written into it ([`Runner`]).
+        if let Some(runner) = called {
+            if runner.unreadable || depth >= EVAL_DEPTH {
+                return Some(RUNNER_UNREAD);
+            }
+            let call = words.get(index..).unwrap_or_default();
+            for command in &runner.commands {
+                let runs = command.at_call(call);
+                let verdict = match runs.first() {
+                    // No word at the command's head at all: it expands to nothing, runs no command and reads
+                    // none of the pipe, whose writer dies as it does behind any wrapper that runs nothing.
+                    None => Some(WRAPPER_RUNS_NOTHING),
+                    // A word that names no program could be any command, and no reading here can name it.
+                    Some(_) if command.names_no_program(call) => Some(RUNNER_UNREAD),
+                    Some(_) => judge_words(&runs, grep_env, depth + 1, runners),
+                };
+                if verdict.is_some() {
+                    return verdict;
+                }
+            }
+            return None;
+        }
         if WRAPPERS.contains(&name.as_str()) {
-            match past_wrapper_options(&name, &words, index) {
+            match past_wrapper_options(&name, words, index) {
+                // What `env`'s `-S` splits out stands among `env`'s own words: read again with them.
+                Program::Split(read) => return judge_words(&read.iter().collect::<Vec<_>>(), grep_env, depth + 1, runners),
+                Program::SplitUnread => return Some(ENV_SPLIT_UNREAD),
+                // `xargs` reads the pipe itself, every word of it, and hands its utility none of it: the
+                // utility's standard input is `/dev/null` (measured on macOS's: a `read` in it gets nothing,
+                // and its `/dev/fd/0` is the null device; GNU's documents the same wherever `-a` and `-o` do
+                // not stand, and this reading refuses both as options it does not follow), so no utility is
+                // the pipe's reader, and a pipe into a larger-than-any-buffer `xargs grep -q x` drains to the
+                // end (measured 0 1). What the utility runs is read where it stands, by the settings reading.
+                Program::At(_) if name == "xargs" => return None,
                 Program::At(next) if next < words.len() => index = next,
                 // A word not written out stood before the command this reading came to: it is the command as
                 // easily as it is an option or an assignment before it, so which word reads the pipe is not
@@ -997,14 +1669,14 @@ fn judge(stage: &Value, grep_env: bool, depth: usize) -> Option<&'static str> {
             "read" => Some(READ_SHAPE),
             "mapfile" | "readarray" => mapfile_verdict(rest),
             "awk" | "gawk" | "mawk" | "nawk" => Some(AWK_SHAPE),
-            "eval" => eval_reads(rest, grep_env, depth),
+            "eval" => eval_reads(rest, grep_env, depth, runners),
             // A child shell at a pipe's end reads the pipe through what it runs: its `-c` script is read as
             // an `eval`'s is, its first command the reader; a parse-only child runs nothing and reads
             // nothing, as a wrapper running nothing does; a script file it runs reads the pipe through
             // commands this reading does not reach, and a child with no program of its own reads the pipe
             // itself as its script — either unseen, and refused.
             name if CHILD_SHELLS.contains(&name) => match child_program(rest, 0, depth).0 {
-                Child::Program(program) => script_reads(&program, grep_env, depth),
+                Child::Program(program) => script_reads(&program, grep_env, depth, runners),
                 Child::Parses => Some(WRAPPER_RUNS_NOTHING),
                 Child::File(_) | Child::Stream | Child::Unread => Some(CHILD_UNREAD),
             },
@@ -1015,29 +1687,43 @@ fn judge(stage: &Value, grep_env: bool, depth: usize) -> Option<&'static str> {
 
 /// Whether a word naming a child shell stands among a wrapper's words: behind an option this reading cannot
 /// follow, which may have eaten the word naming the command, any of them could be the shell the wrapper
-/// runs.
+/// runs — the word itself, or, where that option is `env`'s `-S`, one of the words a written word splits to
+/// (measured: `env "$o" 'bash -o pipefail -c "…"'` with `o=-S` runs the string's `grep -q` pipe at 141). A
+/// word with blanks that does not split whole could hold one as easily.
 fn names_child_shell(words: &[&Value]) -> bool {
-    words.iter().filter_map(|word| program(word)).any(|name| CHILD_SHELLS.contains(&name.as_str()))
+    words.iter().any(|word| {
+        program(word).is_some_and(|name| CHILD_SHELLS.contains(&name.as_str()))
+            || literal(word).filter(|text| text.contains(char::is_whitespace)).is_some_and(|text| match split_value(&text) {
+                Ok(inner) => names_child_shell(&inner.iter().collect::<Vec<_>>()),
+                Err(()) => true,
+            })
+    })
 }
 
 /// What an `eval` at a pipe's end reads of it: the script it runs reads the pipe with its first command, so
 /// that command is the reader, judged as any other, and a script of more than one statement is read as the
-/// compound command it is. Its words read as [`evaluated`] reads them, so one held in an expansion stands as
-/// a reader named by an expansion.
-fn eval_reads(words: &[&Value], grep_env: bool, depth: usize) -> Option<&'static str> {
+/// compound command it is. Its words read as [`evaluated`] reads them; words that are not all written out
+/// run a script this reading cannot read at all, which is refused as opaque — the same answer the settings
+/// reading gives at that same line, so the command stays one problem, told once.
+fn eval_reads(words: &[&Value], grep_env: bool, depth: usize, runners: &Runners) -> Option<&'static str> {
     let Ok(eval) = evaluated(words, 0, depth) else { return Some(EVAL_UNREAD) };
-    script_reads(&eval, grep_env, depth)
+    if eval.holes {
+        return Some(EVAL_OPAQUE);
+    }
+    script_reads(&eval, grep_env, depth, runners)
 }
 
 /// What the first command of a script read from a command's words — an `eval`'s text, a child shell's `-c`
 /// program — makes of the pipe, judged as any other reader, with a script of more than one statement read
-/// as the compound command it is.
-fn script_reads(program: &Evaluated, grep_env: bool, depth: usize) -> Option<&'static str> {
+/// as the compound command it is. The script calls the functions of the shell it runs in and its own alike,
+/// so the runners of both trees answer for its calls.
+fn script_reads(program: &Evaluated, grep_env: bool, depth: usize, runners: &Runners) -> Option<&'static str> {
+    let runners = runners.merged(&program.tree);
     match program.tree.get("Stmts").and_then(Value::as_array).map(Vec::as_slice) {
         Some([statement]) => {
             let mut stages = Vec::new();
             stages_of(statement, &program.text, &mut stages);
-            stages.first().and_then(|first| judge(first, grep_env, depth + 1))
+            stages.first().and_then(|first| judge(first, grep_env, depth + 1, &runners))
         }
         _ => Some(COMPOUND_READER),
     }
@@ -1071,6 +1757,85 @@ fn hands_variable(words: &[&Value], vars: &[&str]) -> bool {
     words.iter().filter_map(|word| literal(word)).any(|text| assignment_name(&text, true).is_some_and(|name| vars.contains(&name)))
 }
 
+/// Whether an option word of `env` is its `-S`, and the value glued to it, if any: `Some(None)` where the
+/// value is the next word. A cluster reaches its `S` only past flags that take no value, and GNU's `env`
+/// reads every abbreviation of `--split-string` as that option (measured: `env --split 'bash -o pipefail
+/// -c "…"'` runs the string at 141), where macOS's ends at once.
+fn env_split_option(text: &str) -> Option<Option<String>> {
+    if let Some((name, value)) = long_option(text) {
+        return (!name.is_empty() && "split-string".starts_with(name)).then(|| value.map(str::to_string));
+    }
+    let mut flags = text.strip_prefix('-')?.chars();
+    while let Some(flag) = flags.next() {
+        match flag {
+            'i' | 'v' => {}
+            'S' => return Some(Some(flags.as_str()).filter(|glued| !glued.is_empty()).map(str::to_string)),
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// `env`'s own words once the value of the `-S` at `index` is split into them. `env` splits the value by
+/// itself — at blanks, with its quotes taken off, running no shell and reading no operator — and hands each
+/// word to its own reading of its arguments in the value's place, as if it had been written there, the words
+/// standing after the value following them: an option or an assignment among them is `env`'s own, and the
+/// first word that is neither is the command (measured on macOS's `env` and on GNU's alike:
+/// `env -S '-u X bash -o pipefail -c "…"'` runs the child's `grep -q` pipe at 141, `env -S '-u' X printenv X`
+/// unsets `X`, `env -S 'GREP_OPTIONS=-q grep x'` hands its grep the option at 141, and `env -S '' echo hi`
+/// runs the echo). So the wrapper reading is read again over the spliced words. A value this reading cannot
+/// split whole is [`Program::SplitUnread`] ([`ENV_SPLIT_UNREAD`]): one held in a word not written out; one
+/// holding a backslash, which the two `env`s split differently (measured: macOS's reads `\ ` as a plain
+/// space where GNU's ends at 125 with `env: invalid sequence '\ '`); and one shfmt reads as no plain run of
+/// words — a quote left open, which both `env`s end on, or a `;`, a `|`, a `&` or a redirection, which `env`
+/// splits as plain parts of a word where a shell reads an operator (measured: `env -S 'true; true'` dies
+/// trying to exec `true;`). A `${NAME}` in the value is filled in by both `env`s outside single quotes and
+/// stands, as in a shell, as a word this reading cannot spell.
+fn env_spliced(words: &[&Value], index: usize, glued: Option<String>) -> Program {
+    let (value, after) = match (glued, words.get(index + 1)) {
+        (Some(value), _) => (Some(value), index + 1),
+        (None, None) => (None, index + 1),
+        (None, Some(word)) => match literal(word) {
+            Some(value) => (Some(value), index + 2),
+            None => return Program::SplitUnread,
+        },
+    };
+    let Ok(split) = value.as_deref().map_or(Ok(Vec::new()), split_value) else { return Program::SplitUnread };
+    let before = words.get(..index).unwrap_or_default().iter().map(|word| (*word).clone());
+    let rest = words.get(after..).unwrap_or_default().iter().map(|word| (*word).clone());
+    Program::Split(before.chain(split).chain(rest).collect())
+}
+
+/// The words one `-S` value splits into, as [`env_spliced`] reads them: read through shfmt as the arguments
+/// of a command named `:`, since shfmt keeps an assignment at a command's head apart from its words, while
+/// `env` reads every split word, an assignment among them, as the word it is.
+fn split_value(value: &str) -> Result<Vec<Value>, ()> {
+    if value.contains('\\') {
+        return Err(());
+    }
+    let tree = parse("env -S", &format!(": {value}")).map_err(|_| ())?;
+    let [statement] = tree.get("Stmts").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default() else {
+        return Err(());
+    };
+    // A `;`, a `&` or a redirection is an operator to shfmt and a plain part of a word to `env`.
+    if statement.get("Semicolon").is_some() || statement.get("Redirs").and_then(Value::as_array).is_some_and(|redirs| !redirs.is_empty()) {
+        return Err(());
+    }
+    match statement.get("Cmd") {
+        Some(cmd) if cmd.get("Type").and_then(Value::as_str) == Some("CallExpr") => {
+            Ok(cmd.get("Args").and_then(Value::as_array).map(|args| args.iter().skip(1).cloned().collect()).unwrap_or_default())
+        }
+        _ => Err(()),
+    }
+}
+
+/// A word written out as this text, as shfmt's tree holds one: what a reading that puts words together —
+/// `env`'s split, the stand-in for the call's words in [`command_place`] — hands the readings of words.
+fn written(text: &str) -> Value {
+    let part = serde_json::Map::from_iter([("Type".to_string(), Value::from("Lit")), ("Value".to_string(), Value::from(text))]);
+    Value::Object(serde_json::Map::from_iter([("Parts".to_string(), Value::Array(vec![Value::Object(part)]))]))
+}
+
 /// Where the reading of a wrapper's options leaves the command it runs.
 enum Program {
     /// The word at this index is the command, or stands where one would be if the word is not written out.
@@ -1086,6 +1851,12 @@ enum Program {
     /// `cat big | env "$setup" grep pat` reads the grep's options from `GREP_OPTIONS=-q` (each measured 141
     /// in bash 3.2), with no word of the line naming it.
     BehindHand(usize),
+    /// `env`'s words with its `-S` value split into them in the value's place ([`env_spliced`]), which the
+    /// reading reads again.
+    Split(Vec<Value>),
+    /// An `-S` whose value this reading cannot split whole, or one standing behind a word it cannot spell
+    /// or an option it cannot follow, either of which could have eaten it.
+    SplitUnread,
 }
 
 impl Program {
@@ -1108,10 +1879,10 @@ impl Program {
 /// `-V`, bundled or not, print what a name is, an option `builtin` or `command` has not got ends either at
 /// once with its error, `env -0` refuses a command and `env --help` and `--version` end, and a wrapper left
 /// with no command after its options runs nothing either (`env` alone prints the environment; measured on
-/// macOS: each ends without reading the pipe, whose writer dies of SIGPIPE). [`Program::Hidden`] when an
-/// option hides the command from this reading: one that takes the command itself in its value —
-/// `env -S 'head -n 1'` runs `head`, which quits early (measured on macOS's `env`; GNU's spells it
-/// `--split-string` too) — or one the reading does not follow, which one platform's wrapper has not got and
+/// macOS: each ends without reading the pipe, whose writer dies of SIGPIPE). [`Program::Split`] where `env`'s
+/// `-S` hands the words of its value to `env`'s own reading ([`env_spliced`]), and [`Program::SplitUnread`]
+/// where this reading cannot follow it. [`Program::Hidden`] when an option hides the command from this
+/// reading: one the reading does not follow, which one platform's wrapper has not got and
 /// ends at once on, or which may take a value the reading would mistake for the command (GNU's `env` reads
 /// every abbreviation of `--unset` as taking one, so `env --un FOO head` runs head, where macOS's `env` reads
 /// no long option). The one reading of every wrapper's options, for the pipe's reader and the settings alike.
@@ -1126,7 +1897,40 @@ fn past_wrapper_options(wrapper: &str, words: &[&Value], mut index: usize) -> Pr
     // `--` too, and is a word to run after it (all measured; read below where it stands): `--` ends every
     // other option's standing, but only an assignment ends this one.
     let mut assigned = false;
-    let at = |index: usize, behind: bool| if behind { Program::BehindHand(index) } else { Program::At(index) };
+    // Whether `timeout` still has its duration word to read: the command it runs is the word after the
+    // first word past its options, whatever that duration is (its `--`, which ends the options before the
+    // duration, does not spend it either).
+    let mut duration_left = wrapper == "timeout";
+    // Whether a word this reading cannot spell stood where the wrapper reads options, without naming a
+    // program even by its tail: such a hand could spell an option whose value is the next word, which
+    // would eat the word that this reading would otherwise come to as the command. [`at`] below refuses
+    // what such a hand could have eaten along with it.
+    let mut option_hand = false;
+    let at = |index: usize, behind: bool, option_hand: bool| match (behind, option_hand, words.get(index)) {
+        // A word not written out stood where the wrapper reads an option, and named no program even by
+        // its tail: such a hand stands for an option whose value is the next word as easily as for any
+        // option or assignment — `env "$o" FOO bash …` with `-u`, `exec "$o" name bash` with `-a`,
+        // `nice "$o" 5 bash` with `-n` — and an option that takes its value next eats the word this
+        // reading came to as the command and runs the one after instead (each measured 141 at a child
+        // shell's early-quit pipe). Where the command word could be such an eaten value — it names no
+        // child shell and no wrapper itself, while a child shell's words stand behind it — the command is
+        // hidden from this reading whole, and the refusal falls on the line from both sides of it: the
+        // wrapper reading of the settings, and of the pipe's reader, each takes a hidden command the way
+        // it takes any unread one. A hand whose written tail does name a program
+        // (`exec "$lock_run/debug/xtask" device-lock … -- bash "$script"`) could be no option of any
+        // wrapper — no wrapper takes a value naming such a command — and leaves the reading where it was.
+        (true, true, Some(candidate)) => {
+            let named = program(candidate);
+            let names_run = |name: &String| CHILD_SHELLS.contains(&name.as_str()) || WRAPPERS.contains(&name.as_str());
+            if !named.as_ref().is_some_and(names_run) && names_child_shell(words.get(index..).unwrap_or_default()) {
+                Program::Hidden
+            } else {
+                Program::BehindHand(index)
+            }
+        }
+        (true, _, _) => Program::BehindHand(index),
+        _ => Program::At(index),
+    };
     while let Some(word) = words.get(index) {
         // A word not written out stands where every wrapper reads an option and `env` an assignment too, so it
         // is one of those as easily as it is the command, for each wrapper alike: `env "$V=1" bash …`,
@@ -1135,15 +1939,33 @@ fn past_wrapper_options(wrapper: &str, words: &[&Value], mut index: usize) -> Pr
         // turns the setting on. So the words after it are still read, the first written out that is no
         // option taken as the command, behind a word this reading cannot spell. When that word is an option
         // whose value comes next (`env "$o" FOO bash …` with `-u`), the value is taken for the command, and
-        // what runs after it stays unread.
+        // what runs after it stays unread — unless the hand named a program by its tail, which no option
+        // eats ([`Program::Hidden`] above decides where the eaten word stood).
         let Some(text) = literal(word) else {
             behind = true;
+            if program(word).is_none() {
+                option_hand = true;
+            }
+            // Where `timeout` still has its duration to read, this word is that duration as easily as an
+            // option, and the word after it the command: `timeout "$limit" bash -o pipefail -c '…'` runs
+            // the string's `grep -q` pipe at 141 (measured).
+            if duration_left {
+                duration_left = false;
+                options_ended = true;
+            }
             index += 1;
             continue;
         };
         if text == "--" && !options_ended {
+            // `--` ends `timeout`'s options, but the duration it still reads after them is no command:
+            // the words keep reading until the command word past the duration.
+            if wrapper == "timeout" {
+                options_ended = true;
+                index += 1;
+                continue;
+            }
             if wrapper != "env" {
-                return at(index + 1, behind);
+                return at(index + 1, behind, option_hand);
             }
             // `--` ends `env`'s options but not its assignments: past it `env` still reads every word
             // holding a `=` as one and runs the first that is none — `env -- FOO=1 grep -q pat` runs that
@@ -1176,8 +1998,23 @@ fn past_wrapper_options(wrapper: &str, words: &[&Value], mut index: usize) -> Pr
             index += 1;
             continue;
         }
+        // `sudo` reads `VAR=value` assignments between its options and its command, handing them to the
+        // command it runs: each is read past the way `env`'s assignments are, its command standing after
+        // them. A word beginning with `-` that holds a `=` is `sudo`'s option before any assignment, an
+        // option this reading has not got, and hides what follows the way an unknown option does.
+        if wrapper == "sudo" && assignment_name(&text, true).is_some_and(|name| !name.starts_with('-')) {
+            index += 1;
+            continue;
+        }
         if options_ended || !text.starts_with('-') {
-            return at(index, behind);
+            if wrapper == "timeout" && duration_left {
+                // The word that ends `timeout`'s options is its duration; the command is the word after it.
+                duration_left = false;
+                options_ended = true;
+                index += 1;
+                continue;
+            }
+            return at(index, behind, option_hand);
         }
         let takes_value = match wrapper {
             // Any option ends them: `builtin -p` lists the builtins and runs no command, pipe-fed or not
@@ -1199,26 +2036,41 @@ fn past_wrapper_options(wrapper: &str, words: &[&Value], mut index: usize) -> Pr
             // macOS runs the command behind `env -P bin cat`; GNU's 9.11 answers "invalid option --
             // 'P'", a dead end either reading passes only by refusing). `-0` refuses a command on both
             // (measured: 125), and GNU's `--help` and `--version` print and end where macOS's ends at
-            // once on them, so neither runs a command either way. Any other word — `-S`, which takes
-            // the command itself in its value, or a word carrying a long option, macOS ending at once
+            // once on them, so neither runs a command either way. `-S` is read apart ([`env_spliced`]). Any
+            // other word — a word carrying a long option, macOS ending at once
             // on each while GNU reads every abbreviation of every one as the option it abbreviates and
             // runs what stands behind it (measured on GNU: `env --un FOO head` runs head) — hides the
             // command from this reading, which is refused rather than guessed at, live on one env and
             // dead on the other.
-            "env" => match text.as_str() {
-                "-0" | "--null" | "--help" | "--version" => return Program::Nothing,
-                _ => {
-                    let mut cluster = text.chars().skip(1).peekable();
-                    loop {
-                        match cluster.next() {
-                            None => break false,
-                            Some('i') | Some('v') => {}
-                            Some('u') | Some('C') | Some('P') => break cluster.peek().is_none(),
-                            _ => return Program::Hidden,
+            "env" => {
+                if let Some(glued) = env_split_option(&text) {
+                    return if behind { Program::SplitUnread } else { env_spliced(words, index, glued) };
+                }
+                // An option this reading cannot follow hides an `-S` behind it as it hides any word, with
+                // the command inside its value, which no word of the line names on its own.
+                let hides = || {
+                    let later = words.get(index + 1..).unwrap_or_default();
+                    if later.iter().any(|word| literal(word).is_some_and(|text| env_split_option(&text).is_some())) {
+                        Program::SplitUnread
+                    } else {
+                        Program::Hidden
+                    }
+                };
+                match text.as_str() {
+                    "-0" | "--null" | "--help" | "--version" => return Program::Nothing,
+                    _ => {
+                        let mut cluster = text.chars().skip(1).peekable();
+                        loop {
+                            match cluster.next() {
+                                None => break false,
+                                Some('i') | Some('v') => {}
+                                Some('u') | Some('C') | Some('P') => break cluster.peek().is_none(),
+                                _ => return hides(),
+                            }
                         }
                     }
                 }
-            },
+            }
             // bash 3.2 and 5.2 both: `-c` runs the command with a null environment and `-l` prefixes argv0
             // with a dash, neither taking a value; `-a` takes the argv0 it sets.
             "exec" => match text.as_str() {
@@ -1231,11 +2083,92 @@ fn past_wrapper_options(wrapper: &str, words: &[&Value], mut index: usize) -> Pr
                 t if t.starts_with("-n") => false,
                 _ => return Program::Hidden,
             },
+            // `xargs` runs its utility on the words of its input, defaulting to `echo`. The options both
+            // xargses read are these short ones — GNU's adds long options BSD's has not got, and BSD's ends
+            // at once with its error where GNU's reads one and runs what stands behind it, so a long option
+            // hides its command the way every one-platform option does. The value-taking options take
+            // their value glued to them or as the next word, as the getopt of each reads both; `-0`, `-t`
+            // and `-x` only change how input becomes words and what is echoed, not that the utility is read
+            // as the command. Two read on only so far: `-E` names a word at which `xargs` stops reading its
+            // input and runs what it has, leaving the writer's rest unread (measured: a pipe into
+            // `xargs -E STOP echo` answers 141 0 where its input holds `STOP` early), which no reading of the
+            // utility answers, so it hides the command as an option this reading does not follow does; and
+            // `-I` or `-J` writes each input line, or its words, into every word of the utility holding
+            // their replace string, so a child shell whose words hold it runs words its input spells
+            // (measured: `xargs -I {} bash -o pipefail -c '{}'` runs a `grep -q` pipe its input names at
+            // 141), unread by any reading here, and hides as a child behind such an option does.
+            "xargs" => {
+                let mut cluster = text.chars().skip(1).peekable();
+                loop {
+                    match cluster.next() {
+                        None => break false,
+                        Some('0') | Some('t') | Some('x') => {}
+                        Some('I') | Some('J') => {
+                            let glued: String = cluster.collect();
+                            let after = if glued.is_empty() { index + 2 } else { index + 1 };
+                            let replace = if glued.is_empty() { words.get(index + 1).and_then(|word| literal(word)) } else { Some(glued) };
+                            let utility = words.get(after..).unwrap_or_default();
+                            let filled = |replace: &String| {
+                                replace.is_empty() || utility.iter().any(|word| literal(word).is_none_or(|text| text.contains(replace.as_str())))
+                            };
+                            if replace.as_ref().is_none_or(filled) && names_child_shell(utility) {
+                                return Program::Hidden;
+                            }
+                            break after == index + 2;
+                        }
+                        Some('L') | Some('n') | Some('P') | Some('s') | Some('R') | Some('S') => break cluster.peek().is_none(),
+                        _ => return Program::Hidden,
+                    }
+                }
+            }
+            // GNU's `timeout`, which coreutils ships and macOS does not ship at all: a script that starts
+            // one starts coreutils', so its grammar — read off `timeout --help` of GNU coreutils 9.11 on
+            // this machine, the same one the gate's Ubuntu carries — is the only one to read, with the
+            // duration word taken where it stands (see above). `-k` and `-s` take their value glued or
+            // next; `-f`, `-p` and `-v` change what the command is sent or reported, not which word it
+            // is; `--help` and `--version` print and end having run nothing, as `env --help` does. Every
+            // other word hides the command, this reading having no such option to follow.
+            "timeout" => match text.as_str() {
+                "-f" | "-p" | "-v" | "--foreground" | "--preserve-status" | "--verbose" => false,
+                "--help" | "--version" => return Program::Nothing,
+                "-k" | "-s" => text.len() == 2,
+                t if t.starts_with("--kill-after") || t.starts_with("--signal") => !t.contains('='),
+                _ => return Program::Hidden,
+            },
+            // `sudo`, whose grammar is read off its own manual and never measured: the gate never runs
+            // `sudo` with a command, since a password prompt no terminal answers would hang the stage that
+            // ran it. The flags that only change how the command runs are read past, and the options its
+            // manual gives a value take it glued or as the next word, as getopt reads them. Every other
+            // letter hides the command: `-h`, which the manual gives both to the help that prints and runs
+            // nothing and to a host that takes a value, so no reading can tell which a word after it makes
+            // it; the options that print or ask instead of running the command (`-l`, `-v`, `-V`, `-K`,
+            // `-k`, `-A`, `-e`); `-i` and `-s`, which put a whole unread shell there, at a pipe's end
+            // reading the pipe as its script; and `-S`, which reads a password from the standard input
+            // itself and quits its writer unseen. A `sudo` left with no word of its own to run runs the
+            // invoking user's login shell reading the standard input the same way, so it hides too, and
+            // a bare `sudo` at a pipe's end is refused rather than answered as running nothing.
+            "sudo" => {
+                let mut cluster = text.chars().skip(1).peekable();
+                loop {
+                    match cluster.next() {
+                        None => break false,
+                        Some('b') | Some('B') | Some('E') | Some('H') | Some('n') | Some('P') => {}
+                        Some('C') | Some('D') | Some('g') | Some('p') | Some('R') | Some('T') | Some('u') | Some('U') => break cluster.peek().is_none(),
+                        _ => return Program::Hidden,
+                    }
+                }
+            }
             _ => return Program::Hidden,
         };
         index += if takes_value { 2 } else { 1 };
     }
-    at(index, behind)
+    if wrapper == "sudo" {
+        // A `sudo` whose words run out with no command of its own runs the invoking user's login shell
+        // reading its standard input instead — the pipe itself at a pipe's end — which is an unread
+        // child, not a wrapper that runs nothing, wherever the words stopped.
+        return Program::Hidden;
+    }
+    at(index, behind, option_hand)
 }
 
 /// What one of a grep's options takes: nothing, a value (after `=` or in the next word), or a value only after `=`.
@@ -2267,6 +3200,9 @@ mod tests {
             ("bash -c \"$program\"\n", format!("early-pipes: s.sh:1: {CHILD_UNREAD}")),
             ("env SHELLOPTS=pipefail bash other.sh\n", format!("early-pipes: s.sh:1: {CHILD_SHELLOPTS}")),
             ("set -o pipefail\neval 'if then'\n", format!("early-pipes: s.sh:2: {EVAL_UNREAD}")),
+            ("set -o pipefail\nlisted | eval \"$reader\"\n", format!("early-pipes: s.sh:2: {EVAL_OPAQUE}")),
+            ("set -o pipefail\nf() { \"$@\"; }\nlisted | f \"$reader\"\n", format!("early-pipes: s.sh:3: {RUNNER_UNREAD}")),
+            ("set -o pipefail\nlisted | env -S \"$split\"\n", format!("early-pipes: s.sh:2: {ENV_SPLIT_UNREAD}")),
             ("set -o pipefail\nlisted | command -v grep\n", format!("early-pipes: s.sh:2: {WRAPPER_RUNS_NOTHING}")),
             ("set -o pipefail\nlisted | bash -n -c 'cat'\n", format!("early-pipes: s.sh:2: {WRAPPER_RUNS_NOTHING}")),
         ];
@@ -2298,7 +3234,10 @@ mod tests {
                 CHILD_UNREAD,
                 CHILD_SHELLOPTS,
                 EVAL_UNREAD,
-                WRAPPER_RUNS_NOTHING
+                EVAL_OPAQUE,
+                RUNNER_UNREAD,
+                WRAPPER_RUNS_NOTHING,
+                ENV_SPLIT_UNREAD
             ],
             [
                 "a pipe feeds a grep that stops reading its input before the end, on macOS's grep or on GNU's (-q, -m, -l, -L, -r, -R, -d, -D, -f, -V, macOS's -I, -J, -M and -X, or their long names, whole or abbreviated, --help, and the options that stop on their value or their file: --binary-files, --color, --devices, --directories, --file): under pipefail the writer dying of SIGPIPE makes the pipe answer 141 where the reader's answer belongs, so the verdict is timing; let the grep read the writer's whole output and send its own away, or judge the writer itself",
@@ -2309,7 +3248,7 @@ mod tests {
                 "a pipe feeds a grep with a word before `--` that is not written out, which could be an option that quits before its input ends: end its options with `--`",
                 "a pipe feeds a grep with an option that macOS's grep or GNU's reads as none of its own, as more than one, or with a value it takes none of, so what follows it cannot be read: write the option out whole, as both greps know it",
                 "a pipe feeds a grep in a script whose shell sets GREP_OPTIONS or POSIXLY_CORRECT, however its `source`s run: either variable changes what the grep reads as its options from what its words say, so this reading of them holds for nothing: macOS's grep takes option words out of GREP_OPTIONS, and POSIXLY_CORRECT makes either grep read a word after the pattern as a file: unset it, as tools/env.sh does for every script this rule reads",
-                "a pipe feeds a command named by an expansion, through an escape, or past a wrapper option this reading does not follow — one that takes the command in its value, or one that macOS's wrapper or GNU's has not got — which this reading cannot tell from a reader that quits before its input ends: name its program as a plain word, after options both platforms' wrappers read",
+                "a pipe feeds a command named by an expansion, through an escape, or past a wrapper option this reading does not follow — one that takes the command in its value, one that macOS's wrapper or GNU's has not got, or one that ends the wrapper's own reading of its input early, as `xargs -E` does — which this reading cannot tell from a reader that quits before its input ends: name its program as a plain word, after options both platforms' wrappers read",
                 "a pipe feeds a compound command, which this reading cannot tell from a reader that quits before its input ends: hand it the writer's output with `< <( … )`, or capture the output first",
                 "a `set` or `shopt` with an option that is not written out, so this reading cannot tell whether it turns pipefail on or off",
                 "a `source` or `.` whose file is named by an expansion with no file name written at its end, so this reading cannot tell which script it brings under pipefail",
@@ -2321,10 +3260,13 @@ mod tests {
                 "a pipe feeds the `read` builtin, which takes one line and leaves the writer's rest unread: under pipefail the writer dying of SIGPIPE makes the pipe answer 141 where the reader's answer belongs, so the verdict is timing; capture the writer's whole output and let the shell read it from a here-string or a file",
                 "a pipe feeds a mapfile or readarray told with `-n` how many lines to copy, leaving the writer's rest unread, or told with `-u` to read another descriptor and not the pipe, or given an option this reading cannot see whole, which could be `-n` itself: under pipefail the writer dying of SIGPIPE makes the pipe answer 141 where the reader's answer belongs, so the verdict is timing; capture the writer's whole output and hand it to mapfile as a here-string",
                 "a script that runs under pipefail exports SHELLOPTS, which hands the running shell's own options, pipefail among them, to every bash started below it — by name, by a script's `#!` line, as the `sh` macOS runs, or by any program the script starts — whose own pipes then answer 141 by timing where a reader quits early, unseen by any reading of this script: do not export SHELLOPTS",
-                "a child shell (`bash`, `sh`, `dash`, `ksh` or `zsh`) was given a program this reading cannot read whole: no `-c` program at all, one held in a word that is not written out, one shfmt cannot parse, an option this reading does not know or one held in a word whose first letter is not written out, a program read from a stream — no program or file at all, which leaves the shell its standard input or a here-document, or `/dev/stdin` — a script file named by an expansion while the child runs with `pipefail` on, or a word naming one that stands behind a wrapper option this reading cannot follow, which may have eaten the word before it and named no command at all — such a shell runs words no reading of this script reaches, and at a pipe's end the shell with no program of its own reads the pipe itself, so its early-quit pipes answer 141 by timing unseen: write the `-c` program and every option out whole where shfmt can parse them, name the script file the shell runs with a plain word, and let no child stand behind an option only one platform's wrapper reads",
+                "a child shell (`bash`, `sh`, `dash`, `ksh` or `zsh`) was given a program this reading cannot read whole: no `-c` program at all, one held in a word that is not written out, one shfmt cannot parse, an option this reading does not know or one held in a word whose first letter is not written out, a program read from a stream — no program or file at all, which leaves the shell its standard input or a here-document, or `/dev/stdin` — a script file named by an expansion while the child runs with `pipefail` on, a word naming one that stands behind a wrapper option this reading cannot follow, which may have eaten the word before it and named no command at all, or one whose words `xargs -I` or `-J` fills in from its input — such a shell runs words no reading of this script reaches, and at a pipe's end the shell with no program of its own reads the pipe itself, so its early-quit pipes answer 141 by timing unseen: write the `-c` program and every option out whole where shfmt can parse them, name the script file the shell runs with a plain word, and let no child stand behind an option only one platform's wrapper reads",
                 "a command is handed a SHELLOPTS assignment in the environment given it, which starts the shell it runs with the options named there, pipefail among them, unseen by any reading of this script or of the script that shell runs: hand no command a SHELLOPTS assignment; let each script turn on its own options, and take back an inherited export with `export -n SHELLOPTS`, which tools/env.sh does for every script this rule reads",
                 "an `eval` whose text shfmt cannot parse, so this reading cannot tell what it runs: whether it turns pipefail on, sources a script, or feeds or reads a pipe that quits early",
-                "a pipe feeds a wrapper that runs no command and reads none of the pipe — `command -v` or `-V`, a `builtin` or `command` given an option it has not got, `env -0`, which runs a command on neither platform, `env --help` or `--version`, or a wrapper left with no command after its options — or a child shell reading `-n` or `-D`, which parses what it is given and runs none of it: its writer dies of SIGPIPE, so the pipe answers with what that prints or its error, by timing, and never with what the pipe holds: name the command to run, or let the child shell run its program"
+                "an `eval` whose words are not all written out, so this reading cannot tell what it runs: it could turn `pipefail` on, source a script, or start a reader that quits before its input ends, and no reading of a script that cannot be read whole can answer for any pipe: write out the commands it runs where shfmt can read them, or run them directly",
+                "a command runs through a function whose body runs a command with the call's own words (`\"$@\"` or `\"$1\"`), and this reading cannot tell which command the call runs: the word the call puts at a command's head is not written out, the body moves its words in a way this reading cannot count (a `shift` given a word that is no plain count of words, one standing where a loop or a condition could run it twice, or a `set` handing the shell new words), the body starts a command with the call's words in a shape this reading cannot point at (`$@` unquoted, `$*`, `${@}`, `\"${@:2}\"`), the function reaches itself deeper than this reading follows, or a script or a `-c` program starts a command with its own arguments, which no call in it names, so what reads the pipe, and under what options it starts its children, stands nowhere on the line: call such a function with its command written out as a plain word, start the body's command with `\"$@\"` or `\"$1\"` quoted, and keep each of the body's `shift`s standing on its own at the body's top level, bare or given its count in digits",
+                "a pipe feeds a wrapper that runs no command and reads none of the pipe — `command -v` or `-V`, a `builtin` or `command` given an option it has not got, `env -0`, which runs a command on neither platform, `env --help` or `--version`, a `timeout` left with no duration or no command after it, or a wrapper left with no command after its options — or a child shell reading `-n` or `-D`, which parses what it is given and runs none of it, or a function running its call's own words (`\"$@\"` or `\"$1\"`) called with none of its own: its writer dies of SIGPIPE, so the pipe answers with what that prints or its error, by timing, and never with what the pipe holds: name the command to run, or let the child shell run its program",
+                "`env` splits the value of its `-S` option into words of its own — its options, its assignments and the command it runs — and this reading cannot read that value whole: it is held in a word that is not written out, it holds a backslash, which macOS's `env` and GNU's split differently (macOS's reads `\\ ` as a plain space where GNU's ends with `invalid sequence`, measured), or shfmt reads it as no plain run of words — a quote left open, or a `;`, a `|`, a `&` or a redirection, which `env` splits as plain parts of a word: write the `-S` value out whole, without backslashes, as the plain words `env` will read"
             ]
         );
     }
@@ -3228,11 +4170,6 @@ mod tests {
             assert_eq!(one(&format!("set -o pipefail\nlisted | {nothing}\n")), [format!("early-pipes: s.sh:2: {WRAPPER_RUNS_NOTHING}")], "{nothing}");
         }
         for hidden in [
-            "env -S 'head -n 1'",
-            "env -S 'sed 1q'",
-            "env --split-string 'head -n 1'",
-            "env --split-string=head -n 1",
-            "env --split 'head -n 1'",
             "env --un FOO head -n 1",
             "env --unset=FOO head -n 1",
             "env --unset=FOO cat",
@@ -3269,8 +4206,79 @@ mod tests {
             ("env - head -n 1", HEAD_SHAPE),
             ("env -- - head -n 1", HEAD_SHAPE),
             ("env -P /bin head -n 1", HEAD_SHAPE),
+            // The command inside `env`'s `-S` value is read whole through the one wrapper reading: the
+            // split is this reading's to do (measured: the child at 141 on macOS's and GNU's `env`
+            // alike), `--split-string` is its long name, an `S` plain in a cluster places its value the
+            // same way, and the split words stand among `env`'s own in the value's place, the words after
+            // the value behind them. A bare `-S` left to the next word splits it too.
+            ("env -S 'head -n 1'", HEAD_SHAPE),
+            ("env -S 'sed 1q'", SED_SHAPE),
+            ("env --split-string 'head -n 1'", HEAD_SHAPE),
+            ("env --split 'head -n 1'", HEAD_SHAPE),
+            ("env -u X -S 'head -n 1'", HEAD_SHAPE),
+            ("env -C / -S 'head -n 1'", HEAD_SHAPE),
+            ("env --split-string=head -n 1", HEAD_SHAPE),
+            ("env -iS 'sed 1q'", SED_SHAPE),
+            ("env -vS 'sed 1q'", SED_SHAPE),
+            ("env -S bash -o pipefail -c \"grep -q x\"", GREP_SHAPE),
+            ("env --split-string 'bash -o pipefail -c \"grep -q x\"'", GREP_SHAPE),
+            // `timeout` reads its duration as its own, past its flags and past a `--`, and then names
+            // the command behind it; `sudo` names its own the same way. sudo's grammar was read off its
+            // manual page, never run.
+            ("timeout 5 bash -c \"grep -q x\"", GREP_SHAPE),
+            ("timeout -k 1 5 bash -c \"head -2\"", HEAD_SHAPE),
+            ("timeout --foreground 5 bash -c \"head -2\"", HEAD_SHAPE),
+            ("timeout -- 5 bash -c \"head -2\"", HEAD_SHAPE),
+            // `xargs` hands its utility none of the pipe, but runs it all the same: a child shell's own
+            // pipe is read where the child stands, past every value option, whose word is consumed even
+            // where it spells a shell (`-n`'s count, `-I`'s replace string when no word of the child
+            // holds it), so the reading eats the value and reads the shell after it.
+            ("xargs -n 1 bash -o pipefail -c \"big | grep -q x\"", GREP_SHAPE),
+            ("xargs -n1 bash -o pipefail -c \"big | grep -q x\"", GREP_SHAPE),
+            ("xargs -I cat bash -o pipefail -c \"big | grep -q x\"", GREP_SHAPE),
+            ("xargs -Icat bash -o pipefail -c \"big | grep -q x\"", GREP_SHAPE),
+            ("sudo bash -c \"grep -q x\"", GREP_SHAPE),
+            ("sudo -u root bash -c \"head -2\"", HEAD_SHAPE),
+            ("sudo -n bash -c \"head -2\"", HEAD_SHAPE),
+            ("sudo -u root -- bash -c \"head -2\"", HEAD_SHAPE),
+            ("sudo -u bash bash -o pipefail -c \"big | grep -q x\"", GREP_SHAPE),
+            ("sudo -u cat bash -o pipefail -c \"big | grep -q x\"", GREP_SHAPE),
         ] {
             assert_eq!(one(&format!("set -o pipefail\nlisted | {reader}\n")), [format!("early-pipes: s.sh:2: {verdict}")], "{reader}");
+        }
+        // A wrapper option whose value this reading cannot see through hides the command behind it: the
+        // option may have taken that command as its value and left the child-shell word standing as no
+        // command at all, so a child shell past an unread option and its value is refused unread. All
+        // three measured 141 in bash 3.2 with the option held in a word not written out.
+        for hidden_command in [
+            "env \"$o\" FOO bash -o pipefail -c \"grep -q x\"",
+            "exec \"$o\" name bash -o pipefail -c \"grep -q x\"",
+            "nice \"$o\" 5 bash -o pipefail -c \"grep -q x\"",
+            "sudo \"$o\" name bash -o pipefail -c \"grep -q x\"",
+            "xargs \"$o\" name bash -o pipefail -c \"grep -q x\"",
+            // The word standing where `timeout`'s duration would be is the duration as easily as an option.
+            "timeout \"$o\" 5 bash -o pipefail -c \"grep -q x\"",
+        ] {
+            assert_eq!(one(&format!("set -o pipefail\nlisted | {hidden_command}\n")), [format!("early-pipes: s.sh:2: {CHILD_UNREAD}")], "{hidden_command}");
+        }
+        // One split value this reading cannot read whole is refused by name: held in a word not written
+        // out, carrying a backslash the two envs split apart differently (measured), or no plain run of
+        // words — a quote left open, which both envs end on, or a redirection, whose `>` env splits as a
+        // plain part of a word. A `-S` left with no value runs no command, like every wrapper so left.
+        for unread in ["env -S \"$split\"", "env -S 'head -n 1\\'", "env -S 'head \"-n 1'", "env -S 'head -n 1 >x'", "env --split-string \"$split\""] {
+            assert_eq!(one(&format!("set -o pipefail\nlisted | {unread}\n")), [format!("early-pipes: s.sh:2: {ENV_SPLIT_UNREAD}")], "{unread}");
+        }
+        // The same refusal off a pipe's end: the settings reading reaches the unread split wherever
+        // the command stands, so a hidden reader cannot hide by waiting for a writer.
+        assert_eq!(one("set -o pipefail\nenv -S \"$split\" head -n 1\n"), [format!("early-pipes: s.sh:2: {ENV_SPLIT_UNREAD}")]);
+        for nothing in ["env -S ''", "env --split-string ''"] {
+            assert_eq!(one(&format!("set -o pipefail\nlisted | {nothing}\n")), [format!("early-pipes: s.sh:2: {WRAPPER_RUNS_NOTHING}")], "{nothing}");
+        }
+        // A split value a shell would read as more than one command hides behind a split no reading here
+        // follows: `env` splits `;` and `|` as plain parts of the words it reads (measured: it tries to
+        // exec `cat;`), so what runs stands in no command this reading can name.
+        for unread in ["env -S 'cat; head -n 1'", "env -S 'cat | head -n 1'"] {
+            assert_eq!(one(&format!("set -o pipefail\nlisted | {unread}\n")), [format!("early-pipes: s.sh:2: {ENV_SPLIT_UNREAD}")], "{unread}");
         }
         // Read whole past options both platforms' wrappers read, each measured 0 on macOS; a bare `-`
         // is read as an option and runs the command behind on both, and `-P` is read taking its path
@@ -3292,8 +4300,303 @@ mod tests {
             "env -iuNOPE cat",
             "nice -n 5 cat",
             "nohup cat",
+            "env -S 'cat'",
+            "env -S bash -c \"cat\"",
+            "env -Sv cat",
+            "env --split-string=FOO cat bash",
+            "timeout 5 cat",
+            "timeout --preserve-status 5 cat",
+            // `xargs` reads the whole pipe itself and hands its utility `/dev/null` (measured: a pipe into
+            // `xargs grep -q x` far larger than its buffer answers 0 1), so whatever reader its utility is
+            // reads none of the pipe.
+            "xargs",
+            "xargs cat",
+            "xargs -0 cat",
+            "xargs grep -q x",
+            "xargs -n 5 head -n 1",
+            "xargs bash -c \"grep -q x\"",
+            "xargs -I {} cp {} /tmp",
+            // `env` execs a program named `if`, which no system has: its own error answers the pipe.
+            "env -S 'if head -n 1'",
+            "sudo cat",
+            "sudo -E cat",
         ] {
             assert!(one(&format!("set -o pipefail\nlisted | {whole}\n")).is_empty(), "{whole}");
+        }
+        // An option this reading cannot follow still hides what stands after it on each wrapper, and a
+        // `timeout` or `sudo` left with no command after its options runs none: the first is refused as
+        // a reader this reading cannot name, the second as a wrapper that runs nothing.
+        for hidden in [
+            "xargs -Q cat",
+            "timeout -Q 5 cat",
+            "sudo -Q cat",
+            "sudo -i cat",
+            "sudo",
+            // `-h` is the help that runs nothing as well as the host that takes a value.
+            "sudo -h host cat",
+            "sudo -a type cat",
+            // `-E` ends xargs's own reading at a word of its input, leaving the writer's rest unread
+            // (measured 141 0 on macOS's `xargs -E STOP echo` with `STOP` early in the pipe).
+            "xargs -E STOP cat",
+            "xargs -ESTOP cat",
+        ] {
+            assert_eq!(one(&format!("set -o pipefail\nlisted | {hidden}\n")), [format!("early-pipes: s.sh:2: {NAMED_UNSEEN}")], "{hidden}");
+        }
+        for nothing in ["timeout", "timeout 5", "timeout -k 1"] {
+            assert_eq!(one(&format!("set -o pipefail\nlisted | {nothing}\n")), [format!("early-pipes: s.sh:2: {WRAPPER_RUNS_NOTHING}")], "{nothing}");
+        }
+        // `xargs -I` or `-J` writes its input into every word of the utility holding the replace string,
+        // so a child shell whose words hold it runs words the input spells (measured 141 at a `grep -q`
+        // pipe the input names): refused as a child this reading cannot read, the replace string held in
+        // the child's program or in its own name alike, or not written out at all.
+        for filled in [
+            "xargs -I {} bash -o pipefail -c '{}'",
+            "xargs -I{} bash -o pipefail -c 'cat {} | grep -q x'",
+            "xargs -J % bash -o pipefail -c %",
+            "xargs -I bash bash -o pipefail -c 'cat'",
+            "xargs -I \"$r\" bash -o pipefail -c 'cat'",
+        ] {
+            assert_eq!(one(&format!("{filled}\n")), [format!("early-pipes: s.sh:1: {CHILD_UNREAD}")], "{filled}");
+        }
+    }
+
+    /// `env` splits its `-S` value into words of its own and reads them in the value's place, with the words
+    /// after the value behind them: an option or an assignment the value holds is `env`'s, and the first word
+    /// that is neither its command, measured on macOS's `env` and on GNU's alike.
+    #[test]
+    fn env_reads_the_words_its_split_value_holds_as_its_own() {
+        // The options a value holds: `-u X` takes its name and the child behind it runs its `-c` program
+        // at 141, as does `-i`; a `-u` at the value's end takes the word after the value.
+        for (reader, verdict) in [
+            ("env -S '-u X head -n 1'", HEAD_SHAPE),
+            ("env -S '-i head -n 1'", HEAD_SHAPE),
+            ("env -S '-u' X head -n 1", HEAD_SHAPE),
+            ("env -S \"-S 'head -n 1'\"", HEAD_SHAPE),
+            ("env -S '' head -n 1", HEAD_SHAPE),
+            ("env -iS '-u X' head -n 1", HEAD_SHAPE),
+            ("env -S 'A=1' head -n 1", HEAD_SHAPE),
+            // An assignment the value holds is handed to the command as one written out is.
+            ("env -S 'GREP_OPTIONS=-q grep x'", GREP_ENV),
+            ("env -S 'A=1 GREP_OPTIONS=-q' grep x", GREP_ENV),
+        ] {
+            assert_eq!(one(&format!("set -o pipefail\nlisted | {reader}\n")), [format!("early-pipes: s.sh:2: {verdict}")], "{reader}");
+        }
+        for child in ["env -S '-u X bash -o pipefail -c \"listed | grep -q x\"'", "env -S '' bash -o pipefail -c 'listed | grep -q x'"] {
+            assert_eq!(one(&format!("{child}\n")), [format!("early-pipes: s.sh:1: {GREP_SHAPE}")], "{child}");
+        }
+        // A hand the value holds is the hand, told once at its line whichever word spells it.
+        for hand in ["env -S 'A=1 SHELLOPTS=pipefail bash other.sh'", "env -S 'SHELLOPTS=pipefail bash other.sh'"] {
+            assert_eq!(one(&format!("{hand}\n")), [format!("early-pipes: s.sh:1: {CHILD_SHELLOPTS}")], "{hand}");
+        }
+        // A `--` the value holds ends `env`'s options, so a `-S` behind it is a program's name.
+        assert!(one("set -o pipefail\nlisted | env -S '-- -S' 'head -n 1'\n").is_empty());
+        // A `-S` is reached past the options `env` reads before it, a value option's among them, and by
+        // each abbreviation GNU's `env` takes for it (each measured 141 at the child's pipe).
+        for spelt in ["env -u X -S", "env -C / -S", "env -i -S", "env -iS", "env --split", "env --s"] {
+            assert_eq!(one(&format!("{spelt} 'bash -o pipefail -c \"listed | grep -q x\"'\n")), [format!("early-pipes: s.sh:1: {GREP_SHAPE}")], "{spelt}");
+        }
+        // An assignment an outer `env` gave stands over the command the inner `-S` splits out.
+        assert_eq!(one("set -o pipefail\nlisted | env GREP_OPTIONS=-q env -S 'grep x'\n"), [format!("early-pipes: s.sh:2: {GREP_ENV}")]);
+        // A `-S` behind a word this reading cannot spell, or behind an option it cannot follow, is refused
+        // as unread: either could have eaten it.
+        for hidden in [
+            "env \"$o\" -S 'bash -o pipefail -c \"listed | grep -q x\"'",
+            "env --unset=X -S 'bash -o pipefail -c \"listed | grep -q x\"'",
+            "env --unset=X -S \"$v\"",
+        ] {
+            assert_eq!(one(&format!("{hidden}\n")), [format!("early-pipes: s.sh:1: {ENV_SPLIT_UNREAD}")], "{hidden}");
+        }
+        // A word not written out could be `-S` itself, and the written word after it the value holding
+        // the child (measured 141 with `o=-S`); a word with blanks that does not split could hold one too.
+        for hidden in ["env \"$o\" 'bash -o pipefail -c \"listed | grep -q x\"'", "env \"$o\" 'bash -c \"a\\b\"'"] {
+            assert_eq!(one(&format!("{hidden}\n")), [format!("early-pipes: s.sh:1: {CHILD_UNREAD}")], "{hidden}");
+        }
+        // A trailing `;` or `&` is an operator to shfmt and part of a word to `env`.
+        for unread in ["env -S 'cat;'", "env -S 'cat &'"] {
+            assert_eq!(one(&format!("set -o pipefail\nlisted | {unread}\n")), [format!("early-pipes: s.sh:2: {ENV_SPLIT_UNREAD}")], "{unread}");
+        }
+        // `timeout`'s duration held in a word not written out leaves the command the word after it.
+        assert_eq!(one("timeout \"$t\" bash -o pipefail -c 'listed | grep -q x'\n"), [format!("early-pipes: s.sh:1: {GREP_SHAPE}")]);
+    }
+
+    /// A function whose body starts a command with its own words (`"$@"` or `"$1"`) runs whatever the
+    /// call's own words are, so the rule falls on the call: the argument words stand in for the body's
+    /// command, with the body's counted `shift`s taken off the front where they only ever moved whole
+    /// words of the call. A call this reading cannot follow — a command word not written out, a body
+    /// whose shifts it cannot count, or a call with no words of its own at all — is refused whole, never
+    /// half-read: a runner whose first call reads clean must not lend its name a clean reading of a
+    /// later call the reading cannot see through.
+    #[test]
+    fn a_runner_is_read_through_its_own_call_and_refused_when_the_call_cannot_be_read() {
+        // The body's own word at the command place: the call's words stand in for it whole.
+        assert_eq!(one("set -o pipefail\nf() { \"$@\"; }\nlisted | f head -n 1\n"), [format!("early-pipes: s.sh:3: {HEAD_SHAPE}")]);
+        assert_eq!(one("set -o pipefail\nf() { \"$1\"; }\nlisted | f head -n 1\n"), [format!("early-pipes: s.sh:3: {HEAD_SHAPE}")]);
+        // A shift the reading can count moves the call's words by its count: the word the body shifts
+        // off names where the script goes and the command follows it, which is how `with_the_run_temporary
+        // bash "$repo/tools/build-xcframework.sh" --keep-bindings` reads its child whole.
+        assert_eq!(one("set -o pipefail\nf() { local p=\"$1\"; shift; \"$@\"; }\nlisted | f /tmp head -n 1\n"), [format!("early-pipes: s.sh:3: {HEAD_SHAPE}")]);
+        // A child shell at the call, with its settings and its `-c` string, answers at the call line as
+        // the same words written out there would.
+        assert_eq!(
+            one("set -o pipefail\nf() { \"$@\"; }\nlisted | f bash -o pipefail -c 'listed | grep -q x'\n"),
+            [format!("early-pipes: s.sh:3: {GREP_SHAPE}")]
+        );
+        // A word not written out stood where the call puts the command: which command ran is not known,
+        // and no earlier call of the same name answers for this one.
+        assert_eq!(one("set -o pipefail\nreader=head -n 1\nf() { \"$@\"; }\nlisted | f \"$reader\"\n"), [format!("early-pipes: s.sh:4: {RUNNER_UNREAD}")]);
+        // A shift this reading cannot count — its number a word not written out, or the shift standing
+        // where a loop could run it twice — leaves every call of the runner unread: how many of the
+        // call's words the body moved off is the question the refusal cannot answer.
+        assert_eq!(one("set -o pipefail\nn=1\nf() { shift \"$n\"; \"$@\"; }\nlisted | f head -n 1\n"), [format!("early-pipes: s.sh:4: {RUNNER_UNREAD}")]);
+        assert_eq!(
+            one("set -o pipefail\nf() { while true; do shift; done; \"$@\"; }\nlisted | f head -n 1\n"),
+            [format!("early-pipes: s.sh:3: {RUNNER_UNREAD}")]
+        );
+        // A call with no words of its own runs nothing, whatever the body holds: the writer dies of
+        // SIGPIPE and the pipe answers by timing, which is the wrapper refusal.
+        assert_eq!(one("set -o pipefail\nf() { \"$@\"; }\nlisted | f\n"), [format!("early-pipes: s.sh:3: {WRAPPER_RUNS_NOTHING}")]);
+        // And a body that never starts a command with the call's own words is no runner at all: its
+        // calls name nothing this stage reads, and stand as any other command does.
+        assert!(one("set -o pipefail\nf() { echo \"$@\"; }\nlisted | f head -n 1\n").is_empty());
+    }
+
+    /// A runner's command is read with the call's words written into it, in the order its body runs.
+    #[test]
+    fn a_runners_command_is_read_with_the_calls_words_written_in() {
+        // The body's own command is read with the call's words written into it, its own words beside them
+        // and the shifts that stand before it counted, in the order the body runs: a `shift` after the
+        // command, or in a subshell of its own, moves nothing the command sees, and a wrapper the body
+        // starts the words behind reads them as it reads any command's (each measured 141 at a `grep -q`
+        // the call names).
+        for (body, call) in [
+            ("\"$@\"; shift", "f grep -q x"),
+            ("(shift); \"$@\"", "f grep -q x"),
+            ("\"$1\" -q \"$2\"", "f grep x"),
+            ("\"$@\" -q", "f grep x"),
+            ("timeout 5 \"$@\"", "f grep -q x"),
+            ("env -u X \"$@\"", "f grep -q x"),
+            ("shift; (shift; true); \"$2\" -q \"$3\"", "f a b grep x"),
+            ("grep -q \"$1\"", "f x"),
+        ] {
+            assert_eq!(one(&format!("set -o pipefail\nf() {{ {body}; }}\nlisted | {call}\n")), [format!("early-pipes: s.sh:3: {GREP_SHAPE}")], "{body}");
+        }
+        // `"$N"` hands on that one word and no other: `"$2" x` called with `a grep -q` runs `grep x`, which
+        // reads the whole pipe (measured 0 0).
+        assert!(one("set -o pipefail\nf() { \"$2\" x; }\nlisted | f a grep -q\n").is_empty());
+        // A command place the call's words fill in a shape this reading cannot point at — split again
+        // unquoted, joined, braced or sliced — names no word of the call, and so does a body that hands the
+        // shell new positional words with `set`.
+        for body in ["${@}", "\"${@:1}\"", "$@", "\"$*\"", "$1", "set -- head -n 1; \"$@\"", "set a; \"$@\""] {
+            assert_eq!(
+                one(&format!("set -o pipefail\nf() {{ {body}; }}\nlisted | f grep -q x\n")),
+                [format!("early-pipes: s.sh:3: {RUNNER_UNREAD}")],
+                "{body}"
+            );
+        }
+        // A function reaching itself without end is read to the depth every reading here stops at and
+        // refused there, at each call of it, its own body's among them.
+        assert_eq!(
+            one("set -o pipefail\nf() { f \"$@\"; }\nlisted | f grep -q x\n"),
+            [format!("early-pipes: s.sh:2: {RUNNER_UNREAD}"), format!("early-pipes: s.sh:3: {RUNNER_UNREAD}")]
+        );
+    }
+
+    /// A variable holding one of the call's words stands for it, and a wrapper or a script's top level is read for them too.
+    #[test]
+    fn a_variable_holding_a_call_word_and_a_top_level_running_its_own_words_are_read() {
+        // A variable the body's statement list gives one of the call's words stands for that word, by its
+        // place among all of them, whatever shifts follow; reassigned, or set only in a subshell, it holds
+        // no word of the call, and read in any shape but `"$name"` it holds none this reading can point at.
+        for (body, call) in [
+            ("local run=\"$1\"; shift; \"$run\" \"$@\"", "f grep -q x"),
+            ("run=$1; shift; \"$run\" \"$@\"", "f grep -q x"),
+            ("shift; local run=\"$1\"; \"$run\" -q x", "f a grep"),
+        ] {
+            assert_eq!(one(&format!("set -o pipefail\nf() {{ {body}; }}\nlisted | {call}\n")), [format!("early-pipes: s.sh:3: {GREP_SHAPE}")], "{body}");
+        }
+        for body in ["local run=\"$1\"; $run x", "local run=\"$1\"; \"${run}\" x"] {
+            assert_eq!(one(&format!("set -o pipefail\nf() {{ {body}; }}\nlisted | f grep\n")), [format!("early-pipes: s.sh:3: {RUNNER_UNREAD}")], "{body}");
+        }
+        assert_eq!(one("f() { local run=\"$1\"; \"$run\" x; }\nf \"$reader\"\n"), [format!("early-pipes: s.sh:2: {RUNNER_UNREAD}")]);
+        for body in ["local run=\"$1\"; run=cat; \"$run\"", "(run=\"$1\"); \"$run\"", "run=\"$1\"; if c; then run=cat; fi; \"$run\""] {
+            assert!(one(&format!("set -o pipefail\nf() {{ {body}; }}\nlisted | f head\n")).is_empty(), "{body}");
+        }
+        // A word whose tail names a function runs a file all the same; and a body whose shifts no count
+        // reads, handing the call's words only to its own commands' arguments, is read where it stands,
+        // as `tools/ios-device-test.sh`'s `launch` is.
+        assert!(one("set -o pipefail\nxtask() { \"$run/xtask\" \"$@\"; }\nlisted | xtask head -n 1\n").is_empty());
+        assert!(one("set -o pipefail\nf() { while [ \"$1\" != -- ]; do shift; done; xcrun run \"$@\"; }\nlisted | f a -- head -n 1\n").is_empty());
+        assert!(one("set -o pipefail\nf() { while [ \"$1\" != -- ]; do shift; done; grep -c \"$1\"; }\nlisted | f -q\n").is_empty());
+        // The call's words behind a wrapper the body starts them through: an unquoted shape there is as
+        // unreadable as at the head, and a call word not written out names no command there either.
+        assert_eq!(
+            one("set -o pipefail\nf() { timeout 5 $@; }\nlisted | f grep -q x\n").last().cloned(),
+            Some(format!("early-pipes: s.sh:3: {RUNNER_UNREAD}"))
+        );
+        assert_eq!(one("f() { timeout 5 \"$@\"; }\nf \"$reader\" x\n"), [format!("early-pipes: s.sh:2: {RUNNER_UNREAD}")]);
+        // A wrapper passes over a function of the name it runs (measured: the real `head` at 141).
+        assert_eq!(one("set -o pipefail\nhead() { \"$@\"; }\nlisted | command head -n 1\n"), [format!("early-pipes: s.sh:3: {HEAD_SHAPE}")]);
+        assert!(one("f() { \"$@\"; }\ncommand f bash -o pipefail -c 'listed | grep -q x'\n").is_empty());
+        // A script's or a `-c` program's own top level running its own arguments has no call to read
+        // (measured: `"$@"` handed `set -o pipefail` puts the next `grep -q` pipe at 141), told once at a pipe.
+        for own in ["\"$@\"", "\"$1\" x", "timeout 5 \"$@\"", "eval '\"$@\"'", "bash -c '\"$@\"' _ cat"] {
+            assert_eq!(
+                one(&format!("{own}\nlisted | grep -q x\n")),
+                [format!("early-pipes: s.sh:1: {RUNNER_UNREAD}"), format!("early-pipes: s.sh:2: {GREP_SHAPE}")],
+                "{own}"
+            );
+        }
+        assert_eq!(one("listed | \"$@\"\n"), [format!("early-pipes: s.sh:1: {RUNNER_UNREAD}")]);
+    }
+
+    /// A runner stands in every script of its shell and in no other.
+    #[test]
+    fn a_runner_is_read_in_every_script_of_its_shell() {
+        // A runner one script defines is called from every script in its shell: the library's function
+        // answers for the sourcing script's call, and the sourcing script's for the library's.
+        let lib = script("tools/lib.sh", "# shellcheck shell=bash\nrun() { \"$@\"; }\n");
+        let caller = script(
+            "tools/caller.sh",
+            "set -o pipefail\nsource \"$(dirname \"$0\")/lib.sh\"\nlisted | run grep -q x\nrun bash -o pipefail -c 'listed | head -n 1'\n",
+        );
+        assert_eq!(check(&[lib, caller]).0, [format!("early-pipes: tools/caller.sh:3: {GREP_SHAPE}"), format!("early-pipes: tools/caller.sh:4: {HEAD_SHAPE}")]);
+        let lib = script("tools/lib.sh", "# shellcheck shell=bash\nlisted | run head -n 1\n");
+        let caller = script("tools/caller.sh", "set -o pipefail\nrun() { \"$@\"; }\nsource \"$(dirname \"$0\")/lib.sh\"\n");
+        assert_eq!(check(&[lib, caller]).0, [format!("early-pipes: tools/lib.sh:2: {HEAD_SHAPE}")]);
+        // A script sharing no shell with the one that defines a name calls no function of that name.
+        let lib = script("tools/lib.sh", "# shellcheck shell=bash\nrun() { \"$@\"; }\n");
+        let other = script("tools/other.sh", "set -o pipefail\nlisted | run head -n 1\n");
+        assert!(check(&[lib, other]).0.is_empty());
+    }
+
+    /// `tools/env.sh` imports `cargo ndk-env`'s output as data: what the tool prints for a target reads back
+    /// as the same variables an `eval` of it would set, and any other name, value or shape of line is
+    /// refused in its own words with nothing of it exported.
+    #[test]
+    fn the_android_import_exports_what_it_can_name_and_refuses_the_rest() {
+        let env = crate::repo_root().join("tools/env.sh");
+        let import = |printed: &str| {
+            let program = "source \"$1\"; printed=\"$2\"; craftbridge_cargo() { printf '%s\\n' \"$printed\"; }; craftbridge_android_target_env aarch64-linux-android; status=$?; printf '%s|%s|%s' \"$status\" \"${CC_aarch64_linux_android-unset}\" \"${CLANG_PATH-unset}\"";
+            let output = Command::new("bash").args(["-c", program, "import"]).arg(&env).arg(printed).output().unwrap();
+            (String::from_utf8_lossy(&output.stdout).to_string(), String::from_utf8_lossy(&output.stderr).to_string())
+        };
+        let (read, said) = import("export CC_aarch64_linux_android=\"/ndk/clang --target=x\"\n\n# a note\nexport CLANG_PATH=\"/ndk/clang\"");
+        assert_eq!((read.as_str(), said.as_str()), ("0|/ndk/clang --target=x|/ndk/clang", ""));
+        for (line, words) in [
+            ("export EVIL=\"x\"", "named EVIL, which it has never named for aarch64-linux-android"),
+            ("export CC_x86_64_linux_android=\"x\"", "named CC_x86_64_linux_android, which it has never named"),
+            ("export CC_aarch64_linux_android=\"a$b\"", "holding quotes, a backslash or an expansion"),
+            ("export CC_aarch64_linux_android=\"a\\b\"", "holding quotes, a backslash or an expansion"),
+            ("export CC_aarch64_linux_android=\"a\" \"b\"", "holding quotes, a backslash or an expansion"),
+            ("CC_aarch64_linux_android=\"x\"", "no plain export"),
+            ("export CC_aarch64_linux_android=x", "no plain export"),
+            // The shell would read this value as `x=v`, so reading it as `v` would import another value.
+            ("export CC_aarch64_linux_android=x=\"v\"", "no plain export"),
+            ("export =\"x\"", "no plain export"),
+        ] {
+            let (read, said) = import(line);
+            assert_eq!(read, "1|unset|unset", "{line}");
+            assert!(said.contains(words), "{line}: {said}");
         }
     }
 
@@ -3340,34 +4643,52 @@ mod tests {
         ] {
             assert!(one(&format!("{off}\nlisted | grep -q x\n")).is_empty(), "{off}");
         }
-        // An `eval` whose words are not all written out could spell `set -o pipefail` itself, so its shell
-        // is read under `pipefail`; what does show of it is read as far as it goes, and a `set` or `source`
-        // it shows unread is refused as that command is. `tools/env.sh` runs `eval "$exports"` in a script
-        // already under `pipefail`, where it changes nothing.
-        assert_eq!(one("eval \"$x\"\nlisted | grep -q x\n"), [format!("early-pipes: s.sh:2: {GREP_SHAPE}")]);
-        // So is one whose spelling holds a backslash the shell takes off before `eval` reads the text: the
-        // text handed on is not the one the tree spells (measured in bash 3.2: `eval \$x` and `eval "\$x"`
-        // of `x='set -o pipefail'` both put the next `grep -q` pipe at 141), while a backslash the shell
-        // hands on inside `"…"` leaves the spelling the text, and reads whole.
+        // An `eval` whose words are not all written out is refused whole: no reading of a script that
+        // cannot be read whole can answer for any pipe, and what such an `eval` runs could as well be a
+        // reader that quits before its input ends as a setting. The refusal falls on the `eval`'s own
+        // line, and the script is read under `pipefail` from there on, so a pipe behind it answers as it
+        // would under the worst of what the hidden words could spell.
+        assert_eq!(one("eval \"$x\"\nlisted | grep -q x\n"), [format!("early-pipes: s.sh:1: {EVAL_OPAQUE}"), format!("early-pipes: s.sh:2: {GREP_SHAPE}")]);
+        // So is one whose spelling holds a backslash the shell takes off before `eval` reads the text:
+        // the text handed on is not the one the tree spells (measured in bash 3.2: `eval \$x` and
+        // `eval "\$x"` of `x='set -o pipefail'` both put the next `grep -q` pipe at 141), while a
+        // backslash the shell hands on inside `"…"` leaves the spelling the text, and reads whole.
         for escaped in ["eval \\$x", "eval \"\\$x\"", "eval $'\\x24x'"] {
-            assert_eq!(one(&format!("{escaped}\nlisted | grep -q x\n")), [format!("early-pipes: s.sh:2: {GREP_SHAPE}")], "{escaped}");
+            assert_eq!(
+                one(&format!("{escaped}\nlisted | grep -q x\n")),
+                [format!("early-pipes: s.sh:1: {EVAL_OPAQUE}"), format!("early-pipes: s.sh:2: {GREP_SHAPE}")],
+                "{escaped}"
+            );
         }
         assert!(one("eval \"printf 'y\\n'\"\nlisted | grep -q x\n").is_empty());
-        assert_eq!(one("set -o pipefail\neval \"set -o $option\"\n"), [format!("early-pipes: s.sh:2: {SET_UNSEEN}")]);
-        assert_eq!(one("set -o pipefail\neval \"source $library\"\n"), [format!("early-pipes: s.sh:2: {SOURCE_UNSEEN}")]);
-        assert!(one("set -o pipefail\neval \"$exports\"\nlisted | grep -c pat\n").is_empty());
+        assert_eq!(one("set -o pipefail\neval \"set -o $option\"\n"), [format!("early-pipes: s.sh:2: {EVAL_OPAQUE}")]);
+        assert_eq!(one("set -o pipefail\neval \"source $library\"\n"), [format!("early-pipes: s.sh:2: {EVAL_OPAQUE}")]);
+        assert_eq!(one("set -o pipefail\neval \"$exports\"\nlisted | grep -c pat\n"), [format!("early-pipes: s.sh:2: {EVAL_OPAQUE}")]);
+        // A written-out eval folds a script whose own eval is opaque: the outer eval reads whole, so
+        // no refusal falls on it, and it is the pipe judge that reaches the inner eval and refuses it
+        // — the settings never see a statement standing inside a script's text.
+        assert_eq!(one("set -o pipefail\neval 'listed | eval \"$x\"'\n"), [format!("early-pipes: s.sh:2: {EVAL_OPAQUE}")]);
+        // A source's function holding one is refused at its own line, and the caller's pipe answers under
+        // the setting the hidden words could spell, whatever they spell: `tools/env.sh` ran
+        // `eval "$exports"` exactly here, and now reads what it exports name by name instead.
         let opaque = script("tools/lib.sh", "# shellcheck shell=bash\nlib_env() { eval \"$exports\"; }\n");
         let caller = script("tools/caller.sh", "# shellcheck source=tools/lib.sh\nsource \"$(dirname \"$0\")/lib.sh\"\nlisted | grep -q x\n");
         let (problems, under) = check(&[opaque, caller]);
         assert_eq!(under, 2);
-        assert_eq!(problems, [format!("early-pipes: tools/caller.sh:3: {GREP_SHAPE}")]);
+        assert_eq!(problems, [format!("early-pipes: tools/lib.sh:2: {EVAL_OPAQUE}"), format!("early-pipes: tools/caller.sh:3: {GREP_SHAPE}")]);
         // What an `eval` runs is read as the script's own: its pipes are judged at the `eval`'s line, an
         // `eval` at a pipe's end is read by the command it runs first, and the variables it sets are set.
         assert_eq!(one("set -o pipefail\neval 'listed | head -n 1'\n"), [format!("early-pipes: s.sh:2: {HEAD_SHAPE}")]);
         assert_eq!(one("set -o pipefail\nlisted | eval 'head -n 1'\n"), [format!("early-pipes: s.sh:2: {HEAD_SHAPE}")]);
-        assert_eq!(one("set -o pipefail\nlisted | eval \"$reader\"\n"), [format!("early-pipes: s.sh:2: {NAMED_UNSEEN}")]);
+        assert_eq!(one("set -o pipefail\nlisted | eval \"$reader\"\n"), [format!("early-pipes: s.sh:2: {EVAL_OPAQUE}")]);
         assert_eq!(one("set -o pipefail\nlisted | eval 'read a; read b'\n"), [format!("early-pipes: s.sh:2: {COMPOUND_READER}")]);
         assert!(one("set -o pipefail\nlisted | eval 'cat'\n").is_empty());
+        // The pipe's reader of an opaque `eval` answers as the settings reading does at that line, so the
+        // command is told once; read on its own, it refuses the `eval` rather than reading the text its
+        // holes stand in as a program, where `head -n 1 ${_}` would read as a `head`.
+        let opaque = parse("s.sh", "eval \"head -n 1 $x\"\n").unwrap();
+        let words = words_of(&opaque["Stmts"][0]["Cmd"]);
+        assert_eq!(eval_reads(&words[1..], false, 0, &Runners::default()), Some(EVAL_OPAQUE));
         assert_eq!(one("set -o pipefail\neval 'export GREP_OPTIONS=-q'\nlisted | grep -c pat\n"), [format!("early-pipes: s.sh:3: {GREP_ENV}")]);
         // `eval`s nested in `eval`s are read to a depth no script reaches, and one nested past it is refused
         // rather than read without end.
@@ -3579,6 +4900,10 @@ mod tests {
         // and `-u` with its value, and the child behind runs at 141 (measured on both; glued too).
         assert_eq!(one("env -iu NOPE bash -o pipefail -c 'listed | grep -q x'\n"), [format!("early-pipes: s.sh:1: {GREP_SHAPE}")]);
         assert_eq!(one("env -iuNOPE bash -o pipefail -c 'listed | grep -q x'\n"), [format!("early-pipes: s.sh:1: {GREP_SHAPE}")]);
+        // The words standing after a `-S` value join the command the value spells as its own arguments,
+        // as `env` hands them (measured alike): this child is the same one `env -S 'bash -o pipefail -c
+        // \'listed | grep -q x\''` runs, read whole at the line that runs it.
+        assert_eq!(one("env -S bash -o pipefail -c 'listed | grep -q x'\n"), [format!("early-pipes: s.sh:1: {GREP_SHAPE}")]);
         // Where an option this reading cannot follow may have eaten the word naming the command, the
         // settings reading refuses the line unread as one reading a child it cannot reach, rather than
         // walk past it in silence: GNU's `env` reads every abbreviation of `--unset` as taking a value
@@ -3586,7 +4911,6 @@ mod tests {
         for unread in [
             "env --un FOO bash -o pipefail -c 'listed | grep -q x'",
             "env --ignore-environment bash -o pipefail -c 'listed | grep -q x'",
-            "env -S bash -o pipefail -c 'listed | grep -q x'",
             // Behind every wrapper alike: `nice -5`, GNU's `nice --adjustment=5` and bash's `exec -cl` each
             // run the child's string at 141 (measured), and `nohup --help` runs nothing, refused as the safe
             // half.
