@@ -544,12 +544,25 @@ the_checks_are_built() {
   checks_tool="$checks_build/debug/xtask"
 }
 
+# The native libraries the AARs ship, built by the tree's own tools/build-android.sh before any AAR is
+# made, as the XCFramework is built by the tree's own builder: the gate's and the AARs' one build, never a
+# second one (plan §23). Which crate is the distribution library, which Android targets it is built for and
+# where its libraries are packaged are that script's and its xtask's definitions alone, so an AAR filled
+# some other way would carry bytes no gate ever compiled — and an AAR filled with nothing would ship an app
+# that opens to no engine, which is why the publish is refused below rather than the folders patched here.
+# --keep-bindings, as for the XCFramework below: the committed bindings are part of the tree the tag
+# versions, and the AARs compile them as they stand.
+building_the_android_native_libraries() {
+  with_the_run_temporary bash "$repo/tools/build-android.sh" --keep-bindings ||
+    fail "the Android native libraries could not be built from the tree being released"
+}
+
 # The AARs prove their own version: the publish tasks take the `craftbridge.version` property and refuse
 # every publish without it, the proof repository stands inside the run's folder beside no repository
 # anyone else reads, and what reaches it is read back. Gradle runs on the catalog's JDK, which the pins
 # hand to JAVA_HOME.
 proving_the_aar_versions() {
-  local modules module published_name dir read_version pins
+  local modules module published_name dir read_version pins aar_path shipped_module native_check
   the_checks_are_built
   # The pins belong to the tree being released, and xtask judges the tree it runs for by where its
   # binary was built, so the pins are read from inside that tree rather than this checkout's.
@@ -582,6 +595,19 @@ proving_the_aar_versions() {
       fail "${dir#"$proof_repository/"} holds no ${published_name}.aar: the publication shipped no AAR to version"
     [ "$read_version" = "$version" ] ||
       fail "${module#"$proof_repository/"} reads version $read_version, not the release's $version"
+    # The AAR that reached the proof repository is read for its own part, through the same check the
+    # publish task runs: the metadata says which module published it, and the check answers what that
+    # module's AAR must hold — for the module that packages the SDK's native library, that library under
+    # every ABI the toolchain names. Read here as well as there, because the release answers for the AAR
+    # that landed, not for the task that should have stopped it: an AAR that reached the repository
+    # without its library, by a publish its check did not stand before, is this run's failure.
+    aar_path="$dir/$published_name.aar"
+    shipped_module="$(jq -er '.component.module' "$module")" ||
+      fail "${module#"$proof_repository/"} names no module its AAR can be checked as"
+    native_check="$(
+      cd "$repo" && env -u CRAFTBRIDGE_ROOT "$checks_tool" aar-native-libraries "$JAVA_HOME/bin/jar" "$shipped_module" "$aar_path"
+    )" || fail "${native_check##*"$line_break"}"
+    say "${native_check##*"$line_break"}"
     say "the proof repository's ${module#"$proof_repository/"} reads version $read_version, with its AAR beside it"
   done <<<"$modules"
 }
@@ -1179,6 +1205,7 @@ settling_where_the_release_stands
 reading_the_changelog
 checking_the_version_against_the_releases
 reading_the_previous_sizes
+building_the_android_native_libraries
 proving_the_aar_versions
 staging_the_release_aars
 building_the_xcframework_zip

@@ -573,6 +573,21 @@ stage_android() {
   # the build's rule jar carries its own tests, run here beside the rules they check.
   android_gradle "$log" . detektMain detektTest :build-logic:detekt-rules:test || status=1
   android_gradle "$log" . "${android_checks[@]}" compileDebugAndroidTestSources || status=1
+  # The AAR check stops a publish only while the publish task brings it, and the settings refuse a build
+  # file that has unhooked a check from the tasks that do its work (android/sdk/settings.gradle.kts).
+  # So that the gate sees that wiring too, this schedules the publish graph without publishing:
+  # --dry-run builds the task graph and runs no task action, writes no artifact and uploads nothing,
+  # and the settings' own refusal fires here — as it fires for a hand-run publish and for the release —
+  # if any publish task of a module no longer runs `checkNativeLibraries` first. The graph goes to a log
+  # of its own: a dry-run reports every task SKIPPED, which is the point here and not a task skipped
+  # by a module's build file, which `skipped-tasks` below judges on the real runs' log alone. It asks for
+  # Gradle's own lifecycle tasks, `publish` (every publication to every repository the build declares,
+  # the proof folder's among them once its property names one) and `publishToMavenLocal`, so no
+  # repository is named here a second time and one added to the build is scheduled with the rest.
+  local planlog
+  planlog="$(mktemp)"
+  android_gradle "$planlog" . -m -Pcraftbridge.localRepo="$planlog.proof" publish publishToMavenLocal || status=1
+  rm -f "$planlog"
   xtask skipped-tasks "$log" || status=1
   rm -f "$log"
   return "$status"

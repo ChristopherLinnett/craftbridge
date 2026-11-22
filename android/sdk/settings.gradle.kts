@@ -84,11 +84,43 @@ val gateWorkers =
     )
 gradle.taskGraph.whenReady {
     val scheduled = allTasks.map { it.path }.toSet()
+
+    // Every task the graph runs before `task`: its dependencies, theirs, and so on. A dependency the run
+    // leaves out (`-x`) is no part of the plan, which then has nothing to say of it, so it runs before
+    // nothing.
+    fun scheduledDependencies(task: Task) = getDependencies(task).filter { it.path in scheduled }
+
+    fun before(task: Task): Set<String> {
+        val seen = mutableSetOf<String>()
+        val next = ArrayDeque(scheduledDependencies(task))
+        while (next.isNotEmpty()) {
+            val dependency = next.removeFirst()
+            if (seen.add(dependency.path)) next.addAll(scheduledDependencies(dependency))
+        }
+        return seen
+    }
     for (task in allTasks) {
         val owner = task.path.removeSuffix(task.name)
         val missing = gateWorkers[task.name].orEmpty().map { owner + it }.filterNot { it in scheduled }
         if (missing.isNotEmpty()) {
             throw GradleException("${task.path} no longer brings ${missing.joinToString()}, so it would succeed having checked nothing")
+        }
+        // A publish task is such a check too, and the task it must bring is one the publication cannot
+        // publish without: an AAR of the module that packages the native library is refused unless
+        // `checkNativeLibraries` stood first, or it could hand the repository an AAR with no engine and
+        // nobody asked. The wiring lives in the convention plugin; a build file that unhooked it would
+        // publish first and check never, so the same unhooking reading as the map above names it here —
+        // at every run that schedules a publish, the release's included, and at the Android stage's dry
+        // run of the publish graph, which runs no task action and is how the gate asks. Being in the graph
+        // is not enough here: a check that runs after the publish, as a finalizer, refuses an AAR the
+        // repository already holds, so the check must be among what the graph runs before the publish.
+        if (task is AbstractPublishToMaven) {
+            val check = owner + "checkNativeLibraries"
+            if (check !in before(task)) {
+                throw GradleException(
+                    "${task.path} no longer runs $check before it, so it could publish an AAR no one asked whether it holds its native library",
+                )
+            }
         }
     }
 }

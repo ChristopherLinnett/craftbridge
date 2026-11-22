@@ -3,12 +3,15 @@
 # rust/rust-toolchain.toml, into the `jniLibs` folder of the module that packages it, and the Kotlin
 # bindings it is called through.
 #
-#   tools/build-android.sh      build, then check the alignment of what was built
+#   tools/build-android.sh                  build, check the alignment of what was built, regenerate the
+#                                           bindings
+#   tools/build-android.sh --keep-bindings  build and check, leaving the committed bindings as they are
 #
 # The NDK, cargo-ndk and the target feature are set once in tools/env.sh, as they are for the gate's
 # rust_mobile stage and for a test run on a device. The Kotlin bindings are written by `cargo xtask
 # generate`, whose registered generators run the workspace's uniffi-bindgen over a host build of the same
-# library, so they always describe the library built here.
+# library, so they always describe the library built here. tools/release.sh passes --keep-bindings, for the
+# reason tools/env.sh gives with the option.
 set -euo pipefail
 # shellcheck disable=SC2046 # one variable name per word, split on purpose
 unset $(git rev-parse --local-env-vars 2>/dev/null)
@@ -18,6 +21,7 @@ cd "$CRAFTBRIDGE_ROOT"
 # What ships is built as the gate builds: a `RUSTFLAGS` or a profile in the shell's environment, which cargo
 # reads over the target feature tools/env.sh sets, would change the library without a word.
 craftbridge_refuse_switches || exit 1
+regenerate="$(craftbridge_regenerates_bindings "$@")" || exit 64
 
 xtask_run="$(mktemp -d "${TMPDIR:-/tmp}/craftbridge-xtask.XXXXXX")"
 craftbridge_remove_on_exit "$xtask_run"
@@ -29,21 +33,21 @@ craftbridge_android_env
 # The module that packages the native library, and where its libraries go.
 jni_libs="android/sdk/effects/src/main/jniLibs"
 # The native library the SDK ships, as the layer table gives it (rust/xtask/src/layers.rs): the package
-# cargo builds, and its library's name, which the file of each Android build carries as lib<name>.so. The
-# table is the one place that says which crate is the distribution library, so the script names neither.
+# cargo builds, and the file each Android build of it writes. The table is the one place that says which
+# crate is the distribution library and what its file is called, the name the AAR check requires too, so
+# the script names neither.
 sdk_library="$("$xtask" sdk-library)"
-package="" name=""
+package="" library=""
 while IFS= read -r line; do
   case "$line" in
     package=*) package="${line#package=}" ;;
-    library=*) name="${line#library=}" ;;
+    android-file=*) library="${line#android-file=}" ;;
   esac
 done <<<"$sdk_library"
-if [ -z "$package" ] || [ -z "$name" ]; then
-  echo "build-android: cargo xtask sdk-library named no package or no library: $sdk_library" >&2
+if [ -z "$package" ] || [ -z "$library" ]; then
+  echo "build-android: cargo xtask sdk-library named no package or no Android library file: $sdk_library" >&2
   exit 1
 fi
-library="lib$name.so"
 targets=()
 while IFS= read -r target; do targets+=(-t "$target"); done < <(craftbridge_android_targets)
 if [ ${#targets[@]} -eq 0 ]; then
@@ -70,5 +74,5 @@ libraries=()
 while IFS= read -r file; do libraries+=("$file"); done < <(find "$jni_libs" -name "$library" | sort)
 "$xtask" elf-alignment "$readelf" "${libraries[@]}"
 
-"$xtask" generate
+if [ "$regenerate" = yes ]; then "$xtask" generate; fi
 craftbridge_passed=1

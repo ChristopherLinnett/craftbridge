@@ -25,15 +25,7 @@ cd "$CRAFTBRIDGE_ROOT"
 # reads over the CPU target tools/env.sh sets, would change the library without a word.
 craftbridge_refuse_switches || exit 1
 
-regenerate=yes
-case "$*" in
-  "") ;;
-  --keep-bindings) regenerate=no ;;
-  *)
-    echo "usage: tools/build-xcframework.sh [--keep-bindings]" >&2
-    exit 64
-    ;;
-esac
+regenerate="$(craftbridge_regenerates_bindings "$@")" || exit 64
 
 # xtask is built into a folder of this run only, as the gate does: a concurrent build would replace the
 # shared binary this script is starting (tools/env.sh).

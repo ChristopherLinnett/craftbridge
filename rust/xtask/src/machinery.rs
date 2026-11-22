@@ -89,6 +89,9 @@ const MACHINERY: &[&str] = &[
     // Android libraries the Android stage packages from `jniLibs`.
     "tools/build-xcframework.sh",
     "tools/build-android.sh",
+    // The read of a packaged AAR, which refuses one whose `jni/` holds no library for an ABI the toolchain
+    // names: the publish task and the release both ask it, so what an app can install is its answer too.
+    "tools/aar-native-libraries.sh",
     ".github/workflows/ci.yml",
     "rust/xtask/",
     "rust/effects/craftbridge-effects-conformance/",

@@ -11,6 +11,7 @@ import org.gradle.kotlin.dsl.configure
 class AndroidLibraryConventionPlugin : AndroidModuleConventionPlugin(AndroidModuleKind.LIBRARY, "com.android.library") {
     override fun Project.configureKind() {
         configurePublishing()
+        configureNativeLibraryCheck()
         extensions.configure<LibraryExtension> {
             defaultConfig {
                 // Published inside the AAR, so an app that shrinks its code keeps what the native
