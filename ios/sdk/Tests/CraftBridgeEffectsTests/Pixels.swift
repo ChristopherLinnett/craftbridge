@@ -4,6 +4,7 @@
 
 import AVFoundation
 import CraftBridge
+import CraftBridgeEffectsConformance
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers

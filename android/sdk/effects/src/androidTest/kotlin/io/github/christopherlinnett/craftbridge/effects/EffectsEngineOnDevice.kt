@@ -6,6 +6,7 @@ package io.github.christopherlinnett.craftbridge.effects
 import android.content.Context
 import io.github.christopherlinnett.craftbridge.core.CraftColor
 import io.github.christopherlinnett.craftbridge.core.Folders
+import io.github.christopherlinnett.craftbridge.core.InternalErrorException
 import io.github.christopherlinnett.craftbridge.core.JSONValue
 import io.github.christopherlinnett.craftbridge.core.jsonValue
 import io.github.christopherlinnett.craftbridge.ffi.core.GpuChoice
@@ -87,8 +88,12 @@ private fun engineChecksOnDevice(): List<Case> =
             } finally {
                 engine.shutDown()
             }
+            // The typed error the Swift engine's calls answer after its `shutDown()` too: `Internal`, in the
+            // core's words.
             val after = runCatching { engine.frame() }.exceptionOrNull()
-            require(after != null) { "the shut-down engine answered a frame after all" }
+            require(after is InternalErrorException && after.detail == CLOSED_WORDS) {
+                "a frame asked of the shut-down engine answered $after, not the core's Internal \"$CLOSED_WORDS\""
+            }
         },
         Case("a template built on the device opens back, takes its control and exports its frames with progress") { context ->
             val cache = File(Folders.appDefault(context).cache)

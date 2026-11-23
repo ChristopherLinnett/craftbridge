@@ -33,18 +33,36 @@ public final class EffectsEngine: Sendable {
         background = BackgroundController(engine: engine, policy: policy, preview: target, host: host)
     }
 
-    /// Sends one request of the engine's method table, such as `"exec"`, and returns its reply. Package-wide
-    /// rather than public: the public calls are the typed ones built on it, and the package's conformance
-    /// tests make the corpus's requests through it, which name the method table's methods, not the typed calls.
-    package func request(_ method: String, _ params: JSONValue) async throws -> JSONValue {
+    /// Sends one request of the engine's method table, such as `"exec"`, and returns its reply: the generic
+    /// door under every typed call that makes such a request. An app prefers the typed calls, whose arguments
+    /// name what each request takes. The door is for a binding to another language, which carries every call
+    /// as a method's name and its parameters as JSON, so that a method the engine gains needs no new Swift:
+    /// `JSONValue` is `Codable`, so the binding reads the parameters from JSON text with `JSONDecoder` and
+    /// writes the reply back with `JSONEncoder`. The engine answers each method at one door alone: a method
+    /// that reports progress is started through ``job(_:_:progress:)`` and a frame is asked through
+    /// ``frame(params:format:)``, and this call refuses both. The package's conformance tests make the
+    /// corpus's requests here too, which name the method table's methods, not the typed calls.
+    ///
+    /// - Throws: the ``CraftError`` the engine answers the request with, which for a method this door does
+    ///   not answer is ``CraftError/Unsupported(detail:)``, naming the methods it does;
+    ///   ``CraftError/InvalidParams(detail:)`` for parameters that hold NaN or an infinity, which JSON has no
+    ///   number for; and ``CraftError/Internal(detail:)`` once the engine has been shut down.
+    public func request(_ method: String, _ params: JSONValue) async throws -> JSONValue {
         try JSONValue(
             jsonText: try await handle.request(method: method, params: params.jsonText())
         )
     }
 
-    /// Renders one frame as the engine's `frame` is asked with `params`: the typed `frame` call asks it with
-    /// the keys its arguments name, and the conformance tests ask it with the corpus's own.
-    package func frame(params: JSONValue, format: PixelFormat) async throws -> FrameBytes {
+    /// Renders one frame as the engine's `frame` is asked with `params`, that request's own keys, and answers
+    /// its bytes laid out as `format` names: the generic door under
+    /// ``frame(comp:at:frame:maxSide:scale:transparent:format:)``, which asks it with the keys its arguments
+    /// name. An app prefers that typed call. This one is for a binding to another language, which carries the
+    /// request's keys as JSON (see ``request(_:_:)``), and the conformance tests ask it with the corpus's own.
+    ///
+    /// - Throws: the ``CraftError`` the engine refuses the frame with, and, as ``request(_:_:)`` throws them,
+    ///   ``CraftError/InvalidParams(detail:)`` for parameters JSON has no number for and
+    ///   ``CraftError/Internal(detail:)`` once the engine has been shut down.
+    public func frame(params: JSONValue, format: PixelFormat) async throws -> FrameBytes {
         try await handle.frame(params: params.jsonText(), format: format)
     }
 

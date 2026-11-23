@@ -38,8 +38,9 @@ private const val NO_WINDOW_WORDS = "no window of this process has that id"
 /** The note the core answers when the app asked for no GPU, which a CPU-only engine keeps getting. */
 private const val CPU_ONLY_NOTE = "the app asked for CPU-only rendering"
 
-/** The core's words for a call made after its engine was shut down. */
-private const val CLOSED_WORDS = "engine is closed"
+/** The core's words for a call made after its engine was shut down: the boundary's own calls answer them,
+ * and so does every call of an engine the app has ended. */
+internal const val CLOSED_WORDS = "engine is closed"
 
 /** One entry of the manifest: what one call of this check must account for. */
 private class SurfaceEntry(

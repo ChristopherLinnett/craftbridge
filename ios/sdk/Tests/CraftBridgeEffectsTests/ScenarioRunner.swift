@@ -9,12 +9,9 @@
 
 import CraftBridge
 import CraftBridgeEffects
+import CraftBridgeEffectsConformance
 import CraftBridgeFFI
 import Foundation
-
-/// Where the scenario's folder goes in a text of the corpus: the engine takes absolute paths, and the
-/// folder is not known until the scenario runs.
-private let container = "<container>"
 
 /// A failure of the runner, not of the plug-in: the scenario cannot be judged.
 struct RunnerFailure: Error, Equatable, CustomStringConvertible {
@@ -59,11 +56,9 @@ private func document(of error: CraftError) -> JSONValue {
 extension JSONValue {
     /// The value at `pointer` (RFC 6901), if the document holds one.
     func value(at pointer: String) -> JSONValue? {
-        if pointer.isEmpty { return self }
-        guard pointer.hasPrefix("/") else { return nil }
+        guard let keys = Self.pointerTokens(pointer) else { return nil }
         var found = self
-        for token in pointer.dropFirst().split(separator: "/", omittingEmptySubsequences: false) {
-            let key = token.replacingOccurrences(of: "~1", with: "/").replacingOccurrences(of: "~0", with: "~")
+        for key in keys {
             switch found {
             case .object(let fields):
                 guard let next = fields[key] else { return nil }
@@ -75,16 +70,6 @@ extension JSONValue {
             }
         }
         return found
-    }
-
-    /// This value with `text` written wherever a string holds `target`.
-    fileprivate func replacing(_ target: String, with text: String) -> JSONValue {
-        switch self {
-        case .string(let value): .string(value.replacingOccurrences(of: target, with: text))
-        case .array(let items): .array(items.map { $0.replacing(target, with: text) })
-        case .object(let fields): .object(fields.mapValues { $0.replacing(target, with: text) })
-        default: self
-        }
     }
 
     /// The value as JSON text, which is how a failure names it.
@@ -100,36 +85,11 @@ extension JSONValue {
     }
 }
 
-/// The folders of an app whose container is `container`, and whose bundle is `bundle`, the app's read-only
-/// root: the working folders sit inside the container, each hidden from a listing of it by a leading dot.
-func engineFolders(container: URL, bundle: URL?) -> Folders {
-    func path(_ url: URL) -> String { url.path(percentEncoded: false) }
-    let hidden = { (name: String) in path(container.appending(path: ".\(name)", directoryHint: .isDirectory)) }
-    return Folders(
-        container: path(container),
-        bundle: bundle.map(path),
-        config: hidden("config"),
-        cache: hidden("cache"),
-        models: hidden("models"),
-        staged: hidden("staged"),
-        plugins: nil,
-        fonts: []
-    )
-}
-
 /// The plug-in side of the corpus, run over scenario folders made in `root`.
 struct ScenarioRunner: Sendable {
     /// The folder each scenario's own folder is made in, which the caller removes when it is done with it:
     /// the engine of a scenario closes on its own thread a moment after the scenario ends.
     let root: URL
-    /// The corpus file's own folder, which the fixtures are read from.
-    let corpusFolder: URL
-
-    /// A runner whose scenarios' folders are made in `root`, and whose fixtures are the corpus's own.
-    init(root: URL) {
-        self.root = root
-        corpusFolder = Corpus.file.deletingLastPathComponent()
-    }
 
     /// Runs every step of `scenario` in a folder of its own in `root`, removed when it ends, and checks what
     /// the corpus says of the outputs and the folder. Every failure is found, not only the first: a step that
@@ -179,7 +139,7 @@ struct ScenarioRunner: Sendable {
         -> (outputs: [[JSONValue]], failures: [String], rendersOn: [JSONValue])
     {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        for fixture in scenario.fixtures { try place(fixture, in: folder) }
+        for fixture in scenario.fixtures { try fixture.place(in: folder) }
         var (outputs, failures, rendersOn): ([[JSONValue]], [String], [JSONValue]) = ([], [], [])
         for (index, step) in scenario.steps.enumerated() {
             do {
@@ -196,19 +156,6 @@ struct ScenarioRunner: Sendable {
             }
         }
         return (outputs, failures, rendersOn)
-    }
-
-    /// A fixture copied from the corpus's folder into the scenario's.
-    private func place(_ fixture: Fixture, in folder: URL) throws {
-        let (from, to) = (corpusFolder.appending(path: fixture.from), folder.appending(path: fixture.to))
-        try FileManager.default.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if fixture.namesContainer {
-            let text = try String(contentsOf: from, encoding: .utf8)
-            try text.replacingOccurrences(of: container, with: folder.path(percentEncoded: false))
-                .write(to: to, atomically: true, encoding: .utf8)
-        } else {
-            try FileManager.default.copyItem(at: from, to: to)
-        }
     }
 
     /// One step: an engine started afresh over the scenario's folder, on the GPU when `gpu` says, the step's
@@ -272,23 +219,12 @@ struct ScenarioRunner: Sendable {
         let at = folder.path(percentEncoded: false)
         switch call {
         case .request(let method, let params, let files, let stop):
-            var sent = params.replacing(container, with: at)
-            for (name, path) in files {
-                guard case .object(var fields) = sent else {
-                    throw CraftError.InvalidParams(detail: "`\(method)`: parameters that take a file must be an object")
-                }
-                do {
-                    fields[name] = .string(try String(contentsOf: folder.appending(path: path), encoding: .utf8))
-                } catch {
-                    throw CraftError.Io(detail: "cannot read \(path): \(error.localizedDescription)")
-                }
-                sent = .object(fields)
-            }
+            let sent = try Call.parameters(of: method, params, files: files, in: folder)
             guard let stop else { return [try await engine.request(method, sent)] }
             return [try await Listening(stop: stop).run(method, sent, on: engine)]
         case .frame(let params, let format, let out):
             let frame = try await engine.frame(
-                params: params.replacing(container, with: at),
+                params: params.replacing(containerMarker, with: at),
                 format: format == .png ? .png : .rgba8Straight
             )
             let bytes =
@@ -303,7 +239,7 @@ struct ScenarioRunner: Sendable {
         case .mcp:
             var replies: [JSONValue] = []
             for line in input {
-                if let reply = try await engine.mcp(line.replacingOccurrences(of: container, with: at)) {
+                if let reply = try await engine.mcp(line.replacingOccurrences(of: containerMarker, with: at)) {
                     replies.append(try JSONValue(jsonText: reply))
                 }
             }

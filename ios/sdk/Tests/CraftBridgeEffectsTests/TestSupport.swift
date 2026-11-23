@@ -4,6 +4,7 @@
 import AVFoundation
 import CraftBridge
 import CraftBridgeEffects
+import CraftBridgeEffectsConformance
 import CraftBridgeFFI
 import Darwin
 import Foundation
