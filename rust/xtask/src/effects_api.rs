@@ -1,6 +1,6 @@
-//! The generators behind `generated/api-surface.json`, the Swift and Kotlin facades and the plugin's
-//! version constants, and the comparison of two surfaces the upstream update makes: the codegen binary,
-//! built and run by cargo.
+//! The generators behind `generated/api-surface.json` and the facade model planned from it, the Swift and
+//! Kotlin facades and the plugin's version constants, and the comparison of two surfaces the upstream
+//! update makes: the codegen binary, built and run by cargo.
 //!
 //! The codegen links the pinned EffectCraft and reads its command registry at run time, and xtask may not
 //! depend on a host tool, so xtask asks cargo for the binary and runs it. The pin the surface records is
@@ -33,9 +33,12 @@ pub(crate) const DOCS_OUTPUT_DIR: &str = "docs/generated";
 /// The codegen's package, and the binary it builds.
 const CODEGEN: &str = "craftbridge-effects-codegen";
 
-/// Write the surface into `out_dir`.
+/// Write the surface into `out_dir`, and then the facade model planned from it. Both files are this one
+/// step's, written into this one folder: the model is rendered from the surface file the step has just
+/// written, so the pair cannot come apart — a pin move rewrites the surface and the model with it.
 pub(crate) fn generate(out_dir: &Path) -> Result<(), String> {
-    run_codegen(&["surface", "--pin", &pinned_commit(&crate::repository_root()?)?], out_dir)
+    run_codegen(&["surface", "--pin", &pinned_commit(&crate::repository_root()?)?], out_dir)?;
+    run_codegen(&["facade-model", &out_dir.join(SURFACE_FILE_NAME).to_string_lossy()], out_dir)
 }
 
 /// Write the version constants into `out_dir`.
@@ -74,6 +77,10 @@ fn run_codegen(args: &[&str], out_dir: &Path) -> Result<(), String> {
     let output = Command::new(&binary).args(args).arg(out_dir).output().map_err(|error| format!("cannot run {}: {error}", binary.display()))?;
     if output.status.success() { Ok(()) } else { Err(format!("{CODEGEN} exited with {}: {}", output.status, String::from_utf8_lossy(&output.stderr).trim())) }
 }
+
+/// The surface file's name, inside [`OUTPUT_DIR`] and inside any folder the codegen's `surface` command is
+/// asked to write into.
+pub(crate) const SURFACE_FILE_NAME: &str = "api-surface.json";
 
 /// The surface file inside [`OUTPUT_DIR`].
 pub(crate) const SURFACE_FILE: &str = "rust/effects/craftbridge-effects-codegen/generated/api-surface.json";
@@ -130,7 +137,7 @@ mod tests {
 
     #[test]
     fn the_surface_file_is_where_the_generator_writes_it() {
-        assert_eq!(SURFACE_FILE, format!("{OUTPUT_DIR}/api-surface.json"));
+        assert_eq!(SURFACE_FILE, format!("{OUTPUT_DIR}/{SURFACE_FILE_NAME}"));
     }
 
     #[test]

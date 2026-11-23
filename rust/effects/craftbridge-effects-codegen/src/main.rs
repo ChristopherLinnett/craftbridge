@@ -1,8 +1,10 @@
-//! Generates the EffectCraft API surface from the engine's command registry, the Swift and Kotlin
-//! facades over it, the constants the plugin's `info` reports, and the diff between two surfaces. `cargo xtask generate` runs it.
+//! Generates the EffectCraft API surface from the engine's command registry, the facade model planned
+//! from it, the Swift and Kotlin facades over it, the constants the plugin's `info` reports, and the diff
+//! between two surfaces. `cargo xtask generate` runs it.
 //!
 //! ```text
 //! craftbridge-effects-codegen surface --pin <commit> <out-dir>
+//! craftbridge-effects-codegen facade-model <surface-file> <out-dir>
 //! craftbridge-effects-codegen swift <out-dir>
 //! craftbridge-effects-codegen kotlin <out-dir>
 //! craftbridge-effects-codegen docs <surface-file> <out-dir>
@@ -10,7 +12,9 @@
 //! craftbridge-effects-codegen diff <old> <new>
 //! ```
 //!
-//! `surface` writes `api-surface.json` into `<out-dir>`, `swift` one Swift file for each command namespace,
+//! `surface` writes `api-surface.json` into `<out-dir>`, `facade-model` the facade model — the surface as
+//! [`facade::plan`] decides its facades, for a generator in a language this crate holds no emitter of,
+//! from a surface file — `swift` one Swift file for each command namespace,
 //! `kotlin` one Kotlin file for each, in the package the `:effects` module declares, `docs` the Markdown
 //! command reference from a surface file — the one reader the file has, so reference and facades cannot
 //! disagree — and `version` the plugin's Rust file of the engine's version and pin.
@@ -23,6 +27,7 @@
 mod diff;
 mod docs;
 mod facade;
+mod facade_model;
 mod kotlin;
 mod model;
 mod refused;
@@ -54,6 +59,7 @@ fn run(args: &[OsString]) -> ExitCode {
         [command, out_dir] if command == swift::COMMAND => report(write_facade(&SWIFT, Path::new(out_dir))),
         [command, out_dir] if command == kotlin::COMMAND => report(write_facade(&KOTLIN, Path::new(out_dir))),
         [command, surface, out_dir] if command == docs::COMMAND => write_reference(Path::new(surface), Path::new(out_dir)),
+        [command, surface, out_dir] if command == facade_model::COMMAND => write_model(Path::new(surface), Path::new(out_dir)),
         [command, flag, pin, out_dir] if command == version::COMMAND && flag == "--pin" => {
             report(pin_text(pin).and_then(|pin| write_version(pin, Path::new(out_dir))))
         }
@@ -61,7 +67,7 @@ fn run(args: &[OsString]) -> ExitCode {
         _ => {
             say(
                 std::io::stderr(),
-                "usage: craftbridge-effects-codegen surface --pin <commit> <out-dir>\n       craftbridge-effects-codegen swift <out-dir>\n       craftbridge-effects-codegen kotlin <out-dir>\n       craftbridge-effects-codegen docs <surface-file> <out-dir>\n       craftbridge-effects-codegen version --pin <commit> <out-dir>\n       craftbridge-effects-codegen diff <old> <new>",
+                "usage: craftbridge-effects-codegen surface --pin <commit> <out-dir>\n       craftbridge-effects-codegen facade-model <surface-file> <out-dir>\n       craftbridge-effects-codegen swift <out-dir>\n       craftbridge-effects-codegen kotlin <out-dir>\n       craftbridge-effects-codegen docs <surface-file> <out-dir>\n       craftbridge-effects-codegen version --pin <commit> <out-dir>\n       craftbridge-effects-codegen diff <old> <new>",
             );
             ExitCode::FAILURE
         }
@@ -174,6 +180,18 @@ fn write_reference(surface: &Path, out_dir: &Path) -> ExitCode {
     }))
 }
 
+/// Read the surface in `surface` and write the facade model into `out_dir`: the model is planned from the
+/// same surface file the reference is rendered from and the facades are typed from, so it cannot disagree
+/// with either.
+fn write_model(surface: &Path, out_dir: &Path) -> ExitCode {
+    report(read_surface(surface).and_then(|surface| {
+        let namespaces = facade::plan(&surface.commands)?;
+        let methods: usize = namespaces.iter().map(|namespace| namespace.methods.len()).sum();
+        write_into(out_dir, facade_model::FILE, &facade_model::render(&surface, &namespaces)?)?;
+        Ok(format!("{} holds {} with {methods} methods in {} namespaces", out_dir.display(), facade_model::FILE, namespaces.len()))
+    }))
+}
+
 /// Write the engine's version and pin constants into `out_dir`.
 fn write_version(pin: &str, out_dir: &Path) -> Result<String, String> {
     let file = write_into(out_dir, version::FILE, &version::build(pin)?)?;
@@ -230,21 +248,36 @@ mod tests {
         assert!(!out.exists());
     }
 
+    /// A surface file as small as one can be and still be read: what the tests of the commands that read a
+    /// surface file write for them to read.
+    const ONE_COMMAND_SURFACE: &str = r#"{"app":"effectcraft","engineVersion":"9.9.9","pin":"0123456789abcdef0123456789abcdef01234567","commands":[{"id":"text.fonts","label":"List fonts","params":"","journal":false,"keys":[]}],"tools":[]}"#;
+
     #[test]
     fn the_command_reference_is_written_from_a_surface_file_and_a_missing_one_is_named() {
         let from = temp("reference-surface");
         let out = temp("reference");
         let _ = std::fs::remove_dir_all(&out);
-        std::fs::write(
-            &from,
-            r#"{"app":"effectcraft","engineVersion":"9.9.9","pin":"0123456789abcdef0123456789abcdef01234567","commands":[{"id":"text.fonts","label":"List fonts","params":"","journal":false,"keys":[]}],"tools":[]}"#,
-        )
-        .unwrap();
+        std::fs::write(&from, ONE_COMMAND_SURFACE).unwrap();
         assert_eq!(write_reference(&from, &out), ExitCode::SUCCESS);
         let text = std::fs::read_to_string(out.join(docs::FILE)).unwrap();
         assert!(text.starts_with("<!-- @generated by `cargo xtask generate` (craftbridge-effects-codegen docs): do not edit"), "{text}");
         assert!(text.contains("engine version `9.9.9`") && text.contains("### `text.fonts` — List fonts"), "{text}");
         assert_eq!(write_reference(&temp("no-surface-here"), &out), ExitCode::FAILURE);
+        let _ = std::fs::remove_dir_all(&out);
+        let _ = std::fs::remove_dir_all(&from);
+    }
+
+    #[test]
+    fn the_facade_model_is_written_from_a_surface_file_and_a_missing_one_is_named() {
+        let from = temp("model-surface");
+        let out = temp("model");
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::write(&from, ONE_COMMAND_SURFACE).unwrap();
+        assert_eq!(write_model(&from, &out), ExitCode::SUCCESS);
+        let text = std::fs::read_to_string(out.join(facade_model::FILE)).unwrap();
+        assert!(text.starts_with("{\n  \"app\": \"effectcraft\"") && text.ends_with("}\n"), "{text}");
+        assert!(text.contains("\"id\": \"text.fonts\"") && text.contains("\"journal\": false") && text.contains("List fonts"), "{text}");
+        assert_eq!(write_model(&temp("no-model-surface"), &out), ExitCode::FAILURE);
         let _ = std::fs::remove_dir_all(&out);
         let _ = std::fs::remove_dir_all(&from);
     }

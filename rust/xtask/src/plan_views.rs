@@ -376,6 +376,7 @@ mod tests {
             "EFFECTCRAFT-PLUGIN-PORT-PLAN.html",
             "modules/repository-and-pins.md",
             "contracts/api-surface.schema.json",
+            "contracts/facade-model.schema.json",
             "diagrams/drawio/d01-journey.drawio",
         ];
         for view in views {

@@ -49,6 +49,12 @@ fn output_no_one_reads_ends_in_an_exit_code_not_a_panic() -> std::io::Result<()>
     assert_eq!(exit_unread(&[arg("no-such-command")])?, Some(1), "a command line that is no command");
     assert_eq!(exit_unread(&[arg("surface"), arg("--pin"), arg("0123abcd"), folder])?, Some(0), "the surface is written; only the word saying so is lost");
     assert!(out.join("api-surface.json").is_file());
+    assert_eq!(
+        exit_unread(&[arg("facade-model"), surface, folder])?,
+        Some(0),
+        "the model is written from the surface the run left there; only the word saying so is lost"
+    );
+    assert!(out.join("facade-model.json").is_file());
     let _ = std::fs::remove_dir_all(&out);
     Ok(())
 }
