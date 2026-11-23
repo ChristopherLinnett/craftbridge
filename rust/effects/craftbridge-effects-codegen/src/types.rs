@@ -49,8 +49,9 @@ impl KeyType {
     }
 
     /// Every type, an `enum` with no words of its own: what [`Self::named`] reads a name back against, so
-    /// each name is spelt once, in [`Self::name`].
-    const EVERY: [KeyType; 9] = [Self::Bool, Self::Number, Self::Str, Self::Enum(Vec::new()), Self::Vec2, Self::Vec3, Self::Color, Self::Ref, Self::Json];
+    /// each name is spelt once, in [`Self::name`], and what the facade model lists the SDK's types over.
+    pub(crate) const EVERY: [KeyType; 9] =
+        [Self::Bool, Self::Number, Self::Str, Self::Enum(Vec::new()), Self::Vec2, Self::Vec3, Self::Color, Self::Ref, Self::Json];
 
     /// The type a surface file names `name`, with `values` for its words when it gives any: [`Self::name`]
     /// read back. A name no type bears, words beside any type but an `enum`, or an `enum` without its

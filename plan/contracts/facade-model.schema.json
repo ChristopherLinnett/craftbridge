@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CraftBridge facade model",
+  "type": "object",
+  "required": ["schemaVersion", "app", "engineVersion", "pin", "engine", "extra", "extraDoc", "returnsDoc", "throwsDoc", "wordDoc", "fromWordDoc", "sdkTypes", "namespaces"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "app": { "const": "effectcraft" },
+    "engineVersion": { "type": "string" },
+    "pin": { "type": "string", "pattern": "^[0-9a-f]{8,40}$" },
+    "engine": { "type": "string" },
+    "extra": { "type": "string" },
+    "extraDoc": { "type": "string" },
+    "returnsDoc": { "type": "string" },
+    "throwsDoc": { "type": "string" },
+    "wordDoc": { "type": "string" },
+    "fromWordDoc": { "type": "string" },
+    "sdkTypes": { "type": "object", "additionalProperties": { "type": "string" } },
+    "namespaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "typeName", "name", "doc", "methods", "enums"],
+        "properties": {
+          "path": { "type": "string" },
+          "typeName": { "type": "string" },
+          "name": { "type": "string" },
+          "parent": { "type": "string" },
+          "doc": { "type": "string" },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "name", "summary", "detail", "journal", "params"],
+              "properties": {
+                "id": { "type": "string" },
+                "name": { "type": "string" },
+                "summary": { "type": "string" },
+                "detail": { "type": "string" },
+                "journal": { "type": "boolean" },
+                "params": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["key", "name", "required", "type", "doc"],
+                    "properties": {
+                      "key": { "type": "string" },
+                      "name": { "type": "string" },
+                      "required": { "type": "boolean" },
+                      "type": { "enum": ["bool", "number", "string", "enum", "vec2", "vec3", "color", "ref", "json"] },
+                      "enumName": { "type": "string" },
+                      "doc": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "enums": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "command", "key", "doc", "cases"],
+              "properties": {
+                "name": { "type": "string" },
+                "command": { "type": "string" },
+                "key": { "type": "string" },
+                "doc": { "type": "string" },
+                "cases": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["name", "value", "doc"],
+                    "properties": {
+                      "name": { "type": "string" },
+                      "value": { "type": "string" },
+                      "doc": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

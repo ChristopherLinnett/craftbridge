@@ -749,7 +749,7 @@ try await card.set(&quot;Photo&quot;, media: photoURL)        // sam.jpg
 </tr>
 <tr>
 <td>API generator (§21)</td>
-<td><code>craftbridge-effects-codegen</code>, <code>api-surface.json</code></td>
+<td><code>craftbridge-effects-codegen</code>, <code>api-surface.json</code>, <code>facade-model.json</code></td>
 <td>—</td>
 <td><code>command_specs</code>, <code>params_schema</code>, tool catalogue, the confinement&#39;s refusals</td>
 <td>—</td>
@@ -1194,6 +1194,96 @@ pub fn set_device_codecs(codecs: Vec&lt;CodecInfo&gt;);   // the device&#39;s co
           &quot;description&quot;: { &quot;type&quot;: &quot;string&quot; },
           &quot;bridgeOnly&quot;: { &quot;type&quot;: &quot;boolean&quot; },
           &quot;refusedUnderConfinement&quot;: { &quot;type&quot;: &quot;boolean&quot; }
+        }
+      }
+    }
+  }
+}
+</code></pre>
+<p><strong>The facade model</strong> (<code>facade-model.json</code>, written by the generator beside the surface, at <code>rust/<wbr>effects/<wbr>craftbridge-effects-codegen/<wbr>generated/<wbr>facade-model.json</code>, the path a generator in another language reads it at, §21): what a facade of a language the codegen holds no emitter of is planned from — the namespaces, names, parameters and enums <code>facade::plan</code> decides, each command&#39;s <code>journal</code> mark as the surface words it, the type the SDK defines for each key type it defines one for (<code>sdkTypes</code>: a <code>bool</code>, <code>number</code> or <code>string</code> key is passed as the language&#39;s own type, and an <code>enum</code> key as its <code>enumName</code>), and the member a namespace&#39;s type keeps its engine by (<code>engine</code>). A method takes its <code>params</code> in their order, each optional unless <code>required</code>, then the optional <code>extra</code>, a map of key names to values of the <code>json</code> type, and answers the <code>json</code> type; a namespace is the property <code>name</code> of its <code>parent</code>&#39;s type, or of the engine&#39;s when it has no <code>parent</code>. <code>schemaVersion</code> names the shape and a change of shape raises it, so a reader built in another repository for another shape refuses the file by that number rather than read it wrong; the surface file names none, since the codegen reads every surface it is given, an earlier pin&#39;s too, through the defaults of the keys a file lacks.</p>
+<pre><code class="language-json">{
+  &quot;$schema&quot;: &quot;https://json-schema.org/draft/2020-12/schema&quot;,
+  &quot;title&quot;: &quot;CraftBridge facade model&quot;,
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [&quot;schemaVersion&quot;, &quot;app&quot;, &quot;engineVersion&quot;, &quot;pin&quot;, &quot;engine&quot;, &quot;extra&quot;, &quot;extraDoc&quot;, &quot;returnsDoc&quot;, &quot;throwsDoc&quot;, &quot;wordDoc&quot;, &quot;fromWordDoc&quot;, &quot;sdkTypes&quot;, &quot;namespaces&quot;],
+  &quot;properties&quot;: {
+    &quot;schemaVersion&quot;: { &quot;const&quot;: 1 },
+    &quot;app&quot;: { &quot;const&quot;: &quot;effectcraft&quot; },
+    &quot;engineVersion&quot;: { &quot;type&quot;: &quot;string&quot; },
+    &quot;pin&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;pattern&quot;: &quot;^[0-9a-f]{8,40}$&quot; },
+    &quot;engine&quot;: { &quot;type&quot;: &quot;string&quot; },
+    &quot;extra&quot;: { &quot;type&quot;: &quot;string&quot; },
+    &quot;extraDoc&quot;: { &quot;type&quot;: &quot;string&quot; },
+    &quot;returnsDoc&quot;: { &quot;type&quot;: &quot;string&quot; },
+    &quot;throwsDoc&quot;: { &quot;type&quot;: &quot;string&quot; },
+    &quot;wordDoc&quot;: { &quot;type&quot;: &quot;string&quot; },
+    &quot;fromWordDoc&quot;: { &quot;type&quot;: &quot;string&quot; },
+    &quot;sdkTypes&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;additionalProperties&quot;: { &quot;type&quot;: &quot;string&quot; } },
+    &quot;namespaces&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;required&quot;: [&quot;path&quot;, &quot;typeName&quot;, &quot;name&quot;, &quot;doc&quot;, &quot;methods&quot;, &quot;enums&quot;],
+        &quot;properties&quot;: {
+          &quot;path&quot;: { &quot;type&quot;: &quot;string&quot; },
+          &quot;typeName&quot;: { &quot;type&quot;: &quot;string&quot; },
+          &quot;name&quot;: { &quot;type&quot;: &quot;string&quot; },
+          &quot;parent&quot;: { &quot;type&quot;: &quot;string&quot; },
+          &quot;doc&quot;: { &quot;type&quot;: &quot;string&quot; },
+          &quot;methods&quot;: {
+            &quot;type&quot;: &quot;array&quot;,
+            &quot;items&quot;: {
+              &quot;type&quot;: &quot;object&quot;,
+              &quot;required&quot;: [&quot;id&quot;, &quot;name&quot;, &quot;summary&quot;, &quot;detail&quot;, &quot;journal&quot;, &quot;params&quot;],
+              &quot;properties&quot;: {
+                &quot;id&quot;: { &quot;type&quot;: &quot;string&quot; },
+                &quot;name&quot;: { &quot;type&quot;: &quot;string&quot; },
+                &quot;summary&quot;: { &quot;type&quot;: &quot;string&quot; },
+                &quot;detail&quot;: { &quot;type&quot;: &quot;string&quot; },
+                &quot;journal&quot;: { &quot;type&quot;: &quot;boolean&quot; },
+                &quot;params&quot;: {
+                  &quot;type&quot;: &quot;array&quot;,
+                  &quot;items&quot;: {
+                    &quot;type&quot;: &quot;object&quot;,
+                    &quot;required&quot;: [&quot;key&quot;, &quot;name&quot;, &quot;required&quot;, &quot;type&quot;, &quot;doc&quot;],
+                    &quot;properties&quot;: {
+                      &quot;key&quot;: { &quot;type&quot;: &quot;string&quot; },
+                      &quot;name&quot;: { &quot;type&quot;: &quot;string&quot; },
+                      &quot;required&quot;: { &quot;type&quot;: &quot;boolean&quot; },
+                      &quot;type&quot;: { &quot;enum&quot;: [&quot;bool&quot;, &quot;number&quot;, &quot;string&quot;, &quot;enum&quot;, &quot;vec2&quot;, &quot;vec3&quot;, &quot;color&quot;, &quot;ref&quot;, &quot;json&quot;] },
+                      &quot;enumName&quot;: { &quot;type&quot;: &quot;string&quot; },
+                      &quot;doc&quot;: { &quot;type&quot;: &quot;string&quot; }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          &quot;enums&quot;: {
+            &quot;type&quot;: &quot;array&quot;,
+            &quot;items&quot;: {
+              &quot;type&quot;: &quot;object&quot;,
+              &quot;required&quot;: [&quot;name&quot;, &quot;command&quot;, &quot;key&quot;, &quot;doc&quot;, &quot;cases&quot;],
+              &quot;properties&quot;: {
+                &quot;name&quot;: { &quot;type&quot;: &quot;string&quot; },
+                &quot;command&quot;: { &quot;type&quot;: &quot;string&quot; },
+                &quot;key&quot;: { &quot;type&quot;: &quot;string&quot; },
+                &quot;doc&quot;: { &quot;type&quot;: &quot;string&quot; },
+                &quot;cases&quot;: {
+                  &quot;type&quot;: &quot;array&quot;,
+                  &quot;items&quot;: {
+                    &quot;type&quot;: &quot;object&quot;,
+                    &quot;required&quot;: [&quot;name&quot;, &quot;value&quot;, &quot;doc&quot;],
+                    &quot;properties&quot;: {
+                      &quot;name&quot;: { &quot;type&quot;: &quot;string&quot; },
+                      &quot;value&quot;: { &quot;type&quot;: &quot;string&quot; },
+                      &quot;doc&quot;: { &quot;type&quot;: &quot;string&quot; }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -2053,7 +2143,7 @@ pub fn set_device_codecs(codecs: Vec&lt;CodecInfo&gt;);   // the device&#39;s co
 <tbody><tr>
 <td><code>rust/<wbr>effects/<wbr>craftbridge-effects-codegen/<wbr>src/<wbr>main.rs</code></td>
 <td>NEW</td>
-<td><code>surface</code> (writes <code>api-surface.json</code>), <code>swift</code>, <code>kotlin</code>, <code>version</code> (writes the plugin&#39;s <code>version.rs</code>), <code>diff &lt;old&gt; &lt;new&gt;</code></td>
+<td><code>surface</code> (writes <code>api-surface.json</code>), <code>facade-model &lt;surface-file&gt;</code> (writes <code>facade-model.json</code>), <code>swift</code>, <code>kotlin</code>, <code>version</code> (writes the plugin&#39;s <code>version.rs</code>), <code>diff &lt;old&gt; &lt;new&gt;</code></td>
 </tr>
 <tr>
 <td><code>rust/<wbr>effects/<wbr>craftbridge-effects-codegen/<wbr>src/<wbr>types.rs</code></td>
@@ -2064,6 +2154,11 @@ pub fn set_device_codecs(codecs: Vec&lt;CodecInfo&gt;);   // the device&#39;s co
 <td><code>rust/<wbr>effects/<wbr>craftbridge-effects-codegen/<wbr>generated/<wbr>api-surface.json</code></td>
 <td>NEW, generated</td>
 <td>the API surface at the pin (schema in §14)</td>
+</tr>
+<tr>
+<td><code>rust/<wbr>effects/<wbr>craftbridge-effects-codegen/<wbr>generated/<wbr>facade-model.json</code></td>
+<td>NEW, generated</td>
+<td>the facade model at the pin: what <code>facade::plan</code> decides — namespaces, names, parameters, enums, and each command&#39;s <code>journal</code> mark — for a generator in a language this crate holds no emitter of (schema in §14)</td>
 </tr>
 <tr>
 <td><code>ios/<wbr>sdk/<wbr>Sources/<wbr>CraftBridgeEffects/<wbr>Generated/<wbr>*.swift</code></td>
@@ -2143,7 +2238,7 @@ pub fn set_device_codecs(codecs: Vec&lt;CodecInfo&gt;);   // the device&#39;s co
 which calls <code>request(&quot;exec&quot;, {&quot;command&quot;: &quot;layer.newText&quot;, &quot;params&quot;: {…}})</code>; Kotlin emits the matching <code>public suspend fun newText(vararg namedOnly: NamedArguments, text: String? = null, …, extra: Map&lt;String, JSONValue&gt;? = null): JSONValue</code>, whose code calls nothing a command, key or namespace of the same name could answer instead: it reaches the engine through <code>this</code>, and <code>extra</code> defaults to the literal <code>null</code>, since a command <code>emptyMap</code> would answer a bare <code>emptyMap()</code>. Every argument is passed by name, the first included, so a key EffectCraft adds, wherever it stands, takes no old call&#39;s value. Swift&#39;s labels require that. Kotlin has no named-only parameter, so each method takes first a <code>vararg</code> of <code>NamedArguments</code>, a type <code>:core</code> defines with no value: an argument passed by position would fill it and does not compile, and every parameter after a <code>vararg</code> can only be named. The other ways each leave a gap: plain parameters let a positional call hand its value, <code>extra</code>&#39;s too, to a key added before it, so that every such key would break apps and need a major version, and a call whose types agree would compile with its values on the wrong keys; a lint runs only where an app runs it; a parameter object or builder for each command parts from the Swift shape; and a first key left positional would move onto a key put before it. Names follow the id (<code>renderQueue.setRender</code> → <code>renderQueue.setRender(…)</code>); a reserved word is escaped, and a name that would start with a digit takes its holder&#39;s name in front (<code>view.3d</code> → <code>view.view3d</code>). <code>extra</code> passes keys the rules did not type, and the engine still validates every key (<code>check_params</code>). An enum key is a value type, never a language enum: in Swift a <code>RawRepresentable</code> struct with a static member for each word (<code>renderer: .classic3D</code>), in Kotlin a value class with a companion constant for each, so no <code>switch</code> or <code>when</code> over it is exhaustive and a word EffectCraft adds later breaks no app&#39;s build; its initializer or constructor makes the value of any word. Neither facade has a method for a command the surface marks <code>refusedUnderConfinement</code> or <code>withheldByPlugin</code>: the confinement or the plugin&#39;s door refuses every call of it, so a method could only fail, and a namespace left with no method of its own or below it has no type and no file (at the pin, <code>file.watchFolder</code>).</p>
 <p><strong>Diff.</strong> <code>diff &lt;old&gt; &lt;new&gt;</code> reads two surface files through the types the generator writes them with, and lists the commands, keys and tools that were added, removed or changed (required-ness, type, enum values, key order, a tool&#39;s input schema), one line each, sorted, then a count; a line that starts with <code>#</code> is a comment. A change is <strong>breaking</strong> when an app written against the old facade can fail to compile or run once built against the new one, and the doubtful cases break: a removed or renamed command, key, tool or enum word; a key that is new and required or became required; a key of another type, either way; keys the command keeps in another order, since Swift takes arguments only in their declared order; a command or tool an app can call that became refused under confinement, a command an app can call that the plugin came to withhold, or a tool an app can call that became <code>bridgeOnly</code>; or a tool an app can call whose input schema changed other than by a description, a new optional property or an optional property that was required. An entry no app could call — a tool that was <code>bridgeOnly</code> or refused, a command that was refused or withheld — breaks nothing, whatever becomes of it, and its changes are still listed: the engine runs headless (§19), which hides what is <code>bridgeOnly</code>, always confined (AD9), which answers what is refused before it runs, and behind the plugin&#39;s door (AD11, AD19, AD20), which answers what it withholds before the engine sees it, and no facade gives such an entry a method (Emitted code), so no app wrote a call to it. A new command, enum word (no Swift <code>switch</code> or Kotlin <code>when</code> over an enum key can be exhaustive: Emitted code) or tool, a new optional key wherever it stands (a Swift call leaves out a defaulted parameter, and every Kotlin call names its arguments: Emitted code), a refusal or a withholding lifted, and a changed label, <code>journal</code> flag, <code>params</code> text or description are compatible. Exit code 0 when nothing breaks, 2 when something does (the report names each, §24), 1 when a file cannot be read or parsed (the message names it) or the report cannot be written; a command line that is no command exits 1 too, so that 2 means a breaking change and nothing else.</p>
 <p><strong>States.</strong> Clean regeneration · a new key the rules cannot type (<code>json</code>, reported) · a breaking diff.</p>
-<p><strong>Tests.</strong> The rules run over all 763 commands at the pin and the generated code compiles; a golden <code>api-surface.json</code> is checked in; the gate regenerates and fails on any difference (L10).</p>
+<p><strong>Tests.</strong> The rules run over all 763 commands at the pin and the generated code compiles; a golden <code>api-surface.json</code> is checked in; the gate regenerates and fails on any difference (L10). The facade model is regenerated the same way; a test weighs it against the very <code>facade::plan</code> value the Swift and Kotlin emitters are given — every namespace, method, parameter, enum and case — against the surface&#39;s <code>journal</code> marks, and against the type both facades pass each key as, so the file and the two facades are one decision; another holds the file to exactly the keys of the shape its <code>schemaVersion</code> names.</p>
 <h2 id="22-swift-packages-design">22. Swift packages design<a class="anchor" href="#22-swift-packages-design" aria-label="link">#</a></h2>
 <p>One Swift package in <code>ios/<wbr>sdk/<wbr></code>, <code>Package.swift</code> at its top (PD19), iOS 17 (PD11), products <code>CraftBridge</code> and <code>CraftBridgeEffects</code> (PD16). The engine start needs no processor check on iOS: every chip iOS 17 runs on (A12 and newer) has FP16. Apps reach it by local path during development and through <code>SwiftEffects</code> from the first release (D-24).</p>
 <div class="table-wrap"><table>

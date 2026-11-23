@@ -9,9 +9,10 @@
 
 | File | Change | What |
 |---|---|---|
-| `rust/effects/craftbridge-effects-codegen/src/main.rs` | NEW | `surface` (writes `api-surface.json`), `swift`, `kotlin`, `version` (writes the plugin's `version.rs`), `diff <old> <new>` |
+| `rust/effects/craftbridge-effects-codegen/src/main.rs` | NEW | `surface` (writes `api-surface.json`), `facade-model <surface-file>` (writes `facade-model.json`), `swift`, `kotlin`, `version` (writes the plugin's `version.rs`), `diff <old> <new>` |
 | `rust/effects/craftbridge-effects-codegen/src/types.rs` | NEW | the type rules below |
 | `rust/effects/craftbridge-effects-codegen/generated/api-surface.json` | NEW, generated | the API surface at the pin (schema in §14) |
+| `rust/effects/craftbridge-effects-codegen/generated/facade-model.json` | NEW, generated | the facade model at the pin: what `facade::plan` decides — namespaces, names, parameters, enums, and each command's `journal` mark — for a generator in a language this crate holds no emitter of (schema in §14) |
 | `ios/sdk/Sources/CraftBridgeEffects/Generated/*.swift` | NEW, generated | one file per command namespace |
 | `android/sdk/effects/src/generated/kotlin/…/effects/*.kt` | NEW, generated | the same for Kotlin |
 | `rust/effects/craftbridge-effects/src/generated/version.rs` | NEW, generated | `ENGINE_VERSION` (the surface's `engineVersion`) and `ENGINE_PIN` (the surface's `pin`), the constants `info` reports |
@@ -42,4 +43,4 @@ which calls `request("exec", {"command": "layer.newText", "params": {…}})`; Ko
 
 **States.** Clean regeneration · a new key the rules cannot type (`json`, reported) · a breaking diff.
 
-**Tests.** The rules run over all 763 commands at the pin and the generated code compiles; a golden `api-surface.json` is checked in; the gate regenerates and fails on any difference (L10).
+**Tests.** The rules run over all 763 commands at the pin and the generated code compiles; a golden `api-surface.json` is checked in; the gate regenerates and fails on any difference (L10). The facade model is regenerated the same way; a test weighs it against the very `facade::plan` value the Swift and Kotlin emitters are given — every namespace, method, parameter, enum and case — against the surface's `journal` marks, and against the type both facades pass each key as, so the file and the two facades are one decision; another holds the file to exactly the keys of the shape its `schemaVersion` names.

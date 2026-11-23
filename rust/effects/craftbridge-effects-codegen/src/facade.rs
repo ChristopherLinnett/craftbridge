@@ -61,7 +61,8 @@ pub(crate) fn header(command: &str) -> String {
 
 /// The member every namespace's type of either facade keeps its engine by. A namespace below another is
 /// handed out by a property of its parent's type, so one named this would be a second declaration of the
-/// name there: [`crate::swift::check`] and [`crate::kotlin::check`] both refuse it.
+/// name there: [`crate::swift::check`] and [`crate::kotlin::check`] both refuse it. The facade model
+/// writes it too, so a facade generated in another language keeps its engine by the same member.
 pub(crate) const ENGINE: &str = "engine";
 
 /// The one thing that differs by language in naming: how a name that the language reserves is written.
@@ -97,6 +98,11 @@ pub(crate) struct Method {
     pub(crate) summary: String,
     /// The rest of its documentation: the registry's `params` text, on one line.
     pub(crate) detail: String,
+    /// Whether the engine records the command in its session's journal, the steps `journal.export` and
+    /// `help.exportRepro` write out as a replay script, as the surface words it: a pure query is not
+    /// journalled. No emitter types anything from it; the facade model writes it, so a facade generated
+    /// in another language can say which commands the engine journals without reading the registry.
+    pub(crate) journal: bool,
     pub(crate) params: Vec<Param>,
 }
 
@@ -189,9 +195,10 @@ fn namespace_of(path: &[&str]) -> Result<Namespace, String> {
 
 fn method_of(command: &Command, last: &str, namespace: &str) -> Result<Method, String> {
     // Read whole, so a field the surface gains stops this build until the facade says what it does with
-    // it, as the diff must; `journal` changes nothing a call is typed by, and the refusal marks were read
+    // it, as the diff must; `journal` changes nothing a call is typed by — the emitters write nothing of
+    // it, and only the facade model repeats it as the surface words it — and the refusal marks were read
     // by `plan`, which makes no method of a command they keep from apps.
-    let Command { id, label, params, journal: _, refused_under_confinement: _, withheld_by_plugin: _, keys } = command;
+    let Command { id, label, params, journal, refused_under_confinement: _, withheld_by_plugin: _, keys } = command;
     let name = member_name(last, namespace).map_err(|error| format!("command `{id}`: {error}"))?;
     let typed = keys.iter().map(|key| param_of(id, &name, key)).collect::<Result<Vec<_>, _>>()?;
     let mut seen = BTreeSet::new();
@@ -205,6 +212,7 @@ fn method_of(command: &Command, last: &str, namespace: &str) -> Result<Method, S
         name,
         summary: format!("{}.", one_line(label).trim_end_matches('.')),
         detail: format!("The engine describes its parameters as: {}", one_line(params)),
+        journal: *journal,
         params: typed,
     })
 }
@@ -346,22 +354,34 @@ fn lower_initial(part: &str) -> String {
     part.chars().enumerate().map(|(index, letter)| if index < lowered { letter.to_ascii_lowercase() } else { letter }).collect()
 }
 
-/// The type a key is passed as, in whichever language asks. Every word here names a type the transport
-/// or the bindings already name alike in Swift and in Kotlin — `Double`, `String`, `Vec2`, `Vec3`,
-/// `CraftColor`, `ItemReference`, `JSONValue` — and an enum key takes its enum type's own name, which
-/// is also the same in both. Only the boolean is spelled per language, so that word alone is the
-/// argument; a facade for a third language adds its word here rather than copying this table.
+/// The type a key of `key_type` is passed as where the SDK defines that type itself, under the one name
+/// every language it ships gives it — `Vec2`, `Vec3`, `CraftColor`, `ItemReference`, `JSONValue`, which
+/// the transport or the bindings already name alike in Swift and in Kotlin — or `None` for a key passed as
+/// a type of the language's own, a boolean, a number or a string, or as the enum type the facade names
+/// for an enum key ([`Param::enum_name`]). The facade model writes these names, so a facade generated in
+/// another language passes each key as the type Swift and Kotlin pass it as, with no table of its own.
+pub(crate) fn sdk_type(key_type: &KeyType) -> Option<&'static str> {
+    match key_type {
+        KeyType::Vec2 => Some("Vec2"),
+        KeyType::Vec3 => Some("Vec3"),
+        KeyType::Color => Some("CraftColor"),
+        KeyType::Ref => Some("ItemReference"),
+        KeyType::Json => Some("JSONValue"),
+        KeyType::Bool | KeyType::Number | KeyType::Str | KeyType::Enum(_) => None,
+    }
+}
+
+/// The type a key is passed as, in whichever language asks: the SDK's own type where it defines one
+/// ([`sdk_type`]), an enum key's own type, whose name is the same in both, and otherwise the language's
+/// boolean, number or string. Swift and Kotlin spell the number `Double` and the string `String` alike,
+/// so the boolean's word alone is the argument.
 pub(crate) fn type_name(param: &Param, bool_name: &str) -> String {
     match &param.key_type {
         KeyType::Bool => bool_name.to_string(),
         KeyType::Number => "Double".to_string(),
         KeyType::Str => "String".to_string(),
         KeyType::Enum(_) => param.enum_name.clone().unwrap_or_else(|| "String".to_string()),
-        KeyType::Vec2 => "Vec2".to_string(),
-        KeyType::Vec3 => "Vec3".to_string(),
-        KeyType::Color => "CraftColor".to_string(),
-        KeyType::Ref => "ItemReference".to_string(),
-        KeyType::Json => "JSONValue".to_string(),
+        shared @ (KeyType::Vec2 | KeyType::Vec3 | KeyType::Color | KeyType::Ref | KeyType::Json) => sdk_type(shared).unwrap_or_default().to_string(),
     }
 }
 

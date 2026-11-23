@@ -253,7 +253,7 @@ flowchart TB
 | Native media (§18) | `craftbridge-media` | — | `filmcraft_codecs` registry and fallback | `filmcraft-platform` |
 | EffectCraft app crate (§19) | `craftbridge-effects` and its adaptations AD1–AD7, AD9–AD11 | — | `Session`, `Backend`, tools, `McpServer`, render queue, replay, `Exporter`, `FileExporter`, the font database | the CLI binary, the oracle the adaptations are compared with (§28) |
 | FFI and bindings (§20) | `craftbridge-core-ffi`, `craftbridge-effects-ffi` | — | UniFFI 0.32 | — |
-| API generator (§21) | `craftbridge-effects-codegen`, `api-surface.json` | — | `command_specs`, `params_schema`, tool catalogue, the confinement's refusals | — |
+| API generator (§21) | `craftbridge-effects-codegen`, `api-surface.json`, `facade-model.json` | — | `command_specs`, `params_schema`, tool catalogue, the confinement's refusals | — |
 | Swift packages (§22) | `ios/sdk/`, `CraftBridge`, `CraftBridgeEffects`, XCFramework, `SwiftEffects` | — | — | — |
 | Kotlin libraries (§23) | `:core`, `:effects`, AARs | — | — | — |
 | Upstream update loop (§24) | `tools/update-upstream.sh`, API diff | — | — | — |
@@ -469,6 +469,100 @@ A failed step of `run` names its step whichever row it maps onto: `CommandFailed
           "description": { "type": "string" },
           "bridgeOnly": { "type": "boolean" },
           "refusedUnderConfinement": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}
+```
+
+**The facade model** (`facade-model.json`, written by the generator beside the surface, at `rust/effects/craftbridge-effects-codegen/generated/facade-model.json`, the path a generator in another language reads it at, §21): what a facade of a language the codegen holds no emitter of is planned from — the namespaces, names, parameters and enums `facade::plan` decides, each command's `journal` mark as the surface words it, the type the SDK defines for each key type it defines one for (`sdkTypes`: a `bool`, `number` or `string` key is passed as the language's own type, and an `enum` key as its `enumName`), and the member a namespace's type keeps its engine by (`engine`). A method takes its `params` in their order, each optional unless `required`, then the optional `extra`, a map of key names to values of the `json` type, and answers the `json` type; a namespace is the property `name` of its `parent`'s type, or of the engine's when it has no `parent`. `schemaVersion` names the shape and a change of shape raises it, so a reader built in another repository for another shape refuses the file by that number rather than read it wrong; the surface file names none, since the codegen reads every surface it is given, an earlier pin's too, through the defaults of the keys a file lacks.
+
+<!-- @code contracts/facade-model.schema.json -->
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CraftBridge facade model",
+  "type": "object",
+  "required": ["schemaVersion", "app", "engineVersion", "pin", "engine", "extra", "extraDoc", "returnsDoc", "throwsDoc", "wordDoc", "fromWordDoc", "sdkTypes", "namespaces"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "app": { "const": "effectcraft" },
+    "engineVersion": { "type": "string" },
+    "pin": { "type": "string", "pattern": "^[0-9a-f]{8,40}$" },
+    "engine": { "type": "string" },
+    "extra": { "type": "string" },
+    "extraDoc": { "type": "string" },
+    "returnsDoc": { "type": "string" },
+    "throwsDoc": { "type": "string" },
+    "wordDoc": { "type": "string" },
+    "fromWordDoc": { "type": "string" },
+    "sdkTypes": { "type": "object", "additionalProperties": { "type": "string" } },
+    "namespaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "typeName", "name", "doc", "methods", "enums"],
+        "properties": {
+          "path": { "type": "string" },
+          "typeName": { "type": "string" },
+          "name": { "type": "string" },
+          "parent": { "type": "string" },
+          "doc": { "type": "string" },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "name", "summary", "detail", "journal", "params"],
+              "properties": {
+                "id": { "type": "string" },
+                "name": { "type": "string" },
+                "summary": { "type": "string" },
+                "detail": { "type": "string" },
+                "journal": { "type": "boolean" },
+                "params": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["key", "name", "required", "type", "doc"],
+                    "properties": {
+                      "key": { "type": "string" },
+                      "name": { "type": "string" },
+                      "required": { "type": "boolean" },
+                      "type": { "enum": ["bool", "number", "string", "enum", "vec2", "vec3", "color", "ref", "json"] },
+                      "enumName": { "type": "string" },
+                      "doc": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "enums": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "command", "key", "doc", "cases"],
+              "properties": {
+                "name": { "type": "string" },
+                "command": { "type": "string" },
+                "key": { "type": "string" },
+                "doc": { "type": "string" },
+                "cases": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["name", "value", "doc"],
+                    "properties": {
+                      "name": { "type": "string" },
+                      "value": { "type": "string" },
+                      "doc": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -838,9 +932,10 @@ UniFFI 0.32 in proc-macro mode generates the Swift and Kotlin bindings (D-3). It
 
 | File | Change | What |
 |---|---|---|
-| `rust/effects/craftbridge-effects-codegen/src/main.rs` | NEW | `surface` (writes `api-surface.json`), `swift`, `kotlin`, `version` (writes the plugin's `version.rs`), `diff <old> <new>` |
+| `rust/effects/craftbridge-effects-codegen/src/main.rs` | NEW | `surface` (writes `api-surface.json`), `facade-model <surface-file>` (writes `facade-model.json`), `swift`, `kotlin`, `version` (writes the plugin's `version.rs`), `diff <old> <new>` |
 | `rust/effects/craftbridge-effects-codegen/src/types.rs` | NEW | the type rules below |
 | `rust/effects/craftbridge-effects-codegen/generated/api-surface.json` | NEW, generated | the API surface at the pin (schema in §14) |
+| `rust/effects/craftbridge-effects-codegen/generated/facade-model.json` | NEW, generated | the facade model at the pin: what `facade::plan` decides — namespaces, names, parameters, enums, and each command's `journal` mark — for a generator in a language this crate holds no emitter of (schema in §14) |
 | `ios/sdk/Sources/CraftBridgeEffects/Generated/*.swift` | NEW, generated | one file per command namespace |
 | `android/sdk/effects/src/generated/kotlin/…/effects/*.kt` | NEW, generated | the same for Kotlin |
 | `rust/effects/craftbridge-effects/src/generated/version.rs` | NEW, generated | `ENGINE_VERSION` (the surface's `engineVersion`) and `ENGINE_PIN` (the surface's `pin`), the constants `info` reports |
@@ -871,7 +966,7 @@ which calls `request("exec", {"command": "layer.newText", "params": {…}})`; Ko
 
 **States.** Clean regeneration · a new key the rules cannot type (`json`, reported) · a breaking diff.
 
-**Tests.** The rules run over all 763 commands at the pin and the generated code compiles; a golden `api-surface.json` is checked in; the gate regenerates and fails on any difference (L10).
+**Tests.** The rules run over all 763 commands at the pin and the generated code compiles; a golden `api-surface.json` is checked in; the gate regenerates and fails on any difference (L10). The facade model is regenerated the same way; a test weighs it against the very `facade::plan` value the Swift and Kotlin emitters are given — every namespace, method, parameter, enum and case — against the surface's `journal` marks, and against the type both facades pass each key as, so the file and the two facades are one decision; another holds the file to exactly the keys of the shape its `schemaVersion` names.
 <!-- @end -->
 
 ## 22. Swift packages design
