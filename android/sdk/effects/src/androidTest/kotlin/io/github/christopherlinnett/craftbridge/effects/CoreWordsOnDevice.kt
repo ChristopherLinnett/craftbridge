@@ -7,14 +7,17 @@ import io.github.christopherlinnett.craftbridge.core.Engine
 import io.github.christopherlinnett.craftbridge.core.InvalidParamsException
 import io.github.christopherlinnett.craftbridge.core.IoException
 import io.github.christopherlinnett.craftbridge.core.NotFoundException
+import io.github.christopherlinnett.craftbridge.ffi.core.PixelFormat
 
 /**
  * What an engine's own refusals say, as the exceptions an app catches carry it. The sentence of each is
  * the core's, read from the core, and only the native library can give it, so it is pinned here and not
  * on the host: a failed command keeps its name and its step around its reason, and every other row's
- * message is the reason as the engine or the system worded it. The `Gpu` and `Internal` rows have no
- * call that answers them on a device that works, so they are pinned by the boundary's own tests of the
- * core's words (`craftbridge-core-ffi`'s `error.rs`) and by the host's tests of the mapping.
+ * message is the reason as the engine or the system worded it; text that is not JSON is `InvalidParams`
+ * at each of the three text doors, which Swift's text door throws in the same words. The `Gpu` and
+ * `Internal` rows have no call that answers them on a device that works, so they are pinned by the
+ * boundary's own tests of the core's words (`craftbridge-core-ffi`'s `error.rs`) and by the host's tests
+ * of the mapping.
  */
 internal val wordsChecks: List<Case> =
     listOf(
@@ -47,6 +50,23 @@ internal val wordsChecks: List<Case> =
                     "the refusal of a file outside the roots reads ${outside.message}"
                 }
                 require(outside.detail == outside.message) { "the detail ${outside.detail} is not the message ${outside.message}" }
+            }
+        },
+        Case("text that is not JSON is the engine's InvalidParams at every door, in the words Swift's text door throws") { context ->
+            onEngine(context) { engine ->
+                val words = "expected ident at line 1 column 2"
+                val doors =
+                    mapOf<String, suspend () -> Unit>(
+                        "request" to { engine.request("info", "not json") },
+                        "requestWithProgress" to { engine.requestWithProgress("export", "not json") { _, _, _ -> } },
+                        "frame" to { engine.frame("not json", PixelFormat.PNG) },
+                    )
+                for ((door, call) in doors) {
+                    val refusal = runCatching { call() }.exceptionOrNull() ?: error("`$door` took text that is not JSON")
+                    require(refusal is InvalidParamsException) { "`$door` answered text that is not JSON with $refusal" }
+                    requireWords(refusal, words)
+                    require(refusal.detail == refusal.message) { "the detail ${refusal.detail} is not the message ${refusal.message}" }
+                }
             }
         },
     )

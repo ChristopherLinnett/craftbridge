@@ -114,6 +114,28 @@ private func controlled(
         #expect(await eventually { host.ended == host.begun })
     }
 
+    /// The controller watches a job's end through its text, which it never reads as a value: an export the
+    /// engine refuses, and one whose answer is not JSON, which only a read as a value would refuse, both
+    /// end the task all the same.
+    @Test func anExportTheEngineRefusesEndsItsTask() async throws {
+        let refusal = CraftError.InvalidParams(detail: "the engine's refusal")
+        let fake = FakeEngine()
+        fake.answer = { _, _ in throw refusal }
+        let (engine, host, _) = controlled(over: fake)
+        let job = try await engine.export(to: URL(filePath: "/tmp/card.mp4"))
+        await #expect(throws: refusal) { try await job.resultJSON }
+        #expect(await eventually { host.ended == [1] })
+    }
+
+    @Test func anExportWhoseAnswerIsNotJSONEndsItsTask() async throws {
+        let fake = FakeEngine()
+        fake.answer = { _, _ in "{" }
+        let (engine, host, _) = controlled(over: fake)
+        let job = try await engine.export(to: URL(filePath: "/tmp/card.mp4"))
+        #expect(try await job.resultJSON == "{")
+        #expect(await eventually { host.ended == [1] })
+    }
+
     @Test func aGpuKeptThroughTheBackgroundStillRunsItsExportsUnderATask() async throws {
         let (_, host, job, finish) = try await running(.keepGpu)
         #expect(host.begun == [1])

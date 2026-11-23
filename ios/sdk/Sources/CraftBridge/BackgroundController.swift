@@ -77,7 +77,9 @@ public final class BackgroundController {
         guard running[key] == nil else { return }
         running[key] = Running(job: job, task: begin(for: job))
         Task {
-            _ = try? await job.result
+            // The text and not `result`: only the job's end matters here, and reading the value would build a
+            // tree of the whole reply for every job, a binding's too, which reads the text to be spared it.
+            _ = try? await job.resultJSON
             finished(key)
         }
     }
