@@ -188,8 +188,9 @@ extension EffectsEngine {
     /// before the system stops the app. It is the generic door for such a method, as ``request(_:_:)`` is for
     /// one that answers at once: an app prefers ``export(_:to:format:progress:extra:)`` and
     /// `templates.render`, whose arguments name what the request takes, and a binding to another language,
-    /// which carries the method's name and its parameters as JSON, starts the method here. The conformance
-    /// tests start the corpus's jobs here too.
+    /// which carries the method's name and its parameters as JSON, starts the method at
+    /// ``jobJSON(_:params:progress:)``, the same door in JSON text. The conformance tests start the corpus's
+    /// jobs here too.
     ///
     /// - Throws: ``CraftError/InvalidParams(detail:)`` for parameters that hold NaN or an infinity, which JSON
     ///   has no number for, and then nothing is started. What the engine refuses the method with is thrown
@@ -200,7 +201,27 @@ extension EffectsEngine {
         _ params: JSONValue,
         progress: @escaping ProgressHandler = { _, _, _ in }
     ) async throws -> ExportJob {
-        let job = try ExportJob(engine: handle, method: method, params: params, progress: progress)
+        try await jobJSON(method, params: params.jsonText(), progress: progress)
+    }
+
+    /// Starts `method` of the method table as a job with its parameters as JSON text, and answers the
+    /// ``ExportJob`` that carries it: the one door to a job, which ``job(_:_:progress:)`` and every typed
+    /// call that starts a job are built on, so each is started alike and handed to the engine's
+    /// ``background`` controller. The parameters reach the engine exactly as given, unparsed on the Swift
+    /// side, and the job's answer is read as the engine's own text through ``ExportJob/resultJSON``, which
+    /// is why a binding to another language starts its jobs here (see ``requestJSON(_:params:)`` for what
+    /// the text keeps that a `JSONValue` does not). An app prefers the typed calls.
+    ///
+    /// - Throws: nothing of the parameters: text that is not JSON is read by the engine, which refuses the
+    ///   job with ``CraftError/InvalidParams(detail:)`` at ``ExportJob/resultJSON``, as it refuses every
+    ///   other failure of the method, such as ``CraftError/Unsupported(detail:)`` for a method that reports
+    ///   no progress.
+    public func jobJSON(
+        _ method: String,
+        params: String,
+        progress: @escaping ProgressHandler = { _, _, _ in }
+    ) async throws -> ExportJob {
+        let job = ExportJob(engine: handle, method: method, paramsJSON: params, progress: progress)
         await background.protect(job)
         return job
     }

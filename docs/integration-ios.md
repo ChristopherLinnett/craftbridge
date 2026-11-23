@@ -171,37 +171,23 @@ func addTitleAndCaption(
 
 ## The generic door, for a binding to another language
 
-The typed calls are what an app uses: `exec`, `run`, `export`, `frame` and the rest name what each request takes, and the compiler checks what the app hands them. Under them sits a generic door of three calls on `EffectsEngine`, which a Swift app has no need of. It is for a binding to another language — a Flutter plugin, for one — which carries every engine call as a method's name with its parameters as JSON, so that a method the engine gains reaches the other language with no new Swift:
+The typed calls are what an app uses: `exec`, `run`, `export`, `frame` and the rest name what each request takes, and the compiler checks what the app hands them. Under them sits a generic door of three calls on `EffectsEngine`, which a Swift app has no need of. It is for a binding to another language — a Flutter plugin, for one — which carries every engine call as a method's name with its parameters as JSON text, so that a method the engine gains reaches the other language with no new Swift. Each call has a form in JSON text, which a binding uses, and a form in `JSONValue`, which the typed calls are built on:
 
-- `request(_:_:)` sends one request of the engine's method table and answers its reply;
-- `job(_:_:progress:)` starts a method that reports progress, as `export` does, and answers its `ExportJob` at once;
-- `frame(params:format:)` renders one frame from the `frame` request's own keys and answers its bytes.
+- `requestJSON(_:params:)`, and `request(_:_:)` beside it, send one request of the engine's method table and answer its reply;
+- `jobJSON(_:params:progress:)`, and `job(_:_:progress:)`, start a method that reports progress, as `export` does, and answer its `ExportJob` at once;
+- `frameJSON(params:format:)`, and `frame(params:format:)`, render one frame from the `frame` request's own keys and answer its bytes.
 
-The engine answers each method at one of the three alone, so a binding sends a method through the door that answers it: `request` refuses a method that reports progress, and `frame`, with `CraftError.Unsupported`, whose words name the methods it does answer, and a job of a method that reports no progress ends in the same refusal. A binding keeps no list of methods for that: each call reaches it through the entry its caller chose by what it wants back, a reply, a job to watch and stop, or a frame, and a method sent through another door, like a method the engine does not have, is refused before anything runs.
+The engine answers each method at one of the three alone, so a binding sends a method through the door that answers it: `requestJSON` and `request` refuse a method that reports progress, and `frame`, with `CraftError.Unsupported`, whose words name the methods it does answer, and a job of a method that reports no progress ends in the same refusal. A binding keeps no list of methods for that: each call reaches it through the entry its caller chose by what it wants back, a reply, a job to watch and stop, or a frame, and a method sent through another door, like a method the engine does not have, is refused before anything runs.
 
-Parameters and replies are `JSONValue`, which is `Codable`, so a binding reads the text it is handed with `JSONDecoder` and writes a reply back with `JSONEncoder`:
-
-```swift
-func parameters(from text: String) throws -> JSONValue {
-    try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
-}
-```
-
-```swift
-func text(of reply: JSONValue) throws -> String {
-    String(decoding: try JSONEncoder().encode(reply), as: UTF8.self)
-}
-```
-
-A call the binding carries is then one line through the door:
+A binding uses the text forms. The parameters reach the engine exactly as they were handed over, unparsed on the Swift side, and the reply comes back exactly as the engine wrote it, so a call the binding carries is one line through the door:
 
 ```swift
 func forward(_ method: String, _ json: String, to engine: EffectsEngine) async throws -> String {
-    try text(of: try await engine.request(method, try parameters(from: json)))
+    try await engine.requestJSON(method, params: json)
 }
 ```
 
-A method that reports progress goes through `job`, which runs it under the engine's own background task as `export` runs ([background-exports.md](background-exports.md)), and the job's `result` is the method's reply:
+A method that reports progress goes through `jobJSON`, which runs it under the engine's own background task as `export` runs ([background-exports.md](background-exports.md)), and the job's `resultJSON` is the method's reply as text:
 
 ```swift
 func forward(
@@ -210,16 +196,16 @@ func forward(
     to engine: EffectsEngine,
     progress: @escaping ProgressHandler
 ) async throws -> String {
-    let job = try await engine.job(method, try parameters(from: json), progress: progress)
-    return try text(of: try await job.result)
+    let job = try await engine.jobJSON(method, params: json, progress: progress)
+    return try await job.resultJSON
 }
 ```
 
-and a frame through `frame(params:format:)`, here as the bytes of a PNG:
+and a frame through `frameJSON(params:format:)`, here as the bytes of a PNG:
 
 ```swift
 func forwardFrame(_ json: String, to engine: EffectsEngine) async throws -> Data {
-    try await engine.frame(params: try parameters(from: json), format: .png).data
+    try await engine.frameJSON(params: json, format: .png).data
 }
 ```
 
@@ -228,11 +214,11 @@ A binding that draws the frame itself asks for rows of pixels and keeps what the
 ```swift
 func forwardPixels(_ json: String, to engine: EffectsEngine) async throws -> FrameBytes {
     let layout: PixelFormat = .bgra8Premultiplied
-    return try await engine.frame(params: try parameters(from: json), format: layout)
+    return try await engine.frameJSON(params: json, format: layout)
 }
 ```
 
-Each of the three throws the `CraftError` the typed call over it throws, and answers what that typed call answers for the same request. A `JSONValue` holds every number as a `Double`, JSON's one number type as Swift reads it, so a whole number goes back as text without a fraction, and one past 2^53 is not exact; and it holds an object's fields in a dictionary, so a reply's keys go back as text in no set order. On Android the same door is the core engine's, `EffectsEngine.core`: `request` and `requestWithProgress`, which take and answer JSON text, and `frame(params, format)`.
+Text that is not JSON is refused by the engine, not by Swift: each text form throws `CraftError.InvalidParams` with the engine's own words, as Kotlin's `request`, `requestWithProgress` and `frame` do; a job's refusal is thrown by `resultJSON`, as every refusal of a job is. The `JSONValue` forms answer the same requests with the same errors, but a reply read into a `JSONValue` and written back is no longer what the engine wrote. A `JSONValue` holds every number as a `Double`, JSON's one number type as Swift reads it, so a whole number the engine wrote as `2.0` goes back as `2`, which a reader that tells the two apart, as Dart's does, holds as an `int` on iOS where Android gives it a `double`, and one past 2^53 would lose digits, though the engine answers none today; and it holds an object's fields in a dictionary, so keys the engine writes sorted go back in an order that changes from one process to the next. The text forms keep the engine's reply as it wrote it, which is why a binding uses them, and they build no tree of values for a reply, which a phone with little memory feels. On Android the same door is the core engine's, `EffectsEngine.core`: `request` and `requestWithProgress`, which take and answer JSON text, and `frame(params, format)`.
 
 ## Fonts
 

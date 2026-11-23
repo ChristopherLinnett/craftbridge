@@ -22,10 +22,11 @@ enum Door: String, CaseIterable, Sendable {
 /// What a frame call asks for in the tally of the calls made, where a request has its method's name.
 private let frameMethod = "frame"
 
-/// How a scenario's calls reach the engine: all through the generic door, or each through the typed call
-/// that spells it, where there is one.
+/// How a scenario's calls reach the engine: all through the generic door's `JSONValue` forms, all through its
+/// JSON text forms, or each through the typed call that spells it, where there is one.
 enum Route: Sendable {
     case door
+    case text
     case typed
 }
 
@@ -59,6 +60,16 @@ struct Made: Sendable {
         guard case .reply(let reply) = answer else { return answer }
         return .reply(measured.comparable(reply, of: measuredAs))
     }
+
+    /// Records an issue unless `other`, the same call made as `how` names, answered what this one did.
+    func expectSame(as other: Made, how: String, scenario: Scenario, step: Int, measured: Measured) {
+        #expect(
+            comparable(by: measured) == other.comparable(by: measured),
+            """
+            \(scenario.id), step \(step): \(door.rawValue) answered `\(method)` with \(answer), \
+            and \(how) with \(other.answer)
+            """)
+    }
 }
 
 /// A scenario's calls made over `container`, each step on an engine started afresh there, as the corpus
@@ -66,15 +77,18 @@ struct Made: Sendable {
 private struct Replay {
     let container: URL
     let route: Route
+    /// Whether a making through the door leaves out a step that can be made only once in a process, as it
+    /// must when another test's making through the door is the one that makes it.
+    var leavesOutStepsMadeOnce = false
 
     /// What every call of every step answered, or nil for a step left out: one that can be made only once
-    /// in a process, which the making through the door has made by the time the typed calls come to it.
+    /// in a process, which one making through the door has made by the time any other comes to it.
     func answers(of scenario: Scenario) async throws -> [[Made]?] {
         try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
         for fixture in scenario.fixtures { try fixture.place(in: container) }
         var answers: [[Made]?] = []
         for step in scenario.steps {
-            let leftOut = route == .typed && step.isMadeOncePerProcess
+            let leftOut = (route != .door || leavesOutStepsMadeOnce) && step.isMadeOncePerProcess
             answers.append(leftOut ? nil : try await self.answers(of: step))
         }
         return answers
@@ -136,6 +150,11 @@ private struct Replay {
             let typed = route == .typed ? typedRequest(method, sent) : nil
             let answer = try await answered {
                 if let typed { return .reply(try await typed(engine)) }
+                if route == .text {
+                    return .reply(
+                        try JSONValue(
+                            readingJSON: try await engine.requestJSON(method, params: try sent.writtenAsJSON())))
+                }
                 return .reply(try await engine.request(method, try handed(sent)))
             }
             return (answer, typed != nil)
@@ -148,10 +167,13 @@ private struct Replay {
                 let job =
                     if let typed {
                         try await typed(engine, progress)
+                    } else if route == .text {
+                        try await engine.jobJSON(method, params: try sent.writtenAsJSON(), progress: progress)
                     } else {
                         try await engine.job(method, try handed(sent), progress: progress)
                     }
                 hearing.take(job)
+                if route == .text { return .reply(try JSONValue(readingJSON: try await job.resultJSON)) }
                 return .reply(try await job.result)
             }
             return (answer, typed != nil)
@@ -165,6 +187,8 @@ private struct Replay {
                         try await engine.frame(
                             comp: typed.comp, at: typed.time, frame: typed.frame, maxSide: typed.maxSide,
                             scale: typed.scale, transparent: typed.transparent, format: layout)
+                    } else if route == .text {
+                        try await engine.frameJSON(params: try sent.writtenAsJSON(), format: layout)
                     } else {
                         try await engine.frame(params: try handed(sent), format: layout)
                     }
@@ -283,12 +307,8 @@ private func whyTheDoorAlone(makes call: Call) -> String? {
                 "\(scenario.id), step \(step): the two ways to ask made as many calls")
             for (through, other) in zip(asked, spelt) where other.typed {
                 held += 1
-                #expect(
-                    through.comparable(by: measured) == other.comparable(by: measured),
-                    """
-                    \(scenario.id), step \(step): \(through.door.rawValue) answered `\(through.method)` with \
-                    \(through.answer), and the typed call with \(other.answer)
-                    """)
+                through.expectSame(
+                    as: other, how: "the typed call", scenario: scenario, step: step, measured: measured)
             }
         }
         // A reply is JSON a binding hands on: written as text and read back, it is the reply.
@@ -296,6 +316,32 @@ private func whyTheDoorAlone(makes call: Call) -> String? {
             #expect(try JSONValue(readingJSON: try reply.writtenAsJSON()) == reply)
         }
         print("\(scenario.id): \(door.joined().count) calls through the door, \(held) held to their typed calls")
+    }
+
+    /// Over the corpus each text form answers what the `JSONValue` form of the same call answers, a refusal
+    /// being an answer too: the text a binding is handed is read back as a value to be held to it.
+    @Test(arguments: DoorCorpus.scenarios)
+    func everyTextDoorAnswersWhatItsJSONValueDoorAnswers(_ scenario: Scenario) async throws {
+        let measured = try DoorCorpus.read.get().measured
+        let container = scratchFolder("text-door")
+        defer { try? FileManager.default.removeItem(at: container) }
+        let value = try await Replay(container: container, route: .door, leavesOutStepsMadeOnce: true)
+            .answers(of: scenario)
+        try FileManager.default.removeItem(at: container)
+        let text = try await Replay(container: container, route: .text).answers(of: scenario)
+
+        #expect(value.count == text.count, "\(scenario.id): the two makings took as many steps")
+        var held = 0
+        for (step, (asked, texted)) in zip(value, text).enumerated() {
+            guard let asked, let texted else { continue }
+            #expect(asked.count == texted.count, "\(scenario.id), step \(step): the two forms made as many calls")
+            for (through, other) in zip(asked, texted) {
+                held += 1
+                through.expectSame(
+                    as: other, how: "the text form", scenario: scenario, step: step, measured: measured)
+            }
+        }
+        print("\(scenario.id): \(held) calls held to their text forms")
     }
 
     /// The round a binding's call makes: its parameters arrive as JSON text, and its reply leaves as JSON
@@ -325,11 +371,7 @@ private func whyTheDoorAlone(makes call: Call) -> String? {
             let frame = await #expect(throws: CraftError.self) { try await engine.request("frame", [:]) }
             let info = await #expect(throws: CraftError.self) { try await engine.job("info", [:]).result }
             for (refusal, method) in [(export, "export"), (frame, "frame"), (info, "info")] {
-                guard case .Unsupported(let detail)? = refusal else {
-                    Issue.record("a door that does not answer `\(method)` ended it in \(String(describing: refusal))")
-                    continue
-                }
-                #expect(detail.hasPrefix("`\(method)` is not answered by "), "the refusal names its method: \(detail)")
+                expectUnsupported(refusal, method: method)
             }
         }
     }

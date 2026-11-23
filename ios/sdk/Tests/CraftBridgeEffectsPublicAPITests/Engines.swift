@@ -5,6 +5,7 @@ import CraftBridge
 import CraftBridgeEffects
 import CraftBridgeEffectsConformance
 import Foundation
+import Testing
 
 /// A folder of this run's own in the temporary folder, for one engine's container: not made yet, and the
 /// test that asks for it removes it. Its name is none the conformance suite's sweep of that folder takes
@@ -43,3 +44,13 @@ func withEngine<Value: Sendable>(
 /// What every call of an engine that was shut down throws: the core's own words for it, which the Kotlin
 /// engine's calls answer too, as `InternalErrorException`.
 let closed = CraftError.Internal(detail: "engine is closed")
+
+/// Records an issue unless `refusal` is the `Unsupported` an engine answers a method with at a door that does
+/// not answer it, whose words name the method asked.
+func expectUnsupported(_ refusal: CraftError?, method: String) {
+    guard case .Unsupported(let detail)? = refusal else {
+        Issue.record("a door that does not answer `\(method)` ended it in \(String(describing: refusal))")
+        return
+    }
+    #expect(detail.hasPrefix("`\(method)` is not answered by "), "the refusal names its method: \(detail)")
+}

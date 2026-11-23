@@ -15,9 +15,19 @@ import os
 /// What the engine was asked, in order, kept for the test to read.
 actor Requests {
     private(set) var all: [(method: String, params: JSONValue)] = []
+    /// The parameter text of each call made with text, exactly as the handle was handed it, so that a test
+    /// can tell text the engine was given unchanged from text read and written again.
+    private(set) var texts: [String] = []
 
     func record(_ method: String, _ params: JSONValue) {
         all.append((method, params))
+    }
+
+    /// Keeps the parameter text a call was handed, and answers it read as a value when it is JSON and as a
+    /// string of the same characters when it is not, so a test can hand the handle text that is none.
+    func read(_ text: String) -> JSONValue {
+        texts.append(text)
+        return (try? JSONValue(jsonText: text)) ?? .string(text)
     }
 
     /// The params of the `index`th call, or nil when fewer were made: a call that never reached the
@@ -67,7 +77,7 @@ final class FakeEngine: Engine, @unchecked Sendable {
     }
 
     override func request(method: String, params: String) async throws -> String {
-        let sent = try JSONValue(jsonText: params)
+        let sent = await asked.read(params)
         await asked.record(method, sent)
         return try await answer(method, sent)
     }
@@ -78,14 +88,15 @@ final class FakeEngine: Engine, @unchecked Sendable {
         listener: any ProgressListener,
         cancel: CancelToken
     ) async throws -> String {
-        let sent = try JSONValue(jsonText: params)
+        let sent = await asked.read(params)
         await asked.record(method, sent)
         listener.progress(done: report.done, total: report.total, secondsLeft: report.secondsLeft)
         return try await answer(method, sent)
     }
 
     override func frame(params: String, format: PixelFormat) async throws -> FrameBytes {
-        await asked.record("frame", ["params": try JSONValue(jsonText: params), "format": .string("\(format)")])
+        let sent = await asked.read(params)
+        await asked.record("frame", ["params": sent, "format": .string("\(format)")])
         return frameReply
     }
 

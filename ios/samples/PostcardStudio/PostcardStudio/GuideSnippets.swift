@@ -62,43 +62,34 @@
         try await engine.shutDown()
     }
 
-    /// The parameters a binding to another language is handed as JSON text, as the generic door takes them.
-    func parameters(from text: String) throws -> JSONValue {
-        try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
-    }
-
-    /// A reply as the JSON text a binding hands back.
-    func text(of reply: JSONValue) throws -> String {
-        String(decoding: try JSONEncoder().encode(reply), as: UTF8.self)
-    }
-
     /// One call of a binding to another language, which carries it as a method's name with its parameters
-    /// as JSON text: the request goes through the generic door, and its reply goes back as text.
+    /// as JSON text: the request goes through the generic door in text, and the reply goes back as the
+    /// engine wrote it.
     func forward(_ method: String, _ json: String, to engine: EffectsEngine) async throws -> String {
-        try text(of: try await engine.request(method, try parameters(from: json)))
+        try await engine.requestJSON(method, params: json)
     }
 
     /// The same for a method that reports progress, such as `export`: the door answers the job at once,
-    /// and the job's result is the method's reply.
+    /// and the job's text is the method's reply.
     func forward(
         _ method: String,
         _ json: String,
         to engine: EffectsEngine,
         progress: @escaping ProgressHandler
     ) async throws -> String {
-        let job = try await engine.job(method, try parameters(from: json), progress: progress)
-        return try text(of: try await job.result)
+        let job = try await engine.jobJSON(method, params: json, progress: progress)
+        return try await job.resultJSON
     }
 
     /// A frame asked with the `frame` request's own keys, answered as the bytes of a PNG.
     func forwardFrame(_ json: String, to engine: EffectsEngine) async throws -> Data {
-        try await engine.frame(params: try parameters(from: json), format: .png).data
+        try await engine.frameJSON(params: json, format: .png).data
     }
 
     /// A frame as rows of pixels, for a binding that draws it itself: the layout and the frame are types the
     /// core names, so a binding writes them in declarations of its own.
     func forwardPixels(_ json: String, to engine: EffectsEngine) async throws -> FrameBytes {
         let layout: PixelFormat = .bgra8Premultiplied
-        return try await engine.frame(params: try parameters(from: json), format: layout)
+        return try await engine.frameJSON(params: json, format: layout)
     }
 #endif
