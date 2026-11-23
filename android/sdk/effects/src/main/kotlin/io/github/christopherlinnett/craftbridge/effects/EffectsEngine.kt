@@ -252,12 +252,14 @@ public class EffectsEngine internal constructor(
      * Preview [comp] at [time] into [surface], the app's own: the surface is attached when the engine is
      * not previewing into this one yet — on the first call, on a new surface, on a [Surface] object that
      * names another window since (a `SurfaceView` hands out one object for every surface it makes), on a
-     * surface lost with a GPU given up for the background, and after [endPreview] gave it up — and the frame
-     * is drawn into it on the GPU. An app that draws many frames into one surface names the same surface
-     * every time, and it is attached once: naming the surface the engine already previews into costs no
-     * attach and no second configuration. Naming a surface after resizing it is how the resize reaches the
-     * frame: the draw answers [GpuException] as the surface is configured again, and the draw after it
-     * draws. [comp] is the active comp when it is left out, [time] its current time.
+     * surface lost with a GPU given up for the background, on one the app attached itself asking to carry the
+     * composition's alpha ([Engine.attachPreview]), which this call attaches again over black, and after
+     * [endPreview] gave it up — and the frame is drawn into it on the GPU. An app that keeps a surface attached
+     * with that ask draws into it with the overload that names no surface. An app that draws many frames into
+     * one surface names the same surface every time, and it is attached once: naming the surface the engine
+     * already previews into costs no attach and no second configuration. Naming a surface after resizing it is
+     * how the resize reaches the frame: the draw answers [GpuException] as the surface is configured again, and
+     * the draw after it draws. [comp] is the active comp when it is left out, [time] its current time.
      *
      * @throws GpuException when there is no device to draw on or the surface is lost or changed, and
      * [CraftException] for whatever else the core's `attachPreview` or `present` refuse with.

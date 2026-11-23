@@ -28,29 +28,80 @@ const fn preferred_formats(platform: Platform) -> &'static [wgpu::TextureFormat]
     }
 }
 
-/// The alpha modes a surface is configured with, best first, each with what the blit pass writes for
-/// it (§17). `PostMultiplied` shows a transparent comp over the app's own views; `Opaque` shows the
-/// frame over black. Android's surfaces offer `Inherit` alone, because its window manager, not the
-/// swapchain, decides how a window is composited (the platform's Vulkan loader,
-/// `frameworks/native/vulkan/libvulkan/swapchain.cpp`, reports `VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR`
-/// and nothing else); there the pass writes alpha 1, which shows the same whatever the window does
-/// with alpha.
+/// What an attach asks the preview to write of the composition's alpha. The ask is the app's, made
+/// when the surface is attached, because the window's compositor — not the SDK — decides how a
+/// surface's alpha is read under `CompositeAlphaMode::Inherit`, so the SDK cannot know it and the app
+/// that owns the consumer can: an app that shows the surface in a compositor that reads premultiplied
+/// alpha (a Flutter `Texture`, say) asks for [`PreviewAlpha::Premultiplied`] and the surface carries
+/// the composition's transparency; every attach that does not ask is written as it always was.
 ///
-/// On iOS the translucent mode is still wgpu's `PostMultiplied`, the one non-opaque mode its Metal
-/// backend offers, which only clears the layer's opaque flag. Core Animation then reads the layer as
-/// premultiplied, whatever the name says (measured on the simulator, composing a half-transparent red over
-/// blue), so the pass writes the frame as it is held, premultiplied: written straight, every translucent
-/// pixel would show too bright.
-const fn alpha_modes(platform: Platform) -> [(wgpu::CompositeAlphaMode, Output); 3] {
-    let translucent = match platform {
-        Platform::Ios => Output::Premultiplied,
-        Platform::Android | Platform::Host => Output::PostMultiplied,
-    };
+/// The ask picks the alpha modes the surface may be configured with, and is never answered with
+/// another ask's: a surface that cannot carry what was asked refuses the attach, so an app that asked
+/// for the composition's alpha is never handed the frame over black, or straight colour its
+/// compositor would read as premultiplied, without being told. Where the surface says itself how its
+/// alpha reads — iOS, the host — both asks choose the same mode and the same output, since the window
+/// settles nothing there, and refusing one would fail the same app call on one platform and not
+/// another for no reason the app can act on. The bars follow the ask on every platform
+/// ([`crate::blit::clear_color`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PreviewAlpha {
+    /// The default, and what every preview wrote before an attach could ask: the modes every platform
+    /// has always chosen from, between opaque black bars. On Android, whose surfaces offer `Inherit`
+    /// alone, that is the frame over black with alpha 1.
+    #[default]
+    Opaque,
+    /// The frame's own colour and alpha, premultiplied as the compositor leaves it, between fully
+    /// transparent bars, so a compositor that reads premultiplied alpha shows the composition's
+    /// transparency and lets what is behind the surface show through the bars. On Android it is
+    /// written only through a mode that carries it, and refused where the surface offers none.
+    Premultiplied,
+}
+
+/// The rows of an attach that did not ask to carry the composition's alpha, the ones every platform
+/// has always chosen from: `PostMultiplied` shows a transparent comp over the app's own views, written
+/// `translucent`, which is what the platform's translucent surface reads; under `Opaque` and under
+/// `Inherit` the pass writes [`Output::Opaque`], the frame over black with alpha 1.
+const fn unasked_modes(translucent: Output) -> [(wgpu::CompositeAlphaMode, Output); 3] {
     [
         (wgpu::CompositeAlphaMode::PostMultiplied, translucent),
         (wgpu::CompositeAlphaMode::Opaque, Output::Opaque),
         (wgpu::CompositeAlphaMode::Inherit, Output::Opaque),
     ]
+}
+
+/// The alpha modes a surface may be configured with for what its attach asked, best first, each with
+/// what the blit pass writes for it (§17). The surface gets the first row it offers and nothing
+/// outside the ask's own rows: one that offers none of them refuses the attach.
+///
+/// An attach that did not ask ([`PreviewAlpha::Opaque`]) chooses from [`unasked_modes`] on every
+/// platform. Android's surfaces offer `Inherit` alone, because its window manager, not the swapchain,
+/// decides how a window is composited (the platform's Vulkan loader,
+/// `frameworks/native/vulkan/libvulkan/swapchain.cpp`, reports `VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR`
+/// and nothing else), so there such an attach is written [`Output::Opaque`]: the SDK cannot know how
+/// that window reads alpha, and alpha 1 asks nothing of it.
+///
+/// An Android attach that asked to carry the composition's alpha ([`PreviewAlpha::Premultiplied`])
+/// takes `PreMultiplied` where the surface offers it, else `Inherit`, and under either the pass writes
+/// [`Output::Premultiplied`], the frame's alpha as it is held. Under `Inherit` that is right only for a
+/// window whose compositor reads premultiplied alpha, which the app that asked knows. It never takes
+/// `PostMultiplied`, whose straight colour such a compositor would add at full strength, nor `Opaque`,
+/// which would hand the frame over black to an app that asked not to have it.
+///
+/// On iOS the translucent mode is still wgpu's `PostMultiplied`, the one non-opaque mode its Metal
+/// backend offers, which only clears the layer's opaque flag. Core Animation then reads the layer as
+/// premultiplied, whatever the name says (measured on the simulator, composing a half-transparent red over
+/// blue), so the pass writes the frame as it is held, premultiplied: written straight, every translucent
+/// pixel would show too bright. iOS and the host choose from the same rows whichever was asked: a
+/// `CAMetalLayer` and a desktop window say themselves how their alpha reads, so the ask settles nothing
+/// there.
+const fn alpha_modes(platform: Platform, alpha: PreviewAlpha) -> &'static [(wgpu::CompositeAlphaMode, Output)] {
+    match (platform, alpha) {
+        (Platform::Android, PreviewAlpha::Premultiplied) => {
+            &[(wgpu::CompositeAlphaMode::PreMultiplied, Output::Premultiplied), (wgpu::CompositeAlphaMode::Inherit, Output::Premultiplied)]
+        }
+        (Platform::Ios, _) => &const { unasked_modes(Output::Premultiplied) },
+        (Platform::Android | Platform::Host, _) => &const { unasked_modes(Output::PostMultiplied) },
+    }
 }
 
 /// How many frames the surface may hold between acquiring one and showing it: one, as the desktop
@@ -72,21 +123,35 @@ pub struct Choice {
 }
 
 impl Choice {
-    /// Choose from what a surface reports it supports. The format is the first of the platform's
-    /// that the surface lists. The present mode is `Fifo`, which every surface must offer, checked
-    /// anyway. The alpha mode is the first of [`alpha_modes`] the surface lists. Anything the
-    /// surface cannot give is [`CraftError::Gpu`] naming what was wanted and what it offered.
+    /// Choose from what a surface reports it supports for an attach that did not ask to carry the
+    /// composition's alpha: [`from_capabilities_with_alpha`][Self::from_capabilities_with_alpha] at the
+    /// default. Every attach keeps its ask from its own call, so nothing that ships asks twice; this
+    /// asks-with-nothing shape stands for the tests, which weigh a choice made without an ask against
+    /// one made with the default and so hold the default to it.
+    #[cfg(test)]
     pub(crate) fn from_capabilities(platform: Platform, capabilities: &wgpu::SurfaceCapabilities) -> Result<Self> {
+        Self::from_capabilities_with_alpha(platform, capabilities, PreviewAlpha::default())
+    }
+
+    /// Choose from what a surface reports it supports, for an attach that asked for `alpha`. The
+    /// format is the first of the platform's that the surface lists. The present mode is `Fifo`,
+    /// which every surface must offer, checked anyway. The alpha mode is the first row of
+    /// [`alpha_modes`] for that ask that the surface lists, and what the pass writes is that row's.
+    /// Anything the surface cannot give is [`CraftError::Gpu`] naming what was wanted and what it
+    /// offered: for the alpha mode, the modes of the ask's own rows, so an attach that asked to carry
+    /// the composition's alpha reads which modes would have carried it and can attach without the ask.
+    pub(crate) fn from_capabilities_with_alpha(platform: Platform, capabilities: &wgpu::SurfaceCapabilities, alpha: PreviewAlpha) -> Result<Self> {
         let format = preferred_formats(platform).iter().copied().find(|format| capabilities.formats.contains(format)).ok_or_else(|| {
             CraftError::gpu(format!("the preview surface offers none of the formats {:?}, only {:?}", preferred_formats(platform), capabilities.formats))
         })?;
         if !capabilities.present_modes.contains(&wgpu::PresentMode::Fifo) {
             return Err(CraftError::gpu(format!("the preview surface does not offer Fifo, only {:?}", capabilities.present_modes)));
         }
-        let (alpha_mode, output) = alpha_modes(platform).into_iter().find(|(mode, _)| capabilities.alpha_modes.contains(mode)).ok_or_else(|| {
+        let rows = alpha_modes(platform, alpha);
+        let (alpha_mode, output) = rows.iter().copied().find(|(mode, _)| capabilities.alpha_modes.contains(mode)).ok_or_else(|| {
             CraftError::gpu(format!(
                 "the preview surface offers none of the alpha modes {:?}, only {:?}",
-                alpha_modes(platform).map(|(mode, _)| mode),
+                rows.iter().map(|(mode, _)| mode).collect::<Vec<_>>(),
                 capabilities.alpha_modes
             ))
         })?;
@@ -242,10 +307,28 @@ pub struct PreviewSurface<S: Swapchain = Box<dyn Swapchain + Send>> {
 impl<S: Swapchain> PreviewSurface<S> {
     /// Take the platform's surface, choose its configuration from what it supports on the core's
     /// `adapter`, make the blit pass for it, and configure it at the size the surface has now.
+    /// This is an attach that did not ask to carry the composition's alpha.
     pub fn attach(swapchain: S, adapter: &wgpu::Adapter, device: &wgpu::Device) -> Result<Self> {
+        Self::attach_with_alpha(swapchain, adapter, device, PreviewAlpha::default())
+    }
+
+    /// Take the platform's surface as [`PreviewSurface::attach`] does, for an attach that asked for
+    /// `alpha`. The ask chooses the surface's alpha mode and what the pass writes for it, and a
+    /// surface that offers no mode the ask takes is refused here, as [`CraftError::Gpu`], before it
+    /// is configured. The surface keeps the ask in the pass it makes, which clears as
+    /// [`crate::blit::clear_color`] says: an attach that asked to carry the composition's alpha
+    /// leaves the bars transparent, and one that did not is exactly [`PreviewSurface::attach`].
+    pub fn attach_with_alpha(swapchain: S, adapter: &wgpu::Adapter, device: &wgpu::Device, alpha: PreviewAlpha) -> Result<Self> {
+        Self::attach_on(Platform::current(), swapchain, adapter, device, alpha)
+    }
+
+    /// The attach, choosing by `platform`'s rules: the build's own platform for every attach that
+    /// ships, and each platform in turn for the tests, which hold a phone's whole attach — its choice,
+    /// its refusal and what it draws — on the machine they run on.
+    fn attach_on(platform: Platform, swapchain: S, adapter: &wgpu::Adapter, device: &wgpu::Device, alpha: PreviewAlpha) -> Result<Self> {
         let size = swapchain.current_size();
-        let choice = Choice::from_capabilities(Platform::current(), &swapchain.capabilities(adapter))?;
-        let blit = Blit::new(device, choice.format, choice.output)?;
+        let choice = Choice::from_capabilities_with_alpha(platform, &swapchain.capabilities(adapter), alpha)?;
+        let blit = Blit::new_with_alpha(device, choice.format, choice.output, alpha)?;
         let mut surface = Self { swapchain, choice, blit, size, max_side: device.limits().max_texture_dimension_2d, configured: false, lost: false };
         surface.reconfigure(device)?;
         Ok(surface)
@@ -349,9 +432,9 @@ impl<S: Swapchain> PreviewSurface<S> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use crate::blit::tests::{assert_matches, ramp_frame, reference, target};
+    use crate::blit::tests::{assert_matches, frame as texels, ramp_frame, reference, target};
     use crate::testing::{BOTH, EVERYTHING, MODES, Rig, Scripted, caps, read_back, refuse, rig, texture};
     use std::cell::Cell;
 
@@ -422,6 +505,151 @@ mod tests {
         assert_eq!(error, CraftError::gpu("the preview surface offers none of the alpha modes [PostMultiplied, Opaque, Inherit], only [PreMultiplied]"));
     }
 
+    /// What each ask chooses from what a surface may offer, on each platform's rows. An attach that did
+    /// not ask chooses what it always did, refusals included, and a choice made with no ask is one made
+    /// with the default. An Android attach that asked to carry the composition's alpha takes
+    /// `PreMultiplied`, else `Inherit`, written premultiplied under either, whatever order the surface
+    /// lists them in; it never takes `PostMultiplied` or `Opaque`, so a surface that offers neither of
+    /// its own two modes is refused, naming them. iOS and the host choose the same for either ask.
+    #[test]
+    fn the_ask_picks_the_alpha_mode_and_never_falls_back() {
+        use wgpu::CompositeAlphaMode as Mode;
+        let choose = |platform: Platform, offered: &[Mode], alpha: PreviewAlpha| {
+            Choice::from_capabilities_with_alpha(platform, &caps(&BOTH, &MODES, offered), alpha).map(|choice| (choice.alpha_mode, choice.output))
+        };
+        let android = |offered: &[Mode], alpha: PreviewAlpha| choose(Platform::Android, offered, alpha);
+        let refused =
+            |wanted: &str, offered: &str| Err(CraftError::gpu(format!("the preview surface offers none of the alpha modes {wanted}, only {offered}")));
+
+        // An Android attach that did not ask: the rows, and the order, it always chose by.
+        let unasked = "[PostMultiplied, Opaque, Inherit]";
+        assert_eq!(android(&[Mode::Inherit], PreviewAlpha::Opaque), Ok((Mode::Inherit, Output::Opaque)));
+        assert_eq!(android(&[Mode::PreMultiplied], PreviewAlpha::Opaque), refused(unasked, "[PreMultiplied]"));
+        assert_eq!(android(&[Mode::Inherit, Mode::PostMultiplied], PreviewAlpha::Opaque), Ok((Mode::PostMultiplied, Output::PostMultiplied)));
+        assert_eq!(android(&[Mode::Opaque], PreviewAlpha::Opaque), Ok((Mode::Opaque, Output::Opaque)));
+        assert_eq!(android(&[], PreviewAlpha::Opaque), refused(unasked, "[]"));
+
+        // An Android attach that asked: a mode that carries premultiplied alpha, or no attach at all.
+        let asked = "[PreMultiplied, Inherit]";
+        assert_eq!(android(&[Mode::Inherit], PreviewAlpha::Premultiplied), Ok((Mode::Inherit, Output::Premultiplied)));
+        assert_eq!(android(&[Mode::PreMultiplied], PreviewAlpha::Premultiplied), Ok((Mode::PreMultiplied, Output::Premultiplied)));
+        assert_eq!(
+            android(&[Mode::Inherit, Mode::PreMultiplied], PreviewAlpha::Premultiplied),
+            Ok((Mode::PreMultiplied, Output::Premultiplied)),
+            "the surface's own premultiplied mode comes before the window's"
+        );
+        assert_eq!(
+            android(&[Mode::PostMultiplied, Mode::Inherit], PreviewAlpha::Premultiplied),
+            Ok((Mode::Inherit, Output::Premultiplied)),
+            "a mode that reads straight colour is never taken"
+        );
+        assert_eq!(android(&EVERYTHING, PreviewAlpha::Premultiplied), Ok((Mode::PreMultiplied, Output::Premultiplied)));
+        assert_eq!(
+            android(&[Mode::PostMultiplied, Mode::Opaque], PreviewAlpha::Premultiplied),
+            refused(asked, "[PostMultiplied, Opaque]"),
+            "neither the straight mode nor the opaque one stands in for what was asked"
+        );
+        assert_eq!(android(&[Mode::Opaque], PreviewAlpha::Premultiplied), refused(asked, "[Opaque]"));
+        assert_eq!(android(&[], PreviewAlpha::Premultiplied), refused(asked, "[]"));
+
+        // Whatever a surface offers: no ask is the default ask on every platform, and iOS and the host
+        // answer one ask as they answer the other.
+        let offers: [&[Mode]; 7] = [
+            &[Mode::Inherit],
+            &[Mode::PreMultiplied],
+            &[Mode::PostMultiplied, Mode::Inherit],
+            &[Mode::Opaque],
+            &[Mode::PostMultiplied, Mode::Opaque],
+            &EVERYTHING,
+            &[],
+        ];
+        for offered in offers {
+            for platform in [Platform::Ios, Platform::Android, Platform::Host] {
+                let quiet = Choice::from_capabilities(platform, &caps(&BOTH, &MODES, offered)).map(|choice| (choice.alpha_mode, choice.output));
+                assert_eq!(quiet, choose(platform, offered, PreviewAlpha::Opaque), "{platform:?} offered {offered:?}: no ask is the default ask");
+            }
+            for platform in [Platform::Ios, Platform::Host] {
+                assert_eq!(
+                    choose(platform, offered, PreviewAlpha::Premultiplied),
+                    choose(platform, offered, PreviewAlpha::Opaque),
+                    "{platform:?} offered {offered:?}: the ask settles nothing here"
+                );
+            }
+        }
+        // And what they answer is what they always chose: iOS's translucent layer written premultiplied,
+        // the host's straight, `Opaque` and `Inherit` opaque on both, and a refusal in the rows every
+        // platform had.
+        assert_eq!(choose(Platform::Ios, &EVERYTHING, PreviewAlpha::Premultiplied), Ok((Mode::PostMultiplied, Output::Premultiplied)));
+        assert_eq!(choose(Platform::Host, &EVERYTHING, PreviewAlpha::Premultiplied), Ok((Mode::PostMultiplied, Output::PostMultiplied)));
+        for platform in [Platform::Ios, Platform::Host] {
+            assert_eq!(choose(platform, &[Mode::Opaque], PreviewAlpha::Premultiplied), Ok((Mode::Opaque, Output::Opaque)), "{platform:?}");
+            assert_eq!(choose(platform, &[Mode::Inherit], PreviewAlpha::Premultiplied), Ok((Mode::Inherit, Output::Opaque)), "{platform:?}");
+            assert_eq!(choose(platform, &[Mode::PreMultiplied], PreviewAlpha::Premultiplied), refused(unasked, "[PreMultiplied]"), "{platform:?}");
+        }
+    }
+
+    /// The ask an attach makes reaches the surface it attaches, on each platform's rows, from a surface
+    /// that offers what Android's do. The choice is the ask's own, and what is drawn is what the ask
+    /// says: a frame of another aspect, with soft alpha, reaches an Android attach that asked to carry
+    /// the composition's alpha as its own premultiplied bytes between transparent bars, and one that
+    /// did not as the frame over black between opaque black bars. iOS and the host write the frame
+    /// over black under `Inherit` whichever was asked, and their bars alone follow the ask. The attach
+    /// every platform's maker makes is this build's platform with the ask it was handed, and an attach
+    /// that names no ask is this build's platform at the default.
+    #[test]
+    fn the_ask_reaches_the_attached_surface_its_picture_and_its_bars() {
+        let rig = rig();
+        // Premultiplied (64, 32, 0) at alpha 128, twice as wide as it is tall: bars above and below.
+        let source = texels(&rig, 8, 4, |_, _| [64, 32, 0, 128]);
+        let inherit_alone = || {
+            let scripted = Scripted::new((8, 8), []);
+            scripted.set_caps(caps(&BOTH, &MODES, &[wgpu::CompositeAlphaMode::Inherit]));
+            scripted
+        };
+        let drawn = |surface: PreviewSurface<Scripted>| bar_and_picture(&rig, surface, &source);
+        let attached = |platform: Platform, alpha: PreviewAlpha| {
+            let scripted = inherit_alone();
+            let surface = PreviewSurface::attach_on(platform, scripted.clone(), &rig.adapter, &rig.device, alpha).expect("every ask takes Inherit");
+            let choice = Choice::from_capabilities_with_alpha(platform, &scripted.capabilities(&rig.adapter), alpha).expect("every ask takes Inherit");
+            assert_eq!(surface.choice(), choice, "{platform:?} {alpha:?}: the choice is the ask's");
+            drawn(surface)
+        };
+        let (black_bar, over_black) = (Some([0, 0, 0, 255]), Some([64, 32, 0, 255]));
+        let (clear_bar, carried) = (Some([0, 0, 0, 0]), Some([64, 32, 0, 128]));
+        assert_eq!(attached(Platform::Android, PreviewAlpha::Premultiplied), (clear_bar, carried), "an Android attach that asked");
+        assert_eq!(attached(Platform::Android, PreviewAlpha::Opaque), (black_bar, over_black), "an Android attach that did not ask");
+        for platform in [Platform::Ios, Platform::Host] {
+            assert_eq!(attached(platform, PreviewAlpha::Premultiplied), (clear_bar, over_black), "{platform:?}: only the bars follow the ask");
+            assert_eq!(attached(platform, PreviewAlpha::Opaque), (black_bar, over_black), "{platform:?}");
+        }
+        for alpha in [PreviewAlpha::Premultiplied, PreviewAlpha::Opaque] {
+            let named = PreviewSurface::attach_with_alpha(inherit_alone(), &rig.adapter, &rig.device, alpha).expect("every ask takes Inherit");
+            assert_eq!(drawn(named), attached(Platform::current(), alpha), "{alpha:?}: a maker's attach is this build's platform with its ask");
+        }
+        let quiet = PreviewSurface::attach(inherit_alone(), &rig.adapter, &rig.device).expect("an attach that names no ask takes Inherit");
+        assert_eq!(drawn(quiet), attached(Platform::current(), PreviewAlpha::Opaque), "an attach that names no ask is the default ask");
+    }
+
+    /// A surface that offers neither mode an Android attach takes to carry the composition's alpha
+    /// fails that attach, naming both, and is never configured; the same surface attaches for an
+    /// attach that did not ask, as it always did, which is the other way the refusal leaves the app.
+    #[test]
+    fn attaching_to_carry_alpha_where_no_mode_carries_it_is_a_gpu_error() {
+        let rig = rig();
+        let scripted = Scripted::new((16, 16), []);
+        scripted.set_caps(caps(&BOTH, &MODES, &[wgpu::CompositeAlphaMode::PostMultiplied, wgpu::CompositeAlphaMode::Opaque]));
+        let refused = PreviewSurface::attach_on(Platform::Android, scripted.clone(), &rig.adapter, &rig.device, PreviewAlpha::Premultiplied).err();
+        assert_eq!(
+            refused,
+            Some(CraftError::gpu("the preview surface offers none of the alpha modes [PreMultiplied, Inherit], only [PostMultiplied, Opaque]"))
+        );
+        assert!(scripted.configured().is_empty(), "a refused surface is never configured");
+        let unasked = PreviewSurface::attach_on(Platform::Android, scripted.clone(), &rig.adapter, &rig.device, PreviewAlpha::Opaque)
+            .expect("an attach that did not ask takes PostMultiplied");
+        assert_eq!((unasked.choice().alpha_mode, unasked.choice().output), (wgpu::CompositeAlphaMode::PostMultiplied, Output::PostMultiplied));
+        assert_eq!(scripted.configured(), [(16, 16)]);
+    }
+
     /// The whole configuration at a size: the size is the surface's, cut to the device's limit, a
     /// size with no pixels configures nothing, and nothing else about it moves with the size.
     #[test]
@@ -462,6 +690,18 @@ mod tests {
                 refuse(device);
             }
         }
+    }
+
+    /// The corner and a pixel of the picture of the 8 by 8 texture `surface` hands over, once `frame`, twice
+    /// as wide as it is tall, is drawn into it: the corner is a bar, which follows what the attach asked of
+    /// the composition's alpha on every platform, so it tells one ask's surface from the other's.
+    pub(crate) fn bar_and_picture<S: Swapchain>(rig: &Rig, mut surface: PreviewSurface<S>, frame: &wgpu::Texture) -> (Option<[u8; 4]>, Option<[u8; 4]>) {
+        let texture = target(rig, surface.choice().format, (8, 8));
+        let shown = Cell::new(0);
+        let taken = Offscreen { texture: texture.clone(), shown: &shown, refuse: None };
+        assert_eq!(surface.show(&rig.device, &rig.queue, frame, taken, false), Ok(Presented::Shown));
+        let pixels = read_back(rig, &texture);
+        (pixels.first().copied(), pixels.get(4 * 8 + 4).copied())
     }
 
     /// A display frame for the tests that only need one to be there.

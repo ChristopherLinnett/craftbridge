@@ -3,11 +3,11 @@
 //! It is a plain library: an app's distribution crate links it into the one native library.
 //!
 //! Every call of an [`Engine`] — `request`, `request_with_progress`, `frame`, `mcp`, `suspend_gpu`,
-//! `resume_gpu`, `present`, `detach_preview`, `attach_window` and `shut_down` — and
-//! `attach_metal_layer`, which takes the engine, is an `async` function that fails by throwing
-//! [`CraftError`], never by answering with one: a closed engine and a panic the engine caught throw
-//! as `request` does, so a reply the app never wrote is never read as one, and an `mcp` line that
-//! needs no reply answers `None`.
+//! `resume_gpu`, `present`, `detach_preview`, `attach_window`, `attach_window_with_alpha` and
+//! `shut_down` — and `attach_metal_layer`, which takes the engine, is an `async` function that fails
+//! by throwing [`CraftError`], never by answering with one: a closed engine and a panic the engine
+//! caught throw as `request` does, so a reply the app never wrote is never read as one, and an `mcp`
+//! line that needs no reply answers `None`.
 //!
 //! `recovery` answers at once with what the start cleaned up after an export the system killed, and
 //! [`craft_error_message`] with the words a [`CraftError`] shows the app's user.
@@ -49,6 +49,7 @@ pub use error::{CraftError, craft_error_message};
 pub use folders::Folders;
 pub use frames::{FrameBytes, PixelFormat};
 pub use gpu::GpuChoice;
+pub use platform::PreviewAlpha;
 pub use progress::ProgressListener;
 pub use recovery::{Recovery, RecoveryNote};
 

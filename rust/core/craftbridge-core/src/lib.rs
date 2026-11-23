@@ -39,7 +39,7 @@ pub use gpu::{GpuChoice, GpuDevice, GpuFailure, Platform};
 pub use journal::{JOURNAL_FILE, Recovery};
 pub use platform::memory::available_memory;
 pub use preview::{Surface, SurfaceMaker};
-pub use surface::{Presented, PreviewSurface};
+pub use surface::{Presented, PreviewAlpha, PreviewSurface};
 
 /// The result of a runtime call: what the call answers, or the [`CraftError`] it failed with. The
 /// error has a default so a signature can name just its answer, as the plan's runtime sketches write it.

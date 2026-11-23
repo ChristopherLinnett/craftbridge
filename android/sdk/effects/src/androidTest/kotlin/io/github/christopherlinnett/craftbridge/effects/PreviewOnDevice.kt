@@ -14,6 +14,7 @@ import io.github.christopherlinnett.craftbridge.core.GpuException
 import io.github.christopherlinnett.craftbridge.core.InvalidParamsException
 import io.github.christopherlinnett.craftbridge.ffi.core.CraftException
 import io.github.christopherlinnett.craftbridge.ffi.core.GpuChoice
+import io.github.christopherlinnett.craftbridge.ffi.core.PreviewAlpha
 import io.github.christopherlinnett.craftbridge.ffi.core.windowAddress
 
 /** The side of the square surfaces the checks preview into, in pixels. */
@@ -41,6 +42,28 @@ private const val RED_COMP =
 /** The pixel red and opaque makes, as an `RGBA_8888` buffer holds it. */
 private val OPAQUE_RED = listOf(255, 0, 0, 255)
 
+/** A comp half red over nothing, twice as wide as it is tall: into a square surface it is letterboxed,
+ * its middle the half red and its corners the bars — every pixel an ask about alpha tells apart. */
+private const val HALF_RED_COMP =
+    """{"steps":[
+        {"command":"comp.new","params":{"name":"Half red","width":${SURFACE_SIDE * 2},"height":$SURFACE_SIDE,"duration":1,"frameRate":30}},
+        {"command":"layer.newSolid","params":{"comp":1,"name":"Half","color":"#ff0000"}},
+        {"command":"prop.set","params":{"layer":"Half","path":"transform/opacity","value":50}}
+    ]}"""
+
+/** The half red once the preview has carried it — straight (255, 0, 0, 128) premultiplied — as a frame
+ * reaching a window that composites alpha itself must read. */
+private val CARRIED_HALF_RED = listOf(128, 0, 0, 128)
+
+/** The same half red once the preview has written it over black: its colour, opaque. */
+private val HALF_RED_OVER_BLACK = listOf(128, 0, 0, 255)
+
+/** A bar of a letterboxed frame, transparent where the preview carries alpha… */
+private val CARRIED_NOTHING = listOf(0, 0, 0, 0)
+
+/** …and opaque black where it does not. */
+private val BLACK_BAR = listOf(0, 0, 0, 255)
+
 /**
  * A surface an app could hand over, with its consumer in hand: an image reader is the platform's own
  * stand-in for a view's surface, whose buffers the check can read, and which the check abandons by
@@ -62,19 +85,26 @@ internal class TextureSurface {
     }
 }
 
-/** The middle pixel of the next buffer a presented frame left at [reader], waiting for it to arrive. */
-internal fun middlePixel(reader: ImageReader): List<Int> {
+/** The pixel of the next buffer a presented frame left at [reader] at ([x], [y]), waiting for it to arrive. */
+internal fun pixelAt(
+    reader: ImageReader,
+    x: Int,
+    y: Int,
+): List<Int> {
     val until = SystemClock.elapsedRealtime() + WAIT_FOR_FRAME_MILLIS
     while (SystemClock.elapsedRealtime() < until) {
         reader.acquireNextImage()?.use { image ->
             val plane = image.planes.first()
-            val middle = SURFACE_SIDE / 2 * plane.rowStride + SURFACE_SIDE / 2 * 4
-            return List(4) { plane.buffer.get(middle + it).toInt() and 0xFF }
+            val at = y * plane.rowStride + x * 4
+            return List(4) { plane.buffer.get(at + it).toInt() and 0xFF }
         }
         Thread.sleep(50)
     }
     error("no frame reached the surface in ${WAIT_FOR_FRAME_MILLIS / 1000} seconds")
 }
+
+/** The middle pixel of the next buffer a presented frame left at [reader], waiting for it to arrive. */
+internal fun middlePixel(reader: ImageReader): List<Int> = pixelAt(reader, SURFACE_SIDE / 2, SURFACE_SIDE / 2)
 
 /** Present until a frame is drawn, then confirm it is the comp's red at the middle of [reader]'s surface. */
 private suspend fun Engine.drawsRedOn(reader: ImageReader) {
@@ -228,4 +258,151 @@ internal val previewChecks: List<Case> =
                 surface.close()
             }
         },
+        Case("an attach asked to carry the alpha shows the frame's alpha over transparent bars; the default, over black") { context ->
+            onEngine(context, GpuChoice.PREFERRED) { engine ->
+                engine.request("run", HALF_RED_COMP)
+                val asked = reader()
+                engine.attachPreview(asked.surface, PreviewAlpha.PREMULTIPLIED)
+                engine.present()
+                val carried = middlePixel(asked)
+                require(carried == CARRIED_HALF_RED) {
+                    "the half red of a surface attached to carry alpha reads $carried in the middle, not $CARRIED_HALF_RED"
+                }
+                engine.present()
+                val bar = pixelAt(asked, 0, 0)
+                require(bar == CARRIED_NOTHING) {
+                    "the bar of a surface attached to carry alpha reads $bar at the corner, not $CARRIED_NOTHING"
+                }
+                engine.detachPreview()
+                asked.close()
+                // Another surface, attached without the ask: the same half red over black, in an opaque bar.
+                val quiet = reader()
+                engine.attachPreview(quiet.surface)
+                engine.present()
+                val written = middlePixel(quiet)
+                require(written == HALF_RED_OVER_BLACK) {
+                    "the half red of a surface attached without an ask reads $written in the middle, not $HALF_RED_OVER_BLACK"
+                }
+                engine.present()
+                val black = pixelAt(quiet, 0, 0)
+                require(black == BLACK_BAR) {
+                    "the bar of a surface attached without an ask reads $black at the corner, not $BLACK_BAR"
+                }
+                engine.detachPreview()
+                quiet.close()
+            }
+        },
+        Case("a surface attached with an ask is held under that ask, and the comp's preview attaches it again at the default") { context ->
+            val engine = EffectsEngine.start(context, gpu = GpuChoice.PREFERRED)
+            try {
+                engine.core.request("run", HALF_RED_COMP)
+                val surface = reader()
+                engine.core.attachPreview(surface.surface, PreviewAlpha.PREMULTIPLIED)
+                require(!engine.core.holdsPreview(surface.surface)) {
+                    "a surface attached to carry alpha answers held under the default it did not ask"
+                }
+                require(engine.core.holdsPreview(surface.surface, PreviewAlpha.PREMULTIPLIED)) {
+                    "the engine does not report the surface under the ask its attach made"
+                }
+                // The comp's preview asks whether the engine previews into the surface the default way,
+                // finds it does not, and attaches it again as an attach that asks nothing: the half red
+                // reaches the window over black now, whatever it read through the ask.
+                engine.preview(surface.surface)
+                val rewritten = middlePixel(surface)
+                require(rewritten == HALF_RED_OVER_BLACK) {
+                    "the preview of the comp left $rewritten in the middle, so it did not re-attach the surface at the default"
+                }
+                require(engine.core.holdsPreview(surface.surface)) {
+                    "the attach the comp's preview made is not held under the default"
+                }
+                require(!engine.core.holdsPreview(surface.surface, PreviewAlpha.PREMULTIPLIED)) {
+                    "the surface is still held under the ask the preview's attach replaced"
+                }
+                surface.close()
+            } finally {
+                engine.shutDown()
+            }
+        },
+        Case(
+            "the alpha an attach asked for is forgotten with that attach: at the window's next attach, at a detach, and when the GPU goes",
+        ) { context ->
+            val engine = EffectsEngine.start(context, gpu = GpuChoice.PREFERRED)
+            try {
+                engine.core.request("run", HALF_RED_COMP)
+                val surface = reader()
+                // The other way round: held the default way, then attached again with the ask. It is the
+                // one window at the one address both times, so only the ask tells the two attaches apart.
+                engine.core.attachPreview(surface.surface)
+                engine.core.heldOnly(surface.surface, PreviewAlpha.OPAQUE, "after the attach that asked nothing")
+                engine.core.attachPreview(surface.surface, PreviewAlpha.PREMULTIPLIED)
+                engine.core.heldOnly(surface.surface, PreviewAlpha.PREMULTIPLIED, "after the same window was attached again with the ask")
+                engine.core.draws(surface, CARRIED_HALF_RED, "the window attached again with the ask")
+                // A detach forgets the window and its ask together: the window stands where it stood, and
+                // is held under neither, so the comp's preview attaches it the default way.
+                engine.core.detachPreview()
+                engine.core.heldOnly(surface.surface, null, "after the detach")
+                engine.preview(surface.surface)
+                surface.shows(HALF_RED_OVER_BLACK, "the comp's preview after the detach of a window attached with the ask")
+                engine.core.heldOnly(surface.surface, PreviewAlpha.OPAQUE, "after the comp's preview attached the detached window")
+                // The GPU's going takes the surface and leaves the window, its address and its ask as they
+                // were remembered: neither ask holds it then, nor once the device is back, until an attach.
+                engine.core.attachPreview(surface.surface, PreviewAlpha.PREMULTIPLIED)
+                engine.core.suspendGpu()
+                engine.core.heldOnly(surface.surface, null, "with the GPU given up")
+                val note = engine.core.resumeGpu()
+                require(note == null) { "the device was not taken again: $note" }
+                engine.core.heldOnly(surface.surface, null, "with the GPU back and nothing attached")
+                engine.preview(surface.surface)
+                surface.shows(HALF_RED_OVER_BLACK, "the comp's preview after the GPU took a window attached with the ask")
+                engine.core.heldOnly(surface.surface, PreviewAlpha.OPAQUE, "after the comp's preview attached the window the GPU took")
+                // A surface destroyed and another made in its place: wherever its window stands, it is
+                // attached as its own attach asks, and the ask of the one before it holds nothing.
+                engine.core.attachPreview(surface.surface, PreviewAlpha.PREMULTIPLIED)
+                engine.core.detachPreview()
+                surface.close()
+                val next = reader()
+                engine.core.heldOnly(next.surface, null, "before a surface made after another was destroyed is attached")
+                engine.core.attachPreview(next.surface)
+                engine.core.heldOnly(next.surface, PreviewAlpha.OPAQUE, "after the attach of a surface made after another was destroyed")
+                engine.core.draws(next, HALF_RED_OVER_BLACK, "the surface made after another was destroyed")
+                engine.core.detachPreview()
+                next.close()
+            } finally {
+                engine.shutDown()
+            }
+        },
     )
+
+/** Confirms the engine previews into [surface] under [held] and under no other alpha, or under none when [held] is null. */
+private suspend fun Engine.heldOnly(
+    surface: Surface,
+    held: PreviewAlpha?,
+    whenAsked: String,
+) {
+    val under = held ?: "no alpha"
+    for (alpha in PreviewAlpha.entries) {
+        val answered = holdsPreview(surface, alpha)
+        require(answered == (alpha == held)) { "$whenAsked the surface answers $answered for $alpha, and it is held under $under" }
+    }
+    val quiet = holdsPreview(surface)
+    require(quiet == (held == PreviewAlpha.OPAQUE)) { "$whenAsked the surface answers $quiet with no alpha named, held under $under" }
+}
+
+/** Confirms the frame a preview just drew reached [this] reader's surface with [pixel] in its middle. */
+private fun ImageReader.shows(
+    pixel: List<Int>,
+    what: String,
+) {
+    val middle = middlePixel(this)
+    require(middle == pixel) { "$what left $middle in the middle, not $pixel" }
+}
+
+/** Presents one frame and confirms it reached [reader]'s surface with [pixel] in its middle. */
+private suspend fun Engine.draws(
+    reader: ImageReader,
+    pixel: List<Int>,
+    what: String,
+) {
+    present()
+    reader.shows(pixel, what)
+}

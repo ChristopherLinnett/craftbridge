@@ -50,6 +50,12 @@
     },
     {
       "kind": "method",
+      "name": "attach_window_with_alpha",
+      "namespace": "craftbridge_core_ffi",
+      "owner": "Engine"
+    },
+    {
+      "kind": "method",
       "name": "detach_preview",
       "namespace": "craftbridge_core_ffi",
       "owner": "Engine"

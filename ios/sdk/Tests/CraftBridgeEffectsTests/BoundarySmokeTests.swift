@@ -150,7 +150,7 @@ struct BoundarySmokeTests {
         #expect(frame.data.count == 64 * 36 * 4, "the frame's bytes are not one RGBA pixel each: \(frame.data.count)")
 
         // The preview, from an engine holding nothing: the engine's own answer is no surface, and
-        // detaching nothing is fine. iOS has no Android window, so both window calls answer so.
+        // detaching nothing is fine. iOS has no Android window, so every window call answers so.
         let holding = try await calls.made("Engine.has_preview_surface") { try await engine.hasPreviewSurface() }
         #expect(!holding, "a fresh engine answered that it previews")
         try await calls.made("Engine.detach_preview") { try await engine.detachPreview() }
@@ -163,6 +163,12 @@ struct BoundarySmokeTests {
         let noWindow = "this platform has no Android window to preview on"
         await #expect(throws: CraftError.Unsupported(detail: noWindow)) {
             try await calls.made("Engine.attach_window") { try await engine.attachWindow(id: 999_999) }
+        }
+        // The attach that asks to carry the composition's alpha is Android's too, whatever it asks.
+        await #expect(throws: CraftError.Unsupported(detail: noWindow)) {
+            try await calls.made("Engine.attach_window_with_alpha") {
+                try await engine.attachWindowWithAlpha(id: 999_999, alpha: .premultiplied)
+            }
         }
         await #expect(throws: CraftError.Unsupported(detail: noWindow)) {
             _ = try await calls.made("window_address") { try windowAddress(id: 999_999) }
