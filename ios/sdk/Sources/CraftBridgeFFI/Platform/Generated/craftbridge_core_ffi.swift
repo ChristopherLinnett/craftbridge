@@ -881,6 +881,21 @@ public protocol EngineProtocol: AnyObject, Sendable {
      */
     func attachWindow(id: Int64) async throws
 
+    /**
+     * Attach the window the `id` names as the engine's preview surface, as [`Self::attach_window`]
+     * does, and write the composition's alpha into it as `alpha` asks. `Premultiplied` writes the
+     * frame's own alpha, premultiplied, and clears the letterbox bars transparent, so a compositor
+     * that reads premultiplied alpha — a Flutter `Texture` over the app's own content — shows the
+     * composition's transparency. It is written only through a mode of the surface that carries it,
+     * `PreMultiplied` or else Android's `Inherit`: a surface that offers neither is refused as `Gpu`,
+     * naming those modes, never drawn over black or in straight colour in its place, and the app
+     * attaches it with `Opaque` instead. `Opaque` is exactly [`Self::attach_window`]: the frame over
+     * black. The choice is made with the attach and kept with the surface until it is detached or
+     * another is attached. Every refusal and platform answer of [`Self::attach_window`] is this
+     * call's too: on a platform with no Android window it answers `Unsupported` whichever is asked.
+     */
+    func attachWindowWithAlpha(id: Int64, alpha: PreviewAlpha) async throws
+
 }
 /// A handle to one engine. Every call but `recovery` is `async`, and every call throws [`CraftError`].
 /// A call reaches the engine as it is first polled, which the foreign caller does as it makes the call,
@@ -1192,6 +1207,35 @@ open class Engine: EngineProtocol, @unchecked Sendable {
                 rustFutureFunc: {
                     uniffi_craftbridge_core_ffi_fn_method_engine_attach_window(
                         self.uniffiCloneHandle(), FfiConverterInt64.lower(id)
+                    )
+                },
+                pollFunc: ffi_craftbridge_core_ffi_rust_future_poll_void,
+                completeFunc: ffi_craftbridge_core_ffi_rust_future_complete_void,
+                freeFunc: ffi_craftbridge_core_ffi_rust_future_free_void,
+                liftFunc: { $0 },
+                errorHandler: FfiConverterTypeCraftError_lift
+            )
+    }
+
+    /**
+     * Attach the window the `id` names as the engine's preview surface, as [`Self::attach_window`]
+     * does, and write the composition's alpha into it as `alpha` asks. `Premultiplied` writes the
+     * frame's own alpha, premultiplied, and clears the letterbox bars transparent, so a compositor
+     * that reads premultiplied alpha — a Flutter `Texture` over the app's own content — shows the
+     * composition's transparency. It is written only through a mode of the surface that carries it,
+     * `PreMultiplied` or else Android's `Inherit`: a surface that offers neither is refused as `Gpu`,
+     * naming those modes, never drawn over black or in straight colour in its place, and the app
+     * attaches it with `Opaque` instead. `Opaque` is exactly [`Self::attach_window`]: the frame over
+     * black. The choice is made with the attach and kept with the surface until it is detached or
+     * another is attached. Every refusal and platform answer of [`Self::attach_window`] is this
+     * call's too: on a platform with no Android window it answers `Unsupported` whichever is asked.
+     */
+    open func attachWindowWithAlpha(id: Int64, alpha: PreviewAlpha) async throws {
+        return
+            try await uniffiRustCallAsync(
+                rustFutureFunc: {
+                    uniffi_craftbridge_core_ffi_fn_method_engine_attach_window_with_alpha(
+                        self.uniffiCloneHandle(), FfiConverterInt64.lower(id), FfiConverterTypePreviewAlpha_lower(alpha)
                     )
                 },
                 pollFunc: ffi_craftbridge_core_ffi_rust_future_poll_void,
@@ -2124,6 +2168,62 @@ public func FfiConverterTypePixelFormat_lower(_ value: PixelFormat) -> RustBuffe
     return FfiConverterTypePixelFormat.lower(value)
 }
 
+public enum PreviewAlpha: Equatable, Hashable {
+
+    case opaque
+    case premultiplied
+
+}
+
+#if compiler(>=6)
+    extension PreviewAlpha: Sendable {}
+#endif
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePreviewAlpha: FfiConverterRustBuffer {
+    typealias SwiftType = PreviewAlpha
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PreviewAlpha {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .opaque
+
+        case 2: return .premultiplied
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PreviewAlpha, into buf: inout [UInt8]) {
+        switch value {
+
+        case .opaque:
+            writeInt(&buf, Int32(1))
+
+        case .premultiplied:
+            writeInt(&buf, Int32(2))
+
+        }
+    }
+}
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+public func FfiConverterTypePreviewAlpha_lift(_ buf: RustBuffer) throws -> PreviewAlpha {
+    return try FfiConverterTypePreviewAlpha.lift(buf)
+}
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+public func FfiConverterTypePreviewAlpha_lower(_ value: PreviewAlpha) -> RustBuffer {
+    return FfiConverterTypePreviewAlpha.lower(value)
+}
+
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
@@ -2455,6 +2555,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_craftbridge_core_ffi_checksum_method_engine_attach_window() != 60864 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_craftbridge_core_ffi_checksum_method_engine_attach_window_with_alpha() != 2435 {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_craftbridge_core_ffi_checksum_method_progresslistener_progress() != 54350 {

@@ -7,6 +7,7 @@ import android.hardware.HardwareBuffer
 import android.view.Surface
 import io.github.christopherlinnett.craftbridge.ffi.core.FrameBytes
 import io.github.christopherlinnett.craftbridge.ffi.core.PixelFormat
+import io.github.christopherlinnett.craftbridge.ffi.core.PreviewAlpha
 import io.github.christopherlinnett.craftbridge.ffi.core.Recovery
 import io.github.christopherlinnett.craftbridge.ffi.core.setDeviceCodecs
 import io.github.christopherlinnett.craftbridge.ffi.core.windowAddress
@@ -117,9 +118,27 @@ public class Engine internal constructor(
     }
 
     /**
-     * Preview into [surface]: every later [present] draws its frame there, until [detachPreview], another
+     * Preview into [surface], showing every frame over black: the attach that asks nothing about the
+     * composition's alpha, exactly as every call of the SDK always attached. It is [attachPreview] with
+     * [PreviewAlpha.OPAQUE], and throws what that call throws.
+     */
+    public suspend fun attachPreview(surface: Surface): Unit = attachPreview(surface, PreviewAlpha.OPAQUE)
+
+    /**
+     * Preview into [surface], writing the composition's alpha into it as [alpha] asks: every later
+     * [present] draws its frame there, until [detachPreview], another
      * [attachPreview], or the GPU is given up ([suspendGpu]), which drops the surface with the device.
-     * Attaching replaces the surface the engine previewed before.
+     * Attaching replaces the surface the engine previewed before, with whatever ask that one made.
+     *
+     * [PreviewAlpha.PREMULTIPLIED] asks the preview to carry the composition's alpha: the frame's own
+     * alpha reaches the window, premultiplied, and the bars drawn around a letterboxed frame reach it
+     * transparent, so a window that composites alpha itself — a `TextureView`'s, a Flutter `Texture`'s —
+     * shows the composition over the app's own content. Only the app knows that its window reads
+     * premultiplied alpha, which is why it is the app's to ask, and the ask is never answered with
+     * anything else: a surface with no alpha mode that carries premultiplied alpha is refused, never
+     * drawn over black in its place. [PreviewAlpha.OPAQUE], the ask an attach that names none makes,
+     * shows the frame over black. The ask belongs to the attach and is kept with the surface it made:
+     * [holdsPreview] answers an attached surface only under the ask its attach made.
      *
      * The engine holds the window of the surface, not the [Surface] object, and keeps it until it lets
      * the preview go, so the app may release its own surface first; once it has, the next [present]
@@ -128,18 +147,23 @@ public class Engine internal constructor(
      *
      * @throws InvalidParamsException when [surface] is not a live surface, [UnsupportedException] when the
      * native library that holds the windows is not part of the app, [GpuException] when the engine has no
-     * device to preview on (it renders on the CPU), or the surface cannot become a preview, as one whose
-     * consumer is already gone cannot.
+     * device to preview on (it renders on the CPU), the surface cannot become a preview, as one whose
+     * consumer is already gone cannot, or [alpha] is [PreviewAlpha.PREMULTIPLIED] and the surface offers
+     * no alpha mode that carries it, which the refusal names: [PreviewAlpha.OPAQUE] attaches such a surface.
      */
-    public suspend fun attachPreview(surface: Surface) {
+    public suspend fun attachPreview(
+        surface: Surface,
+        alpha: PreviewAlpha,
+    ) {
         previewing.withLock {
             attachingWindow(windowOf(surface), NativeSurfaces::release) { window ->
                 val address = mapped { windowAddress(window) }
                 // The engine gives the surface it held up before it makes this one, and an attach that
                 // fails leaves none, so nothing is remembered until this one is held.
                 attachedWindow = NO_WINDOW
-                mapped { boundary.attachWindow(window) }
+                mapped { boundary.attachWindowWithAlpha(window, alpha) }
                 attachedWindow = address
+                attachedAlpha = alpha
             }
         }
     }
@@ -157,6 +181,11 @@ public class Engine internal constructor(
      * never stands for one it holds. [previewing] guards it. */
     private var attachedWindow = NO_WINDOW
 
+    /** The ask the attach that set [attachedWindow] made, its window's together with its alpha: read —
+     * like [attachedWindow] — only while that window stands, so an ask left behind by a window the engine
+     * no longer holds is never read for it. [previewing] guards it. */
+    private var attachedAlpha = PreviewAlpha.OPAQUE
+
     /**
      * Whether the engine holds a preview surface: from an [attachPreview] that attached one until a
      * [detachPreview] gives it up, or the GPU goes with it — on [suspendGpu], or on a device lost.
@@ -169,20 +198,39 @@ public class Engine internal constructor(
     public suspend fun hasPreviewSurface(): Boolean = mapped { boundary.hasPreviewSurface() }
 
     /**
-     * Whether the engine is previewing into [surface]: it holds a preview surface, and that surface is the
-     * window [surface] names now — the window the app last [attached][attachPreview]. A call that previews
+     * Whether the engine is previewing into [surface] the way an attach that asked nothing did: the
+     * window the app last [attached][attachPreview] without an ask, under [PreviewAlpha.OPAQUE]. A
+     * surface attached with another ask is not held under this one, and answers no — what a call that
+     * previews the default way reads as "no surface held: attach it afresh" — and it is answered, and
+     * refused, as [holdsPreview] with that alpha is.
+     */
+    public suspend fun holdsPreview(surface: Surface): Boolean = holdsPreview(surface, PreviewAlpha.OPAQUE)
+
+    /**
+     * Whether the engine is previewing into [surface] the way the app attached it: it holds a preview
+     * surface, that surface is the window [surface] names now, and the attach that handed it over — the
+     * window the app last [attached][attachPreview] — asked for [alpha]. A call that previews
      * into a surface can skip its attach when this answers yes: the engine already draws into that window.
      * A surface the app released names no window, and one that names another window since — as a
      * `SurfaceView`'s does once it makes a new surface — is not the one held, so both answer no and are
-     * attached afresh, which refuses a released one as [attachPreview] does. Holding is not health: a window
+     * attached afresh, which refuses a released one as [attachPreview] does. An attached surface is held
+     * under the one ask its attach made and no other. Holding is not health: a window
      * whose consumer is gone, or that was resized, still answers [GpuException] at [present], with §17's
      * answers, whatever this says.
      *
      * @throws UnsupportedException when the native library that holds the windows is not part of the app,
      * and what [hasPreviewSurface], which it asks first, throws.
      */
-    public suspend fun holdsPreview(surface: Surface): Boolean =
-        previewing.withLock { hasPreviewSurface() && attachedWindow != NO_WINDOW && addressOf(surface) == attachedWindow }
+    public suspend fun holdsPreview(
+        surface: Surface,
+        alpha: PreviewAlpha,
+    ): Boolean =
+        previewing.withLock {
+            hasPreviewSurface() &&
+                attachedWindow != NO_WINDOW &&
+                addressOf(surface) == attachedWindow &&
+                attachedAlpha == alpha
+        }
 
     /**
      * Give up the preview surface, if one is attached: [present] answers [GpuException] again until the

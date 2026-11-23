@@ -13,14 +13,18 @@
 
 use crate::Result;
 use crate::gpu::validated;
+use crate::surface::PreviewAlpha;
 
 /// What the target's alpha channel means to whatever composites the surface, which decides what the
 /// pass writes there.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Output {
-    /// An opaque picture, for a surface that ignores alpha (`CompositeAlphaMode::Opaque`) or leaves it
-    /// to the window (`Inherit`): the frame's premultiplied colour is already the frame composited
-    /// over black, which is what is written, with alpha 1, so it shows the same either way.
+    /// An opaque picture: the frame's premultiplied colour is already the frame composited over black,
+    /// which is what is written, with alpha 1. It is written for a surface that ignores alpha
+    /// (`CompositeAlphaMode::Opaque`), and for one that leaves alpha to the window (`Inherit`) when its
+    /// attach did not ask to carry the composition's alpha ([`PreviewAlpha::Opaque`]). An Android attach
+    /// that asked ([`PreviewAlpha::Premultiplied`]) is written [`Output::Premultiplied`] under `Inherit`
+    /// instead.
     Opaque,
     /// The surface reads straight colour with alpha (`CompositeAlphaMode::PostMultiplied` off iOS, where
     /// [`Output::Premultiplied`] takes that mode): the frame is un-premultiplied before it is written, or
@@ -28,9 +32,11 @@ pub enum Output {
     PostMultiplied,
     /// The surface reads colour already multiplied by its alpha, as Core Animation reads every
     /// non-opaque `CAMetalLayer` whatever alpha mode wgpu was told (wgpu's Metal backend only clears the
-    /// layer's opaque flag for `PostMultiplied`): the frame is premultiplied already, so it is written as
-    /// it is. Written straight, a translucent pixel would be added to what is behind it at its full
-    /// colour and show too bright.
+    /// layer's opaque flag for `PostMultiplied`), and as the window of an Android attach that asked to
+    /// carry the composition's alpha ([`PreviewAlpha::Premultiplied`]) reads its surface, under
+    /// `PreMultiplied` or `Inherit`: the frame is premultiplied already, so it is written as it is.
+    /// Written straight, a translucent pixel would be added to what is behind it at its full colour and
+    /// show too bright.
     Premultiplied,
 }
 
@@ -45,10 +51,26 @@ impl Output {
     }
 }
 
-/// The colour of the letterbox bars: opaque black, whatever the output. The bars are not picture, so
-/// they never take the frame's alpha, and a preview then has the same shape on every platform
-/// whichever alpha mode its surface offers.
+/// The colour of the letterbox bars of every attach that did not ask to carry the composition's alpha:
+/// opaque black, whatever the output. The bars are not picture, so they never take the frame's alpha,
+/// and such a preview has the same shape on every platform whichever alpha mode its surface offers.
 pub const BAR_COLOR: wgpu::Color = wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
+
+/// Nothing at all: what an attach that asked to carry the composition's alpha clears the bars to,
+/// so what is behind the surface shows through them.
+pub const TRANSPARENT_COLOR: wgpu::Color = wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
+
+/// The colour the pass clears the target to before the aspect-fit draw, which is what the bars are
+/// then: [`BAR_COLOR`] for every attach that did not ask to carry the composition's alpha, and
+/// [`TRANSPARENT_COLOR`] for one that did — a surface attached to carry alpha shows the app's own
+/// content in the bars, as it shows the composition's own alpha in the picture.
+#[must_use]
+pub const fn clear_color(alpha: PreviewAlpha) -> wgpu::Color {
+    match alpha {
+        PreviewAlpha::Opaque => BAR_COLOR,
+        PreviewAlpha::Premultiplied => TRANSPARENT_COLOR,
+    }
+}
 
 /// The vertex entry point of [`SHADER`].
 const VERTEX_ENTRY: &str = "vs";
@@ -134,18 +156,29 @@ fn narrow(value: u128, limit: u32) -> u32 {
     u32::try_from(value).unwrap_or(limit).clamp(1, limit)
 }
 
-/// The blit pass on one device, for one target format and output: its pipeline and sampler, made once.
+/// The blit pass on one device, for one target format and output: its pipeline, sampler and clear
+/// colour, made once.
 #[derive(Debug)]
 pub struct Blit {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    /// What the attach asked of the alpha, as the colour it clears to: [`clear_color`] answers it,
+    /// so the pass remembers the ask for every frame it draws.
+    clear: wgpu::Color,
 }
 
 impl Blit {
-    /// The pass for targets of `format`, writing `output`. A device that rejects the pipeline —
-    /// a format it cannot render to — answers [`CraftError::Gpu`](crate::CraftError::Gpu) and nothing else.
+    /// The pass for targets of `format`, writing `output`, cleared to [`BAR_COLOR`]: the pass for an
+    /// attach that did not ask to carry the composition's alpha.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, output: Output) -> Result<Self> {
+        Self::new_with_alpha(device, format, output, PreviewAlpha::default())
+    }
+
+    /// The pass for targets of `format`, writing `output`, cleared as [`clear_color`] says for an
+    /// attach that asked for `alpha`. A device that rejects the pipeline — a format it cannot render
+    /// to — answers [`CraftError::Gpu`](crate::CraftError::Gpu) and nothing else.
+    pub fn new_with_alpha(device: &wgpu::Device, format: wgpu::TextureFormat, output: Output, alpha: PreviewAlpha) -> Result<Self> {
         validated(device, "the blit pass", || {
             let module =
                 device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("craftbridge blit"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
@@ -200,13 +233,14 @@ impl Blit {
                 mipmap_filter: wgpu::MipmapFilterMode::Linear,
                 ..Default::default()
             });
-            Self { pipeline, layout, sampler }
+            Self { pipeline, layout, sampler, clear: clear_color(alpha) }
         })
     }
 
     /// Draw `frame`, aspect-fit, into `target`, a view of a texture `target_size` pixels across,
-    /// and submit the work. The whole target is cleared to [`BAR_COLOR`] first, so a frame with no
-    /// pixels leaves a target of bars. A `frame` the pass cannot sample — without
+    /// and submit the work. The whole target is cleared first, to the colour [`clear_color`] gave the
+    /// pass — [`BAR_COLOR`] for one made without the ask, fully transparent for one made with it — so
+    /// a frame with no pixels leaves a target of bars. A `frame` the pass cannot sample — without
     /// `TEXTURE_BINDING`, or a format that is not filterable colour — answers [`CraftError::Gpu`](crate::CraftError::Gpu).
     pub fn draw(&self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &wgpu::Texture, target: &wgpu::TextureView, target_size: (u32, u32)) -> Result<()> {
         let rect = fit((frame.width(), frame.height()), target_size);
@@ -230,7 +264,7 @@ impl Blit {
                         view: target,
                         depth_slice: None,
                         resolve_target: None,
-                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(BAR_COLOR), store: wgpu::StoreOp::Store },
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(self.clear), store: wgpu::StoreOp::Store },
                     })],
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
@@ -331,7 +365,7 @@ pub(crate) mod tests {
     // ---- The pass on a real device, against references computed apart from the code ----
 
     /// A display frame as the compositor leaves it: `Rgba8Unorm`, one mip level, filled by `texel`.
-    fn frame(rig: &Rig, width: u32, height: u32, texel: impl Fn(u32, u32) -> [u8; 4]) -> wgpu::Texture {
+    pub(crate) fn frame(rig: &Rig, width: u32, height: u32, texel: impl Fn(u32, u32) -> [u8; 4]) -> wgpu::Texture {
         let usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
         let texture = texture(&rig.device, (width, height), 1, wgpu::TextureFormat::Rgba8Unorm, usage);
         let bytes: Vec<u8> = (0..height).flat_map(|y| (0..width).map(move |x| (x, y))).flat_map(|(x, y)| texel(x, y)).collect();
@@ -556,6 +590,31 @@ pub(crate) mod tests {
         let got = render(&rig, wgpu::TextureFormat::Rgba8Unorm, Output::PostMultiplied, &clear, (8, 8));
         assert_eq!(got.first(), Some(&[0, 0, 0, 255]), "a bar");
         assert_eq!(got.get(4 * 8 + 4), Some(&[0, 0, 0, 0]), "a clear picture");
+    }
+
+    /// The clear under the picture follows what the attach asked, and needs no device to say so: the
+    /// bar colour for an attach that did not ask to carry the composition's alpha, the default among
+    /// them, and fully transparent for one that did.
+    #[test]
+    fn the_clear_follows_what_the_attach_asked() {
+        assert_eq!(clear_color(PreviewAlpha::default()), BAR_COLOR, "the default of every attach clears the bars opaque black");
+        assert_eq!(clear_color(PreviewAlpha::Opaque), BAR_COLOR);
+        assert_eq!(clear_color(PreviewAlpha::Premultiplied), TRANSPARENT_COLOR);
+        assert_eq!(TRANSPARENT_COLOR, wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 });
+    }
+
+    /// A pass made with the ask draws its bars as the ask says and its picture the same either way:
+    /// the colour the pass was given is the one it clears to on a real device.
+    #[test]
+    fn a_pass_clears_its_bars_as_its_attach_asked() {
+        let rig = rig();
+        let source = frame(&rig, 8, 4, |_, _| [64, 32, 0, 128]);
+        for (alpha, bar) in [(PreviewAlpha::Opaque, [0, 0, 0, 255]), (PreviewAlpha::Premultiplied, [0, 0, 0, 0])] {
+            let blit = Blit::new_with_alpha(&rig.device, wgpu::TextureFormat::Rgba8Unorm, Output::Premultiplied, alpha).expect("the blit pass is made");
+            let got = render_with(&rig, &blit, wgpu::TextureFormat::Rgba8Unorm, &source, (8, 8));
+            assert_eq!(got.first(), Some(&bar), "{alpha:?}: the bar follows the ask");
+            assert_eq!(got.get(4 * 8 + 4), Some(&[64, 32, 0, 128]), "{alpha:?}: the picture is the frame's own bytes");
+        }
     }
 
     /// A frame of no pixels, and a target of no pixels, are answered, not drawn and not a panic.

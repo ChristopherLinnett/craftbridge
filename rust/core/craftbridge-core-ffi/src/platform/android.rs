@@ -10,7 +10,7 @@ use crate::engine::Engine;
 use crate::error::CraftError;
 use crate::platform::{Held, OnSurface, ids::IdTable};
 use craftbridge_core::engine::guarded;
-use craftbridge_core::{CraftError as CoreError, GpuDevice, Surface, SurfaceMaker};
+use craftbridge_core::{CraftError as CoreError, GpuDevice, PreviewAlpha, Surface, SurfaceMaker};
 use ndk::native_window::NativeWindow;
 use std::os::raw::c_void;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -150,11 +150,20 @@ pub(super) fn address(id: i64) -> Result<i64, CraftError> {
 }
 
 /// The attach `Engine::attach_window` makes on Android: take the window out of the table, and hand the
-/// engine the call that makes its surface on the engine's device.
+/// engine the call that makes its surface on the engine's device. This is an attach that did not ask
+/// to carry the composition's alpha.
 pub(super) async fn attach(engine: &Engine, id: i64) -> Result<(), CraftError> {
+    attach_with_alpha(engine, id, PreviewAlpha::default()).await
+}
+
+/// The attach `Engine::attach_window_with_alpha` makes: as [`attach`], and the surface is made with
+/// the ask, so its alpha mode is one the ask takes and the pass it draws frames with writes and clears
+/// as `alpha` asks (§17). A window whose surface offers no such mode is refused like any other the
+/// engine cannot make a preview of, and is back under its id.
+pub(super) async fn attach_with_alpha(engine: &Engine, id: i64, alpha: PreviewAlpha) -> Result<(), CraftError> {
     let window = WINDOWS.take(id).ok_or_else(|| CraftError::not_found(UNKNOWN_ID))?;
     let held = window.clone();
-    let make: SurfaceMaker = Box::new(move |gpu: &GpuDevice| Surface::new(Box::new(preview(gpu, held)?), gpu));
+    let make: SurfaceMaker = Box::new(move |gpu: &GpuDevice| Surface::new_with_alpha(Box::new(preview(gpu, held)?), gpu, alpha));
     match engine.attach_surface(make).await {
         Ok(()) => Ok(()),
         Err(error) => {
@@ -314,6 +323,20 @@ mod tests {
         assert_eq!(pollster::block_on(engine.attach_window(id)), Ok(()));
         assert_eq!(pollster::block_on(engine.present("\"translucent\"".into())), Ok(()), "the translucent frame was drawn and shown");
         assert_eq!(middle_pixel(&reader), [128, 0, 0, 255], "straight (255, 0, 0, 128) premultiplied, over black");
+        pollster::block_on(engine.detach_preview()).expect("the detach answers");
+    }
+
+    /// A window attached asking to carry the composition's alpha shows the frame's own alpha through
+    /// the `Inherit` surface: the same CPU frame that reaches an attach that asked nothing as half red
+    /// over black reaches this one premultiplied, the reader's buffer holding the frame's alpha.
+    #[test]
+    fn a_window_attached_asking_for_alpha_carries_it() {
+        let engine = engine_on_a_device();
+        let reader = window_reader();
+        let id = WINDOWS.insert(reader.window().expect("the reader hands out its window"));
+        assert_eq!(pollster::block_on(engine.attach_window_with_alpha(id, PreviewAlpha::Premultiplied)), Ok(()), "the ask attaches on the `Inherit` surface");
+        assert_eq!(pollster::block_on(engine.present("\"translucent\"".into())), Ok(()), "the translucent frame was drawn and shown");
+        assert_eq!(middle_pixel(&reader), [128, 0, 0, 128], "straight (255, 0, 0, 128) reaches the window premultiplied, alpha and all");
         pollster::block_on(engine.detach_preview()).expect("the detach answers");
     }
 

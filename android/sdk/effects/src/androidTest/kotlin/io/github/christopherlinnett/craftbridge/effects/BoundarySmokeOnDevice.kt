@@ -14,6 +14,7 @@ import io.github.christopherlinnett.craftbridge.ffi.core.CancelToken
 import io.github.christopherlinnett.craftbridge.ffi.core.CraftException
 import io.github.christopherlinnett.craftbridge.ffi.core.GpuChoice
 import io.github.christopherlinnett.craftbridge.ffi.core.PixelFormat
+import io.github.christopherlinnett.craftbridge.ffi.core.PreviewAlpha
 import io.github.christopherlinnett.craftbridge.ffi.core.ProgressListener
 import io.github.christopherlinnett.craftbridge.ffi.core.attachMetalLayer
 import io.github.christopherlinnett.craftbridge.ffi.core.craftErrorMessage
@@ -152,6 +153,17 @@ internal val boundarySmokeChecks: List<Case> =
                 require(
                     noWindow is CraftException.NotFound && noWindow.detail == NO_WINDOW_WORDS,
                 ) { "attaching an id of no window answered $noWindow, not the core's NotFound" }
+                // The attach that asks to carry the composition's alpha looks its window up as the plain
+                // one does, before the ask is read, so an id of no window answers the same whatever it asks.
+                val noAlphaWindow =
+                    runCatching {
+                        called.made("Engine.attach_window_with_alpha") {
+                            boundary.attachWindowWithAlpha(NO_SUCH_ID, PreviewAlpha.PREMULTIPLIED)
+                        }
+                    }.exceptionOrNull()
+                require(
+                    noAlphaWindow is CraftException.NotFound && noAlphaWindow.detail == NO_WINDOW_WORDS,
+                ) { "attaching an id of no window to carry alpha answered $noAlphaWindow, not the core's NotFound" }
                 val noAddress = runCatching { called.made("window_address") { windowAddress(NO_SUCH_ID) } }.exceptionOrNull()
                 require(
                     noAddress is CraftException.NotFound && noAddress.detail == NO_WINDOW_WORDS,

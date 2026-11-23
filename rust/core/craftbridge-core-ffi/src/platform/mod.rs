@@ -6,7 +6,7 @@
 //! app hands over, the JNI call that takes Android's window in, and the wgpu surfaces made from them.
 //! The id table that carries a window between that call and `attach_window` is plain code.
 //!
-//! Both attach calls, and the window's address, are exported from every build, each answering
+//! Every attach call, and the window's address, is exported from every build, each answering
 //! `Unsupported` where its platform's object does not exist. The Swift and Kotlin bindings are generated once, from the host's build of the
 //! library (§20), and each binding names every call that build exports: a call compiled for one platform
 //! alone would be missing from the bindings generated on another host, or named in bindings whose
@@ -16,6 +16,17 @@ use crate::engine::Engine;
 use crate::error::CraftError;
 use craftbridge_core::surface::Swapchain;
 use std::sync::Arc;
+
+/// How an attach asks the preview to write the composition's alpha. Exported as the core defines it,
+/// as the GPU choice is (see `gpu.rs`): the boundary keeps no second enum to keep in step with the first.
+pub use craftbridge_core::PreviewAlpha;
+
+// Exported as the core defines it, as the error and the GPU choice are (see `error.rs`, `gpu.rs`).
+#[uniffi::remote(Enum)]
+pub enum PreviewAlpha {
+    Opaque,
+    Premultiplied,
+}
 
 // The id table is the Android window's, but it is plain code: it stays compiled, and tested, everywhere.
 #[cfg(any(test, target_os = "android"))]
@@ -45,6 +56,10 @@ mod android {
     use crate::error::CraftError;
 
     pub(super) async fn attach(_: &Engine, _: i64) -> Result<(), CraftError> {
+        Err(super::absent("Android window"))
+    }
+
+    pub(super) async fn attach_with_alpha(_: &Engine, _: i64, _: super::PreviewAlpha) -> Result<(), CraftError> {
         Err(super::absent("Android window"))
     }
 
@@ -84,6 +99,21 @@ impl Engine {
     /// `Unsupported`.
     pub async fn attach_window(&self, id: i64) -> Result<(), CraftError> {
         android::attach(self, id).await
+    }
+
+    /// Attach the window the `id` names as the engine's preview surface, as [`Self::attach_window`]
+    /// does, and write the composition's alpha into it as `alpha` asks. `Premultiplied` writes the
+    /// frame's own alpha, premultiplied, and clears the letterbox bars transparent, so a compositor
+    /// that reads premultiplied alpha — a Flutter `Texture` over the app's own content — shows the
+    /// composition's transparency. It is written only through a mode of the surface that carries it,
+    /// `PreMultiplied` or else Android's `Inherit`: a surface that offers neither is refused as `Gpu`,
+    /// naming those modes, never drawn over black or in straight colour in its place, and the app
+    /// attaches it with `Opaque` instead. `Opaque` is exactly [`Self::attach_window`]: the frame over
+    /// black. The choice is made with the attach and kept with the surface until it is detached or
+    /// another is attached. Every refusal and platform answer of [`Self::attach_window`] is this
+    /// call's too: on a platform with no Android window it answers `Unsupported` whichever is asked.
+    pub async fn attach_window_with_alpha(&self, id: i64, alpha: PreviewAlpha) -> Result<(), CraftError> {
+        android::attach_with_alpha(self, id, alpha).await
     }
 }
 
@@ -162,5 +192,18 @@ mod tests {
         let answer = pollster::block_on(super::attach_metal_layer(engine.clone(), 8));
         assert_eq!(answer, Err(CraftError::unsupported("this platform has no CAMetalLayer to preview on")));
         assert_eq!(pollster::block_on(engine.request("echo".into(), "3".into())), Ok("3".to_string()));
+    }
+
+    /// The alpha's attach is in every build with it, answers `Unsupported` where there is no window
+    /// to attach whichever the ask, and carries the ask past a refusal: the engine answers on.
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn the_alpha_attach_where_there_are_no_windows_is_unsupported() {
+        use super::PreviewAlpha;
+        let engine = engine();
+        let absent = CraftError::unsupported("this platform has no Android window to preview on");
+        assert_eq!(pollster::block_on(engine.attach_window_with_alpha(1, PreviewAlpha::Opaque)), Err(absent.clone()), "the default asks nothing");
+        assert_eq!(pollster::block_on(engine.attach_window_with_alpha(1, PreviewAlpha::Premultiplied)), Err(absent), "and so does the one that asks");
+        assert_eq!(pollster::block_on(engine.request("echo".into(), "4".into())), Ok("4".to_string()));
     }
 }

@@ -742,6 +742,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_craftbridge_core_ffi_checksum_method_engine_attach_window(
     ): Int
+    external fun uniffi_craftbridge_core_ffi_checksum_method_engine_attach_window_with_alpha(
+    ): Int
     external fun uniffi_craftbridge_core_ffi_checksum_method_progresslistener_progress(
     ): Int
     external fun uniffi_craftbridge_core_ffi_checksum_constructor_canceltoken_new(
@@ -804,6 +806,8 @@ internal object UniffiLib {
     external fun uniffi_craftbridge_core_ffi_fn_method_engine_suspend_gpu(`ptr`: Long,
     ): Long
     external fun uniffi_craftbridge_core_ffi_fn_method_engine_attach_window(`ptr`: Long,`id`: Long,
+    ): Long
+    external fun uniffi_craftbridge_core_ffi_fn_method_engine_attach_window_with_alpha(`ptr`: Long,`id`: Long,`alpha`: RustBuffer.ByValue,
     ): Long
     external fun uniffi_craftbridge_core_ffi_fn_clone_progresslistener(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
@@ -992,6 +996,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_craftbridge_core_ffi_checksum_method_engine_attach_window() and 0xFFFF) != 60864) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_craftbridge_core_ffi_checksum_method_engine_attach_window_with_alpha() and 0xFFFF) != 2435) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_craftbridge_core_ffi_checksum_method_progresslistener_progress() and 0xFFFF) != 54350) {
@@ -1900,6 +1907,21 @@ public interface EngineInterface {
      */
     suspend fun `attachWindow`(`id`: kotlin.Long)
     
+    /**
+     * Attach the window the `id` names as the engine's preview surface, as [`Self::attach_window`]
+     * does, and write the composition's alpha into it as `alpha` asks. `Premultiplied` writes the
+     * frame's own alpha, premultiplied, and clears the letterbox bars transparent, so a compositor
+     * that reads premultiplied alpha — a Flutter `Texture` over the app's own content — shows the
+     * composition's transparency. It is written only through a mode of the surface that carries it,
+     * `PreMultiplied` or else Android's `Inherit`: a surface that offers neither is refused as `Gpu`,
+     * naming those modes, never drawn over black or in straight colour in its place, and the app
+     * attaches it with `Opaque` instead. `Opaque` is exactly [`Self::attach_window`]: the frame over
+     * black. The choice is made with the attach and kept with the surface until it is detached or
+     * another is attached. Every refusal and platform answer of [`Self::attach_window`] is this
+     * call's too: on a platform with no Android window it answers `Unsupported` whichever is asked.
+     */
+    suspend fun `attachWindowWithAlpha`(`id`: kotlin.Long, `alpha`: PreviewAlpha)
+    
     companion object
 }
 
@@ -2334,6 +2356,43 @@ open class Engine: Disposable, AutoCloseable, EngineInterface
                 uniffiHandle,
                 
         FfiConverterLong.lower(`id`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_craftbridge_core_ffi_rust_future_poll_void(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_craftbridge_core_ffi_rust_future_complete_void(future, continuation) },
+        { future -> UniffiLib.ffi_craftbridge_core_ffi_rust_future_free_void(future) },
+        // lift function
+        { },
+        
+        // Error FFI converter
+        CraftException.ErrorHandler,
+    )
+    }
+
+    
+    /**
+     * Attach the window the `id` names as the engine's preview surface, as [`Self::attach_window`]
+     * does, and write the composition's alpha into it as `alpha` asks. `Premultiplied` writes the
+     * frame's own alpha, premultiplied, and clears the letterbox bars transparent, so a compositor
+     * that reads premultiplied alpha — a Flutter `Texture` over the app's own content — shows the
+     * composition's transparency. It is written only through a mode of the surface that carries it,
+     * `PreMultiplied` or else Android's `Inherit`: a surface that offers neither is refused as `Gpu`,
+     * naming those modes, never drawn over black or in straight colour in its place, and the app
+     * attaches it with `Opaque` instead. `Opaque` is exactly [`Self::attach_window`]: the frame over
+     * black. The choice is made with the attach and kept with the surface until it is detached or
+     * another is attached. Every refusal and platform answer of [`Self::attach_window`] is this
+     * call's too: on a platform with no Android window it answers `Unsupported` whichever is asked.
+     */
+    @Throws(CraftException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `attachWindowWithAlpha`(`id`: kotlin.Long, `alpha`: PreviewAlpha) {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_craftbridge_core_ffi_fn_method_engine_attach_window_with_alpha(
+                uniffiHandle,
+                
+        FfiConverterLong.lower(`id`),
+        FfiConverterTypePreviewAlpha.lower(`alpha`),
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_craftbridge_core_ffi_rust_future_poll_void(future, callback, continuation) },
@@ -3310,6 +3369,40 @@ public object FfiConverterTypePixelFormat: FfiConverterRustBuffer<PixelFormat> {
     override fun allocationSize(value: PixelFormat) = 4UL
 
     override fun write(value: PixelFormat, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class PreviewAlpha {
+    
+    OPAQUE,
+    PREMULTIPLIED;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePreviewAlpha: FfiConverterRustBuffer<PreviewAlpha> {
+    override fun read(buf: ByteBuffer) = try {
+        PreviewAlpha.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: PreviewAlpha) = 4UL
+
+    override fun write(value: PreviewAlpha, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }

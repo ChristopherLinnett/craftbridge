@@ -11,7 +11,7 @@ use crate::Result;
 use crate::error::CraftError;
 use crate::frames::{FrameBytes, PixelFormat, check_raw_length, premultiply_rgba};
 use crate::gpu::{GpuDevice, validated};
-use crate::surface::{Choice, Presented, PreviewSurface, Swapchain};
+use crate::surface::{Choice, Presented, PreviewAlpha, PreviewSurface, Swapchain};
 
 /// The answer to a preview with no device to make its surface on: the engine is on the CPU, because
 /// the app chose so, no adapter answered, or the GPU was given up for the background.
@@ -87,10 +87,17 @@ impl Surface {
     /// Make the preview surface on the `gpu`'s device from a platform's swapchain: the one device
     /// the surface and every frame it shows are made on (§20). A CPU-only engine has no device,
     /// and answers why ([`NO_DEVICE`]); a surface the engine cannot configure answers at this call, not at the
-    /// first frame.
+    /// first frame. This is an attach that did not ask to carry the composition's alpha.
     pub fn new(swapchain: Box<dyn Swapchain + Send>, gpu: &GpuDevice) -> Result<Self> {
+        Self::new_with_alpha(swapchain, gpu, PreviewAlpha::default())
+    }
+
+    /// Make the preview surface as [`Surface::new`] does, for an attach that asked for `alpha`: the
+    /// surface keeps the ask in the pass it draws frames with, which writes and clears as the ask says
+    /// (§17). One that asked nothing is what [`Surface::new`] makes.
+    pub fn new_with_alpha(swapchain: Box<dyn Swapchain + Send>, gpu: &GpuDevice, alpha: PreviewAlpha) -> Result<Self> {
         let (adapter, device, queue) = gpu.parts().ok_or_else(|| CraftError::gpu(NO_DEVICE))?;
-        Ok(Self::from_parts(PreviewSurface::attach(swapchain, adapter, device)?, device.clone(), queue.clone()))
+        Ok(Self::from_parts(PreviewSurface::attach_with_alpha(swapchain, adapter, device, alpha)?, device.clone(), queue.clone()))
     }
 
     /// Take a surface the platform made, with the device its frames show with.
@@ -151,8 +158,10 @@ impl Surface {
 mod tests {
     use super::*;
     use crate::blit::Output;
-    use crate::blit::tests::render;
-    use crate::testing::{Scripted, rig};
+    use crate::blit::tests::{frame, render};
+    use crate::gpu::GpuChoice;
+    use crate::surface::tests::bar_and_picture;
+    use crate::testing::{Rig, Scripted, rig};
 
     /// A CPU frame the width and height say, every pixel the colour `rgba`.
     fn cpu_frame(width: u32, height: u32, rgba: [u8; 4]) -> FrameBytes {
@@ -247,5 +256,30 @@ mod tests {
         };
         assert_eq!(message, "the preview uploads straight RGBA frames");
         assert!(preview.upload.is_none(), "a refused frame writes nothing");
+    }
+
+    /// What a platform's maker asks of the composition's alpha reaches the surface it makes: made with
+    /// an ask, the surface draws as the attach with that ask draws, and made with none, as the default
+    /// does. The bars follow the ask on every platform, so the two asks draw apart wherever this runs
+    /// and a maker that dropped its ask would draw the other's.
+    #[test]
+    fn a_surface_is_made_with_what_its_maker_asked() {
+        // The maker is handed the whole device, so the frame is drawn and read back on that same one.
+        let gpu = GpuDevice::request(GpuChoice::Preferred);
+        let (adapter, device, queue) = gpu.parts().expect("the machine the tests run on answers a device");
+        let rig = Rig { adapter: adapter.clone(), device: device.clone(), queue: queue.clone() };
+        let source = frame(&rig, 8, 4, |_, _| [64, 32, 0, 128]);
+        let swapchain = || -> Box<dyn Swapchain + Send> { Box::new(Scripted::new((8, 8), [])) };
+        let attached = |alpha: PreviewAlpha| {
+            let surface = PreviewSurface::attach_with_alpha(swapchain(), adapter, device, alpha).expect("the scripted surface attaches");
+            bar_and_picture(&rig, surface, &source)
+        };
+        assert_ne!(attached(PreviewAlpha::Premultiplied), attached(PreviewAlpha::Opaque), "the bars tell the two asks apart");
+        for alpha in [PreviewAlpha::Premultiplied, PreviewAlpha::Opaque] {
+            let made = Surface::new_with_alpha(swapchain(), &gpu, alpha).expect("the scripted surface is made");
+            assert_eq!(bar_and_picture(&rig, made.surface, &source), attached(alpha), "{alpha:?}: the maker's ask is the attach's");
+        }
+        let quiet = Surface::new(swapchain(), &gpu).expect("the scripted surface is made");
+        assert_eq!(bar_and_picture(&rig, quiet.surface, &source), attached(PreviewAlpha::default()), "a maker that asks nothing makes the default");
     }
 }
