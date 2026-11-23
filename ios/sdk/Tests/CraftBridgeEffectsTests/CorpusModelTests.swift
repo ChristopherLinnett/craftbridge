@@ -3,6 +3,7 @@
 // the engine takes; and a pointer and a fraction mean what they do on the desktop.
 
 import CraftBridge
+import CraftBridgeEffectsConformance
 import Foundation
 import Testing
 

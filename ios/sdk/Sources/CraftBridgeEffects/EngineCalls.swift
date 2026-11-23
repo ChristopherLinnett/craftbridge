@@ -185,8 +185,17 @@ extension EffectsEngine {
     /// Starts `method` of the method table as a job that reports its progress to `progress`, as an export is
     /// started: every call of the table that reports progress is made through here, so each is started alike
     /// and handed to the engine's ``background`` controller, which keeps it out of suspension and cancels it
-    /// before the system stops the app. Package-wide so the conformance tests start the corpus's jobs here too.
-    package func job(
+    /// before the system stops the app. It is the generic door for such a method, as ``request(_:_:)`` is for
+    /// one that answers at once: an app prefers ``export(_:to:format:progress:extra:)`` and
+    /// `templates.render`, whose arguments name what the request takes, and a binding to another language,
+    /// which carries the method's name and its parameters as JSON, starts the method here. The conformance
+    /// tests start the corpus's jobs here too.
+    ///
+    /// - Throws: ``CraftError/InvalidParams(detail:)`` for parameters that hold NaN or an infinity, which JSON
+    ///   has no number for, and then nothing is started. What the engine refuses the method with is thrown
+    ///   by the job's ``ExportJob/result``: for a method that reports no progress, which ``request(_:_:)``
+    ///   answers and this door does not, that is ``CraftError/Unsupported(detail:)``.
+    public func job(
         _ method: String,
         _ params: JSONValue,
         progress: @escaping ProgressHandler = { _, _, _ in }
@@ -265,6 +274,20 @@ extension EffectsEngine {
     ///   no text can carry.
     public func recovery() throws -> Recovery {
         try handle.recovery()
+    }
+
+    /// Ends the engine: it stops once the calls it has accepted are answered, and every call made from here
+    /// on throws ``CraftError/Internal(detail:)``, whose words say the engine is closed, bar ``recovery()``,
+    /// which answers as it did before. An export still running is stopped as ``ExportJob/cancel()`` stops
+    /// one, at its next progress report, so its ``ExportJob/result`` throws ``CraftError/Cancelled``; the
+    /// preview's surface goes with the engine's GPU device, so a ``preview(_:into:at:)`` or an
+    /// ``endPreview()`` after it throws as the other calls do. The call answers once the engine's thread has
+    /// stopped, so an engine started after it over the same folders finds nothing of this one still running.
+    /// Shutting down twice is not an error. An app calls it when it is done with the engine.
+    ///
+    /// - Throws: ``CraftError/Internal(detail:)`` when the engine's session did not end cleanly.
+    public func shutDown() async throws {
+        try await handle.shutDown()
     }
 }
 

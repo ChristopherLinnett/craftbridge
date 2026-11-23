@@ -5,6 +5,7 @@
 
 import CraftBridge
 import CraftBridgeEffects
+import CraftBridgeEffectsConformance
 import CraftBridgeFFI
 import Foundation
 import TOMLDecoder
@@ -15,11 +16,6 @@ extension Corpus {
     /// file does not parse, which ``ConformanceTests/theCorpusParsesAndTheSwiftRunTakesEveryScenarioThePlugInRuns()``
     /// reports.
     static let pluginScenarios: [Scenario] = ((try? Corpus(file: file))?.scenarios ?? []).filter(\.sides.runsPlugin)
-}
-
-extension Scenario: CustomTestStringConvertible {
-    /// The id and the title, which the test log names the case by.
-    var testDescription: String { "\(id): \(title)" }
 }
 
 /// The name this suite's folders are made under and removed under together, so the making and the

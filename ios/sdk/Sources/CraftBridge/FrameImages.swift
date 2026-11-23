@@ -1,8 +1,18 @@
-// A rendered frame as the pictures an iOS app draws with.
+// A rendered frame, and the pictures an iOS app draws with it. The frame's types are UniFFI's own, declared in
+// the bindings module, which is no product: the names here are the ones a package outside this one writes
+// them by, in a declaration of its own as well as where the compiler infers them.
 
 import CoreGraphics
 import CraftBridgeFFI
 import Foundation
+
+/// A rendered frame as an engine's `frame` call answers it: the size it was rendered at, in pixels, the
+/// layout its bytes are in, and the bytes.
+public typealias FrameBytes = CraftBridgeFFI.FrameBytes
+
+/// The layout a `frame` call is asked for and answers its bytes in: a PNG file's bytes, or rows of 8-bit
+/// pixels from the top row down with no padding, as straight RGBA or as premultiplied BGRA.
+public typealias PixelFormat = CraftBridgeFFI.PixelFormat
 
 extension FrameBytes {
     /// The bytes of one pixel of a ``PixelFormat/bgra8Premultiplied`` frame: blue, green, red, alpha.

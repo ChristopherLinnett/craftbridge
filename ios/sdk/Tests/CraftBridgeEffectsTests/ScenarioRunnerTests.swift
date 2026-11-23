@@ -5,6 +5,7 @@
 
 import CraftBridge
 import CraftBridgeEffects
+import CraftBridgeEffectsConformance
 import Foundation
 import ImageIO
 import Testing
@@ -45,6 +46,32 @@ private let scenarioFolders = runFolder(scenarioFoldersName)
         }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         return folder
+    }
+
+    /// The plug-in's own calls read no fixture that names its container, the oracle's command line being
+    /// what reads T17's, so no scenario's outcome says whether one was placed with the folder written in.
+    @Test func aFixtureThatNamesItsContainerIsPlacedWithTheFoldersPathWhereItSaysSo() throws {
+        let staged = try scenario(
+            calls: info,
+            """
+            [[scenario.fixture]]
+            from = "fixtures/sam-values.json"
+            to = "named/values.json"
+            names_container = true
+            [[scenario.fixture]]
+            from = "fixtures/sam-values.json"
+            to = "plain/values.json"
+
+            """
+        )
+        let folder = try folder(holding: [:])
+        for fixture in staged.fixtures { try fixture.place(in: folder) }
+        let named = try String(contentsOf: folder.appending(path: "named/values.json"), encoding: .utf8)
+        let plain = try String(contentsOf: folder.appending(path: "plain/values.json"), encoding: .utf8)
+        #expect(named.contains("\"\(folder.path(percentEncoded: false))/sam.png\""), "\(named)")
+        #expect(!named.contains(containerMarker), "\(named)")
+        // A fixture that names no container is copied as it is.
+        #expect(plain.contains("\"\(containerMarker)/sam.png\""), "\(plain)")
     }
 
     @Test func anExpectationThatDoesNotHoldFailsAndSaysWhereAndWhatWasFound() throws {

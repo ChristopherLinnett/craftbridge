@@ -7,6 +7,7 @@
 
 import CraftBridge
 import CraftBridgeEffects
+import CraftBridgeEffectsConformance
 import CraftBridgeFFI
 import Foundation
 import Testing

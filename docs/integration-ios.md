@@ -30,6 +30,16 @@ let engine = try await EffectsEngine.start(folders: .appDefault, gpu: .preferred
 
 `Folders.appDefault` is the layout the SDK recommends: settings, installed models and staged copies of imported media under `Library/Application Support/CraftBridge`, and what can be thrown away under `Library/Caches/CraftBridge`, which iOS may empty. `gpu: .preferred` asks for the GPU, and `.cpuOnly` for none. The call throws a `CraftError` rather than crashing on anything wrong with the folders — a full disk is `CraftError.Io`.
 
+When the app is done with the engine, `shutDown` ends it. Postcard Studio keeps its one engine for as long as it runs, so the call is one of the snippets:
+
+```swift
+func end(_ engine: EffectsEngine) async throws {
+    try await engine.shutDown()
+}
+```
+
+It answers once the engine has stopped. An export still running is stopped first, as `cancel()` stops one, and its `result` throws `CraftError.Cancelled`; the preview goes with the engine; and every call made after it throws `CraftError.Internal`, whose words say the engine is closed, bar `recovery()`, which still tells what the start cleaned up. Shutting down twice is not an error.
+
 ### Plug-ins and extra fonts
 
 WebAssembly plug-ins stay switched off until the app names the folder that holds them, so an app decides whether third-party effects run in it:
@@ -158,6 +168,71 @@ func addTitleAndCaption(
 ```
 
 `run` reads every step before it runs the first, so a malformed step anywhere runs none of them; it then runs the steps in order and stops at the first that fails, throwing `CraftError.CommandFailed` naming that step, while the steps before it keep what they did. Values in and out are `JSONValue`, whose cases mirror JSON. The [command reference](generated/commands.md) lists every command with its keys, types and requiredness.
+
+## The generic door, for a binding to another language
+
+The typed calls are what an app uses: `exec`, `run`, `export`, `frame` and the rest name what each request takes, and the compiler checks what the app hands them. Under them sits a generic door of three calls on `EffectsEngine`, which a Swift app has no need of. It is for a binding to another language — a Flutter plugin, for one — which carries every engine call as a method's name with its parameters as JSON, so that a method the engine gains reaches the other language with no new Swift:
+
+- `request(_:_:)` sends one request of the engine's method table and answers its reply;
+- `job(_:_:progress:)` starts a method that reports progress, as `export` does, and answers its `ExportJob` at once;
+- `frame(params:format:)` renders one frame from the `frame` request's own keys and answers its bytes.
+
+The engine answers each method at one of the three alone, so a binding sends a method through the door that answers it: `request` refuses a method that reports progress, and `frame`, with `CraftError.Unsupported`, whose words name the methods it does answer, and a job of a method that reports no progress ends in the same refusal. A binding keeps no list of methods for that: each call reaches it through the entry its caller chose by what it wants back, a reply, a job to watch and stop, or a frame, and a method sent through another door, like a method the engine does not have, is refused before anything runs.
+
+Parameters and replies are `JSONValue`, which is `Codable`, so a binding reads the text it is handed with `JSONDecoder` and writes a reply back with `JSONEncoder`:
+
+```swift
+func parameters(from text: String) throws -> JSONValue {
+    try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
+}
+```
+
+```swift
+func text(of reply: JSONValue) throws -> String {
+    String(decoding: try JSONEncoder().encode(reply), as: UTF8.self)
+}
+```
+
+A call the binding carries is then one line through the door:
+
+```swift
+func forward(_ method: String, _ json: String, to engine: EffectsEngine) async throws -> String {
+    try text(of: try await engine.request(method, try parameters(from: json)))
+}
+```
+
+A method that reports progress goes through `job`, which runs it under the engine's own background task as `export` runs ([background-exports.md](background-exports.md)), and the job's `result` is the method's reply:
+
+```swift
+func forward(
+    _ method: String,
+    _ json: String,
+    to engine: EffectsEngine,
+    progress: @escaping ProgressHandler
+) async throws -> String {
+    let job = try await engine.job(method, try parameters(from: json), progress: progress)
+    return try text(of: try await job.result)
+}
+```
+
+and a frame through `frame(params:format:)`, here as the bytes of a PNG:
+
+```swift
+func forwardFrame(_ json: String, to engine: EffectsEngine) async throws -> Data {
+    try await engine.frame(params: try parameters(from: json), format: .png).data
+}
+```
+
+A binding that draws the frame itself asks for rows of pixels and keeps what the door answers. The frame's type and its layout's are named from `CraftBridge`, as every type the engine's calls take or answer is — `PixelFormat`, `FrameBytes`, `GpuChoice`, and `Recovery` with its `RecoveryNote` — so a binding writes them in declarations of its own, with the two products imported and nothing else:
+
+```swift
+func forwardPixels(_ json: String, to engine: EffectsEngine) async throws -> FrameBytes {
+    let layout: PixelFormat = .bgra8Premultiplied
+    return try await engine.frame(params: try parameters(from: json), format: layout)
+}
+```
+
+Each of the three throws the `CraftError` the typed call over it throws, and answers what that typed call answers for the same request. A `JSONValue` holds every number as a `Double`, JSON's one number type as Swift reads it, so a whole number goes back as text without a fraction, and one past 2^53 is not exact; and it holds an object's fields in a dictionary, so a reply's keys go back as text in no set order. On Android the same door is the core engine's, `EffectsEngine.core`: `request` and `requestWithProgress`, which take and answer JSON text, and `frame(params, format)`.
 
 ## Fonts
 

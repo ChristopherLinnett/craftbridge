@@ -4,6 +4,7 @@
 // record holds.
 
 import CraftBridge
+import CraftBridgeEffectsConformance
 import Foundation
 
 /// What a run measures and prints, as `baseline.toml` defines it.
