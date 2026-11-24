@@ -18,6 +18,7 @@ use effectcraft_engine::Session;
 use effectcraft_engine::project::render_queue::RenderStatus;
 use serde_json::Value;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use crate::methods::{RENDER, execute, execute_listed, lacks_capability, object};
 use crate::outputs;
@@ -28,6 +29,16 @@ pub(crate) type Progress<'a> = &'a mut dyn FnMut(u64, u64, Option<f64>) -> bool;
 
 /// The core's lister of the files an export may write: each call adds to the export's list.
 pub(crate) type ListOutputs<'a> = &'a mut dyn FnMut(&[PathBuf]) -> Result<()>;
+
+/// How long a wait for a stopped job sleeps between its looks: a stopped job reports at its next frame,
+/// which is soon, so this is short.
+const WIND_DOWN: Duration = Duration::from_millis(2);
+
+/// How long a panic's unwinding waits for the job it stopped. A job that never reaches its next look at
+/// the stop would otherwise hold the engine's thread for ever, turning one caught panic into a hang of
+/// every later call. Past this the panic unwinds with the job told to stop: when it does look, the
+/// exporter removes the files it opened and the fill the frames it wrote.
+const PANIC_WAIT: Duration = Duration::from_secs(if cfg!(test) { 2 } else { 10 });
 
 /// How a render or a fill ended as the watch saw it.
 #[derive(Debug, PartialEq, Eq)]
@@ -46,13 +57,16 @@ pub(crate) fn export_request(params: &Value) -> Option<&Value> {
 /// `export`: queue the request (or take the project's own queue), list every file the render may
 /// write with `list_outputs`, render it in the background, report
 /// its progress every [`PROGRESS_INTERVAL`] and answer `{rendered: [{comp, output, seconds}]}`, or
-/// stop the render as soon as `on_progress` answers `false`.
+/// stop the render as soon as `on_progress` answers `false`. A queue's failure and its stop alike list
+/// again the files of the items it finished, so the core keeps them.
 ///
 /// The progress is the current item's frames, as the command line's progress lines give it: a
 /// request renders one item, and a queue's items each count their own frames.
 pub(crate) fn export(backend: &mut Backend, params: &Value, on_progress: Progress<'_>, list_outputs: ListOutputs<'_>) -> Result<Value> {
     let request = RenderRequest::from_params(params)?;
-    if let Some(queued) = request.to_queue_params()? {
+    let queued = request.to_queue_params()?;
+    let single = queued.is_some();
+    if let Some(queued) = queued {
         // The request is the only item the render may write, so every item the project had already
         // ticked for rendering is taken off first, as the command line's `render` takes them off.
         for index in 1..=session(backend)?.project.render_queue.len() {
@@ -81,13 +95,67 @@ pub(crate) fn export(backend: &mut Backend, params: &Value, on_progress: Progres
             _ => refused,
         });
     }
-    let ended = watch(session(backend)?, on_progress);
+    let ended = watching(session(backend)?, stop_and_wait, |session| watch(session, on_progress));
     let session = session(backend)?;
     session.poll_render();
-    if ended == Ended::Stopped {
-        return Err(CraftError::Cancelled);
+    let answer = if ended == Ended::Stopped { Err(CraftError::Cancelled) } else { report(session, &attempted) };
+    // A single export has no finished part to keep: a stop that lands as its one item finishes, which
+    // the engine then reports `Done`, leaves nothing like any other stop.
+    if answer.is_err() && !single {
+        // A queue renders on past a failed item and stops at a cancel, and its status says which items
+        // finished and where, so their files stay. Should this listing be refused they are deleted with
+        // the rest, and the caller still hears the render's own end, which is what it needs.
+        let _ = outputs::list_finished(session, &attempted, list_outputs);
     }
-    report(session, &attempted)
+    answer
+}
+
+/// Run `watch` over a job running on `session`, and `stop` it should `watch` panic, waiting for it to end
+/// for at most [`PANIC_WAIT`]. The answer to a panic deletes what the export listed, so a job left
+/// running would write its next files after that, where no list names them.
+pub(crate) fn watching<T>(session: &mut Session, stop: impl FnMut(&mut Session, Option<Duration>), watch: impl FnOnce(&mut Session) -> T) -> T {
+    struct StopOnPanic<'s, F: FnMut(&mut Session, Option<Duration>)> {
+        session: &'s mut Session,
+        stop: F,
+    }
+    impl<F: FnMut(&mut Session, Option<Duration>)> Drop for StopOnPanic<'_, F> {
+        fn drop(&mut self) {
+            if std::thread::panicking() {
+                // A stop that panics as well while this one unwinds would abort the process, so it is caught
+                // here and what it panicked with is leaked rather than dropped, since that is app code too.
+                if let Err(again) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (self.stop)(self.session, Some(PANIC_WAIT)))) {
+                    std::mem::forget(again);
+                }
+            }
+        }
+    }
+    let guard = StopOnPanic { session, stop };
+    watch(&mut *guard.session)
+}
+
+/// Look until `ended` answers yes, for at most `limit` when there is one.
+pub(crate) fn wait_for_end(limit: Option<Duration>, mut ended: impl FnMut() -> bool) {
+    let started = Instant::now();
+    while !ended() {
+        if limit.is_some_and(|limit| started.elapsed() >= limit) {
+            return;
+        }
+        std::thread::sleep(WIND_DOWN);
+    }
+}
+
+/// Stop the render and wait for its thread to end, for at most `limit` when there is one: the exporter
+/// removes the files it opened only when it sees the stop, and holds them open until then.
+fn stop_and_wait(session: &mut Session, limit: Option<Duration>) {
+    session.stop_render();
+    let Some(job) = session.render_job.as_mut() else { return };
+    if limit.is_some() {
+        wait_for_end(limit, || job.is_finished());
+        if !job.is_finished() {
+            return;
+        }
+    }
+    job.wait();
 }
 
 /// The in-process session behind the backend, which the plugin always builds headless.
@@ -104,10 +172,7 @@ fn watch(session: &mut Session, on_progress: Progress<'_>) -> Ended {
         session.poll_render();
         let Some(state) = session.render_progress().filter(|_| session.is_rendering()) else { return Ended::Ran };
         if !on_progress(state.done, state.total, state.remaining) {
-            session.stop_render();
-            if let Some(job) = session.render_job.as_mut() {
-                job.wait();
-            }
+            stop_and_wait(session, None);
             return Ended::Stopped;
         }
         std::thread::sleep(PROGRESS_INTERVAL);
@@ -370,8 +435,8 @@ mod tests {
     /// starts, from the job the render makes, which exists only once the render has begun: so the
     /// listing comes first, and every file of the export is listed while the memory has not yet been
     /// asked. The refusal is the export's answer, the exporter that writes is never reached, and
-    /// nothing is written; the core clears the entries of an export that fails as it clears every
-    /// export's, so nothing of it stays listed either.
+    /// nothing is written; the core ends the entries of an export that fails, so nothing of it stays
+    /// listed either.
     #[test]
     fn an_export_the_memory_cannot_hold_is_listed_before_it_is_refused_and_writes_nothing() {
         let mut rig = rig_on(1, |slow| Arc::new(crate::exporter::PooledExporter::over(Arc::new(slow), too_little_memory)));
@@ -417,6 +482,174 @@ mod tests {
         assert!(!Path::new(&output).exists(), "a stopped render leaves no output");
         assert!(!rig.backend.session().expect("a session").is_rendering(), "the render's thread has wound down on return");
         assert_eq!(queue(&mut rig), [(1, true, "User Stopped".to_string())]);
+    }
+
+    /// A panic in the watch, as one in a post-render import that `poll_render` runs on this thread,
+    /// stops the render and waits for it: the answer to a panic deletes what the export listed, so a
+    /// render left running would write its next files after that, where no list names them.
+    #[test]
+    fn a_panic_in_the_watch_stops_the_render_before_the_call_unwinds() {
+        let mut rig = rig(1000);
+        let written = rig.written.clone();
+        let output = out(&rig, "p.mp4");
+        let request = serde_json::json!({"output": output, "format": "h264"});
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            export(
+                &mut rig.backend,
+                &request,
+                &mut |_, _, _| {
+                    assert!(!written.load(Ordering::SeqCst), "boom in the beat");
+                    true
+                },
+                &mut unlisted,
+            )
+        }));
+        assert!(unwound.is_err(), "the panic did not reach the call");
+        assert!(!rig.backend.session().expect("a session").is_rendering(), "the render ran on after the call had unwound");
+        assert!(!Path::new(&output).exists(), "the stopped render left its file");
+    }
+
+    /// An exporter that writes its whole file at once, then holds until `let_go`, asked with the engine's
+    /// progress call, answers yes, so a test holds it at the point it names on any machine. Let go, it
+    /// looks at the stop once more when `looks` says so; otherwise it is past its last look and finishes.
+    struct Held {
+        let_go: Box<dyn Fn(&mut dyn FnMut(u64, u64) -> bool) -> bool + Send + Sync>,
+        looks: bool,
+    }
+
+    impl Held {
+        /// Past its last look at the stop: it waits for the stop, then finishes whatever it was told.
+        fn finishing() -> Self {
+            Self { let_go: Box::new(|progress| !progress(1, 2)), looks: false }
+        }
+
+        /// Stuck on a frame: it takes no look at the stop until `released` is set.
+        fn stuck(released: Arc<AtomicBool>) -> Self {
+            Self { let_go: Box::new(move |_| released.load(Ordering::SeqCst)), looks: true }
+        }
+    }
+
+    impl Exporter for Held {
+        fn formats(&self) -> Vec<OutputFormat> {
+            vec![OutputFormat::H264]
+        }
+        fn export(&self, job: &ExportJob, progress: &mut dyn FnMut(u64, u64) -> bool) -> std::result::Result<ExportResult, String> {
+            std::fs::write(job.path, b"the movie").map_err(|error| error.to_string())?;
+            let _ = progress(1, 2);
+            let held = Instant::now();
+            while !(self.let_go)(progress) && held.elapsed() < Duration::from_secs(30) {
+                std::thread::sleep(FRAME);
+            }
+            if self.looks && !progress(2, 2) {
+                let _ = std::fs::remove_file(job.path);
+                return Err(CANCELLED.into());
+            }
+            Ok(ExportResult { path: job.path.to_string(), frames: 2, ..Default::default() })
+        }
+    }
+
+    /// A rig whose queue holds an item at each of `outputs`, over an exporter that finishes each item after
+    /// its last look at the stop.
+    fn finishing_queue(outputs: &[&str]) -> (Rig, Vec<String>) {
+        let mut rig = rig_on(1, |_| Arc::new(Held::finishing()));
+        let outputs: Vec<String> = outputs.iter().map(|name| out(&rig, name)).collect();
+        for output in &outputs {
+            rig.backend.exec("renderQueue.add", serde_json::json!({"output": output, "format": "h264"})).expect("the item is queued");
+        }
+        (rig, outputs)
+    }
+
+    /// Export `request`, stopped once its first frame is reported, after the exporter's last look at the
+    /// stop, and answer what the export listed, in order, the engine's own word on its items and how many
+    /// times it listed `output`.
+    fn stopped_as_it_finishes(rig: &mut Rig, request: &Value) -> (Vec<PathBuf>, Vec<String>) {
+        let mut listed = Vec::new();
+        let stopped = export(&mut rig.backend, request, &mut |done, _, _| done == 0, &mut |paths: &[PathBuf]| {
+            listed.extend_from_slice(paths);
+            Ok(())
+        });
+        assert_eq!(stopped, Err(CraftError::Cancelled));
+        (listed, queue(rig).into_iter().map(|item| item.2).collect())
+    }
+
+    /// How many times `listed` names `output`.
+    fn listings(listed: &[PathBuf], output: &str) -> usize {
+        listed.iter().filter(|path| path.as_path() == Path::new(output)).count()
+    }
+
+    /// A single export stopped just as its render finishes is told `Cancelled`, and leaves nothing, though
+    /// the engine reports its one item `Done`: its file is not listed again as finished.
+    #[test]
+    fn a_single_export_stopped_as_it_finishes_keeps_nothing() {
+        let (mut rig, _) = finishing_queue(&[]);
+        let output = out(&rig, "single.mp4");
+        let (listed, statuses) = stopped_as_it_finishes(&mut rig, &serde_json::json!({"output": output, "format": "h264"}));
+        assert_eq!(statuses, ["Done"], "the stop landed too early to test this");
+        assert_eq!(listings(&listed, &output), 1, "a cancelled single export kept its file");
+    }
+
+    /// A queue stopped just as its last item finishes keeps that item, which it reports `Done`.
+    #[test]
+    fn a_queue_stopped_as_its_last_item_finishes_keeps_it() {
+        let (mut rig, outputs) = finishing_queue(&["last.mp4"]);
+        let (listed, statuses) = stopped_as_it_finishes(&mut rig, &serde_json::json!({"queue": true}));
+        assert_eq!(statuses, ["Done"], "the stop landed too early to test this");
+        assert_eq!(listings(&listed, &outputs[0]), 2, "the finished item was not listed again");
+    }
+
+    /// A queue stopped between two items, as the first finishes, keeps the first and never starts the
+    /// second.
+    #[test]
+    fn a_queue_stopped_between_two_items_keeps_the_first_and_starts_no_other() {
+        let (mut rig, outputs) = finishing_queue(&["first.mp4", "second.mp4"]);
+        let (listed, statuses) = stopped_as_it_finishes(&mut rig, &serde_json::json!({"queue": true}));
+        assert_eq!(statuses, ["Done", "User Stopped"]);
+        assert_eq!((listings(&listed, &outputs[0]), listings(&listed, &outputs[1])), (2, 1), "only the finished item is listed again");
+        assert!(!Path::new(&outputs[1]).exists(), "the item the stop kept from starting wrote a file");
+    }
+
+    /// A panic in the watch unwinds though the render it stopped never ends, and the render, told to
+    /// stop, takes its file away when it next looks.
+    #[test]
+    fn a_panic_unwinds_though_the_render_does_not_end() {
+        let released = Arc::new(AtomicBool::new(false));
+        let stuck = Held::stuck(released.clone());
+        let mut rig = rig_on(1, |_| Arc::new(stuck));
+        let output = out(&rig, "stuck.mp4");
+        let request = serde_json::json!({"output": output, "format": "h264"});
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            export(
+                &mut rig.backend,
+                &request,
+                &mut |done, _, _| {
+                    assert_eq!(done, 0, "boom in the beat");
+                    true
+                },
+                &mut unlisted,
+            )
+        }));
+        assert!(unwound.is_err(), "the panic did not reach the call");
+        let session = rig.backend.session().expect("a session");
+        assert!(session.is_rendering(), "the call waited for a render that does not end");
+        released.store(true, Ordering::SeqCst);
+        wait_for_end(Some(Duration::from_secs(30)), || {
+            session.poll_render();
+            !session.is_rendering()
+        });
+        assert!(!session.is_rendering(), "the render never saw its stop");
+        assert!(!Path::new(&output).exists(), "the stopped render left its file");
+    }
+
+    /// A stop that panics as well, while the call unwinds from a panic in the watch, must not end the
+    /// process: the first panic still reaches the caller.
+    #[test]
+    fn a_stop_that_panics_again_leaves_the_first_panic_to_unwind() {
+        let mut session = Session::default();
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            watching(&mut session, |_, _| panic!("boom in the stop"), |_| -> () { panic!("boom in the watch") })
+        }));
+        let said = unwound.err().and_then(|payload| payload.downcast_ref::<&str>().map(|text| (*text).to_string()));
+        assert_eq!(said.as_deref(), Some("boom in the watch"));
     }
 
     #[test]

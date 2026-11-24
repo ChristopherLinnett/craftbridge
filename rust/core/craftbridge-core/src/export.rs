@@ -78,7 +78,7 @@ pub(crate) struct EngineSide<'a> {
 /// Run one export on the engine thread (plan §16 behaviour 3, plan §19's sequence): take the
 /// `info` answer the calls during it will be given, run the app's own loop behind the never-crash
 /// guard with the engine's beat as its progress closure and the journal's list as its lister, delete
-/// what it listed when it is answered `Cancelled`, clear it, and answer the caller.
+/// what it listed unless it succeeded, clear it, and answer the caller.
 pub(crate) fn run_export(app: &mut dyn CraftApp, call: ExportCall, side: EngineSide<'_>) {
     let ExportCall { method, params, cancel, mut progress, answer } = call;
     // A stop is asked by the caller's token, or by a close, which stops every export (plan §16
@@ -91,7 +91,7 @@ pub(crate) fn run_export(app: &mut dyn CraftApp, call: ExportCall, side: EngineS
     }
     let info = guarded(|| app.request(INFO_METHOD, Value::Null)).flatten();
     // What the app lists while it runs, so a kill before it ends leaves files the next start deletes;
-    // the list is cleared below however the call ends, a panic included.
+    // the list is settled below however the call ends, a panic included.
     let mut listed = side.journal.map(Journal::pending);
     let mut stopped = false;
     let ran = guarded(|| {
@@ -110,8 +110,14 @@ pub(crate) fn run_export(app: &mut dyn CraftApp, call: ExportCall, side: EngineS
         )
     });
     let outcome = match ran {
-        // A panic is answered as one in any call is: `Internal`, with the session kept.
-        Err(panicked) => Err(panicked),
+        // A panic is answered as one in any call is: `Internal`, with the session kept. After one
+        // nothing the app said of its files is trusted, so every file it listed goes.
+        Err(panicked) => {
+            if let Some(listed) = listed.as_mut() {
+                listed.distrust_finished();
+            }
+            Err(panicked)
+        }
         // Once the app was told to stop, the caller hears `Cancelled` whatever the app answered:
         // the caller asked to stop and the work stopped (`CraftApp::request_with_progress`).
         Ok(_) if stopped => Err(CraftError::Cancelled),
@@ -123,18 +129,23 @@ pub(crate) fn run_export(app: &mut dyn CraftApp, call: ExportCall, side: EngineS
     });
 }
 
-/// Settle the export's entries now it has ended, whatever its outcome. A `Cancelled` answer first
-/// deletes what the call listed, so the caller that was told no file was made finds none; a file the
-/// disk will not let go of is answered in its place, naming it. A success whose entries cannot be
-/// cleared is answered as the failure to clear: the entries would make the next start delete the
-/// finished files, and the app must hear that rather than a success.
+/// Settle the export's entries now it has ended, whatever its outcome. A success keeps its files and
+/// clears its entries; one whose entries cannot be cleared is answered as the failure to clear, since
+/// the entries would make the next start delete the finished files and the app must hear that rather
+/// than a success. Every other end, a `Cancelled`, a failure the app answered and a panic the guard
+/// caught alike, first deletes what the call listed, but for the files it listed again as finished,
+/// which a panic never keeps, since nothing the app held is trusted after one, so a file at an output
+/// path always means a finished render. The caller hears the export's own
+/// error unchanged. A file the disk will not let
+/// go of stays listed for the next start and is said as well: after the error's own message, or in
+/// place of `Cancelled`, which carries none ([`CraftError::and_left`]).
 fn cleared(outcome: Result<Value>, listed: Pending) -> Result<Value> {
-    if matches!(outcome, Err(CraftError::Cancelled)) {
-        return listed.remove().and(outcome);
-    }
-    match (listed.clear(), outcome) {
-        (Err(failure), Ok(_)) => Err(failure),
-        (_, outcome) => outcome,
+    match outcome {
+        Ok(value) => listed.clear().map(|()| value),
+        Err(ended) => match listed.remove() {
+            Ok(()) => Err(ended),
+            Err(left) => Err(ended.and_left(&left)),
+        },
     }
 }
 

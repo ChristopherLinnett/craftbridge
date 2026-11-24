@@ -141,7 +141,7 @@ static func cancel() {
 }
 ```
 
-A stopped export leaves no file: the engine deletes what it had written before `result` throws `CraftError.Cancelled`. A failed export may leave what it wrote, and one the system kills leaves its partial movie until the engine's next `start` removes it ([background-exports.md](background-exports.md)), so the movie at the output is whole once `result` has answered, and only then.
+An export's output is a temporary path of the app's, in its own storage: render there, and once `result` has answered, do something with the file, usually move it to the photo library. A stopped or failed export leaves no file of the item it stopped: the engine deletes what it had written before `result` throws `CraftError.Cancelled`, or the export's own error, unchanged. A file the disk would not let go of is named after that error's message, or by a `CraftError.Io` in place of `Cancelled`, and the engine's next `start` deletes it. One the system kills leaves its partial movie until the engine's next `start` removes it ([background-exports.md](background-exports.md)). So a file at the output means a finished render. Nothing protects a file that was already there: the export replaces it, and a failure after it began writing there deletes it, while a file it never reached stays as it was. A queue that fails at one item still renders the others, and a queue that is stopped has finished the items before the one it stopped: either keeps the files of those that finished, and `renderQueue.list` gives each item's `status` and, for a `Done` one, its `last_output`. A single export that is stopped leaves no file, and an export that panics keeps none of its files.
 
 ## Commands without a wrapper
 
