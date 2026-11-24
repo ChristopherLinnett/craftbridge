@@ -8,11 +8,12 @@
 //! is listed harmlessly (the journal deletes only what an export changed), and one it does write and
 //! the list lacks is left behind by a kill, so every rule here leans to listing more.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use craftbridge_core::Result;
 use effectcraft_engine::Session;
-use effectcraft_engine::project::render_queue::{OutputFormat, OutputModule, RenderQueueItem, log_path, sequence_path};
+use effectcraft_engine::project::render_queue::{OutputFormat, OutputModule, RenderQueueItem, RenderStatus, log_path, sequence_path};
 use effectcraft_engine::render_queue::output_bits;
 
 /// How many paths go to the journal in one listing. Each listing rewrites the journal, so a render of
@@ -23,8 +24,43 @@ const CHUNK: usize = 8192;
 /// Hand `list` every file the next render of the queued items may write, in chunks, and stop at the
 /// first refusal `list` answers.
 pub(crate) fn list_queued(session: &Session, list: &mut dyn FnMut(&[PathBuf]) -> Result<()>) -> Result<()> {
-    let formats = session.exporter.as_ref().map(|exporter| exporter.formats()).unwrap_or_default();
-    list_in_chunks(queued_files(session, &formats).map(PathBuf::from), list)
+    list_items(session, RenderQueueItem::is_queued, |_| true, list)
+}
+
+/// Hand `list` again every file of each item of `attempted` the render finished, which says those files
+/// are finished: the queue's own status tells the caller which items they are, so they stay when a
+/// later item fails the export and when the export is stopped. A render log is named from its output's
+/// stem, so items of one stem share one, which the render's refusal of two outputs on one file does not
+/// read: a log a failed item also names may hold that failure, so it is no finished file.
+pub(crate) fn list_finished(session: &Session, attempted: &[u64], list: &mut dyn FnMut(&[PathBuf]) -> Result<()>) -> Result<()> {
+    let formats = formats_of(session);
+    let failed = |item: &&RenderQueueItem| attempted.contains(&item.id) && matches!(item.status, RenderStatus::Failed(_));
+    let logs: HashSet<String> = session
+        .project
+        .render_queue
+        .iter()
+        .filter(failed)
+        .filter_map(|item| outputs_of(session, item, &formats))
+        .flatten()
+        .map(|(_, path)| log_path(&path))
+        .collect();
+    list_items(session, |item| attempted.contains(&item.id) && matches!(item.status, RenderStatus::Done), |file| !logs.contains(file), list)
+}
+
+/// The formats the session's exporter writes.
+fn formats_of(session: &Session) -> Vec<OutputFormat> {
+    session.exporter.as_ref().map(|exporter| exporter.formats()).unwrap_or_default()
+}
+
+/// Hand `list` every file `keep` takes of the items `wanted` takes.
+fn list_items(
+    session: &Session,
+    wanted: impl Fn(&RenderQueueItem) -> bool,
+    keep: impl Fn(&str) -> bool,
+    list: &mut dyn FnMut(&[PathBuf]) -> Result<()>,
+) -> Result<()> {
+    let formats = formats_of(session);
+    list_in_chunks(files_of_items(session, &formats, wanted).filter(|file| keep(file)).map(PathBuf::from), list)
 }
 
 /// Hand `list` each of `paths`, [`CHUNK`] at a time, and stop at the first refusal `list` answers: the
@@ -41,14 +77,14 @@ pub(crate) fn list_in_chunks(paths: impl Iterator<Item = PathBuf>, list: &mut dy
     if chunk.is_empty() { Ok(()) } else { list(&chunk) }
 }
 
-/// The files of every item the next render takes, in the queue's order: the items `Session::start_render`
-/// takes are the queued ones, `RenderQueueItem::is_queued`.
-fn queued_files<'a>(session: &'a Session, formats: &'a [OutputFormat]) -> impl Iterator<Item = String> + 'a {
+/// The files of the items `wanted` takes, in the queue's order. The items `Session::start_render` takes
+/// are the queued ones, `RenderQueueItem::is_queued`.
+fn files_of_items<'a>(session: &'a Session, formats: &'a [OutputFormat], wanted: impl Fn(&RenderQueueItem) -> bool + 'a) -> impl Iterator<Item = String> + 'a {
     session
         .project
         .render_queue
         .iter()
-        .filter(|item| item.is_queued())
+        .filter(move |item| wanted(item))
         .filter_map(move |item| outputs_of(session, item, formats))
         .flatten()
         .flat_map(move |(segment, path)| files_of(session, segment, path))
@@ -204,6 +240,24 @@ pub(crate) mod tests {
         let (listed, written) = logged.export_logged(json!({"comp": 1, "output": output, "format": "h264", "end": 0.5}));
         assert_eq!(written, names(&["b.mp4", "b_RenderLog.txt"]));
         assert_listed(&listed, &written, &[]);
+    }
+
+    /// Whatever a format writes, sidecar or temporary name included, is listed before its first write,
+    /// since a failure deletes only what was listed: for every format the exporter offers.
+    #[test]
+    fn every_file_of_every_format_the_exporter_offers_is_listed() {
+        let offered = rig(16, 16, 0.2).backend.exec("renderQueue.formats", json!({})).expect("the formats");
+        // A format's id names it for the render queue's commands once its `Sequence` is off.
+        let available = offered["formats"].as_array().expect("a list").iter().filter(|format| format["available"] == true);
+        let formats: Vec<&str> = available.filter_map(|format| format["id"].as_str()).map(|id| id.trim_end_matches("Sequence")).collect();
+        assert!(formats.len() >= 10, "the exporter offers {formats:?}");
+        for format in formats {
+            let mut rig = rig(64, 48, 1.0);
+            let output = rig.path("out");
+            let (listed, written) = rig.export_logged(json!({"comp": 1, "output": output, "format": format, "end": 0.2}));
+            assert!(!written.is_empty(), "{format} wrote nothing");
+            assert_eq!(written.difference(&listed).collect::<Vec<_>>(), Vec::<&String>::new(), "{format}: written but not listed");
+        }
     }
 
     #[test]

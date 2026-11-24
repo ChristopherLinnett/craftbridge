@@ -36,7 +36,7 @@ do {
 
 **iOS 17 to 25.** There is no continued processing task; the export continues for the short time iOS grants a backgrounded app, which `EffectsEngine` covers with a background task of its own for every export, on every version. Nothing is reported to the system; when the system is about to stop the app before the export ends, the engine cancels the export.
 
-**The journal (every version, both platforms).** While an export runs, the engine keeps a journal of every file it is about to write. When the *system* ends the process mid-export — its time ran out, or it was killed — the next `start` removes the half-written movie and reports what it removed:
+**The journal (every version, both platforms).** While an export runs, the engine keeps a journal of every file it is about to write. An export that is cancelled or fails deletes those files itself before it answers, so a file at an output path always means a finished render; the one exception is a queue that fails at one item or is cancelled, which keeps the files of the items it finished, as `renderQueue.list` reports them; a panic keeps none. A file the disk will not let go of stays in the journal, and the next `start` deletes it. When the *system* ends the process mid-export — its time ran out, or it was killed — the next `start` removes the half-written movie and reports what it removed:
 
 ```swift
 let stopped = try engine.recovery().removed

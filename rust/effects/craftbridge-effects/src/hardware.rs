@@ -417,7 +417,9 @@ impl HardwareExporter {
                 ..ExportResult::default()
             }),
             Err(why) => {
-                // A stopped or failed export leaves no half-written movie, as EffectCraft's leaves none.
+                // This path removes its own half-written movie when it stops or fails. EffectCraft's exporter
+                // does not: it leaves its file after a failure, so what makes a failed export leave no
+                // output on either path is the core, which deletes every file the export listed.
                 let _ = std::fs::remove_file(job.path);
                 Err(if why == CANCELLED { CANCELLED.to_string() } else { why })
             }

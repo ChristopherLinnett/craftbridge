@@ -27,12 +27,7 @@ use serde_json::map::Map;
 
 use crate::methods::{FILL, execute_listed, failure, object_params};
 use crate::outputs;
-use crate::runner::{Ended, ListOutputs, Progress, session};
-
-/// How long the runner waits between looks at a fill it has stopped, while the task's thread winds
-/// down: a stopped fill reports at its next frame, which is soon, so this is short, and it is no
-/// bound on anything.
-const WIND_DOWN: std::time::Duration = std::time::Duration::from_millis(2);
+use crate::runner::{Ended, ListOutputs, Progress, session, wait_for_end, watching};
 
 /// The name of frame `k` of a fill's sequence, which the command numbers from zero whatever the
 /// frame of the composition it fills (`crates/engine/src/cmd/content_fill.rs`:423).
@@ -122,8 +117,9 @@ impl Plan {
     }
 
     /// Take away what a fill that failed left: the engine leaves every folder its scratch file made
-    /// above the fill's own. What the call found already there stays. A fill that was stopped is not
-    /// withdrawn here: the core deletes what a call listed once it answers `Cancelled`.
+    /// above the fill's own. What the call found already there stays. An engine with a journal deletes
+    /// the same files and folders as the call ends, however it ends; this is what does it for an engine
+    /// started without folders, which keeps no journal.
     fn withdraw(&self, before: &Before) {
         for path in self.files().filter(|path| !before.files.contains(path)) {
             let _ = std::fs::remove_file(path);
@@ -321,13 +317,14 @@ pub(crate) fn generate(backend: &mut Backend, params: &Value, on_progress: Progr
         Some(job) if job.starts_with("task:") => job.to_string(),
         _ => return Err(CraftError::internal(format!("`{FILL}` did not start a background task: {started}"))),
     };
-    let answer = match watch(session(backend)?, &task, on_progress) {
+    let stop = |session: &mut Session, limit| stop_and_wait(session, &task, limit);
+    let answer = match watching(session(backend)?, stop, |session| watch(session, &task, on_progress)) {
         Ended::Stopped => Err(CraftError::Cancelled),
         Ended::Ran => outcome(session(backend)?, &task, params),
     };
     // A fill that fails leaves the container as a restart after a kill does: the engine takes away the
     // frames and the one folder it made only when its task sees the failure, and never the folders
-    // above that its scratch file made. A stop is the core's: it deletes what was listed.
+    // above that its scratch file made. A stop is the core's alone, which deletes what was listed.
     if matches!(&answer, Err(error) if *error != CraftError::Cancelled) {
         plan.withdraw(&before);
     }
@@ -355,17 +352,22 @@ fn watch(session: &mut Session, task: &str, on_progress: Progress<'_>) -> Ended 
         session.poll_jobs();
         let Some(job) = session.jobs().into_iter().find(|job| job.id == task) else { return Ended::Ran };
         if !on_progress(job.done, job.total, None) {
-            session.cancel_job(task);
-            loop {
-                session.poll_jobs();
-                if !session.jobs().iter().any(|job| job.id == task) {
-                    return Ended::Stopped;
-                }
-                std::thread::sleep(WIND_DOWN);
-            }
+            stop_and_wait(session, task, None);
+            return Ended::Stopped;
         }
         std::thread::sleep(PROGRESS_INTERVAL);
     }
+}
+
+/// Tell the task to stop and wait until it has ended, for at most `limit` when there is one: it takes
+/// away the frames it wrote only when it sees the stop, and may write one more frame before it does, so
+/// nothing may delete what the call listed while it runs.
+fn stop_and_wait(session: &mut Session, task: &str, limit: Option<std::time::Duration>) {
+    session.cancel_job(task);
+    wait_for_end(limit, || {
+        session.poll_jobs();
+        !session.jobs().iter().any(|job| job.id == task)
+    });
 }
 
 /// The fill's answer once its task has ended: what the command answers when it waits, or its failure
@@ -811,6 +813,56 @@ mod tests {
         assert_eq!(std::fs::read(&target).expect("the file reads"), b"not a frame", "the frame was written through the link");
         let first = std::fs::symlink_metadata(Path::new(&out).join(frame_name(0))).expect("the first frame");
         assert!(first.file_type().is_file(), "the link is still there");
+    }
+
+    /// A panic in the watch stops the fill's task and waits for it: the answer to a panic deletes what the
+    /// call listed, so a task left running would write its next frames after that, where no list names
+    /// them. The task is held at its write until a thread lets it go while the call unwinds, so a call that
+    /// did not wait would unwind with the task still running.
+    #[test]
+    fn a_panic_in_the_watch_stops_the_fill_and_its_frames_go() {
+        let mut rig = rig(5);
+        let gate = rig.gate();
+        let out = rig.out("fill");
+        let params = json!({"layer": 1, "outputDir": out});
+        let opener = gate.clone();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            opener.open();
+        });
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&mut rig, &params, &mut |_, _, _| panic!("boom in the beat"))));
+        assert!(unwound.is_err(), "the panic did not reach the call");
+        let session = rig.backend.session().expect("a session");
+        assert!(session.jobs().is_empty(), "the call unwound with the fill's task still running");
+        assert_eq!(files_below(&out), BTreeSet::new(), "the fill ran on after the call had unwound");
+        release.join().expect("the thread that lets the task go");
+    }
+
+    /// A panic in the watch unwinds though the task it stopped does not end, here held at its write, and
+    /// the task, told to stop, takes its frames away once it goes on.
+    #[test]
+    fn a_panic_unwinds_though_the_fill_does_not_end() {
+        let mut rig = rig(5);
+        let gate = rig.gate();
+        let out = rig.out("fill");
+        let params = json!({"layer": 1, "outputDir": out});
+        let held = gate.clone();
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run(&mut rig, &params, &mut |_, _, _| {
+                held.wait_until_arrived(1);
+                panic!("boom in the beat")
+            })
+        }));
+        assert!(unwound.is_err(), "the panic did not reach the call");
+        let session = rig.backend.session().expect("a session");
+        assert!(!session.jobs().is_empty(), "the call waited for a task that does not end");
+        gate.open();
+        wait_for_end(Some(DEADLINE), || {
+            session.poll_jobs();
+            session.jobs().is_empty()
+        });
+        assert!(session.jobs().is_empty(), "the fill's task never saw its stop");
+        assert_eq!(files_below(&out), BTreeSet::new(), "the stopped fill left its frames");
     }
 
     /// A fill that fails once its task has started, here for a layer with no hole to fill, answers the

@@ -88,6 +88,26 @@ impl CraftError {
         Self::Internal { message: message.into() }
     }
 
+    /// This error with `left`, what the clean-up of an export that ended in it could not do, said as
+    /// well: the variant and the error's own words stay, so the caller still tells which failure the
+    /// export had, and `left`'s words follow them. `Cancelled` carries no words, so `left` answers
+    /// in its place, as an `Io`, under a lead that says the export was cancelled.
+    #[must_use]
+    pub(crate) fn and_left(self, left: &Self) -> Self {
+        let note = left.to_string();
+        let said = |message: String| format!("{message}; and {note}");
+        match self {
+            Self::InvalidParams { message } => Self::InvalidParams { message: said(message) },
+            Self::CommandFailed { command, message, step } => Self::CommandFailed { command, message: said(message), step },
+            Self::NotFound { message } => Self::NotFound { message: said(message) },
+            Self::Unsupported { message } => Self::Unsupported { message: said(message) },
+            Self::Io { message } => Self::Io { message: said(message) },
+            Self::Gpu { message } => Self::Gpu { message: said(message) },
+            Self::Internal { message } => Self::Internal { message: said(message) },
+            Self::Cancelled => Self::Io { message: format!("the export was cancelled but {note}") },
+        }
+    }
+
     /// The panic row, given what `std::panic::catch_unwind` returned: the payload's text when it is a
     /// string, as `panic!` with a message makes it, and a fixed sentence otherwise, since a payload of
     /// any other type holds nothing a user could read.
@@ -193,6 +213,21 @@ mod tests {
         let error = CraftError::unsupported("external effect helpers are not available on iOS");
         assert!(matches!(error, CraftError::Unsupported { .. }), "{error:?}");
         assert_eq!(error.to_string(), "external effect helpers are not available on iOS");
+    }
+
+    #[test]
+    fn a_clean_up_failure_follows_the_errors_own_words_and_keeps_its_variant() {
+        let left = CraftError::io("card.mp4 could not be removed");
+        let said = |message: &str| format!("{message}; and card.mp4 could not be removed");
+        assert_eq!(CraftError::invalid_params("a").and_left(&left), CraftError::invalid_params(said("a")));
+        assert_eq!(CraftError::command_failed("export", "b", Some(2)).and_left(&left), CraftError::command_failed("export", said("b"), Some(2)));
+        assert_eq!(CraftError::not_found("c").and_left(&left), CraftError::not_found(said("c")));
+        assert_eq!(CraftError::unsupported("d").and_left(&left), CraftError::unsupported(said("d")));
+        assert_eq!(CraftError::io("e").and_left(&left), CraftError::io(said("e")));
+        assert_eq!(CraftError::gpu("f").and_left(&left), CraftError::gpu(said("f")));
+        assert_eq!(CraftError::internal("g").and_left(&left), CraftError::internal(said("g")));
+        // `Cancelled` has no words to follow, so the clean-up's own answer takes its place.
+        assert_eq!(CraftError::Cancelled.and_left(&left), CraftError::io("the export was cancelled but card.mp4 could not be removed"));
     }
 
     #[test]

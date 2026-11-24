@@ -757,3 +757,249 @@ fn a_request_the_command_line_refuses_fails_in_the_command_lines_words() {
     assert!(matches!(&error, CraftError::CommandFailed { command, step: None, .. } if command == "renderQueue.add"), "{error:?}");
     assert!(!scratch.path().join("x.mp4").exists());
 }
+
+/// The render queue reports a finished item at `file`: what a caller of a failed or cancelled queue learns of the
+/// file that stayed.
+fn assert_queue_reports_done_at(engine: &Engine, file: &Path) {
+    let listed = engine.request("exec", json!({"command": "renderQueue.list", "params": {}}));
+    let items = listed.as_ref().ok().and_then(|listed| listed.get("items")).and_then(Value::as_array);
+    let done = items.and_then(|items| items.iter().find(|item| item.get("status") == Some(&json!("Done"))));
+    assert_eq!(
+        done.and_then(|item| item.get("last_output")),
+        Some(&json!(file.display().to_string())),
+        "the queue reports no finished item at its file: {listed:?}"
+    );
+}
+
+/// The frame of a sequence the failing exports below cannot write: a read-only file stands at it, as
+/// the exporter's `File::create` then fails there, after the frames before it were written.
+const BLOCKED_FRAME: &str = "seq_00060.png";
+
+/// The frame `name` in `folder`, made read-only over an earlier frame there, so a render fails as it
+/// reaches it; none when the permissions do not hold (root can write the frame, and no render fails).
+#[cfg(unix)]
+fn blocked_frame(folder: &Path, name: &str) -> std::io::Result<Option<PathBuf>> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(folder)?;
+    let blocked = folder.join(name);
+    std::fs::write(&blocked, b"an earlier frame")?;
+    std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o444))?;
+    Ok(std::fs::OpenOptions::new().write(true).open(&blocked).is_err().then_some(blocked))
+}
+
+/// An export of the demo project that fails part way, after it wrote frames of its own, over EffectCraft's
+/// real exporter: it leaves none of them and no folder it made, and the file that was already at the
+/// blocked frame stays as it was. An item of its queue that finished before the failing one keeps its
+/// movie, which the queue reports as done at that path and a post-render import has made footage of.
+/// The caller hears the render's own failure.
+#[cfg(unix)]
+#[test]
+fn an_export_that_fails_part_way_leaves_no_output_but_what_was_already_there() {
+    for queued in [false, true] {
+        let scratch = Scratch::new().expect("a scratch folder");
+        let engine = start_engine(&scratch).expect("the engine starts");
+        let folder = scratch.path().join("out");
+        let Some(blocked) = blocked_frame(&folder, BLOCKED_FRAME).expect("the blocked frame") else { return };
+        let first = folder.join("first.mp4");
+        let exec = |command: &str, params: Value| engine.request("exec", json!({"command": command, "params": params})).expect("the command runs");
+        let request = if queued {
+            exec("renderQueue.add", json!({"format": "h264", "output": first.display().to_string(), "end": 1, "resolution": "quarter"}));
+            let index = exec("renderQueue.list", json!({}))["items"].as_array().map_or(0, Vec::len);
+            exec("renderQueue.setOutputModule", json!({"index": index, "postRenderAction": "import"}));
+            exec("renderQueue.add", json!({"format": "png", "output": folder.join("seq.png").display().to_string(), "end": 10, "resolution": "half"}));
+            json!({"queue": true})
+        } else {
+            json!({"output": folder.join("seq.png").display().to_string(), "format": "png", "end": 10, "resolution": "half"})
+        };
+        let before = contents_in(&scratch).expect("the container reads");
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let heard = seen.clone();
+        let watched = folder.clone();
+        let answer = engine.request_with_progress(
+            "export",
+            request,
+            move |_, _, _| {
+                if let Ok(mut seen) = heard.lock() {
+                    seen.extend(names_in(&watched));
+                }
+            },
+            &CancelToken::new(),
+        );
+        let written: BTreeSet<String> = seen.lock().map(|seen| seen.iter().cloned().collect()).unwrap_or_default();
+        let error = answer.expect_err("the render fails at the blocked frame");
+        assert!(matches!(error, CraftError::CommandFailed { .. }), "queued {queued}: the render's own failure, unchanged in kind: {error:?}");
+        assert!(written.iter().any(|name| name != BLOCKED_FRAME), "queued {queued}: the render had written nothing before it failed: {written:?}");
+        let finished: &[&str] = if queued { &["first.mp4"] } else { &[] };
+        let left: BTreeSet<String> = names_in(&folder).into_iter().collect();
+        let due: BTreeSet<String> = finished.iter().copied().chain([BLOCKED_FRAME]).map(str::to_string).collect();
+        assert_eq!(left, due, "queued {queued}: a failed export left a file of its own, or lost a finished item's");
+        assert_eq!(std::fs::read(&blocked).expect("the blocked frame reads"), b"an earlier frame", "queued {queued}: the file that was there changed");
+        let (mut files, folders) = contents_in(&scratch).expect("the container reads");
+        files.retain(|file| !finished.iter().any(|name| file.ends_with(name)));
+        assert_eq!((files, folders), before, "queued {queued}: a failed export left a file or a folder");
+        if queued {
+            assert_queue_reports_done_at(&engine, &first);
+            let summary = exec("project.summary", json!({}));
+            let footage = summary["items"].as_array().and_then(|items| items.iter().find(|item| item["name"] == "first.mp4")).expect("the post-render import");
+            assert_eq!(footage["missing"], false, "the footage the import made of the finished item lost its file");
+        }
+        // The session serves the next export, and a finished one keeps its file.
+        let again = export(&engine, request_of(&small(), &scratch.path().join("after.mp4")), &CancelToken::new(), None);
+        assert!(again.answer.is_ok() && scratch.path().join("after.mp4").is_file(), "queued {queued}: {:?}", again.answer);
+        engine.close().expect("the engine closes");
+    }
+}
+
+/// A queue cancelled while its second item renders keeps the movie of the first, which the queue reports as
+/// done at that path, and leaves nothing of the second, whose frames and folder go. The caller hears
+/// `Cancelled`. A single export cancelled leaves nothing (`a_cancelled_export_answers_cancelled_...`).
+#[test]
+fn a_cancelled_queue_keeps_the_items_that_finished_and_nothing_else() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let engine = start_engine(&scratch).expect("the engine starts");
+    let folder = scratch.path().join("out");
+    let first = folder.join("first.mp4");
+    let exec = |command: &str, params: Value| engine.request("exec", json!({"command": command, "params": params})).expect("the command runs");
+    exec("renderQueue.add", json!({"format": "h264", "output": first.display().to_string(), "end": 1, "resolution": "quarter"}));
+    exec("renderQueue.add", json!({"format": "png", "output": folder.join("seq.png").display().to_string(), "end": 10, "resolution": "half"}));
+    let before = contents_in(&scratch).expect("the container reads");
+    let (token, watched) = (CancelToken::new(), folder.clone());
+    let asking = token.clone();
+    let answer = engine.request_with_progress(
+        "export",
+        json!({"queue": true}),
+        move |_, _, _| {
+            if names_in(&watched).iter().any(|name| name.starts_with("seq_")) {
+                asking.cancel();
+            }
+        },
+        &token,
+    );
+    assert_eq!(answer, Err(CraftError::Cancelled));
+    assert_eq!(names_in(&folder), ["first.mp4"], "a cancelled queue left a file of the item it stopped, or lost a finished item's");
+    let (mut files, folders) = contents_in(&scratch).expect("the container reads");
+    files.retain(|file| !file.ends_with("first.mp4"));
+    assert_eq!(
+        (files, folders.into_iter().filter(|folder| !folder.ends_with("out")).collect::<Vec<_>>()),
+        before,
+        "a cancelled queue left more than the finished movie"
+    );
+    assert_queue_reports_done_at(&engine, &first);
+    engine.close().expect("the engine closes");
+}
+
+/// Two items of one queue that name one file are refused before anything is written, which is what lets a
+/// failed or cancelled queue keep a finished item's file: no later item of the job rewrites it.
+#[test]
+fn two_items_of_a_queue_on_one_output_are_refused_before_a_file_is_written() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let engine = start_engine(&scratch).expect("the engine starts");
+    let same = scratch.path().join("out").join("same.mp4").display().to_string();
+    for _ in 0..2 {
+        engine
+            .request("exec", json!({"command": "renderQueue.add", "params": {"format": "h264", "output": same, "end": 1, "resolution": "quarter"}}))
+            .expect("the item is queued");
+    }
+    let before = contents_in(&scratch).expect("the container reads");
+    let error = engine.request_with_progress("export", json!({"queue": true}), |_, _, _| {}, &CancelToken::new()).expect_err("the queue is refused");
+    assert!(error.to_string().contains("Nothing was rendered"), "{error}");
+    assert_eq!(contents_in(&scratch).expect("the container reads"), before, "a refused queue wrote a file");
+    engine.close().expect("the engine closes");
+}
+
+/// The files left in a folder by a queue of a movie that finishes, with the render log `movie_log` asks
+/// for, and then a sequence named `sequence` that fails at its blocked frame (`<stem>_00060.png`), after
+/// the caller heard the render's own failure and the queue reported the movie done at its path; none when
+/// the permissions do not hold.
+#[cfg(unix)]
+fn left_by_a_movie_then_a_failing_sequence(movie: &str, movie_log: &str, sequence: &str) -> Result<Option<BTreeSet<String>>, String> {
+    let scratch = Scratch::new().map_err(|e| e.to_string())?;
+    let engine = start_engine(&scratch)?;
+    let folder = scratch.path().join("out");
+    let stem = sequence.trim_end_matches(".png");
+    if blocked_frame(&folder, &format!("{stem}_00060.png")).map_err(|e| e.to_string())?.is_none() {
+        return Ok(None);
+    }
+    let exec = |command: &str, params: Value| engine.request("exec", json!({"command": command, "params": params})).map_err(|e| e.to_string());
+    let movie = folder.join(movie);
+    exec("renderQueue.add", json!({"format": "h264", "output": movie.display().to_string(), "log": movie_log, "end": 1, "resolution": "quarter"}))?;
+    exec("renderQueue.add", json!({"format": "png", "output": folder.join(sequence).display().to_string(), "end": 10, "resolution": "half"}))?;
+    let heard = engine.request_with_progress("export", json!({"queue": true}), |_, _, _| {}, &CancelToken::new());
+    if !matches!(heard, Err(CraftError::CommandFailed { .. })) {
+        return Err(format!("the sequence did not fail as a command: {heard:?}"));
+    }
+    assert_queue_reports_done_at(&engine, &movie);
+    engine.close().map_err(|e| e.to_string())?;
+    Ok(Some(names_in(&folder).into_iter().collect()))
+}
+
+/// A render log is named from its output's stem, so a movie and a sequence of one stem share one log, which
+/// the refusal of two outputs on one file does not read. The sequence's failure writes it, and it is no file
+/// of the movie that finished: it goes with the failed item.
+#[cfg(unix)]
+#[test]
+fn a_failed_items_log_goes_though_a_finished_item_shares_its_name() {
+    let Some(left) = left_by_a_movie_then_a_failing_sequence("same.mp4", "errorsOnly", "same.png").expect("the queue runs") else { return };
+    let due: BTreeSet<String> = ["same.mp4", "same_00060.png"].map(str::to_string).into();
+    assert_eq!(left, due, "the failed item's log stayed, or the finished movie went");
+}
+
+/// A render log the finished item asked for is its own file, kept with its movie when a later item, which
+/// has a log of its own, fails: only the failed item's log goes.
+#[cfg(unix)]
+#[test]
+fn a_finished_items_own_log_stays_with_its_movie() {
+    let Some(left) = left_by_a_movie_then_a_failing_sequence("first.mp4", "plusSettings", "second.png").expect("the queue runs") else { return };
+    let due: BTreeSet<String> = ["first.mp4", "first_RenderLog.txt", "second_00060.png"].map(str::to_string).into();
+    assert_eq!(left, due, "the finished movie's log went, or the failed item's stayed");
+}
+
+/// The variable that makes this binary, started by the test below under a limit on the size of a file,
+/// run the movie that limit stops.
+const MOVIE_CHILD: &str = "CRAFTBRIDGE_MOVIE_THE_DISK_STOPS";
+
+/// The largest file the child may write, in the shell's blocks: far smaller than the movie, and far
+/// larger than the journal it has to keep.
+const MOVIE_LIMIT_BLOCKS: u32 = 256;
+
+/// What the movie the limit stops writes over when a file is already at its output.
+const EARLIER_MOVIE: &[u8] = b"a movie an earlier export finished";
+
+/// The child of the test below: a real H.264 export the file-size limit stops part way, with and
+/// without a file at its output. Passes at once unless the parent started it.
+#[test]
+fn the_movie_the_disk_stops() {
+    if std::env::var_os(MOVIE_CHILD).is_none() {
+        return;
+    }
+    for earlier in [false, true] {
+        let scratch = Scratch::new().expect("a scratch folder");
+        let engine = start_engine(&scratch).expect("the engine starts");
+        let output = scratch.path().join("movie.mp4");
+        if earlier {
+            std::fs::write(&output, EARLIER_MOVIE).expect("the earlier movie");
+        }
+        let before = contents_in(&scratch).expect("the container reads");
+        let request = json!({"output": output.display().to_string(), "format": "h264", "end": 4, "resolution": "half"});
+        let answer = engine.request_with_progress("export", request, |_, _, _| {}, &CancelToken::new());
+        assert!(matches!(answer, Err(CraftError::CommandFailed { .. })), "earlier {earlier}: the limit did not fail the movie: {answer:?}");
+        assert!(!output.exists(), "earlier {earlier}: a movie cut short was left at the output");
+        let (files, folders) = contents_in(&scratch).expect("the container reads");
+        let without_output = |listed: &[PathBuf]| listed.iter().filter(|file| !file.ends_with("movie.mp4")).cloned().collect::<Vec<_>>();
+        assert_eq!((without_output(&files), folders), (without_output(&before.0), before.1), "earlier {earlier}: the failed movie left something else");
+        engine.close().expect("the engine closes");
+    }
+}
+
+/// A single movie whose muxer the disk stops part way leaves no truncated file, whether or not a file
+/// stood at its output: the export had begun to write over that one, so it is no finished render.
+/// The limit is the shell's, on the child alone, with the signal it raises ignored so the write fails
+/// as a full disk fails it.
+#[cfg(unix)]
+#[test]
+fn a_movie_the_disk_stops_part_way_leaves_no_truncated_file() {
+    let binary = std::env::current_exe().expect("the test binary's own path");
+    let script = format!("trap '' XFSZ; ulimit -f {MOVIE_LIMIT_BLOCKS}; exec \"$0\" --exact export::the_movie_the_disk_stops --test-threads=1");
+    let child = std::process::Command::new("/bin/sh").arg("-c").arg(script).arg(binary).env(MOVIE_CHILD, "1").output().expect("the child runs");
+    assert!(child.status.success(), "the child's export did not end as it should: {}\n{}", child.status, String::from_utf8_lossy(&child.stdout));
+}
