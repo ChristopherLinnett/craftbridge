@@ -206,7 +206,7 @@ private struct Replay {
 /// spelling in `TypedCalls.swift` because that spelling is what it is held to: a method left out there by
 /// mistake is then a request this list says a typed call must spell.
 private let coveredMethods: Set<String> = [
-    "exec", "run", "props", "get", "set", "replay", "timings", "export", "template.render",
+    "exec", "run", "props", "get", "set", "replay", "timings", "previewRequest", "export", "template.render",
 ]
 
 /// The door a call goes through, and the method it asks, or nil for a line of MCP, which goes through none.

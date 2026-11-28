@@ -11,9 +11,11 @@ import io.github.christopherlinnett.craftbridge.core.CraftException
 import io.github.christopherlinnett.craftbridge.core.Engine
 import io.github.christopherlinnett.craftbridge.core.Folders
 import io.github.christopherlinnett.craftbridge.core.GpuException
+import io.github.christopherlinnett.craftbridge.core.InvalidParamsException
 import io.github.christopherlinnett.craftbridge.core.JSONRepresentable
 import io.github.christopherlinnett.craftbridge.core.JSONValue
 import io.github.christopherlinnett.craftbridge.core.NamedArguments
+import io.github.christopherlinnett.craftbridge.core.NotFoundException
 import io.github.christopherlinnett.craftbridge.core.ProgressHandler
 import io.github.christopherlinnett.craftbridge.core.UnsupportedException
 import io.github.christopherlinnett.craftbridge.core.jsonValue
@@ -289,6 +291,33 @@ public class EffectsEngine internal constructor(
     ) {
         core.present(previewRequest(comp, time))
     }
+
+    /**
+     * Fit a preview of [comp] at [time] into a box of [width] by [height] pixels, through the engine's
+     * `previewRequest`: the `frame` request that draws it with its own alpha, as large as fits the box and
+     * never above the comp's own pixels, and the comp's pixel size, which sets the size of the texture or
+     * buffer the frame is drawn into. Leave [comp] out for the active comp and [time] out for its current
+     * time. The same comp, time and box give the same answer on iOS.
+     *
+     * @throws InvalidParamsException naming [width] or [height] when it is below 1, and [NotFoundException]
+     * when the comp is not there, as [frame] refuses it.
+     */
+    public suspend fun previewRequest(
+        vararg namedOnly: NamedArguments,
+        width: Long,
+        height: Long,
+        comp: JSONValue? = null,
+        time: Duration? = null,
+    ): PreviewRequest =
+        previewRequestOf(
+            ask(
+                "previewRequest",
+                "comp" to comp,
+                "time" to time?.toDouble(DurationUnit.SECONDS)?.jsonValue,
+                "width" to width.toNumber(),
+                "height" to height.toNumber(),
+            ),
+        )
 
     /**
      * Ends the preview: the engine gives its preview surface up, and forgets it, so a later [preview] of

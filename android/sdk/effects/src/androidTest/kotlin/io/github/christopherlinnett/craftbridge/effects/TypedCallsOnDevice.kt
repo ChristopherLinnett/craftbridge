@@ -14,6 +14,7 @@ import android.view.Surface
 import io.github.christopherlinnett.craftbridge.core.CraftException
 import io.github.christopherlinnett.craftbridge.core.GpuException
 import io.github.christopherlinnett.craftbridge.core.InvalidParamsException
+import io.github.christopherlinnett.craftbridge.core.NotFoundException
 import io.github.christopherlinnett.craftbridge.core.UnsupportedException
 import io.github.christopherlinnett.craftbridge.core.jsonValue
 import io.github.christopherlinnett.craftbridge.ffi.core.GpuChoice
@@ -21,6 +22,7 @@ import io.github.christopherlinnett.craftbridge.ffi.core.PixelFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.microseconds
 import kotlin.time.Duration.Companion.seconds
 
 /** The frame request the core's own picture calls are given for the first comp, written by hand as the typed calls must not make an app. */
@@ -152,6 +154,28 @@ private suspend fun EffectsEngine.refusesTheMissingCompAsFrameDoes(
         "$what of a comp that does not exist was answered $answered, not as the frame was: $framed"
     }
 }
+
+/**
+ * A 1280 by 720 comp holding one half-opaque box in its middle on a ground that is nothing, so its frame has
+ * content and transparent pixels, which the checks of `previewRequest` read back.
+ */
+private const val WIDE_COMP =
+    """{"steps":[
+        {"command":"comp.new","params":{"name":"Wide","width":1280,"height":720,"duration":2,"frameRate":10}},
+        {"command":"layer.newSolid","params":{"name":"Box","color":"#ff8040","width":320,"height":180}},
+        {"command":"prop.set","params":{"layer":"Box","path":"transform/opacity","value":50}}
+    ]}"""
+
+/** The straight alpha of the pixel at ([x], [y]) of a frame of straight RGBA bytes [width] pixels across. */
+private fun alphaAt(
+    data: ByteArray,
+    width: Int,
+    x: Int,
+    y: Int,
+): Int = data[(y * width + x) * 4 + 3].toInt() and 0xff
+
+/** What [call] is refused with, or `null` when it is not refused. */
+private suspend fun refusal(call: suspend () -> Any?): Throwable? = runCatching { call() }.exceptionOrNull()
 
 internal val typedCallChecks: List<Case> =
     listOf(
@@ -328,6 +352,65 @@ internal val typedCallChecks: List<Case> =
                 buffer.close()
                 read.recycle()
                 engine.refusesTheMissingCompAsFrameDoes("a HardwareBuffer") { frameHardwareBuffer(comp = MISSING_COMP).close() }
+            }
+        },
+        Case("a typed previewRequest fits the comp in the box, and the frame it holds has that size and the comp's own alpha") { context ->
+            withEffects(context, GpuChoice.CPU_ONLY) { engine ->
+                engine.core.request("run", WIDE_COMP)
+                // The box, the request's text, and the size of the frame it renders: a box smaller than the comp, and one larger.
+                for (
+                (side, text, size) in
+                listOf(
+                    Triple(640L, """{"maxSide":640,"time":1,"transparent":true}""", 640 to 360),
+                    Triple(4000L, """{"maxSide":1280,"time":1,"transparent":true}""", 1280 to 720),
+                )
+                ) {
+                    val answer = engine.previewRequest(width = side, height = side, time = 1.seconds)
+                    require(answer.requestText == text) { "a box of $side by $side asks for ${answer.requestText}, not $text" }
+                    require(answer.contentWidth == 1280L && answer.contentHeight == 720L) {
+                        "the comp's size is ${answer.contentWidth} by ${answer.contentHeight}"
+                    }
+                    val frame = engine.core.frame(answer.requestText, PixelFormat.RGBA8_STRAIGHT)
+                    require(frame.width.toInt() == size.first && frame.height.toInt() == size.second) {
+                        "the frame a box of $side by $side gets is ${frame.width} by ${frame.height}, not ${size.first} by ${size.second}"
+                    }
+                    val width = frame.width.toInt()
+                    require(alphaAt(frame.data, width, 0, 0) == 0) { "a corner no layer covers is not transparent" }
+                    require(alphaAt(frame.data, width, width / 2, frame.height.toInt() / 2) > 0) { "the box is not drawn in the middle" }
+                }
+                val other = engine.previewRequest(width = 500, height = 300, comp = FIRST_COMP)
+                require(
+                    other.requestText == """{"comp":1,"maxSide":500,"transparent":true}""",
+                ) { "a box of another aspect: ${other.requestText}" }
+                val narrow = engine.core.frame(other.requestText, PixelFormat.RGBA8_STRAIGHT)
+                require(narrow.width.toInt() == 500 && narrow.height.toInt() == 281) { "that frame is ${narrow.width} by ${narrow.height}" }
+                // Kotlin writes half a millisecond with an exponent and Swift without; the text is the engine's.
+                val early = engine.previewRequest(width = 640, height = 640, time = 500.microseconds)
+                require(
+                    early.requestText == """{"maxSide":640,"time":0.0005,"transparent":true}""",
+                ) { "half a millisecond: ${early.requestText}" }
+            }
+        },
+        Case(
+            "a typed previewRequest refuses a box with a side below 1, and a comp that is not there as a frame that reads the comp does",
+        ) { context ->
+            withEffects(context, GpuChoice.CPU_ONLY) { engine ->
+                engine.core.request("run", WIDE_COMP)
+                for ((width, height, key) in listOf(Triple(0L, 640L, "width"), Triple(640L, 0L, "height"), Triple(-1L, 640L, "width"))) {
+                    val refused = refusal { engine.previewRequest(width = width, height = height) }
+                    require(
+                        refused is InvalidParamsException &&
+                            refused.detail == "`previewRequest`: `$key` must be a whole number from 1 to 4294967295",
+                    ) {
+                        "a box of $width by $height was answered $refused"
+                    }
+                }
+                val framed = refusal { engine.frame(comp = MISSING_COMP, scale = 0.5) }
+                val previewed = refusal { engine.previewRequest(width = 640, height = 640, comp = MISSING_COMP) }
+                require(framed is NotFoundException) { "a frame of a comp that does not exist was answered $framed" }
+                require(previewed is NotFoundException && previewed.message == framed.message) {
+                    "a previewRequest of a comp that does not exist was answered $previewed, not as the frame was: $framed"
+                }
             }
         },
     )

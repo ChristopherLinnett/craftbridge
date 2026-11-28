@@ -110,6 +110,8 @@ func stopPreview(_ engine: EffectsEngine) async throws {
 
 By default the engine also lets its layer go when the app enters the background, and the next `preview` attaches it again (see [background-exports.md](background-exports.md)).
 
+An app that draws the frames into a texture or buffer of its own asks the engine how big to make it: `previewRequest(_:at:width:height:)` takes the box in pixels, the composition (the active one when left out) and the moment, and answers a `PreviewRequest`. Its `request` is the `frame` request that draws the composition with its own alpha, as large as fits the box and never above the composition's own pixels, which `frame(params:format:)` renders; `contentWidth` and `contentHeight` are the composition's pixel size, the size of the texture or buffer to draw it into; and `requestText` is `request` as the JSON text the engine wrote it in, which `frameJSON(params:format:)` takes, and so the same text Android answers for the same composition, moment and box. A box with a side below 1 throws `CraftError.InvalidParams` naming the side, and a composition that is not there throws as `frame` throws it.
+
 ## Export
 
 `export` starts a render of the composition to a movie file and answers an `ExportJob` at once — starting an export is never a wait. The sample's export, in `ExportRecipe.swift`, asks for the hardware video encoder where the phone has one through the `hardware` extra, and hands each progress report both to the system's background task and to the screen:

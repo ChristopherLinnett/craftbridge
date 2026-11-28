@@ -154,6 +154,32 @@ extension EffectsEngine {
         try await previewTarget.detach()
     }
 
+    /// Fits a preview of `comp` — the active composition when left out — at `time` — the current time when
+    /// left out — into a box of `width` by `height` pixels, through the engine's `previewRequest`: the
+    /// `frame` request that draws it with its own alpha, as large as fits the box and never above the
+    /// composition's own pixels, and the composition's pixel size, which sets the size of the texture or
+    /// buffer the frame is drawn into. The same composition, time and box give the same answer on Android.
+    ///
+    /// - Throws: ``CraftError/InvalidParams(detail:)`` naming `width` or `height` when it is below 1,
+    ///   ``CraftError/NotFound(detail:)`` when the composition is not there, as `frame` refuses it.
+    public func previewRequest(
+        _ comp: ItemReference? = nil,
+        at time: Duration? = nil,
+        width: Int,
+        height: Int
+    ) async throws -> PreviewRequest {
+        let answer = try await request(
+            "previewRequest",
+            given([
+                "comp": comp?.jsonValue,
+                "time": time.map { .number(engineSeconds($0)) },
+                "width": .number(Double(width)),
+                "height": .number(Double(height)),
+            ])
+        )
+        return try PreviewRequest(answer: answer)
+    }
+
     /// The request `preview` makes of the engine's `present`: the fields of a `frame` request, which are
     /// the composition and the time in seconds, each left out when the caller left it out.
     package func previewRequest(comp: ItemReference?, at time: Duration?) -> JSONValue {

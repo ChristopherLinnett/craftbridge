@@ -1,6 +1,6 @@
 //! Two requests, each resolved the way the EffectCraft command line resolves the flags it stands
 //! for (plan §14, §17, §19): [`RenderRequest`], the parameters of `export`, and `FrameRequest`, what a
-//! `frame` call asks for.
+//! `frame` call asks for; and the fit of a `frame` in a box, `previewRequest`.
 //!
 //! # `export`
 //!
@@ -39,6 +39,14 @@
 //!
 //! A comp that is not there fails in the command line's words whatever the format, so an app that
 //! asks for the same frame as PNG or as pixels hears one refusal.
+//!
+//! # `previewRequest`
+//!
+//! [`preview_request`] answers the `frame` request that draws a comp with its own alpha fitted inside a
+//! box of pixels, the same request as JSON text, and the comp's pixel size, so a caller that draws
+//! frames into a texture of its own need not read the comp and work the fit out itself. It stands for
+//! no flag of the command line: its request is a `FrameRequest`'s own fields, and its comp is read as
+//! `frame` reads one.
 
 use std::borrow::Cow;
 
@@ -48,12 +56,12 @@ use effectcraft_engine::EngineError;
 use effectcraft_engine::project::ItemId;
 use effectcraft_engine::project::render_queue::OutputFormat;
 use effectcraft_gpu::{DisplayFrame, Gpu};
-use effectcraft_render::RenderOpts;
+use effectcraft_render::{RenderOpts, frame_size};
 use effectcraft_time::Tick;
 use serde_json::Value;
 use serde_json::map::Map;
 
-use crate::methods::{bool_param, failure, number_param, object, object_params, reject_unknown, string_param, tool_json};
+use crate::methods::{bool_param, failure, number_param, object, object_params, reject_unknown, string_param, tool_json, whole_number_words, whole_param};
 use crate::reference::{Given, given, reference};
 
 /// The method a refusal of these parameters names.
@@ -417,6 +425,92 @@ pub(crate) fn picture(backend: &mut Backend, gpu: Option<&Gpu>, params: &Value, 
     FrameRequest::parse(params)?.resolve(backend)?.picture(backend, gpu, max_side)
 }
 
+/// The method a refusal of a preview request's parameters names.
+const PREVIEW_REQUEST: &str = "previewRequest";
+
+/// The most pixels one side of a preview's box may be: a texture's side is a `u32`.
+const MOST_BOX_SIDE: u64 = u32::MAX as u64;
+
+/// The parameters `previewRequest` takes.
+const PREVIEW_REQUEST_FIELDS: [&str; 4] = ["comp", "time", "width", "height"];
+
+/// `previewRequest`: `{comp?, time?, width, height}`, the box a preview fills in pixels, answered as
+/// `{request, requestText, contentWidth, contentHeight}` (plan §14).
+///
+/// `request` is the `frame` request that draws the comp with its own alpha, as a preview shows it,
+/// as large as fits inside the box and never above the comp's own pixels, and `contentWidth` and
+/// `contentHeight` are the comp's pixel size, which sets the texture or buffer the frame is drawn into
+/// before the app scales it. The comp is the request's as a `frame` reads it and the time as given,
+/// each left out when the caller left it out, and the size is read through [`comp_figures`], the read a
+/// `frame` makes for a scale, so a comp that is not there is refused in the words a `frame` refuses it
+/// in. `requestText` is `request` written here as JSON, so every platform answers one text for one
+/// request: each SDK's own writer lays out an object's keys and a number in its own way, such as a
+/// time under a millisecond, which Kotlin writes with an exponent and Swift without.
+pub(crate) fn preview_request(backend: &mut Backend, params: &Value) -> Result<Value> {
+    let obj = object_params(params, PREVIEW_REQUEST)?;
+    reject_unknown(&obj, PREVIEW_REQUEST, &PREVIEW_REQUEST_FIELDS)?;
+    // The time is echoed as the caller wrote it, once it is known to be a number.
+    let time = number_param(&obj, "time", PREVIEW_REQUEST)?.and_then(|_| obj.get("time")).cloned();
+    let side = |key: &str| {
+        let pixels = whole_param(&obj, key, PREVIEW_REQUEST, MOST_BOX_SIDE)?.ok_or_else(|| whole_number_words(key, PREVIEW_REQUEST, MOST_BOX_SIDE))?;
+        u32::try_from(pixels).map_err(|_| whole_number_words(key, PREVIEW_REQUEST, MOST_BOX_SIDE))
+    };
+    let within = (side("width")?, side("height")?);
+    let comp = Some(reference(&obj, "comp", PREVIEW_REQUEST)?).filter(|comp| !comp.is_null());
+    let info = comp_figures(backend, comp.as_ref())?;
+    let figure = |key: &str| {
+        info.get(key)
+            .and_then(Value::as_u64)
+            .and_then(|pixels| u32::try_from(pixels).ok())
+            .ok_or_else(|| CraftError::internal(format!("`{PREVIEW_REQUEST}`: the comp's figures hold no `{key}` in pixels")))
+    };
+    let content = (figure("width")?, figure("height")?);
+    let mut request = Map::new();
+    request.extend(comp.map(|comp| ("comp".to_string(), comp)));
+    request.extend(time.map(|time| ("time".to_string(), time)));
+    request.insert("maxSide".to_string(), Value::from(fitted_side(content, within)));
+    request.insert("transparent".to_string(), Value::Bool(true));
+    let request = Value::Object(request);
+    let text = serde_json::to_string(&request)
+        .map_err(|error| CraftError::internal(format!("`{PREVIEW_REQUEST}`: the request cannot be written as JSON: {error}")))?;
+    Ok(object([
+        ("request", request),
+        ("requestText", Value::String(text)),
+        ("contentWidth", Value::from(content.0)),
+        ("contentHeight", Value::from(content.1)),
+    ]))
+}
+
+/// The longest side, in pixels, of the largest frame of a comp `content` pixels across that fits inside
+/// a box `within` pixels across and is no longer on any side than the comp: the comp's own aspect
+/// kept, its longest side bounded by whichever of its sides meets the box first.
+///
+/// A frame is `frame_size` of the comp at the scale a side makes of its longest, which rounds each side
+/// to a whole pixel, so the side is worked out from that rounding and then checked against
+/// `frame_size` itself, the function every renderer sizes its frame with, and moved by a pixel where
+/// the arithmetic and the floating-point scale part. The result is always at least 1.
+fn fitted_side(content: (u32, u32), within: (u32, u32)) -> u32 {
+    let (width, height) = (content.0.max(1), content.1.max(1));
+    let longest = width.max(height);
+    let fits = |side: u32| {
+        let (frame_width, frame_height) = frame_size(width, height, f64::from(side) / f64::from(longest));
+        frame_width <= within.0 && frame_height <= within.1
+    };
+    // A side of the comp that is `own` pixels across reaches `limit` pixels when `side` pixels of the
+    // longest side round to `limit`, which is the largest `side` for which `own * side / longest` is
+    // under `limit + 0.5`.
+    let reach = |own: u32, limit: u32| ((2 * u128::from(limit) + 1) * u128::from(longest) - 1) / (2 * u128::from(own));
+    let first = reach(width, within.0).min(reach(height, within.1)).min(u128::from(longest)).max(1);
+    let mut side = u32::try_from(first).unwrap_or(longest);
+    while side > 1 && !fits(side) {
+        side -= 1;
+    }
+    while side < longest && fits(side + 1) {
+        side += 1;
+    }
+    side
+}
+
 /// The moment a frame is rendered at.
 enum Moment {
     /// The active comp's current time.
@@ -495,7 +589,7 @@ impl FrameRequest {
     fn resolve(self, backend: &mut Backend) -> Result<Resolved> {
         let Self { comp, moment, size, transparent } = self;
         let needs_comp = matches!(moment, Moment::Frame(_)) || matches!(size, Size::Scale(_));
-        let info = if needs_comp { tool_json(backend, "get_comp", &object([("comp", comp.clone().unwrap_or(Value::Null))]))? } else { Value::Null };
+        let info = if needs_comp { comp_figures(backend, comp.as_ref())? } else { Value::Null };
         let time = match moment {
             Moment::Current => None,
             Moment::Seconds(seconds) => Some(seconds),
@@ -510,6 +604,13 @@ impl FrameRequest {
         };
         Ok(Resolved { comp, time, max_side, transparent })
     }
+}
+
+/// The figures of the comp `comp` names (the active one when none), read as the command line reads them
+/// for a frame number or a scale: from `get_comp`, whose refusal of a comp that is not there is the
+/// command line's own. The one read every request that must know the comp's size makes.
+fn comp_figures(backend: &mut Backend, comp: Option<&Value>) -> Result<Value> {
+    tool_json(backend, "get_comp", &object([("comp", comp.cloned().unwrap_or(Value::Null))]))
 }
 
 /// The seconds frame `number` falls at in the comp `info` describes (`comp.info`'s document): the
@@ -597,6 +698,68 @@ fn missing_comp(backend: &mut Backend, comp: Option<&Value>, unresolved: EngineE
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The largest longest side whose frame fits the box, found by trying every side: what `fitted_side`
+    /// must answer, however it is worked out.
+    fn largest_fit(content: (u32, u32), within: (u32, u32)) -> u32 {
+        let longest = content.0.max(content.1);
+        (1..=longest)
+            .rev()
+            .find(|&side| {
+                let (width, height) = frame_size(content.0, content.1, f64::from(side) / f64::from(longest));
+                width <= within.0 && height <= within.1
+            })
+            .unwrap_or(1)
+    }
+
+    #[test]
+    fn a_box_of_the_comps_own_aspect_or_larger_asks_for_the_comps_longest_side_at_most() {
+        assert_eq!(fitted_side((1280, 720), (640, 640)), 640, "a square box takes the comp's longer side");
+        assert_eq!(fitted_side((1280, 720), (1280, 720)), 1280, "a box of the comp's own size takes the comp's longer side");
+        assert_eq!(fitted_side((1280, 720), (4000, 4000)), 1280, "a larger box never asks for more than the comp's pixels");
+        assert_eq!(fitted_side((720, 1280), (640, 640)), 640, "a portrait comp is bound by its height");
+        assert_eq!(fitted_side((720, 1280), (4000, 4000)), 1280);
+        assert_eq!(fitted_side((1280, 720), (500, 300)), 500, "a box of another aspect keeps the comp's aspect inside it");
+        assert_eq!(fitted_side((1280, 720), (4000, 100)), 178, "a short box is met by the shorter side, as the frame's rounding allows");
+        assert_eq!(fitted_side((1280, 720), (1, 1)), 1, "a box of one pixel is a frame of one");
+        assert_eq!(fitted_side((1, 1), (9, 9)), 1);
+        assert_eq!(fitted_side((100_000, 1), (1000, 1)), 1000, "a comp far wider than tall");
+        assert_eq!(fitted_side((u32::MAX, u32::MAX), (u32::MAX, 1)), 1, "no figure the box or the comp holds overflows");
+    }
+
+    #[test]
+    fn the_fitted_side_is_the_largest_side_whose_frame_fits_the_box() {
+        for width in 1..=13 {
+            for height in 1..=13 {
+                for box_width in 1..=15 {
+                    for box_height in 1..=15 {
+                        let (content, within) = ((width, height), (box_width, box_height));
+                        assert_eq!(fitted_side(content, within), largest_fit(content, within), "a comp of {content:?} in a box of {within:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Where the compositor's floating-point scale rounds a side otherwise than exact arithmetic, the side
+    /// is the compositor's: the frame it renders is the one that must fit.
+    #[test]
+    fn the_fit_follows_the_compositors_rounding_where_it_parts_from_exact_arithmetic() {
+        let fits = |content: (u32, u32), within: (u32, u32), side: u32| {
+            let (width, height) = frame_size(content.0, content.1, f64::from(side) / f64::from(content.0.max(content.1)));
+            width <= within.0 && height <= within.1
+        };
+        // 11 by 22 at a side of 15 is 7.5 pixels wide exactly, which rounds to 8, but the compositor's
+        // floating-point scale makes it a hair under 7.5, so it renders 7: a frame of 7 by 15 the box takes.
+        let (content, within) = ((11, 22), (7, 15));
+        assert_eq!(fitted_side(content, within), 15, "the compositor's 7 by 15 fits");
+        assert!(fits(content, within, 15));
+        // At these figures the float's error is wider than the distance to a half pixel: a side the exact
+        // arithmetic lets through rounds over the box in the compositor, so the side is one less.
+        let (content, within) = ((196_327_744, 405_334_033), (189_842_424, 391_944_582));
+        assert_eq!(fitted_side(content, within), 391_944_581, "one side less than exact arithmetic gives");
+        assert!(fits(content, within, 391_944_581) && !fits(content, within, 391_944_582));
+    }
 
     fn params(request: Value) -> Value {
         RenderRequest::from_params(&request).expect("the request reads").to_queue_params().expect("the request maps").expect("it queues an item")

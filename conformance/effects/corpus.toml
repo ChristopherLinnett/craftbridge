@@ -852,3 +852,188 @@ equals = "Gate Probe"
 step = 1
 pointer = "/kind"
 equals = "Unsupported"
+
+[[scenario]]
+id = "T25"
+title = "previewRequest: the frame request that fits a 1280 by 720 composition in a box, its text, and the composition's pixel size"
+sides = "plugin"
+# The command line has no such request, so the answers are held to what the plan's table says. The frame a
+# request asks for is T26's.
+[[scenario.step]]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [
+  { command = "comp.new", params = { name = "T25", width = 1280, height = 720, duration = 2, frameRate = 10 } },
+  { command = "file.save", params = { path = "<container>/t25.ecproj" } },
+] }
+# A box smaller than the composition, then one larger: the frame is fitted inside the first, and is never
+# above the composition's own pixels in the second.
+[[scenario.step]]
+[[scenario.step.call]]
+kind = "request"
+method = "open"
+params = { path = "<container>/t25.ecproj" }
+[[scenario.step.call]]
+kind = "request"
+method = "previewRequest"
+params = { time = 1, width = 640, height = 640 }
+[[scenario.step]]
+[[scenario.step.call]]
+kind = "request"
+method = "open"
+params = { path = "<container>/t25.ecproj" }
+[[scenario.step.call]]
+kind = "request"
+method = "previewRequest"
+params = { time = 1, width = 4000, height = 4000 }
+# A box with a side below 1, and a composition that is not there, are refused as `frame` refuses a bad
+# request and a missing composition.
+[[scenario.step]]
+[[scenario.step.call]]
+kind = "request"
+method = "open"
+params = { path = "<container>/t25.ecproj" }
+[[scenario.step.call]]
+kind = "request"
+method = "previewRequest"
+params = { width = 0, height = 640 }
+[[scenario.step]]
+[[scenario.step.call]]
+kind = "request"
+method = "open"
+params = { path = "<container>/t25.ecproj" }
+[[scenario.step.call]]
+kind = "request"
+method = "previewRequest"
+params = { comp = "nope", width = 640, height = 640 }
+# A time under a millisecond, which each platform's own JSON writer spells its own way (Kotlin's with an
+# exponent, Swift's without): the request's text is the engine's, so every platform answers the same one.
+[[scenario.step]]
+[[scenario.step.call]]
+kind = "request"
+method = "open"
+params = { path = "<container>/t25.ecproj" }
+[[scenario.step.call]]
+kind = "request"
+method = "previewRequest"
+params = { time = 0.0005, width = 640, height = 640 }
+[[scenario.expect]]
+step = 1
+pointer = "/request/maxSide"
+equals = 640
+[[scenario.expect]]
+step = 1
+pointer = "/request/transparent"
+equals = true
+[[scenario.expect]]
+step = 1
+pointer = "/request/time"
+equals = 1
+[[scenario.expect]]
+step = 1
+pointer = "/request"
+length = 3
+[[scenario.expect]]
+step = 1
+pointer = "/requestText"
+equals = '{"maxSide":640,"time":1,"transparent":true}'
+[[scenario.expect]]
+step = 1
+pointer = "/contentWidth"
+equals = 1280
+[[scenario.expect]]
+step = 1
+pointer = "/contentHeight"
+equals = 720
+[[scenario.expect]]
+step = 2
+pointer = "/request/maxSide"
+equals = 1280
+[[scenario.expect]]
+step = 2
+pointer = "/request/transparent"
+equals = true
+[[scenario.expect]]
+step = 2
+pointer = "/requestText"
+equals = '{"maxSide":1280,"time":1,"transparent":true}'
+[[scenario.expect]]
+step = 2
+pointer = "/contentWidth"
+equals = 1280
+[[scenario.expect]]
+step = 2
+pointer = "/contentHeight"
+equals = 720
+[[scenario.expect]]
+step = 3
+pointer = "/kind"
+equals = "InvalidParams"
+[[scenario.expect]]
+step = 3
+pointer = "/error"
+equals = "`previewRequest`: `width` must be a whole number from 1 to 4294967295"
+[[scenario.expect]]
+step = 4
+pointer = "/kind"
+equals = "NotFound"
+[[scenario.expect]]
+step = 5
+pointer = "/requestText"
+equals = '{"maxSide":640,"time":0.0005,"transparent":true}'
+
+[[scenario]]
+id = "T26"
+title = "the frame a previewRequest asks for: the command line's own transparent frame at the fitted side, 640 by 360 and 1280 by 720"
+# The two requests T25 holds, `maxSide` 640 and 1280 with `transparent`, rendered: the frames' sizes are the
+# fit's (640 by 360 and the composition's own 1280 by 720), which the pixel comparison takes from the oracle's,
+# and the alpha is the composition's own, nothing where no layer draws, which the half-opaque box beside it
+# shows is kept straight.
+[[scenario.step]]
+args = [
+  "run", "--json", "--empty",
+  "comp.new", '{"name":"T26","width":1280,"height":720,"duration":2,"frameRate":10}',
+  "layer.newSolid", '{"comp":1,"name":"Box","color":"#ff8040","width":320,"height":180}',
+  "prop.set", '{"layer":"Box","path":"transform/opacity","value":50}',
+  "file.save", '{"path":"<container>/t26.ecproj"}',
+]
+[[scenario.step.call]]
+kind = "request"
+method = "run"
+params = { steps = [
+  { command = "comp.new", params = { name = "T26", width = 1280, height = 720, duration = 2, frameRate = 10 } },
+  { command = "layer.newSolid", params = { comp = 1, name = "Box", color = "#ff8040", width = 320, height = 180 } },
+  { command = "prop.set", params = { layer = "Box", path = "transform/opacity", value = 50 } },
+  { command = "file.save", params = { path = "<container>/t26.ecproj" } },
+] }
+[[scenario.step]]
+args = ["render-frame", "--json", "--project", "<container>/t26.ecproj", "--time", "1", "--max-side", "640", "--transparent", "--out", "fitted.png"]
+[[scenario.step.call]]
+kind = "request"
+method = "open"
+params = { path = "<container>/t26.ecproj" }
+[[scenario.step.call]]
+kind = "frame"
+params = { time = 1, maxSide = 640, transparent = true }
+format = "png"
+out = "fitted.png"
+[[scenario.step]]
+args = ["render-frame", "--json", "--project", "<container>/t26.ecproj", "--time", "1", "--max-side", "1280", "--transparent", "--out", "whole.png"]
+[[scenario.step.call]]
+kind = "request"
+method = "open"
+params = { path = "<container>/t26.ecproj" }
+[[scenario.step.call]]
+kind = "frame"
+params = { time = 1, maxSide = 1280, transparent = true }
+format = "png"
+out = "whole.png"
+[[scenario.compare]]
+kind = "pixels"
+actual = "fitted.png"
+reference = "fitted.png"
+[[scenario.compare]]
+kind = "pixels"
+actual = "whole.png"
+reference = "whole.png"

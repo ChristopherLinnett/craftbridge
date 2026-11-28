@@ -120,7 +120,7 @@ enum Method {
 /// The methods of the plan's §14 table `request` answers, by name. It is the one list of them: the
 /// dispatch reads it, and the refusal of every other name recites it, so the refusal names what
 /// `request` answers truly whatever a build adds to it.
-const METHODS: [(&str, Method); 14] = [
+const METHODS: [(&str, Method); 15] = [
     ("info", Method::Own(info::info)),
     ("commands", Method::Own(methods::commands)),
     ("exec", Method::Commands(methods::exec)),
@@ -135,6 +135,7 @@ const METHODS: [(&str, Method); 14] = [
     ("replay", Method::Commands(replay::replay)),
     ("timings", Method::Own(timings::timings)),
     ("template.open", Method::Own(templates::open)),
+    ("previewRequest", Method::Own(requests::preview_request)),
 ];
 
 /// One method that runs long enough to report progress: the backend, the parameters, the listener

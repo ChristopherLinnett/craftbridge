@@ -154,6 +154,22 @@ func typedRequest(_ method: String, _ params: JSONValue) -> (@Sendable (EffectsE
             call = {
                 try await $0.timings(comp: comp, time: time, scale: scale, runs: runs, play: play, gpu: gpu)
             }
+        case "previewRequest":
+            let comp = try keys.reference("comp")
+            let time = try keys.number("time")
+            let width = try needed(keys.whole("width"))
+            let height = try needed(keys.whole("height"))
+            call = {
+                // The typed call answers the values apart; the door answers one document holding them.
+                let answer = try await $0.previewRequest(
+                    comp, at: time.map { .seconds($0) }, width: width, height: height)
+                return [
+                    "request": answer.request,
+                    "requestText": .string(answer.requestText),
+                    "contentWidth": .number(Double(answer.contentWidth)),
+                    "contentHeight": .number(Double(answer.contentHeight)),
+                ]
+            }
         default:
             throw Unspelt()
         }

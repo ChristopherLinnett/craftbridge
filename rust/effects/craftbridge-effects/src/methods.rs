@@ -492,6 +492,22 @@ pub(crate) fn number_param(obj: &Map<String, Value>, key: &str, method: &str) ->
     }
 }
 
+/// A whole-number parameter from 1 up to `most`: absent and null mean not given, and a number that is
+/// fractional, below 1 or above `most` is refused in [`whole_number_words`], naming the key.
+pub(crate) fn whole_param(obj: &Map<String, Value>, key: &str, method: &str, most: u64) -> Result<Option<u64>> {
+    match number_param(obj, key, method)? {
+        None => Ok(None),
+        Some(number) if number.fract() == 0.0 && (1.0..=most as f64).contains(&number) => Ok(Some(number as u64)),
+        Some(_) => Err(whole_number_words(key, method, most)),
+    }
+}
+
+/// The refusal of a whole-number parameter that is not one from 1 to `most`, or that a call must have
+/// and lacks: the one sentence every such parameter is refused in.
+pub(crate) fn whole_number_words(key: &str, method: &str, most: u64) -> CraftError {
+    CraftError::invalid_params(format!("`{method}`: `{key}` must be a whole number from 1 to {most}"))
+}
+
 /// The `params` of an `exec` or one `run` step: absent means none, `{}`, as the command line defaults it.
 fn step_params(obj: &Map<String, Value>) -> Value {
     obj.get("params").cloned().unwrap_or_else(empty_params)
