@@ -18,6 +18,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use withheld::assert_withheld_every_way;
 
+/// The methods `request` answers, as its refusal of any other name lists them.
+const REQUEST_METHODS: &str =
+    "`info`, `commands`, `exec`, `run`, `props`, `get`, `set`, `open`, `save`, `saveAs`, `new`, `replay`, `timings`, `template.open` and `previewRequest`";
+
 fn request(app: &mut EffectCraftApp, method: &str, params: Value) -> Result<Value, CraftError> {
     app.request(method, params)
 }
@@ -546,9 +550,7 @@ fn the_method_table_answers_unwired_methods_as_unsupported() {
         match error {
             CraftError::Unsupported { message } => assert_eq!(
                 message,
-                format!(
-                    "`{method}` is not answered by `request` in this build, which answers `info`, `commands`, `exec`, `run`, `props`, `get`, `set`, `open`, `save`, `saveAs`, `new`, `replay`, `timings` and `template.open`"
-                ),
+                format!("`{method}` is not answered by `request` in this build, which answers {REQUEST_METHODS}"),
                 "the refusal names the method and what `request` answers"
             ),
             other => panic!("an unwired method must be `Unsupported`, got {other:?}"),
@@ -741,13 +743,198 @@ fn a_frame_is_never_answered_by_request() {
     app.request("exec", json!({"command": "comp.new", "params": {"name": "C", "width": 8, "height": 6}})).expect("a comp is made");
     assert!(app.frame(json!({}), PixelFormat::Png).is_ok());
     match request(&mut app, "frame", json!({})).expect_err("`request` does not answer `frame`") {
-        CraftError::Unsupported { message } => assert!(
-            message
-                .ends_with("which answers `info`, `commands`, `exec`, `run`, `props`, `get`, `set`, `open`, `save`, `saveAs`, `new`, `replay`, `timings` and `template.open`"),
-            "{message}"
-        ),
+        CraftError::Unsupported { message } => assert!(message.ends_with(&format!("which answers {REQUEST_METHODS}")), "{message}"),
         other => panic!("`frame` through `request` must be `Unsupported`, got {other:?}"),
     }
+}
+
+/// A comp of `width` by `height` pixels holding a half-opaque box in its middle on a ground that is
+/// nothing, so its frame has content and transparent pixels, and a `get_comp` read of it names its
+/// size.
+fn comp_with_content(app: &mut EffectCraftApp, width: u32, height: u32) -> Result<Value, CraftError> {
+    let steps = json!({"steps": [
+        {"command": "comp.new", "params": {"name": "C", "width": width, "height": height, "duration": 2, "frameRate": 10}},
+        {"command": "layer.newSolid", "params": {"comp": 1, "name": "Box", "color": "#ff8040", "width": width / 4, "height": height / 4}},
+        {"command": "prop.set", "params": {"layer": "Box", "path": "transform/opacity", "value": 50}}
+    ]});
+    app.request("run", steps)
+}
+
+/// The straight alpha of the pixel at (`x`, `y`) of a frame.
+fn alpha_at(frame: &craftbridge_core::FrameBytes, x: u32, y: u32) -> Option<u8> {
+    let index = (usize::try_from(y).ok()? * usize::try_from(frame.width).ok()? + usize::try_from(x).ok()?) * 4 + 3;
+    frame.data.get(index).copied()
+}
+
+#[test]
+fn a_preview_request_fits_the_comp_in_the_box_and_the_frame_it_holds_has_that_size_and_its_own_alpha() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    comp_with_content(&mut app, 1280, 720).expect("the comp is made");
+    // The box a preview fills, the longest side asked for and the frame that renders from the request.
+    for (side, max_side, frame_size) in [(640, 640, (640, 360)), (4000, 1280, (1280, 720))] {
+        let answer = request(&mut app, "previewRequest", json!({"time": 1, "width": side, "height": side})).expect("the request is answered");
+        assert_eq!(
+            answer,
+            json!({
+                "request": {"time": 1, "maxSide": max_side, "transparent": true},
+                "requestText": format!(r#"{{"maxSide":{max_side},"time":1,"transparent":true}}"#),
+                "contentWidth": 1280,
+                "contentHeight": 720
+            }),
+            "a box of {side} by {side}"
+        );
+        let frame = app.frame(answer["request"].clone(), PixelFormat::Rgba8Straight).expect("the request renders as a frame does");
+        assert_eq!((frame.width, frame.height), frame_size, "the frame a box of {side} by {side} gets");
+        assert_eq!(alpha_at(&frame, 0, 0), Some(0), "a corner no layer covers is transparent, not the comp's background");
+        assert!(alpha_at(&frame, frame.width / 2, frame.height / 2).is_some_and(|alpha| alpha > 0), "the box is drawn in the middle");
+        let text = answer["requestText"].as_str().expect("the text is a string");
+        let from_text = app.frame(serde_json::from_str(text).expect("the text is JSON"), PixelFormat::Rgba8Straight).expect("the text renders");
+        assert_eq!(from_text, frame, "the request's text asks for the very frame the request does");
+    }
+}
+
+/// Every frame a preview request asks for, rendered, is the size the compositor's own `frame_size` gives
+/// the comp at the request's side, fits the box, is no larger than the comp, and is the largest that fits:
+/// for comps of even and odd sides in both aspects, in boxes wider, taller, larger and smaller than each,
+/// as PNG and as pixels. An 11 by 22 comp in a box of 7 by 15 is where the compositor's floating-point
+/// scale renders a side narrower than exact arithmetic would, which the fit must follow.
+#[test]
+fn every_frame_a_preview_request_asks_for_is_the_largest_of_the_comps_aspect_that_fits_the_box() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    for (width, height) in [(1280_u32, 720_u32), (1279, 719), (719, 1279), (333, 1001), (11, 22)] {
+        let mut app = scratch.app().expect("the app starts from prepared folders");
+        comp_with_content(&mut app, width, height).expect("the comp is made");
+        let longest = width.max(height);
+        let fits = |side: u32, within: (u32, u32)| {
+            let (frame_width, frame_height) = effectcraft_render::frame_size(width, height, f64::from(side) / f64::from(longest));
+            frame_width <= within.0 && frame_height <= within.1
+        };
+        let boxes = [(4000, 300), (300, 4000), (5000, 5000), (100, 100), (width, height), (width, height - 1), (width - 1, height), (7, 15), (1, 1)];
+        for within in boxes {
+            let answer = request(&mut app, "previewRequest", json!({"width": within.0, "height": within.1})).expect("the request is answered");
+            assert_eq!((answer["contentWidth"].clone(), answer["contentHeight"].clone()), (json!(width), json!(height)));
+            let side = answer["request"]["maxSide"].as_u64().and_then(|side| u32::try_from(side).ok()).expect("a side in pixels");
+            let expected = effectcraft_render::frame_size(width, height, f64::from(side) / f64::from(longest));
+            assert!(side <= longest && fits(side, within), "a {width} by {height} comp in a box of {within:?} asks for {side}");
+            assert!(side == longest || !fits(side + 1, within), "a {width} by {height} comp in a box of {within:?}: {side} is not the largest");
+            for format in [PixelFormat::Png, PixelFormat::Rgba8Straight] {
+                let frame = app.frame(answer["request"].clone(), format).expect("the request renders");
+                assert_eq!((frame.width, frame.height), expected, "a {width} by {height} comp in a box of {within:?} as {format:?}");
+                if format == PixelFormat::Rgba8Straight && frame.width > 4 && frame.height > 4 {
+                    assert_eq!(alpha_at(&frame, 0, 0), Some(0), "a {width} by {height} comp in a box of {within:?}: a bare corner is transparent");
+                }
+            }
+        }
+    }
+}
+
+/// The request's text is written by the engine, once, whatever text the parameters came in: Kotlin writes
+/// a time under a millisecond with an exponent and Swift without, and both are answered one text.
+#[test]
+fn a_preview_requests_text_is_the_engines_own_whatever_text_its_parameters_came_in() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    comp_with_content(&mut app, 64, 48).expect("the comp is made");
+    let text = |app: &mut EffectCraftApp, params: &str| {
+        let params: Value = serde_json::from_str(params).expect("the parameters are JSON");
+        request(app, "previewRequest", params).expect("the request is answered")["requestText"].clone()
+    };
+    let expected = json!(r#"{"comp":"C","maxSide":32,"time":0.0005,"transparent":true}"#);
+    for params in [
+        r#"{"comp": "C", "time": 5.0E-4, "width": 32, "height": 32}"#,
+        r#"{"height": 32, "width": 32, "time": 0.0005, "comp": "C"}"#,
+        r#"{"comp": "C", "time": 0.00050, "width": 32.0, "height": 3.2e1}"#,
+    ] {
+        assert_eq!(text(&mut app, params), expected, "{params}");
+    }
+    app.request("exec", json!({"command": "comp.new", "params": {"name": "A/B \"q\" é", "width": 8, "height": 6}})).expect("a comp is made");
+    assert_eq!(
+        text(&mut app, r#"{"comp": "A/B \"q\" é", "width": 32, "height": 32}"#),
+        json!(r#"{"comp":"A/B \"q\" é","maxSide":8,"transparent":true}"#),
+        "a name is written with its slash as it is and only what JSON must escape escaped"
+    );
+}
+
+#[test]
+fn a_preview_request_names_the_comp_and_the_time_as_given_and_leaves_out_what_was_left_out() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    comp_with_content(&mut app, 64, 48).expect("the comp is made");
+    let asked = |app: &mut EffectCraftApp, params: Value| request(app, "previewRequest", params).expect("the request is answered")["request"].clone();
+    assert_eq!(asked(&mut app, json!({"width": 32, "height": 32})), json!({"maxSide": 32, "transparent": true}), "the active comp at its current time");
+    assert_eq!(
+        asked(&mut app, json!({"comp": null, "time": null, "width": 32, "height": 32})),
+        json!({"maxSide": 32, "transparent": true}),
+        "null is left out"
+    );
+    assert_eq!(asked(&mut app, json!({"comp": "-", "width": 32, "height": 32})), json!({"maxSide": 32, "transparent": true}), "`-` is the active comp");
+    assert_eq!(
+        asked(&mut app, json!({"comp": "C", "time": 0.5, "width": 32, "height": 32})),
+        json!({"comp": "C", "time": 0.5, "maxSide": 32, "transparent": true})
+    );
+    assert_eq!(
+        asked(&mut app, json!({"comp": "1", "width": 32, "height": 32}))["comp"],
+        json!(1),
+        "a string of digits is the id it spells, as a frame reads it"
+    );
+    assert_eq!(
+        asked(&mut app, json!({"comp": 1, "width": 100, "height": 20})),
+        json!({"comp": 1, "maxSide": 27, "transparent": true}),
+        "another aspect: the short side meets the box first"
+    );
+    let narrow = asked(&mut app, json!({"comp": 1, "width": 100, "height": 20}));
+    let frame = app.frame(narrow, PixelFormat::Rgba8Straight).expect("the request renders");
+    assert_eq!((frame.width, frame.height), (27, 20), "that frame fits the box and is the comp's aspect");
+}
+
+#[test]
+fn a_preview_request_for_a_comp_that_is_not_there_is_refused_as_a_frame_is() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    let mut empty = scratch.app().expect("the app starts from prepared folders");
+    comp_with_content(&mut app, 64, 48).expect("the comp is made");
+    for (comp, frame_params) in [(json!("nope"), json!({"comp": "nope", "scale": 0.5})), (json!(99999), json!({"comp": 99999, "scale": 0.5}))] {
+        let frame_refusal = app.frame(frame_params, PixelFormat::Png).expect_err("the comp is not there");
+        let refusal = request(&mut app, "previewRequest", json!({"comp": comp, "width": 32, "height": 32})).expect_err("the comp is not there");
+        assert!(matches!(refusal, CraftError::NotFound { .. }), "{comp}: a missing comp is `NotFound`, got {refusal:?}");
+        assert_eq!(refusal, frame_refusal, "{comp}: the words a frame that reads the comp's figures refuses it in");
+    }
+    let no_comp_open = empty.frame(json!({"scale": 0.5}), PixelFormat::Png).expect_err("no comp is open");
+    let refusal = request(&mut empty, "previewRequest", json!({"width": 32, "height": 32})).expect_err("no comp is open");
+    assert_eq!(refusal, no_comp_open, "no comp open is refused as a frame refuses it");
+    assert!(matches!(refusal, CraftError::NotFound { .. }), "{refusal:?}");
+}
+
+#[test]
+fn a_preview_request_refuses_a_box_that_is_not_whole_pixels_and_every_other_malformed_parameter() {
+    let scratch = Scratch::new().expect("a scratch folder");
+    let mut app = scratch.app().expect("the app starts from prepared folders");
+    comp_with_content(&mut app, 64, 48).expect("the comp is made");
+    let side = |key: &str| format!("`previewRequest`: `{key}` must be a whole number from 1 to 4294967295");
+    for (params, words) in [
+        (json!({"width": 0, "height": 32}), side("width")),
+        (json!({"width": 32, "height": 0}), side("height")),
+        (json!({"width": -5, "height": 32}), side("width")),
+        (json!({"width": 32, "height": 2.5}), side("height")),
+        (json!({"width": 4_294_967_296_u64, "height": 32}), side("width")),
+        (json!({"height": 32}), side("width")),
+        (json!({"width": 32}), side("height")),
+        (json!({"width": null, "height": 32}), side("width")),
+        (json!({"width": "32", "height": 32}), "`previewRequest`: `width` must be a number".to_string()),
+        (json!({"width": 32, "height": 32, "time": "1"}), "`previewRequest`: `time` must be a number".to_string()),
+        (json!({"width": 32, "height": 32, "comp": true}), "`previewRequest`: `comp` must be an id, a name or `-`".to_string()),
+        (json!({"width": 32, "height": 32, "maxSide": 4}), "`previewRequest`: unknown parameter(s) `maxSide`".to_string()),
+        (json!([1]), "`previewRequest`: its parameters must be a JSON object".to_string()),
+    ] {
+        match request(&mut app, "previewRequest", params.clone()).expect_err("the parameters are refused") {
+            CraftError::InvalidParams { message } => assert_eq!(message, words, "{params}"),
+            other => panic!("{params} is `InvalidParams`, got {other:?}"),
+        }
+    }
+    // A box of one pixel is the smallest there is, and is answered.
+    let answer = request(&mut app, "previewRequest", json!({"width": 1, "height": 1})).expect("a box of one pixel is answered");
+    assert_eq!(answer["request"]["maxSide"], json!(1));
 }
 
 /// What `info.gpu` answers right now, in one string for the assertions.

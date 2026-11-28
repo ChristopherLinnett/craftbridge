@@ -155,6 +155,51 @@ private func mediaRefusal(importReply: String, detail: String) async throws {
         #expect(await requests.params(1) == ["time": 0.5, "play": 12, "gpu": true])
     }
 
+    /// The engine's answer to `previewRequest`, its keys not in the order of their names, with the request's
+    /// text as the engine writes it: a tenth of a microsecond as `1e-7`, which Swift's own writer spells `1e-07`.
+    private static let previewAnswer = #"""
+        {"contentHeight": 720, "request": {"transparent": true, "maxSide": 640, "time": 1e-7, "comp": "Main"}, \#
+        "requestText": "{\"comp\":\"Main\",\"maxSide\":640,\"time\":1e-7,\"transparent\":true}", "contentWidth": 1280}
+        """#
+
+    @Test func previewRequestSendsItsOwnMethodAndOnlyNamedKeysAndAnswersWhatTheEngineWrote() async throws {
+        let requests = Requests()
+        let fake = FakeEngine(recording: requests)
+        fake.answer = { _, _ in Self.previewAnswer }
+        let engine = EffectsEngine(engine: fake)
+        let answer = try await engine.previewRequest(.name("Main"), at: .nanoseconds(100), width: 640, height: 640)
+        #expect(await requests.method() == "previewRequest")
+        #expect(await requests.params() == ["comp": "Main", "time": 1e-7, "width": 640, "height": 640])
+        #expect(
+            answer.request == ["comp": "Main", "maxSide": 640, "time": 1e-7, "transparent": true])
+        #expect(answer.contentWidth == 1280)
+        #expect(answer.contentHeight == 720)
+        // The text is the engine's, as it wrote it: Swift writes it again nowhere, so Android, which takes the
+        // same text, answers the same one.
+        #expect(answer.requestText == #"{"comp":"Main","maxSide":640,"time":1e-7,"transparent":true}"#)
+        _ = try await engine.previewRequest(width: 1, height: 2)
+        #expect(await requests.params(1) == ["width": 1, "height": 2])
+    }
+
+    @Test func previewRequestRefusesAnAnswerThatIsNotItsShape() async throws {
+        for answer in [
+            "null", #"{"request": {}, "requestText": "{}", "contentWidth": 1}"#,
+            #"{"request": 1, "requestText": "1", "contentWidth": 1, "contentHeight": 2}"#,
+            #"{"request": {}, "requestText": "{}", "contentWidth": 1.5, "contentHeight": 2}"#,
+            #"{"request": {}, "contentWidth": 1, "contentHeight": 2}"#,
+            #"{"request": {}, "requestText": {}, "contentWidth": 1, "contentHeight": 2}"#,
+        ] {
+            let fake = FakeEngine(recording: Requests())
+            fake.answer = { _, _ in answer }
+            await #expect(
+                throws: CraftError.Internal(
+                    detail: "the engine's `previewRequest` answered a document without a request and a pixel size")
+            ) {
+                try await EffectsEngine(engine: fake).previewRequest(width: 4, height: 4)
+            }
+        }
+    }
+
     @Test func mcpPassesTheLineThroughAndTheReplyBack() async throws {
         let fake = FakeEngine()
         fake.mcpReply = #"{"jsonrpc": "2.0"}"#

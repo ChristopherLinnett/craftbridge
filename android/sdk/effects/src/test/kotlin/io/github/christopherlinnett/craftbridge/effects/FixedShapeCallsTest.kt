@@ -3,10 +3,13 @@
 
 package io.github.christopherlinnett.craftbridge.effects
 
+import io.github.christopherlinnett.craftbridge.core.InternalErrorException
 import io.github.christopherlinnett.craftbridge.core.JSONValue
 import io.github.christopherlinnett.craftbridge.core.jsonValue
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.time.Duration.Companion.microseconds
 
 class FixedShapeCallsTest {
     @Test
@@ -125,6 +128,108 @@ class FixedShapeCallsTest {
         val sent = asked.all.single().second
         assertEquals(JSONValue.Object(mapOf("play" to JSONValue.Number(12.0))), sent)
         assertEquals("""{"play":12}""", jsonText(sent))
+    }
+
+    @Test
+    fun previewRequestCarriesOnlyWhatTheCallerNamedAndAnswersWhatTheEngineWrote() {
+        // The request's text is the engine's, as it wrote it: Kotlin writes it again nowhere, so iOS, which
+        // takes the same text, answers the same one, though Kotlin would write this time with an exponent.
+        val text = """{"comp":"Main","maxSide":640,"time":0.0005,"transparent":true}"""
+        val request =
+            JSONValue.Object(
+                mapOf(
+                    "transparent" to JSONValue.Bool(true),
+                    "maxSide" to JSONValue.Number(640.0),
+                    "time" to JSONValue.Number(0.0005),
+                    "comp" to JSONValue.Text("Main"),
+                ),
+            )
+        val answer =
+            JSONValue.Object(
+                mapOf(
+                    "contentHeight" to JSONValue.Number(720.0),
+                    "request" to request,
+                    "requestText" to JSONValue.Text(text),
+                    "contentWidth" to JSONValue.Number(1280.0),
+                ),
+            )
+        val asked = Asked(mapOf("previewRequest" to answer))
+        val engine = fakeEngine(asked)
+        val previewed =
+            await {
+                engine.previewRequest(
+                    comp = "Main".jsonValue,
+                    time = 500.microseconds,
+                    width = 640,
+                    height = 640,
+                )
+            }.getOrThrow()
+        await { engine.previewRequest(width = 1, height = 2) }
+        assertEquals("previewRequest", asked.all.first().first)
+        assertEquals(
+            JSONValue.Object(
+                mapOf(
+                    "comp" to JSONValue.Text("Main"),
+                    "time" to JSONValue.Number(0.0005),
+                    "width" to JSONValue.Number(640.0),
+                    "height" to JSONValue.Number(640.0),
+                ),
+            ),
+            asked.all.first().second,
+        )
+        assertEquals(JSONValue.Object(mapOf("width" to JSONValue.Number(1.0), "height" to JSONValue.Number(2.0))), asked.all.last().second)
+        assertEquals(request, previewed.request)
+        assertEquals(1280L, previewed.contentWidth)
+        assertEquals(720L, previewed.contentHeight)
+        assertEquals(text, previewed.requestText)
+    }
+
+    @Test
+    fun previewRequestRefusesAnAnswerThatIsNotItsShape() {
+        val request = JSONValue.Object(emptyMap())
+        val text = JSONValue.Text("{}")
+        for (
+        answer in
+        listOf(
+            JSONValue.Null,
+            JSONValue.Object(mapOf("request" to request, "requestText" to text, "contentWidth" to JSONValue.Number(1.0))),
+            JSONValue.Object(
+                mapOf(
+                    "request" to JSONValue.Number(1.0),
+                    "requestText" to text,
+                    "contentWidth" to JSONValue.Number(1.0),
+                    "contentHeight" to JSONValue.Number(2.0),
+                ),
+            ),
+            JSONValue.Object(
+                mapOf(
+                    "request" to request,
+                    "requestText" to text,
+                    "contentWidth" to JSONValue.Number(1.5),
+                    "contentHeight" to JSONValue.Number(2.0),
+                ),
+            ),
+            JSONValue.Object(
+                mapOf(
+                    "request" to request,
+                    "contentWidth" to JSONValue.Number(1.0),
+                    "contentHeight" to JSONValue.Number(2.0),
+                ),
+            ),
+            JSONValue.Object(
+                mapOf(
+                    "request" to request,
+                    "requestText" to request,
+                    "contentWidth" to JSONValue.Number(1.0),
+                    "contentHeight" to JSONValue.Number(2.0),
+                ),
+            ),
+        )
+        ) {
+            val outcome = await { fakeEngine(Asked(mapOf("previewRequest" to answer))).previewRequest(width = 4, height = 4) }
+            val refused = assertFailsWith<InternalErrorException> { outcome.getOrThrow() }
+            assertEquals("the engine's `previewRequest` answered a document without a request and a pixel size", refused.message)
+        }
     }
 
     @Test

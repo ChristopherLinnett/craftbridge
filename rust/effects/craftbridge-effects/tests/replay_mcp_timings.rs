@@ -501,6 +501,14 @@ fn timings_refuse_what_they_cannot_time() {
         let error = app.request("timings", params.clone()).expect_err("bad parameters");
         assert!(matches!(error, CraftError::InvalidParams { .. }), "{params}: {error:?}");
     }
+    // A count that is no whole number from 1 to 1000 is refused naming its key, in the one sentence every
+    // whole-number parameter of the plugin is refused in.
+    for (params, key) in [(json!({"runs": 0}), "runs"), (json!({"runs": 1001}), "runs"), (json!({"runs": 1.5}), "runs"), (json!({"play": -2}), "play")] {
+        match app.request("timings", params.clone()).expect_err("bad parameters") {
+            CraftError::InvalidParams { message } => assert_eq!(message, format!("`timings`: `{key}` must be a whole number from 1 to 1000"), "{params}"),
+            other => panic!("{params} is `InvalidParams`, got {other:?}"),
+        }
+    }
     assert!(matches!(app.request("timings", json!({"comp": "nope"})).expect_err("no such comp"), CraftError::NotFound { .. }));
     let error = app.request("timings", json!({"gpu": true, "runs": 1})).expect_err("no GPU attached");
     assert!(matches!(&error, CraftError::Unsupported { message } if message.contains("headless: renders on the CPU")), "{error:?}");

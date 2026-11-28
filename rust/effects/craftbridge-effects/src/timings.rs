@@ -20,7 +20,7 @@ use rustix::time::{ClockId, DynamicClockId, clock_gettime_dynamic};
 use serde_json::Value;
 use serde_json::map::Map;
 
-use crate::methods::{failure, number_param, object, object_params, reject_unknown};
+use crate::methods::{failure, number_param, object, object_params, reject_unknown, whole_param};
 
 /// The command line's defaults: the frame it times is at three seconds, full size, over ten runs.
 const DEFAULT_TIME: f64 = 3.0;
@@ -81,11 +81,7 @@ pub(crate) fn timings(backend: &mut Backend, params: &Value) -> Result<Value> {
 
 /// A whole number of runs or frames, from one up to [`MOST_RUNS`].
 fn count_param(obj: &Map<String, Value>, key: &str) -> Result<Option<u64>> {
-    match number_param(obj, key, "timings")? {
-        None => Ok(None),
-        Some(number) if number.fract() == 0.0 && (1.0..=MOST_RUNS as f64).contains(&number) => Ok(Some(number as u64)),
-        Some(_) => Err(CraftError::invalid_params(format!("`timings`: `{key}` must be a whole number from 1 to {MOST_RUNS}"))),
-    }
+    whole_param(obj, key, "timings", MOST_RUNS)
 }
 
 /// One timed frame: wall milliseconds, the process's CPU milliseconds (every thread: a measure of
